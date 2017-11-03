@@ -21,6 +21,7 @@ setup(
     url='https://github.com/iory/robot',
     license='MIT License',
     packages=['robot',
+              'robot.utils',
               ],
     zip_safe=False,
     setup_requires=setup_requires,
