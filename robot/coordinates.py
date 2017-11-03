@@ -73,7 +73,6 @@ class Coordinates(object):
         dif_pos = self.inverse_transform_vector(coords.worldpos())
         translation_axis = _wrap_axis(translation_axis)
         dif_pos[translation_axis == 1] = 0.0
-        print("dif_pos = {}".format(dif_pos))
         return dif_pos
 
     def difference_rotation(self, coords,
