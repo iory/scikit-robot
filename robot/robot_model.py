@@ -622,6 +622,9 @@ class RobotModel(CascadedLink):
     def reset_pose(self):
         raise NotImplementedError()
 
+    def reset_manip_pose(self):
+        raise NotImplementedError()
+
     def init_pose(self):
         return self.angle_vector(np.zeros_like(self.angle_vector()))
 
