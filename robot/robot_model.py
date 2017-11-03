@@ -637,6 +637,7 @@ class RobotModel(CascadedLink):
         link_maps = {l.name: l for l in links}
 
         joint_list = []
+        joint_names = []
         for j in self.robot_urdf.joints:
             if j.type in ['fixed']:
                 continue
@@ -650,6 +651,7 @@ class RobotModel(CascadedLink):
                 max_joint_torque=j.limit.effort,
                 max_joint_velocity=j.limit.velocity)
             joint_list.append(joint)
+            joint_names.append(joint.name)
 
             link_maps[j.parent].add_child(link_maps[j.child])
             link_maps[j.child].parent_link = link_maps[j.parent]
@@ -665,6 +667,7 @@ class RobotModel(CascadedLink):
                                                                   rot=link_maps[j.child].rot)
         self.link_list = links
         self.joint_list = joint_list
+        self.joint_names = joint_names
         for l in links:
             self.__dict__[l.name] = l
         for j in joint_list:
