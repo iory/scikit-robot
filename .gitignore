@@ -1,0 +1,8 @@
+*~
+*.egg/
+*.pyc
+build
+\#*\#
+.\#*
+robot.egg-info/
+dist/
