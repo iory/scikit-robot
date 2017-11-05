@@ -128,3 +128,50 @@ def normalize_vector(v, ord=2):
     if np.allclose(v, 0) is True:
         return v
     return v / np.linalg.norm(v, ord=ord)
+
+
+def matrix2quaternion(m):
+    """Returns quaternion of given rotation matrix.
+    """
+    m = np.array(m, dtype=np.float64)
+    q0_2 = (1 + m[0, 0] + m[1, 1] + m[2, 2]) / 4.0
+    q1_2 = (1 + m[0, 0] - m[1, 1] - m[2, 2]) / 4.0
+    q2_2 = (1 - m[0, 0] + m[1, 1] - m[2, 2]) / 4.0
+    q3_2 = (1 - m[0, 0] - m[1, 1] + m[2, 2]) / 4.0
+    mq_2 = max(q0_2, q1_2, q2_2, q3_2)
+    if np.isclose(mq_2, q0_2):
+        q0 = np.sqrt(q0_2) * 4.0
+        q1 = (m[2, 1] - m[1, 2] / q0)
+        q2 = (m[0, 2] - m[2, 0] / q0)
+        q3 = (m[1, 0] - m[0, 1] / q0)
+    elif np.isclose(mq_2, q1_2):
+        q1 = np.sqrt(q1_2) * 4
+        q0 = (m[2, 1] - m[1, 2] / q1)
+        q2 = (m[1, 0] + m[0, 1] / q1)
+        q3 = (m[0, 2] + m[2, 0] / q1)
+    elif np.isclose(mq_2, q2_2):
+        q2 = np.sqrt(q2_2) * 4
+        q0 = (m[0, 2] - m[2, 0] / q2)
+        q1 = (m[1, 0] + m[0, 1] / q2)
+        q3 = (m[1, 2] + m[2, 1] / q2)
+    elif np.isclose(mq_2, q3_2):
+        q3 = np.sqrt(q3_2) * 4.0
+        q0 = (m[1, 0] - m[0, 1] / q3)
+        q1 = (m[0, 2] + m[2, 0] / q3)
+        q2 = (m[1, 2] + m[2, 1] / q3)
+    else:
+        raise ValueError('matrix {} is invalid'.format(m))
+    return np.array([q0, q1, q2, q3])
+
+
+def matrix_log(m):
+    """returns matrix log of given m, it returns [-pi, pi]"""
+    qq = matrix2quaternion(m)
+    q0 = qq[0]
+    q = qq[1:]
+    th = 2.0 * np.arctan(np.linalg.norm(q) / q0)
+    if th > np.pi:
+        th = th - 2.0 * np.pi
+    elif th < - np.pi:
+        th = th + 2.0 * np.pi
+    return th * normalize_vector(q)
