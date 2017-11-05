@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.linalg import logm
 
 from robot.math import _wrap_axis
+from robot.math import matrix_log
 from robot.math import normalize_vector
 from robot.math import rotate_matrix
 from robot.math import rotation_matrix
@@ -107,7 +107,7 @@ class Coordinates(object):
         elif rotation_axis is True:
             dif_rotmatrix = np.matmul(self.worldrot().T,
                                       coords.worldrot())
-            dif_rot = logm(dif_rotmatrix)
+            dif_rot = matrix_log(dif_rotmatrix)
         else:
             raise ValueError
         return dif_rot
