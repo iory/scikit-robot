@@ -63,6 +63,20 @@ class Coordinates(object):
     def rotate_vector(self, v):
         return np.matmul(self.rot, v)
 
+    def transform(self, c, wrt='local'):
+        if wrt == 'local' or wrt == self:
+            self = transform_coords(self, c)
+        elif wrt == 'parent' or wrt == self.parent_link \
+             or wrt == 'world':
+            self = transform_coords(c, self)
+        elif isinstance(wrt, Coordinates):
+            self = transform_coords(wrt.inverse_transformation, self)
+            self = transform_coords(c, self)
+            self = transform_coords(wrt.worldcoords(), self)
+        else:
+            raise ValueError("transform wrt {} is not supported".format(wrt))
+        return self.newcoords(self.rot, self.pos)
+
     def axis(self, ax):
         ax = _wrap_axis(ax)
         return self.rotate_vector(ax)
