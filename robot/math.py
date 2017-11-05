@@ -59,7 +59,7 @@ def sr_inverse(J, k=1.0, weight_vector=None):
     # ret = W J^T (J W J^T + kI)^(-1)
     weight_J = np.matmul(weight_matrix, J.T)
     umat = np.matmul(J, weight_J) + k * np.eye(r)
-    ret = np.mamul(weight_J, np.linalg.inv(umat))
+    ret = np.matmul(weight_J, np.linalg.inv(umat))
     return ret
 
 
