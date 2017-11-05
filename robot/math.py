@@ -125,4 +125,6 @@ def rpy_angle(matrix):
 
 
 def normalize_vector(v, ord=2):
+    if np.allclose(v, 0) is True:
+        return v
     return v / np.linalg.norm(v, ord=ord)
