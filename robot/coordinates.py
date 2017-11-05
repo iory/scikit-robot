@@ -107,7 +107,8 @@ class Coordinates(object):
             a0 = self.axis(rotation_axis)
             a1 = coords.axis(rotation_axis)
             dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a1)) * normalize_vector(a0, a1))
+                                np.arccos(np.dot(a0, a1)) * \
+                                normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
             a0 = self.axis(ax)
@@ -115,7 +116,8 @@ class Coordinates(object):
             if need_mirror_for_nearest_axis(self, coords, ax) is False:
                 a2 = - a2
             dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a2)) * normalize_vector(a0 * a2))
+                                np.arccos(np.dot(a0, a2)) * \
+                                normalize_vector(np.cross(a0, a2)))
         elif rotation_axis is False:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
