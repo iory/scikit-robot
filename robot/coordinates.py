@@ -41,15 +41,63 @@ class Coordinates(object):
         self.name = name
         self.parent_link = None
 
+    @property
+    def dimension(self):
+        return len(self.pos)
+
     def translate(self, vec, wrt='local'):
         """translate this coordinates. unit is [mm]"""
         vec /= 1000.0
         return self.newcoords(self.rot,
                               self.parent_orientation(vec, wrt) + self.pos)
 
+    def transform_vector(self, v):
+        """"Vector v given in the local coords
+        is converted to world representation"""
+        return np.matmul(self.rot, v) + self.pos
+
     def inverse_transform_vector(self, vec):
         """vec in world coordinates -> local"""
         return np.matmul(self.rot.T, vec) - np.matmul(self.rot.T, self.pos)
+
+    def inverse_transformation(self, dest=None):
+        """Create a new coordinate
+        with inverse transformation of
+        this coordinate system."""
+        if dest is None:
+            dest = Coordinates()
+        dest.rot = self.rot.T
+        dest.pos = np.matmul(dest.rot, self.pos)
+        dest.pos = -1.0 * dest.pos
+        return dest
+
+    def transformation(self, c2, wrt='local'):
+        c2 = c2.worldcoords()
+        c1 = self.worldcoords()
+        inv = c1.inverse_transformation()
+        if wrt == 'local' or wrt == self:
+            inv = transform_coords(inv, c2)
+        elif wrt == 'parent' or \
+             wrt == self.parent_link or \
+             wrt == 'world':
+            inv = transform_coords(c2, inv)
+        elif isinstance(wrt, Coordinates):
+            xw = wrt.worldcoords()
+            inv = transform_coords(c2, inv)
+            inv = transform_coords(xw.inverse_transformation(),
+                                   inv)
+            inv = transform_coords(inv, xw)
+        else:
+            raise ValueError("wrt {} not supported".format(wrt))
+        return inv
+
+    def T(self):
+        """Return 4x4 transformation matrix"""
+        matrix = np.zeros((4, 4), dtype=np.float64)
+        matrix[3, 3] = 1.0
+        matrix[:3, :3] = self.rot
+        matrix[:3, 3] = self.pos
+        return matrix
 
     def parent_orientation(self, v, wrt):
         if wrt == 'local' or wrt == self:
@@ -76,6 +124,9 @@ class Coordinates(object):
         else:
             raise ValueError("transform wrt {} is not supported".format(wrt))
         return self.newcoords(self.rot, self.pos)
+
+    def rpy_angle(self):
+        return rpy_angle(self.rot)
 
     def axis(self, ax):
         ax = _wrap_axis(ax)
@@ -250,6 +301,9 @@ class CascadedCoords(Coordinates):
     def parentcoords(self):
         if self.parent_link:
             return self.parent_link.worldcoords()
+
+    def transform_vector(self, v):
+        return self.worldcoords().transform_vector(v)
 
     def inverse_transform_vector(self, v):
         return self.worldcoords().inverse_transform_vector(v)
