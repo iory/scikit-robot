@@ -421,6 +421,157 @@ class CascadedLink(CascadedCoords):
                 hook()
         return True
 
+    def collision_avoidance_link_pair_from_link_list(self,
+                                                     link_list,
+                                                     obstacles=[]):
+        return []
+
+    def move_joints_avoidance(self,
+                              union_vel,
+                              union_link_list=None,
+                              link_list=None,
+                              fik_len=None,
+                              weight=None,
+                              null_space=None,
+                              avoid_nspace_gain=0.01,
+                              avoid_weight_gain=1.0,
+                              avoid_collision_distance=200,
+                              avoid_collision_null_gain=1.0,
+                              avoid_collision_joint_gain=1.0,
+                              collision_avoidance_link_pair=None,
+                              cog_gain=0.0,
+                              target_centroid_pos=None,
+                              centroid_offset_func=None,
+                              cog_translation_axis='z',
+                              cog_null_space=False,
+                              additional_weight_list=None,
+                              additional_nspace_list=None,
+                              jacobi=None,
+                              obstacles=None,
+                              *args, **kwargs):
+        angle_speed_collision_blending = 0.0
+        if fik_len is None:
+            fik_len = self.calc_target_joint_dimension(union_link_list)
+        if weight is None:
+            weight = np.ones(fik_len, dtype=np.float64)
+        if jacobi is None:
+            logger.error('jacobi is required')
+            return True
+        if collision_avoidance_link_pair is None:
+            self.collision_avoidance_link_pair_from_link_list(
+                link_list,
+                obstacles=obstacles)
+
+        # weight = self.calc_inverse_kinematics_weight_from_link_list(
+        #     link_list, weight=weight, fik_len=fik_len,
+        #     avoid_weight_gain=avoid_weight_gain,
+        #     union_link_list=union_link_list,
+        #     additional_weight_list=additional_weight_list)
+
+        # calc inverse jacobian and projection jacobian
+        j_sharp = self.calc_inverse_jacobian(jacobi,
+                                             weight=weight,
+                                             *args, **kwargs)
+
+        #
+        # angle-speed-collision-avoidance: avoiding self collision
+        #
+        # qca = J#t a dx + ( I - J# J ) Jt b dx
+        #
+        # dx = p                     if |p| > d_yz
+        #    = (dyz / |p|  - 1) p    else
+        #
+        # a : avoid-collision-joint-gain
+        # b : avoid-collision-null-gain
+        #
+        # implimentation issue:
+        # when link and object are collide,
+        #  p = (nearestpoint_on_object_surface - center_of_link )
+        # else
+        #  p =  (nearestpoint_on_object_surface - neareset_point_on_link_surface)
+        #
+        # H. Sugiura, M. Gienger, H. Janssen, C. Goerick: "Real-Time Self
+        # Collision Avoidance for Humanoids by means of Nullspace Criteria
+        # and Task Intervals" In Humanoids 2006.
+        #
+        # H. Sugiura, M. Gienger, H. Janssen and C. Goerick : "Real-Time
+        # Collision Avoidance with Whole Body Motion Control for Humanoid
+        # Robots", In IROS 2007, 2053--2058
+        #
+
+        self.collision_avoidance_null_vector = []
+        self.collision_avoidance_joint_vector = []
+
+        angle_speed_collision_avoidance = None
+        if collision_avoidance_link_pair is not None \
+           and avoid_collision_distance > 0.0 \
+           and (avoid_collision_joint_gain > 0.0 or
+                avoid_collision_null_gain > 0.0):
+            angle_speed_collision_avoidance = \
+                self.collision_avoidance(avoid_collision_distance=avoid_collision_distance,
+                                         avoid_collision_null_gain=avoid_collision_null_gain,
+                                         avoid_collision_joint_gain=avoid_collision_joint_gain,
+                                         weight=weight,
+                                         collision_avoidance_link_pair=collision_avoidance_link_pair,
+                                         *args, **kwargs)
+            # (setq min-distance (car (elt (send self :get :collision-distance) 0)))
+            # (setq angle-speed-collision-blending
+            #  (cond ((<= avoid-collision-joint-gain 0.0) 0.0)
+            #   ((< min-distance (* 0.1 avoid-collision-distance))
+            #    1.0)
+            #   ((< min-distance avoid-collision-distance)
+            #    (/ (- avoid-collision-distance min-distance)
+            #     (* 0.9 avoid-collision-distance)))
+            #   (t
+            #    0.0)))
+
+        tmp_nspace = None
+        # tmp_nspace = self.calc_inverse_kinematics_nspace_from_link_list(
+        #     link_list, union_link_list=union_link_list,
+        #     avoid_nspace_gain=avoid_nspace_gain,
+        #     cog_gain=cog_gain, target_centroid_pos=target_centroid_pos,
+        #     centroid_offset_func=centroid_offset_func,
+        #     cog_null_space=cog_null_space,
+        #     update_mass_properties=False,
+        #     cog_translation_axis=cog_translation_axis,
+        #     weight=weight,
+        #     fik_len=fik_len,
+        #     null_space=null_space,
+        #     additional_nspace_list=additional_nspace_list)
+
+        # if len(self.collision_avoidance_null_vector):
+        #     tmp_nspace += self.collision_avoidance_null_vector
+
+        #
+        # q = f(d) qca + {1 - f(d)} qwbm
+        #
+        # f(d) = (d - da) / (db - da), if d < da
+        #      = 0                   , otherwise
+        # da : avoid-collision-distance
+        # db : avoid-collision-distance*0.1
+        #
+        # H. Sugiura, IROS 2007
+        #
+        # qwbm = J# x + N W y
+        #
+        # J# = W Jt(J W Jt + kI)-1 (Weighted SR-Inverse)
+        # N  = E - J#J
+        #
+        # SR-inverse :
+        # Y. Nakamura and H. Hanafusa : "Inverse Kinematic Solutions With
+        # Singularity Robustness for Robot Manipulator Control"
+        # J. Dyn. Sys., Meas., Control  1986. vol 108, Issue 3, pp. 163--172.
+        #
+        self.move_joints(union_vel,
+                         union_link_list=union_link_list,
+                         null_space=tmp_nspace,
+                         angle_speed=angle_speed_collision_avoidance,
+                         angle_speed_blending=angle_speed_collision_blending,
+                         weight=weight,
+                         jacobi=jacobi,
+                         j_sharp=j_sharp,
+                         *args, **kwargs)
+
     def calc_vel_from_pos(self, dif_pos, translation_axis,
                           p_limit=100.0):
         if LA.norm(dif_pos) > p_limit:
@@ -463,7 +614,8 @@ class CascadedLink(CascadedCoords):
                            translation_axis=True,
                            rotation_axis=False,
                            stop=100,
-                           inverse_kinematics_hook=[]):
+                           inverse_kinematics_hook=[],
+                           *args, **kwargs):
         if move_target is None:
             raise NotImplementedError
         if link_list is None:
@@ -479,10 +631,6 @@ class CascadedLink(CascadedCoords):
                                                   link_list=link_list,
                                                   translation_axis=translation_axis,
                                                   rotation_axis=rotation_axis)
-            # TODO erase following line
-            # J[:, -1] *= -1
-
-            J_sharp = sr_inverse(J)
             dif_pos = move_target.difference_position(target_coords,
                                                       translation_axis=translation_axis)
             dif_rot = move_target.difference_rotation(target_coords,
@@ -513,10 +661,16 @@ class CascadedLink(CascadedCoords):
 
             if success:
                 break
-            self.move_joints(union_vel,
-                             union_link_list=link_list,
-                             j_sharp=J_sharp,
-                             jacobi=J)
+
+            union_link_list = self.calc_union_link_list(link_list)
+            self.move_joints_avoidance(
+                union_vel,
+                union_link_list=union_link_list,
+                link_list=link_list,
+                rotation_axis=rotation_axis,
+                translation_axis=translation_axis,
+                jacobi=J,
+                *args, **kwargs)
 
     def ik_convergence_check(self,
                              dif_pos,
@@ -614,7 +768,8 @@ class CascadedLink(CascadedCoords):
     def calc_inverse_jacobian(self, jacobi,
                               manipulability_limit=0.1,
                               manipulability_gain=0.001,
-                              weight=None):
+                              weight=None,
+                              *args, **kwargs):
         # m : manipulability
         m = manipulability(jacobi)
         if m < manipulability_limit:
