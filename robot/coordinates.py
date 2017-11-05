@@ -131,9 +131,10 @@ class Coordinates(object):
     def rotate_with_matrix(self, mat, wrt='local'):
         if wrt == 'local' or wrt == self:
             self.rot = np.matmul(self.rot, mat)
-        elif wrt == 'parent' or wrt == self.parent_link \
-                or wrt == 'world':
+            self.newcoords(self.rot, self.pos)
+        elif wrt == 'parent' or wrt == self.parent_link:
             self.rot = np.matmul(mat, self.rot)
+            self.newcoords(self.rot, self.pos)
         elif isinstance(wrt, Coordinates):
             r2 = wrt.worldrot()
             r2t = r2.T
@@ -266,7 +267,7 @@ class CascadedCoords(Coordinates):
             if isinstance(wrt, Coordinates):
                 wrt_rot = wrt.worldrot()
                 matrix = np.matmul(wrt_rot, matrix)
-                matrix = np.matmul(wrt_rot.T, matrix)
+                matrix = np.matmul(matrix, wrt_rot.T)
             matrix = np.matmul(matrix, parent_rot)
             matrix = np.matmul(parent_rot.T, matrix)
             self.rot = np.matmul(matrix, self.rot)
