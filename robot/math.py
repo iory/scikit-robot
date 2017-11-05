@@ -120,7 +120,7 @@ def rpy_angle(matrix):
     p = np.arctan2(- matrix[2, 0],
                    np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
     y = np.arctan2(matrix[1, 0], matrix[0, 0])
-    rpy = np.array([r, p, y])
+    rpy = np.array([y, p, r])
     return rpy, np.pi - rpy
 
 
