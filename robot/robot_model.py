@@ -780,7 +780,7 @@ class CascadedLink(CascadedCoords):
             for hook in inverse_kinematics_hook:
                 hook()
 
-        return self.angle_vector()
+        return success
 
     def calc_inverse_jacobian(self, jacobi,
                               manipulability_limit=0.1,
@@ -898,18 +898,17 @@ class CascadedLink(CascadedCoords):
         P = np.zeros((n, n))
         v = np.zeros(n)
 
+        J = self.calc_jacobian_from_link_list(move_target=move_target,
+                                              link_list=link_list,
+                                              translation_axis=translation_axis,
+                                              rotation_axis=rotation_axis)
+        union_vels = np.array([])
         for mv, tc, trans_axis, rot_axis, w, g in zip(move_target,
                                                       target_coords,
                                                       translation_axis,
                                                       rotation_axis,
                                                       weight,
                                                       gain):
-            J = self.calc_jacobian_from_link_list(
-                move_target=mv,
-                target_coords=tc,
-                link_list=union_link_list,
-                translation_axis=trans_axis,
-                rotation_axis=rot_axis)
             # TODO duplicate of jacobian based ik
             dif_pos = mv.difference_position(tc,
                                              translation_axis=trans_axis)
@@ -919,9 +918,10 @@ class CascadedLink(CascadedCoords):
             vel_pos = self.calc_vel_from_pos(dif_pos, trans_axis)
             vel_rot = self.calc_vel_from_rot(dif_rot, rot_axis)
             union_vel = np.concatenate([vel_pos, vel_rot])
-            r = g * union_vel
-            P += w * np.dot(J.T, J)
-            v += w * np.dot(-r.T, J)
+            union_vels = np.concatenate([union_vels, union_vel])
+        r = g * union_vels
+        P += w * np.dot(J.T, J)
+        v += w * np.dot(-r.T, J)
 
         q_max = np.array(list(map(lambda l: l.joint.max_angle,
                                   union_link_list)))
@@ -948,6 +948,7 @@ class CascadedLink(CascadedCoords):
                          *args, **kwargs):
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
+        n_target = len(target_coords)
         if not isinstance(move_target, list):
             move_target = [move_target]
         if link_list is None:
@@ -955,13 +956,13 @@ class CascadedLink(CascadedCoords):
         if not isinstance(link_list, list):
             link_list = [link_list]
         if not isinstance(translation_axis, list):
-            translation_axis = [translation_axis]
+            translation_axis = [translation_axis] * n_target
         if not isinstance(rotation_axis, list):
-            rotation_axis = [rotation_axis]
+            rotation_axis = [rotation_axis] * n_target
         if not isinstance(weight, list):
-            weight = [weight]
+            weight = [weight] * n_target
         if not isinstance(gain, list):
-            gain = [gain]
+            gain = [gain] * n_target
 
         union_link_list = self.calc_union_link_list(link_list)
 
