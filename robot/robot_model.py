@@ -3,8 +3,6 @@ import itertools
 
 import numpy as np
 import numpy.linalg as LA
-import scipy
-import scipy.optimize
 
 from robot.coordinates import CascadedCoords
 from robot.coordinates import Coordinates
@@ -13,6 +11,7 @@ from robot.math import manipulability
 from robot.math import midpoint
 from robot.math import normalize_vector
 from robot.math import sr_inverse
+from robot.optimizer import solve_qp
 from robot.utils.urdf import URDF
 from robot import worldcoords
 
@@ -709,7 +708,11 @@ class CascadedLink(CascadedCoords):
                                         translation_axis=True,
                                         rotation_axis=True,
                                         stop=100,
-                                        options=None):
+                                        dt=5e-3,
+                                        inverse_kinematics_hook=[],
+                                        thre=1.0,
+                                        rthre=np.deg2rad(1.0),
+                                        *args, **kwargs):
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
         if not isinstance(move_target, list):
@@ -729,41 +732,45 @@ class CascadedLink(CascadedCoords):
                                 len(rotation_axis),
                                 len(move_target)))
 
-        joint_list = list(map(lambda l: l.joint, link_list))
-        if init_angle_vector is None:
-            init_angle_vector = np.array(list(map(lambda joint: joint.joint_angle(),
-                                                  joint_list)))
+        union_link_list = self.calc_union_link_list(link_list)
+        for i in range(stop):
+            qd = self.compute_velocity(target_coords,
+                                       move_target,
+                                       dt,
+                                       link_list=link_list,
+                                       gain=0.85,
+                                       weight=1.0,
+                                       translation_axis=rotation_axis,
+                                       rotation_axis=translation_axis,
+                                       dof_limit_gain=0.5,
+                                       *args, **kwargs)
+            for l, dtheta in zip(union_link_list, qd):
+                l.joint.joint_angle(dtheta,
+                                    relative=True)
 
-        def objective_function(x):
-            for j, theta in zip(joint_list, x):
-                j.joint_angle(theta)
-            cost = 0.0
+            success = True
             for mv, tc, trans_axis, rot_axis in zip(move_target,
                                                     target_coords,
                                                     translation_axis,
                                                     rotation_axis):
-                dif_pos = mv.difference_position(tc, trans_axis) * 1000.0
-                dif_rot = mv.difference_rotation(tc, rot_axis) * 1000.0
-                cost += np.linalg.norm(dif_pos)
-                cost += np.linalg.norm(dif_rot)
-            return cost
+                dif_pos = mv.difference_position(tc,
+                                                 translation_axis=trans_axis)
+                dif_rot = mv.difference_rotation(tc,
+                                                 rotation_axis=rot_axis)
+                dif_pos *= 1000.0
 
-        if options is None or not isinstance(options, dict):
-            options = {}
-        # Manage iterations maximum
-        if stop is not None:
-            options["maxiter"] = stop
-        options['disp'] = True
+                if translation_axis is not None:
+                    success = success and (LA.norm(dif_pos) < thre)
+                if rotation_axis is not None:
+                    success = success and (LA.norm(dif_rot) < rthre)
 
-        joint_angle_limits = list(
-            map(lambda j: (j.min_angle, j.max_angle), joint_list))
+            if success:
+                break
 
-        res = scipy.optimize.fmin_slsqp(
-            func=objective_function,
-            x0=init_angle_vector,
-            bounds=joint_angle_limits)
+            for hook in inverse_kinematics_hook:
+                hook()
 
-        return res
+        return self.angle_vector()
 
     def calc_inverse_jacobian(self, jacobi,
                               manipulability_limit=0.1,
@@ -844,6 +851,154 @@ class CascadedLink(CascadedCoords):
             elif axis is False or axis is None:
                 dim -= 3
         return dim
+
+    def compute_qp_common(self,
+                          target_coords,
+                          move_target,
+                          dt,
+                          link_list=None,
+                          gain=0.85,
+                          weight=1.0,
+                          translation_axis=True,
+                          rotation_axis=True,
+                          dof_limit_gain=0.5):
+        if not isinstance(target_coords, list):
+            target_coords = [target_coords]
+        if not isinstance(move_target, list):
+            move_target = [move_target]
+        if link_list is None:
+            link_list = self.link_list
+        if not isinstance(link_list, list):
+            link_list = [link_list]
+        if not isinstance(translation_axis, list):
+            translation_axis = [translation_axis]
+        if not isinstance(rotation_axis, list):
+            rotation_axis = [rotation_axis]
+        if not isinstance(weight, list):
+            weight = [weight]
+        if not isinstance(gain, list):
+            gain = [gain]
+
+        union_link_list = self.calc_union_link_list(link_list)
+        n = len(union_link_list)
+        q = np.array(list(map(lambda l: l.joint.joint_angle(),
+                              union_link_list)))
+        P = np.zeros((n, n))
+        v = np.zeros(n)
+
+        for mv, tc, trans_axis, rot_axis, w, g in zip(move_target,
+                                                      target_coords,
+                                                      translation_axis,
+                                                      rotation_axis,
+                                                      weight,
+                                                      gain):
+            J = self.calc_jacobian_from_link_list(
+                move_target=mv,
+                target_coords=tc,
+                link_list=union_link_list,
+                translation_axis=trans_axis,
+                rotation_axis=rot_axis)
+            # TODO duplicate of jacobian based ik
+            dif_pos = mv.difference_position(tc,
+                                             translation_axis=trans_axis)
+            dif_rot = mv.difference_rotation(tc,
+                                             rotation_axis=rot_axis)
+            dif_pos *= 1000.0
+            vel_pos = self.calc_vel_from_pos(dif_pos, trans_axis)
+            vel_rot = self.calc_vel_from_rot(dif_rot, rot_axis)
+            union_vel = np.concatenate([vel_pos, vel_rot])
+            r = g * union_vel
+            P += w * np.dot(J.T, J)
+            v += w * np.dot(-r.T, J)
+
+        q_max = np.array(list(map(lambda l: l.joint.max_angle,
+                                  union_link_list)))
+        q_min = np.array(list(map(lambda l: l.joint.min_angle,
+                                  union_link_list)))
+        qd_max_dof_limit = dof_limit_gain * (q_max - q) / dt
+        qd_min_dof_limit = dof_limit_gain * (q_min - q) / dt
+        qd_max = np.minimum(np.ones(n), qd_max_dof_limit)
+        qd_min = np.maximum(- np.ones(n), qd_min_dof_limit)
+        return P, v, qd_max, qd_min
+
+    def compute_velocity(self,
+                         target_coords,
+                         move_target,
+                         dt,
+                         link_list=None,
+                         gain=0.85,
+                         weight=1.0,
+                         translation_axis=True,
+                         rotation_axis=True,
+                         dof_limit_gain=0.5,
+                         fast=True,
+                         solver='cvxopt',
+                         *args, **kwargs):
+        if not isinstance(target_coords, list):
+            target_coords = [target_coords]
+        if not isinstance(move_target, list):
+            move_target = [move_target]
+        if link_list is None:
+            link_list = self.link_list
+        if not isinstance(link_list, list):
+            link_list = [link_list]
+        if not isinstance(translation_axis, list):
+            translation_axis = [translation_axis]
+        if not isinstance(rotation_axis, list):
+            rotation_axis = [rotation_axis]
+        if not isinstance(weight, list):
+            weight = [weight]
+        if not isinstance(gain, list):
+            gain = [gain]
+
+        union_link_list = self.calc_union_link_list(link_list)
+
+        n = len(union_link_list)
+
+        if fast:
+            P, v, qd_max, qd_min = self.compute_qp_common(
+                target_coords,
+                move_target,
+                dt,
+                link_list,
+                gain=gain,
+                weight=weight,
+                translation_axis=translation_axis,
+                rotation_axis=rotation_axis,
+                dof_limit_gain=dof_limit_gain)
+            G = np.vstack([+ np.eye(n), -np.eye(n)])
+            h = np.hstack([qd_max, -qd_min])
+        else:
+            E = np.eye(n)
+            Z = np.zeros((n, n))
+            P0, v0, qd_max, qd_min = self.compute_qp_common(
+                target_coords,
+                move_target,
+                dt,
+                link_list,
+                gain=gain,
+                weight=weight,
+                translation_axis=translation_axis,
+                rotation_axis=rotation_axis,
+                dof_limit_gain=dof_limit_gain)
+            margin_reg = 1e-5
+            margin_lin = 1e-3
+            P = np.vstack([np.hstack([P0, Z]),
+                           np.hstack([Z, margin_reg * E])])
+            v = np.hstack([v0, -margin_lin * np.ones(n)])
+            G = np.vstack([
+                np.hstack([+E, +E / dt]),
+                np.hstack([-E, +E / dt]),
+                np.hstack([Z, -E])])
+            h = np.hstack([qd_max, -qd_min, np.zeros(n)])
+
+        qd = solve_qp(P,
+                      v,
+                      G,
+                      h,
+                      sym_proj=False,
+                      solver=solver)
+        return qd
 
     def reset_joint_angle_limit_weight_old(self, union_link_list):
         tmp_joint_angle_limit_weight_old = self.find_joint_angle_limit_weight_old_from_union_link_list(
