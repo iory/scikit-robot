@@ -1081,3 +1081,13 @@ class RobotModel(CascadedLink):
     @property
     def lleg(self):
         raise NotImplementedError
+
+    @property
+    def joint_min_angles(self):
+        return np.array([joint.min_angle for joint in self.joint_list],
+                        dtype=np.float64)
+
+    @property
+    def joint_max_angles(self):
+        return np.array([joint.max_angle for joint in self.joint_list],
+                        dtype=np.float64)
