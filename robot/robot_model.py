@@ -3,6 +3,7 @@ import itertools
 
 import numpy as np
 import numpy.linalg as LA
+from ordered_set import OrderedSet
 
 from robot.coordinates import CascadedCoords
 from robot.coordinates import Coordinates
@@ -187,7 +188,9 @@ def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
     j_translation = calc_dif_with_axis(j_translation, translation_axis)
     fik[row:row+len(j_translation), column] = j_translation
     j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
-    fik[row + len(j_translation):, column] = j_rotation
+    fik[row + len(j_translation):
+        row + len(j_translation) + len(j_rotation),
+        column] = j_rotation
     return fik
 
 
@@ -630,20 +633,27 @@ class CascadedLink(CascadedCoords):
                                                   link_list=link_list,
                                                   translation_axis=translation_axis,
                                                   rotation_axis=rotation_axis)
-            dif_pos = move_target.difference_position(target_coords,
-                                                      translation_axis=translation_axis)
-            dif_rot = move_target.difference_rotation(target_coords,
-                                                      rotation_axis=rotation_axis)
-            dif_pos *= 1000.0
-            vel_pos = self.calc_vel_from_pos(dif_pos, translation_axis)
-            vel_rot = self.calc_vel_from_rot(dif_rot, rotation_axis)
-            union_vel = np.concatenate([vel_pos, vel_rot])
-
             success = True
-            if translation_axis is not None:
-                success = success and (LA.norm(dif_pos) < thre)
-            if rotation_axis is not None:
-                success = success and (LA.norm(dif_rot) < rthre)
+            union_vels = np.array([])
+            for mv, tc, trans_axis, rot_axis in zip(move_target,
+                                                    target_coords,
+                                                    translation_axis,
+                                                    rotation_axis):
+                dif_pos = mv.difference_position(tc,
+                                                 translation_axis=trans_axis)
+                dif_rot = mv.difference_rotation(tc,
+                                                 rotation_axis=rot_axis)
+                dif_pos *= 1000.0
+
+                vel_pos = self.calc_vel_from_pos(dif_pos, trans_axis)
+                vel_rot = self.calc_vel_from_rot(dif_rot, rot_axis)
+                union_vel = np.concatenate([vel_pos, vel_rot])
+                union_vels = np.concatenate([union_vels, union_vel])
+
+                if translation_axis is not None:
+                    success = success and (LA.norm(dif_pos) < thre)
+                if rotation_axis is not None:
+                    success = success and (LA.norm(dif_rot) < rthre)
 
             for hook in inverse_kinematics_hook:
                 hook()
@@ -663,7 +673,7 @@ class CascadedLink(CascadedCoords):
 
             union_link_list = self.calc_union_link_list(link_list)
             self.move_joints_avoidance(
-                union_vel,
+                union_vels,
                 union_link_list=union_link_list,
                 link_list=link_list,
                 rotation_axis=rotation_axis,
@@ -870,14 +880,16 @@ class CascadedLink(CascadedCoords):
             link_list = self.link_list
         if not isinstance(link_list, list):
             link_list = [link_list]
+        n_target = len(target_coords)
+
         if not isinstance(translation_axis, list):
-            translation_axis = [translation_axis]
+            translation_axis = [translation_axis] * n_target
         if not isinstance(rotation_axis, list):
-            rotation_axis = [rotation_axis]
+            rotation_axis = [rotation_axis] * n_target
         if not isinstance(weight, list):
-            weight = [weight]
+            weight = [weight] * n_target
         if not isinstance(gain, list):
-            gain = [gain]
+            gain = [gain] * n_target
 
         union_link_list = self.calc_union_link_list(link_list)
         n = len(union_link_list)
@@ -1013,7 +1025,7 @@ class CascadedLink(CascadedCoords):
         elif len(link_list) == 1:
             return link_list[0]
         else:
-            return set(list(itertools.chain(*link_list)))
+            return list(OrderedSet(list(itertools.chain(*link_list))))
 
     def calc_target_joint_dimension(self, link_list):
         return calc_target_joint_dimension(map(lambda l: l.joint,
@@ -1056,14 +1068,22 @@ class CascadedLink(CascadedCoords):
         jdim = self.calc_target_joint_dimension(union_link_list)
         if not isinstance(link_list[0], list):
             link_lists = [link_list]
+        else:
+            link_lists = link_list
         if not isinstance(move_target, list):
             move_targets = [move_target]
+        else:
+            move_targets = move_target
         if not isinstance(transform_coords, list):
             transform_coords = [transform_coords]
         if not isinstance(rotation_axis, list):
             rotation_axes = [rotation_axis]
+        else:
+            rotation_axes = rotation_axis
         if not isinstance(translation_axis, list):
             translation_axes = [translation_axis]
+        else:
+            translation_axes = translation_axis
 
         col = col_offset
         i = 0
@@ -1073,7 +1093,7 @@ class CascadedLink(CascadedCoords):
 
             for link_list, move_target, transform_coord, rotation_axis, translation_axis \
                     in zip(link_lists, move_targets, transform_coords, rotation_axes, translation_axes):
-                if True:  # (member ul link-list :test #'equal)
+                if ul in link_list:
                     length = len(link_list)
                     l = link_list.index(ul)
                     joint = ul.joint
@@ -1101,6 +1121,7 @@ class CascadedLink(CascadedCoords):
                     default_coords = joint.default_coords
                     world_default_coords = parent_link.copy_worldcoords().transform(
                         default_coords)
+
                     fik = joint.calc_jacobian(fik, row, col, joint, paxis,
                                               child_link, world_default_coords, child_reverse,
                                               move_target, transform_coord, rotation_axis,
