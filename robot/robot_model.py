@@ -772,6 +772,7 @@ class CascadedLink(CascadedCoords):
                               *args, **kwargs):
         # m : manipulability
         m = manipulability(jacobi)
+        k = 0
         if m < manipulability_limit:
             k = manipulability_gain * ((1.0 - m / manipulability_limit) ** 2)
         # calc weighted SR-inverse
