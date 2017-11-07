@@ -9,7 +9,11 @@ from setuptools import setup
 
 setup_requires = []
 install_requires = [
+    'cvxopt',
     'numpy>=1.9.0',
+    'ordered_set',
+    'pybullet',
+    'quadprog',
 ]
 
 setup(
@@ -22,6 +26,7 @@ setup(
     license='MIT License',
     packages=['robot',
               'robot.utils',
+              'robot.optimizers',
               ],
     zip_safe=False,
     setup_requires=setup_requires,
