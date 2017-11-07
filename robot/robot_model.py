@@ -944,6 +944,7 @@ class CascadedLink(CascadedCoords):
                          rotation_axis=True,
                          dof_limit_gain=0.5,
                          fast=True,
+                         sym_proj=False,
                          solver='cvxopt',
                          *args, **kwargs):
         if not isinstance(target_coords, list):
@@ -1009,7 +1010,7 @@ class CascadedLink(CascadedCoords):
                       v,
                       G,
                       h,
-                      sym_proj=False,
+                      sym_proj=sym_proj,
                       solver=solver)
         return qd
 
