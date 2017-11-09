@@ -623,8 +623,15 @@ class CascadedLink(CascadedCoords):
         if link_list is None:
             link_list = self.link_list
 
-        # translation_axis = _wrap_axis(translation_axis)
-        # wrapped_rotation_axis = _wrap_axis(rotation_axis)
+        if not isinstance(move_target, list):
+            move_target = [move_target]
+        if not isinstance(target_coords, list):
+            target_coords = [target_coords]
+        if not isinstance(translation_axis, list):
+            translation_axis = [translation_axis]
+        if not isinstance(rotation_axis, list):
+            rotation_axis = [rotation_axis]
+
 
         thre = 1.0
         rthre = np.deg2rad(1)
