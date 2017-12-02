@@ -166,6 +166,30 @@ def matrix2quaternion(m):
     return np.array([q0, q1, q2, q3])
 
 
+def quaternion2matrix(q):
+    """Returns matrix of given quaternion"""
+    q0 = q[0]
+    q1 = q[1]
+    q2 = q[2]
+    q3 = q[3]
+    norm = np.linalg.norm(q)
+    if not np.isclose(norm, 1.0):
+        raise ValueError("quaternion q's norm is not 1")
+    m = np.zeros((3, 3))
+    m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
+    m[0, 1] = 2 * (q1 * q2 - q0 * q3)
+    m[0, 2] = 2 * (q1 * q3 + q0 * q2)
+
+    m[1, 0] = 2 * (q1 * q2 + q0 * q3)
+    m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
+    m[1, 2] = 2 * (q2 * q3 - q0 * q1)
+
+    m[2, 0] = 2 * (q1 * q3 - q0 * q2)
+    m[2, 1] = 2 * (q2 * q3 + q0 * q1)
+    m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+    return m
+
+
 def matrix_log(m):
     """returns matrix log of given m, it returns [-pi, pi]"""
     qq = matrix2quaternion(m)
