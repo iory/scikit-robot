@@ -35,6 +35,8 @@ def _wrap_axis(axis):
             return np.array([0, 0, 0])
         else:
             return np.array([1, 1, 1])
+    elif axis is None:
+        return np.array([1, 1, 1])
     else:
         raise ValueError
     return axis
