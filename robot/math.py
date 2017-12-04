@@ -1,3 +1,8 @@
+from math import asin
+from math import atan2
+from math import cos
+from math import sin
+
 import numpy as np
 
 
@@ -201,3 +206,53 @@ def matrix_log(m):
     elif th < - np.pi:
         th = th + 2.0 * np.pi
     return th * normalize_vector(q)
+
+
+def quaternion2rpy(q):
+    """
+    Roll-pitch-yaw angles of a quaternion.
+
+    Parameters
+    ----------
+    quat : (4,) array
+        Quaternion in `[w x y z]` format.
+
+    Returns
+    -------
+    rpy : (3,) array
+        Array of yaw-pitch-roll angles, in [rad].
+    """
+    roll = atan2(
+        2 * q[2] * q[3] + 2 * q[0] * q[1],
+        q[3] ** 2 - q[2] ** 2 - q[1] ** 2 + q[0] ** 2)
+    pitch = -asin(
+        2 * q[1] * q[3] - 2 * q[0] * q[2])
+    yaw = atan2(
+        2 * q[1] * q[2] + 2 * q[0] * q[3],
+        q[1] ** 2 + q[0] ** 2 - q[3] ** 2 - q[2] ** 2)
+    rpy = np.array([yaw, pitch, roll])
+    return rpy, np.pi - rpy
+
+
+def rpy2quaternion(rpy):
+    """
+    Quaternion frmo yaw-pitch-roll angles.
+
+    Parameters
+    ----------
+    rpy : (3,) array
+        Vector of yaw-pitch-roll angles in [rad].
+
+    Returns
+    -------
+    quat : (4,) array
+        Quaternion in `[w x y z]` format.
+    """
+    yaw, pitch, roll = rpy
+    cr, cp, cy = cos(roll / 2.), cos(pitch / 2.), cos(yaw / 2.)
+    sr, sp, sy = sin(roll / 2.), sin(pitch / 2.), sin(yaw / 2.)
+    return np.array([
+        cr * cp * cy + sr * sp * sy,
+        -cr * sp * sy + cp * cy * sr,
+        cr * cy * sp + sr * cp * sy,
+        cr * cp * sy - sr * cy * sp])
