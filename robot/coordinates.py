@@ -9,6 +9,7 @@ from robot.math import rotate_matrix
 from robot.math import rotation_matrix
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
+from robot.math import matrix2quaternion
 
 
 def transform_coords(c1, c2):
@@ -101,6 +102,9 @@ class Coordinates(object):
         matrix[:3, :3] = self.rot
         matrix[:3, 3] = self.pos
         return matrix
+
+    def quaternion(self):
+        return matrix2quaternion(self.rot)
 
     def parent_orientation(self, v, wrt):
         if wrt == 'local' or wrt == self:
