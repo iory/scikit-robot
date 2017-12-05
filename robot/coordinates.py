@@ -49,6 +49,7 @@ class Coordinates(object):
 
     def translate(self, vec, wrt='local'):
         """translate this coordinates. unit is [mm]"""
+        vec = np.array(vec, dtype=np.float64)
         vec /= 1000.0
         return self.newcoords(self.rot,
                               self.parent_orientation(vec, wrt) + self.pos)
