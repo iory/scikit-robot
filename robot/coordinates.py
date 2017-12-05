@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 
 from robot.math import _wrap_axis
@@ -215,8 +217,8 @@ class Coordinates(object):
         return self.newcoords(self.rot, self.pos)
 
     def copy_coords(self):
-        return Coordinates(pos=self.worldpos().copy(),
-                           rot=self.worldrot().copy())
+        return Coordinates(pos=copy.deepcopy(self.worldpos()),
+                           rot=copy.deepcopy(self.worldrot()))
 
     def coords(self):
         return self.copy_coords()
