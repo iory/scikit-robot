@@ -116,8 +116,8 @@ def rpy_matrix(az, ay, ax):
     WORLD, and az radian around z axis in WORLD, in this order.
     These angles can be extracted by the RPY-ANGLE function."""
     r = rotation_matrix(ax, 'x')
-    r = rotate_matrix(r, ay, 'y')
-    r = rotate_matrix(r, az, 'z')
+    r = rotate_matrix(r, ay, 'y', world=True)
+    r = rotate_matrix(r, az, 'z', world=True)
     return r
 
 
