@@ -1248,6 +1248,7 @@ class RobotModel(CascadedLink):
             self.__dict__[link.name] = link
         for joint in joint_list:
             self.__dict__[joint.name] = joint
+        self.root_link = self.__dict__[root_link.name]
 
         if len(links) > 0:
             worldcoords.add_child(self.link_list[0])
