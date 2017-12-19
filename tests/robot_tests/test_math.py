@@ -52,6 +52,9 @@ class TestMath(unittest.TestCase):
             decimal=5)
 
     def test_matrix2quaternion(self):
+        testing.assert_almost_equal(matrix2quaternion(np.eye(3)),
+                                    np.array([1, 0, 0, 0]))
+
         m = rotate_matrix(
             rotate_matrix(
                 rotate_matrix(
