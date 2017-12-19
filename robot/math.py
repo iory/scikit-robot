@@ -153,6 +153,12 @@ def normalize_vector(v, ord=2):
 
 def matrix2quaternion(m):
     """Returns quaternion of given rotation matrix.
+
+    Args:
+        m (np.array): 3 x 3 matrix
+
+    Returns:
+        numpy.array: quaternion [w, x, y, z]
     """
     m = np.array(m, dtype=np.float64)
     q0_2 = (1 + m[0, 0] + m[1, 1] + m[2, 2]) / 4.0
