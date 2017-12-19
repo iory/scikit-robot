@@ -256,3 +256,20 @@ def rpy2quaternion(rpy):
         -cr * sp * sy + cp * cy * sr,
         cr * cy * sp + sr * cp * sy,
         cr * cp * sy - sr * cy * sp])
+
+
+def rotation_matrix_from_rpy(rpy):
+    """
+    Rotation matrix from yaw-pitch-roll angles.
+
+    Args:
+        rpy (np.array or list): [yaw, pitch, roll]
+
+    Returns:
+        numpy.array (3, 3)
+    """
+    return quaternion2matrix(quat_from_rpy(rpy))
+
+
+quat_from_rpy = rpy2quaternion
+rpy_from_quat = quaternion2rpy
