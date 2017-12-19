@@ -9,3 +9,4 @@ from robot import robot_model
 from robot import utils
 from robot.utils.urdf import URDF
 from robot.misc import listify  # NOQA
+from robot.pybullet_robot_interface import PybulletRobotInterface
