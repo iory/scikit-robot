@@ -271,5 +271,7 @@ def rotation_matrix_from_rpy(rpy):
     return quaternion2matrix(quat_from_rpy(rpy))
 
 
+quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion
+rotation_matrix_from_quat = quaternion2matrix
 rpy_from_quat = quaternion2rpy
