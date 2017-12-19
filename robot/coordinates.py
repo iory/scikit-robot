@@ -242,14 +242,14 @@ class Coordinates(object):
 
     def newcoords(self, c, pos=None):
         if isinstance(c, Coordinates):
-            self.rot[:] = c.rot
-            self.pos[:] = c.pos
+            self.rot = copy.deepcopy(c.rot)
+            self.pos = copy.deepcopy(c.pos)
         elif pos is not None:
             c = np.array(c)
             if not c.shape == (3, 3):
                 c = rpy_matrix(c[0], c[1], c[2])
-            self.rot[:] = c
-            self.pos[:] = pos
+            self.rot = copy.deepcopy(c)
+            self.pos = copy.deepcopy(pos)
         else:
             raise NotImplementedError
         return self
