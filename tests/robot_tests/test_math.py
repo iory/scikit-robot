@@ -1,12 +1,15 @@
 import unittest
 
 import numpy as np
+from numpy import pi
 from numpy import testing
 
-from robot.math import quaternion2matrix
-from robot.math import normalize_vector
-from robot.math import rotate_matrix
 from robot.math import matrix2quaternion
+from robot.math import normalize_vector
+from robot.math import quaternion2matrix
+from robot.math import rotate_matrix
+from robot.math import rotation_matrix_from_rpy
+from robot.math import rpy_matrix
 
 
 class TestMath(unittest.TestCase):
@@ -64,3 +67,31 @@ class TestMath(unittest.TestCase):
                                         [-0.285714,  0.857143,  0.428571]])),
             normalize_vector(np.array([4, 3, -1, -3])),
             decimal=5)
+
+    def test_rpy_matrix(self):
+        testing.assert_almost_equal(
+            rpy_matrix(-pi, 0, pi / 2),
+            np.array([[-1, 0, 0],
+                      [ 0, 0, 1],
+                      [ 0, 1, 0]]))
+        testing.assert_almost_equal(
+            rpy_matrix(0, 0, 0),
+            np.eye(3))
+
+    def test_rotation_matrix_from_rpy(self):
+        testing.assert_almost_equal(
+            rotation_matrix_from_rpy([-pi, 0, pi / 2]),
+            np.array([[-1, 0, 0],
+                      [ 0, 0, 1],
+                      [ 0, 1, 0]]))
+        testing.assert_almost_equal(
+            rotation_matrix_from_rpy([0, 0, 0]),
+            np.eye(3))
+
+        # rotation_matrix_from_rpy and rpy_matrix should be same.
+        for i in range(100):
+            r = np.random.random()
+            p = np.random.random()
+            y = np.random.random()
+            testing.assert_almost_equal(rpy_matrix(y, p, r),
+                                        rotation_matrix_from_rpy([y, p, r]))
