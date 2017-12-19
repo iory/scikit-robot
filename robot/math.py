@@ -88,6 +88,20 @@ def midpoint(p, a, b):
     return a + (b - a) * p
 
 
+def transform(m, v):
+    """
+    Args:
+        m (np.array): 3 x 3 matrix
+        v (np.array or list): vector
+
+    Returns:
+        numpy.array vector
+    """
+    m = np.array(m)
+    v = np.array(v)
+    return np.matmul(m, v)
+
+
 def rotation_matrix(theta, axis):
     """
     Return the rotation matrix associated with counterclockwise rotation about
