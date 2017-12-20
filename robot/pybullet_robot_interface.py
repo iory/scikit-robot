@@ -2,6 +2,7 @@ import pybullet as p
 import numpy as np
 
 from robot.robot_model import RobotModel
+from robot.math import quaternion2rpy
 
 
 class PybulletRobotInterface(RobotModel):
@@ -69,3 +70,20 @@ class PybulletRobotInterface(RobotModel):
             if wait is False:
                 break
         return True
+
+    def sync(self):
+        if self.robot_id is None:
+            return self.angle_vector()
+
+        for idx, joint in zip(self.joint_ids, self.joint_list):
+            if idx is None:
+                continue
+            joint_state = p.getJointState(self.robot_id,
+                                          idx)
+            joint.joint_angle(np.rad2deg(joint_state[0]))
+        pos, orientation = p.getBasePositionAndOrientation(self.robot_id)
+        rpy, _ = quaternion2rpy([orientation[3], orientation[0],
+                                 orientation[1], orientation[2]])
+        self.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
+                                 pos=pos)
+        return self.angle_vector()
