@@ -1146,8 +1146,7 @@ class RobotModel(CascadedLink):
 
     def __init__(self, link_list=[], joint_list=[],
                  root_link=None):
-        self.link_list = link_list
-        self.joint_list = joint_list
+        super(RobotModel, self).__init__(link_list, joint_list)
 
         self.joint_names = []
         for joint in self.joint_list:
