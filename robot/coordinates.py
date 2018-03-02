@@ -45,6 +45,14 @@ class Coordinates(object):
         self.parent_link = None
 
     @property
+    def rotation(self):
+        return self.rot
+
+    @property
+    def translation(self):
+        return self.pos
+
+    @property
     def dimension(self):
         return len(self.pos)
 
