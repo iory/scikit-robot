@@ -104,6 +104,10 @@ def transform(m, v):
 
 def rotation_matrix(theta, axis):
     """
+    Args:
+        theta (scalar): radian vector
+        axis (str): rotation axis such that 'x', 'y', 'z'
+
     Return the rotation matrix associated with counterclockwise rotation about
     the given axis by theta radians.
     """
