@@ -229,7 +229,12 @@ class Coordinates(object):
             raise ValueError('wrt {} not supported'.format(wrt))
         return self.newcoords(self.rot, self.pos)
 
+    def copy(self):
+        return self.copy_coords()
+
     def copy_coords(self):
+        """Returns a deep copy of the Coordinates.
+        """
         return Coordinates(pos=copy.deepcopy(self.worldpos()),
                            rot=copy.deepcopy(self.worldrot()))
 
