@@ -32,7 +32,7 @@ class Coordinates(object):
                  angle=None,
                  wrt='local',
                  name=None):
-        self.rot = rot
+        self.rotation = rot
         if pos is None:
             pos = np.zeros(3)
         if rpy is None:
@@ -42,7 +42,7 @@ class Coordinates(object):
                                       rpy[1],
                                       rpy[2],
                                       pos))
-        self.pos = pos
+        self.translation = pos
         self.rpy = rpy
         self.name = name
         self.parent_link = None
@@ -51,9 +51,62 @@ class Coordinates(object):
     def rotation(self):
         return self.rot
 
+    @rotation.setter
+    def rotation(self, rotation):
+        # Convert quaternions
+        if len(rotation) == 4:
+            q = np.array([q for q in rotation])
+            if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
+                raise ValueError('Invalid quaternion. Must be norm 1.0')
+            rotation = quaternion2matrix(q)
+
+        # Convert lists and tuples
+        if type(rotation) in (list, tuple):
+            rotation = np.array(rotation).astype(np.float32)
+
+        self._check_valid_rotation(rotation)
+        self.rot = rotation * 1.
+
     @property
     def translation(self):
         return self.pos
+
+    @translation.setter
+    def translation(self, translation):
+        # Convert lists to translation arrays
+        if type(translation) in (list, tuple) and len(translation) == 3:
+            translation = np.array([t for t in translation]).astype(np.float32)
+
+        self._check_valid_translation(translation)
+        self.pos = translation.squeeze() * 1.
+
+    def _check_valid_rotation(self, rotation):
+        """Checks that the given rotation matrix is valid.
+        """
+        if not isinstance(rotation, np.ndarray) or \
+           not np.issubdtype(rotation.dtype, np.number):
+            raise ValueError('Rotation must be specified \
+                              as numeric numpy array')
+
+        if len(rotation.shape) != 2 or \
+           rotation.shape[0] != 3 or \
+           rotation.shape[1] != 3:
+            raise ValueError('Rotation must be specified as a 3x3 ndarray')
+
+        if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
+            raise ValueError('Illegal rotation. Must have determinant == 1.0')
+
+    def _check_valid_translation(self, translation):
+        """Checks that the translation vector is valid.
+        """
+        if not isinstance(translation, np.ndarray) or \
+           not np.issubdtype(translation.dtype, np.number):
+            raise ValueError('Translation must be specified \
+                              as numeric numpy array')
+        t = translation.squeeze()
+        if len(t.shape) != 1 or t.shape[0] != 3:
+            raise ValueError('Translation must be specified as a 3-vector, \
+                              3x1 ndarray, or 1x3 ndarray')
 
     @property
     def dimension(self):
