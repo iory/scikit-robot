@@ -6,7 +6,10 @@ from robot.math import _wrap_axis
 from robot.math import matrix2quaternion
 from robot.math import matrix_log
 from robot.math import normalize_vector
+from robot.math import random_rotation
+from robot.math import random_translation
 from robot.math import rotate_matrix
+from robot.math import rotation_angle
 from robot.math import rotation_matrix
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
@@ -398,3 +401,26 @@ class CascadedCoords(Coordinates):
     @property
     def parent(self):
         return self.parent_link
+
+
+def make_coords(*args, **kwargs):
+    return Coordinates(*args, **kwargs)
+
+
+def make_cascoords(*args, **kwargs):
+    return CascadedCoords(*args, **kwargs)
+
+
+def random_coords():
+    return Coordinates(pos=random_translation(),
+                       rot=random_rotation())
+
+
+def wrt(coords, vec):
+    return coords.transform_vector(vec)
+
+
+def coordinates_distance(c1, c2, c=None):
+    if c is None:
+        c = c1.transformation(c2)
+    return np.linalg.norm(c.worldpos()), rotation_angle(c.worldrot())[0]
