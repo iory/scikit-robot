@@ -3,13 +3,13 @@ import copy
 import numpy as np
 
 from robot.math import _wrap_axis
+from robot.math import matrix2quaternion
 from robot.math import matrix_log
 from robot.math import normalize_vector
 from robot.math import rotate_matrix
 from robot.math import rotation_matrix
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
-from robot.math import matrix2quaternion
 
 
 def transform_coords(c1, c2):
