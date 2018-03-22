@@ -347,6 +347,28 @@ def rotation_angle(mat):
     return theta, axis
 
 
+def random_rotation():
+    """Generates a random 3x3 rotation matrix with SVD.
+
+    Returns
+    :obj:`numpy.ndarray` of float
+        A random 3x3 rotation matrix.
+    """
+    rand_seed = np.random.rand(3, 3)
+    U, S, V = np.linalg.svd(rand_seed)
+    return U
+
+
+def random_translation():
+    """Generates a random translation vector.
+
+    Returns
+    :obj:`numpy.ndarray` of float
+        A 3-entry random translation vector.
+    """
+    return np.random.rand(3)
+
+
 inverse_rodrigues = rotation_angle
 quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion
