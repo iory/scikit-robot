@@ -47,6 +47,21 @@ def _wrap_axis(axis):
     return axis
 
 
+def _check_valid_rotation(rotation):
+    """Checks that the given rotation matrix is valid.
+    """
+    rotation = np.array(rotation)
+    if not isinstance(rotation, np.ndarray) or not np.issubdtype(rotation.dtype, np.number):
+        raise ValueError('Rotation must be specified as numeric numpy array')
+
+    if len(rotation.shape) != 2 or rotation.shape[0] != 3 or rotation.shape[1] != 3:
+        raise ValueError('Rotation must be specified as a 3x3 ndarray')
+
+    if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
+        raise ValueError('Illegal rotation. Must have determinant == 1.0')
+    return rotation
+
+
 def sr_inverse(J, k=1.0, weight_vector=None):
     """returns sr-inverse of given mat"""
     r, _ = J.shape
