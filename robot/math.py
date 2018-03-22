@@ -310,6 +310,44 @@ def rotation_matrix_from_rpy(rpy):
     return quaternion2matrix(quat_from_rpy(rpy))
 
 
+def rodrigues(axis, theta):
+    """Rodrigues formula
+
+    Args:
+        axis (np.array or list): [x, y, z]
+        theta: radian
+
+    Returns:
+        3x3 rotation matrix
+    """
+    a = axis / np.linalg.norm(axis)
+    tensor_prod = np.array([[a[0] * a[0], a[0] * a[1], a[0] * a[2]],
+                            [a[1] * a[0], a[1] * a[1], a[1] * a[2]],
+                            [a[2] * a[0], a[2] * a[1], a[2] * a[2]]])
+
+    cross_prod = np.array([[   0,    a[2],  - a[1]],
+                           [- a[2],    0,     a[0]],
+                           [  a[1], - a[0],    0]])
+    mat = np.eye(3) * np.cos(theta) + \
+          cross_prod * np.sin(theta) + \
+          tensor_prod * (1 - np.cos(theta))
+    return mat
+
+
+def rotation_angle(mat):
+    """Inverse Rodrigues formula
+    Convert Rotation-Matirx to Axis-Angle
+    """
+    mat = _check_valid_rotation(mat)
+    if np.array_equal(mat, np.eye(3)):
+        return None
+    theta = np.arccos((np.trace(mat) - 1) / 2)
+    axis = 1.0 / (2 * np.sin(theta)) * \
+           np.array([mat[2, 1] - mat[1, 2], mat[0, 2] - mat[2, 0], mat[1, 0] - mat[0, 1]])
+    return theta, axis
+
+
+inverse_rodrigues = rotation_angle
 quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion
 rotation_matrix_from_quat = quaternion2matrix
