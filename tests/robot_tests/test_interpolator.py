@@ -28,7 +28,7 @@ class TestInterpolator(unittest.TestCase):
             i += 0.02
 
         i = t0
-        while t1 > i:
+        while t1 >= i:
             ip.pass_time(0.02)
             testing.assert_almost_equal(
                 ip.position,
