@@ -7,6 +7,7 @@ from numpy import testing
 from robot.math import matrix2quaternion
 from robot.math import matrix_exponent
 from robot.math import matrix_log
+from robot.math import midrot
 from robot.math import normalize_vector
 from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
@@ -16,6 +17,15 @@ from robot.math import rpy_matrix
 
 
 class TestMath(unittest.TestCase):
+
+    def test_midrot(self):
+        m1 = rotate_matrix(rotate_matrix(rotate_matrix(np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
+        testing.assert_almost_equal(
+            midrot(0.5, m1, np.eye(3)),
+            np.array([[0.937735, -0.294516, 0.184158],
+                      [0.319745, 0.939037, -0.126384],
+                      [-0.135709, 0.177398, 0.974737]]),
+            decimal=5)
 
     def test_outer_product_matrix(self):
         testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
