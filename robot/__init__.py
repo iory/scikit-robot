@@ -2,6 +2,7 @@ from robot import coordinates
 
 worldcoords = coordinates.CascadedCoords()
 
+from robot import geo
 from robot import interpolator
 from robot import math
 from robot import optimizer
