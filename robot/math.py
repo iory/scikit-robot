@@ -247,6 +247,27 @@ def matrix_log(m):
     return th * normalize_vector(q)
 
 
+def matrix_exponent(omega, p=1.0):
+    """Returns exponent of given omega"""
+    w = np.linalg.norm(omega)
+    amat = outer_product_matrix(normalize_vector(omega))
+    return np.eye(3) + np.sin(w * p) * amat + (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
+
+
+def outer_product_matrix(v):
+    """Returns outer product matrix of given v
+
+    returns outer product matrix of given v
+    matrix(a) v = a * v
+    0 -w2 w1
+    w2 0 -w0
+    -w1 w0 0
+    """
+    return np.array([[  0,   -v[2],  v[1]],
+                     [v[2],    0,   -v[0]],
+                     [-v[1], v[0],     0]])
+
+
 def quaternion2rpy(q):
     """
     Roll-pitch-yaw angles of a quaternion.
