@@ -103,6 +103,16 @@ def midpoint(p, a, b):
     return a + (b - a) * p
 
 
+def midrot(p, r1, r2):
+    """Returns mid (or p) rotation matrix of given two matrix r1 and r2"""
+    r1 = _check_valid_rotation(r1)
+    r2 = _check_valid_rotation(r2)
+    r = np.matmul(r1.T, r2)
+    omega = matrix_log(r)
+    r = matrix_exponent(omega, p)
+    return np.matmul(r1, r)
+
+
 def transform(m, v):
     """
     Args:
