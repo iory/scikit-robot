@@ -5,7 +5,10 @@ from numpy import pi
 from numpy import testing
 
 from robot.math import matrix2quaternion
+from robot.math import matrix_exponent
+from robot.math import matrix_log
 from robot.math import normalize_vector
+from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
 from robot.math import rotate_matrix
 from robot.math import rotation_matrix_from_rpy
@@ -13,6 +16,18 @@ from robot.math import rpy_matrix
 
 
 class TestMath(unittest.TestCase):
+
+    def test_outer_product_matrix(self):
+        testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
+                                   np.array([[0.0, -3.0, 2.0],
+                                             [3.0, 0.0, -1.0],
+                                             [-2.0, 1.0, 0.0]]))
+
+    def test_matrix_exponent(self):
+        m1 = rotate_matrix(rotate_matrix(rotate_matrix(np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
+        testing.assert_almost_equal(
+            matrix_exponent(matrix_log(m1)), m1,
+            decimal=5)
 
     def test_quaternion2matrix(self):
         testing.assert_array_equal(
