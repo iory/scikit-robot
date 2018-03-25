@@ -62,6 +62,17 @@ def _check_valid_rotation(rotation):
     return rotation
 
 
+def _check_valid_translation(translation):
+    """Checks that the translation vector is valid.
+    """
+    if not isinstance(translation, np.ndarray) or not np.issubdtype(translation.dtype, np.number):
+        raise ValueError('Translation must be specified as numeric numpy array')
+
+    t = translation.squeeze()
+    if len(t.shape) != 1 or t.shape[0] != 3:
+        raise ValueError('Translation must be specified as a 3-vector, 3x1 ndarray, or 1x3 ndarray')
+
+
 def sr_inverse(J, k=1.0, weight_vector=None):
     """returns sr-inverse of given mat"""
     r, _ = J.shape
