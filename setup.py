@@ -13,6 +13,7 @@ install_requires = [
     'numpy>=1.9.0',
     'ordered_set',
     'pybullet',
+    'pyyaml',
     'quadprog',
 ]
 
