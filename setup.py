@@ -4,6 +4,7 @@ import os
 import pkg_resources
 import sys
 
+from setuptools import find_packages
 from setuptools import setup
 
 
@@ -24,11 +25,7 @@ setup(
     author_email='ab.ioryz@gmail.com',
     url='https://github.com/iory/robot',
     license='MIT License',
-    packages=['robot',
-              'robot.misc',
-              'robot.optimizers',
-              'robot.utils',
-              ],
+    packages=find_packages(),
     zip_safe=False,
     setup_requires=setup_requires,
     install_requires=install_requires,

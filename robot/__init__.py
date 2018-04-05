@@ -2,13 +2,13 @@ from robot import coordinates
 
 worldcoords = coordinates.CascadedCoords()
 
-from robot import geo
-from robot import interpolator
-from robot import math
-from robot import optimizer
-from robot import optimizers
-from robot import robot_model
-from robot import utils
+from robot import geo  # NOQA
+from robot import interpolator  # NOQA
+from robot import math  # NOQA
+from robot import optimizer  # NOQA
+from robot import optimizers  # NOQA
+from robot import robot_model  # NOQA
+from robot import utils  # NOQA
 from robot.misc import listify  # NOQA
-from robot.pybullet_robot_interface import PybulletRobotInterface
-from robot.utils.urdf import URDF
+from robot.pybullet_robot_interface import PybulletRobotInterface  # NOQA
+from robot.utils.urdf import URDF  # NOQA
