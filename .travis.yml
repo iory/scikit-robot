@@ -9,6 +9,9 @@ install:
   - pip install --upgrade pip setuptools wheel
   - pip install hacking
   - pip install coveralls
+  - pip install Cython
+  - pip install pyyaml
+  - pip install lxml
   - python setup.py develop
 
 script:

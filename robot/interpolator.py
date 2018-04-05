@@ -10,8 +10,7 @@ class Interpolator(object):
         self.segment_num = 0
         self.is_interpolating = False
 
-    def reset(self, *args,
-              position_list=None,
+    def reset(self, position_list=None,
               time_list=None):
         """"Initialize interpolator
 
@@ -93,7 +92,7 @@ class MinjerkInterpolator(Interpolator):
     def __init__(self):
         Interpolator.__init__(self)
 
-    def reset(self, *args,
+    def reset(self,
               velocity_list=None,
               acceleration_list=None,
               **kwargs):
@@ -108,7 +107,7 @@ class MinjerkInterpolator(Interpolator):
                 list of acceleration in each control point
 
         """
-        Interpolator.reset(self, *args, **kwargs)
+        Interpolator.reset(self, **kwargs)
         if velocity_list is None:
             self.velocity_list = [np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
         else:
