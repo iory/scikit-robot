@@ -13,6 +13,7 @@ from robot.math import rotation_angle
 from robot.math import rotation_matrix
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
+from robot.math import quaternion2matrix
 
 
 def transform_coords(c1, c2):
