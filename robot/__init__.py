@@ -8,6 +8,7 @@ from robot import math  # NOQA
 from robot import optimizer  # NOQA
 from robot import optimizers  # NOQA
 from robot import robot_model  # NOQA
+from robot import robots  # NOQA
 from robot import utils  # NOQA
 from robot.misc import listify  # NOQA
 from robot.pybullet_robot_interface import PybulletRobotInterface  # NOQA
