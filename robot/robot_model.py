@@ -1213,8 +1213,8 @@ class RobotModel(CascadedLink):
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child],
-                    min_angle=np.rad2deg(j.limit.lower),
-                    max_angle=np.rad2deg(j.limit.upper),
+                    min_angle=j.limit.lower * 1000.0,
+                    max_angle=j.limit.upper * 1000.0,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
@@ -1228,9 +1228,14 @@ class RobotModel(CascadedLink):
         for j in self.robot_urdf.joints:
             if j.type in ['fixed']:
                 continue
-            rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
+            elif j.type in ['prismatic']:
+                rpy = np.zeros(3, dtype=np.float32)
+                xyz = np.zeros(3, dtype=np.float32)
+            else:
+                rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
+                xyz = np.array(j.origin.xyz, dtype=np.float32)
             link_maps[j.child].newcoords(rpy,
-                                         np.array(j.origin.xyz, dtype=np.float32))
+                                         xyz)
             # TODO fix automatically update default_coords
             link_maps[j.child].joint.default_coords = Coordinates(pos=link_maps[j.child].pos,
                                                                   rot=link_maps[j.child].rot)
