@@ -1,11 +1,17 @@
 from __future__ import absolute_import
 
+from math import acos
 from math import asin
 from math import atan2
 from math import cos
+from math import pi
 from math import sin
 
 import numpy as np
+
+
+# epsilon for testing whether a number is close to zero
+_EPS = np.finfo(float).eps * 4.0
 
 
 def _wrap_axis(axis):
@@ -465,6 +471,65 @@ def quaternion_inverse(quaternion):
     """
     q = np.array(quaternion, dtype=np.float64)
     return quaternion_conjugate(q) / np.dot(q, q)
+
+
+def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
+    """
+    Return spherical linear interpolation between two quaternions.
+
+    Parameters
+    ----------
+    q0 : list or np.ndarray
+        start quaternion
+    q1 : list or np.ndarray
+        end quaternion
+    fraction : float
+        ratio
+    spin : int
+        TODO
+    shortestpath : bool
+        TODO
+
+    Returns
+    -------
+    quaternion : np.ndarray
+        spherical linear interpolated quaternion
+
+    >>> q0 = random_quaternion()
+    >>> q1 = random_quaternion()
+    >>> q = quaternion_slerp(q0, q1, 0.0)
+    >>> numpy.allclose(q, q0)
+    True
+    >>> q = quaternion_slerp(q0, q1, 1.0, 1)
+    >>> numpy.allclose(q, q1)
+    True
+    >>> q = quaternion_slerp(q0, q1, 0.5)
+    >>> angle = math.acos(numpy.dot(q0, q))
+    >>> numpy.allclose(2.0, math.acos(numpy.dot(q0, q1)) / angle) or \
+        numpy.allclose(2.0, math.acos(-numpy.dot(q0, q1)) / angle)
+    True
+    """
+    q0 = normalize_vector(q0)
+    q1 = normalize_vector(q1)
+    if fraction == 0.0:
+        return q0
+    elif fraction == 1.0:
+        return q1
+    d = np.dot(q0, q1)
+    if abs(abs(d) - 1.0) < 0.0:
+        return q0
+    if shortestpath and d < 0.0:
+        # invert rotation
+        d = -d
+        q1 *= -1.0
+    theta = acos(d)
+    angle = theta + spin * pi
+    if abs(angle) < _EPS:
+        return q0
+    isin = 1.0 / sin(angle)
+    q = (sin((1.0 - fraction) * angle) * q0 +
+         sin(fraction * angle) * q1) * isin
+    return q
 
 
 def random_rotation():
