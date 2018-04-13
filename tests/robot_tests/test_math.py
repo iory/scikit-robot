@@ -11,6 +11,9 @@ from robot.math import midrot
 from robot.math import normalize_vector
 from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
+from robot.math import quaternion_conjugate
+from robot.math import quaternion_inverse
+from robot.math import quaternion_multiply
 from robot.math import rotate_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_matrix
@@ -123,3 +126,34 @@ class TestMath(unittest.TestCase):
             y = np.random.random()
             testing.assert_almost_equal(rpy_matrix(y, p, r),
                                         rotation_matrix_from_rpy([y, p, r]))
+
+    def test_quaternion_multiply(self):
+        q0 = [1, 0, 0, 0]
+        q = quaternion_multiply(q0, q0)
+        testing.assert_array_equal(
+            q, [1, 0, 0, 0])
+
+        q = quaternion_multiply([4, 1, -2, 3],
+                                [8, -5, 6, 7])
+        testing.assert_array_equal(
+            q, [28, -44, -14, 48])
+
+    def test_quaternion_conjugate(self):
+        q0 = [1, 0, 0, 0]
+        q1 = quaternion_conjugate(q0)
+        q = quaternion_multiply(q0, q1)
+        testing.assert_array_equal(
+            q, [1, 0, 0, 0])
+
+    def test_quaternion_inverse(self):
+        q0 = [1, 0, 0, 0]
+        q1 = quaternion_inverse(q0)
+        q = quaternion_multiply(q0, q1)
+        testing.assert_array_equal(
+            q, [1, 0, 0, 0])
+
+        q0 = [1, 2, 3, 4]
+        q1 = quaternion_inverse(q0)
+        q = quaternion_multiply(q0, q1)
+        testing.assert_almost_equal(
+            q, [1, 0, 0, 0])
