@@ -1,3 +1,4 @@
+import math
 import unittest
 
 import numpy as np
@@ -14,6 +15,7 @@ from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
+from robot.math import quaternion_slerp
 from robot.math import rotate_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_matrix
@@ -157,3 +159,17 @@ class TestMath(unittest.TestCase):
         q = quaternion_multiply(q0, q1)
         testing.assert_almost_equal(
             q, [1, 0, 0, 0])
+
+    def test_quaternion_slerp(self):
+        q0 = [-0.84289035, -0.14618244, -0.12038416,  0.50366081]
+        q1 = [ 0.28648105, -0.61500146,  0.73395791,  0.03174259]
+        q = quaternion_slerp(q0, q1, 0.0)
+        testing.assert_almost_equal(q, q0)
+
+        q = quaternion_slerp(q0, q1, 1.0)
+        testing.assert_almost_equal(q, q1)
+
+        q = quaternion_slerp(q0, q1, 0.5)
+        angle = math.acos(np.dot(q0, q))
+        testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
+                                    2.0)
