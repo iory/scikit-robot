@@ -17,6 +17,7 @@ from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_slerp
 from robot.math import rotate_matrix
+from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_matrix
 
@@ -30,6 +31,38 @@ class TestMath(unittest.TestCase):
             np.array([[0.937735, -0.294516, 0.184158],
                       [0.319745, 0.939037, -0.126384],
                       [-0.135709, 0.177398, 0.974737]]),
+            decimal=5)
+
+    def test_rotation_matrix(self):
+        testing.assert_almost_equal(
+            rotation_matrix(pi, [1, 1, 1]),
+            np.array([[-0.33333333,  0.66666667,  0.66666667],
+                      [ 0.66666667, -0.33333333,  0.66666667],
+                      [ 0.66666667,  0.66666667, -0.33333333]]))
+
+        testing.assert_almost_equal(
+            rotation_matrix(2 * pi, [1, 1, 1]),
+            np.eye(3))
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [1, 0, 0]),
+            np.array([[1.0, 0.0, 0.0],
+                      [0.0, 0.5, -0.866025],
+                      [0.0, 0.866025, 0.5]]),
+            decimal=5)
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [0, 1, 0]),
+            np.array([[0.5, 0.0, 0.866025],
+                      [0.0, 1.0, 0.0],
+                      [-0.866025, 0.0, 0.5]]),
+            decimal=5)
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [0, 0, 1]),
+            np.array([[0.5, -0.866025, 0.0],
+                      [0.866025, 0.5, 0.0],
+                      [0.0, 0.0, 1.0]]),
             decimal=5)
 
     def test_outer_product_matrix(self):
