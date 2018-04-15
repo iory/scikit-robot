@@ -33,6 +33,17 @@ class TestMath(unittest.TestCase):
                       [-0.135709, 0.177398, 0.974737]]),
             decimal=5)
 
+    def test_rpy_matrix(self):
+        testing.assert_almost_equal(
+            rpy_matrix(0, 0, 0),
+            np.eye(3))
+
+        testing.assert_almost_equal(
+            rpy_matrix(pi / 6, pi / 5, pi / 3),
+            np.array([[0.700629, 0.190839, 0.687531],
+                      [0.404508, 0.687531, -0.603054],
+                      [-0.587785, 0.700629, 0.404508]]))
+
     def test_rotation_matrix(self):
         testing.assert_almost_equal(
             rotation_matrix(pi, [1, 1, 1]),
