@@ -18,6 +18,7 @@ from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_slerp
 from robot.math import rotate_matrix
+from robot.math import rotation_angle
 from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_matrix
@@ -76,6 +77,17 @@ class TestMath(unittest.TestCase):
                       [0.866025, 0.5, 0.0],
                       [0.0, 0.0, 1.0]]),
             decimal=5)
+
+    def test_rotation_angle(self):
+        rot = rpy_matrix(-1.220e-08, -5.195e-09, 1.333e-09)
+        with self.assertRaises(ValueError):
+            rotation_angle(rot)
+
+        rot = rpy_matrix(-1.220e-08, -5.195e-09, -1.333e-09)
+        with self.assertRaises(ValueError):
+            rotation_angle(rot)
+
+        self.assertEqual(rotation_angle(np.eye(3)), None)
 
     def test_outer_product_matrix(self):
         testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
