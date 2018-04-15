@@ -580,6 +580,31 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     return q
 
 
+def quaternion_from_axis_angle(theta, axis):
+    """
+    Return the quaternion associated with counterclockwise rotation
+    about the given axis by theta radians.
+
+    Parameters
+    ----------
+    theta : float
+        radian
+    axis : list or np.ndarray
+        length is 3. should be normalized.
+
+    Returns
+    -------
+    quaternion : np.ndarray
+        [w, x, y, z] order
+    """
+    s = sin(theta / 2)
+    x = axis[0] * s
+    y = axis[1] * s
+    z = axis[2] * s
+    w = cos(theta / 2)
+    return np.array([w, x, y, z], dtype=np.float64)
+
+
 def random_rotation():
     """Generates a random 3x3 rotation matrix with SVD.
 
