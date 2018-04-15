@@ -437,6 +437,9 @@ def rotation_angle(mat):
     if np.array_equal(mat, np.eye(3)):
         return None
     theta = np.arccos((np.trace(mat) - 1) / 2)
+    if abs(theta) < _EPS:
+        raise ValueError("Rotation Angle is too small. \nvalue : {}".
+                         format(theta))
     axis = 1.0 / (2 * np.sin(theta)) * \
            np.array([mat[2, 1] - mat[1, 2], mat[0, 2] - mat[2, 0], mat[1, 0] - mat[0, 1]])
     return theta, axis
