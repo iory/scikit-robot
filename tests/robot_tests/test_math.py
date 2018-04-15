@@ -13,6 +13,7 @@ from robot.math import normalize_vector
 from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
+from robot.math import quaternion_from_axis_angle
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_slerp
@@ -217,3 +218,9 @@ class TestMath(unittest.TestCase):
         angle = math.acos(np.dot(q0, q))
         testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
                                     2.0)
+
+    def test_quaternion_from_axis_angle(self):
+        q = quaternion_from_axis_angle(0.1, [1, 0, 0])
+        testing.assert_almost_equal(
+            q,
+            matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))
