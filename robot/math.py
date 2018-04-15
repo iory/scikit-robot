@@ -177,10 +177,26 @@ def rotate_matrix(matrix, theta, axis, world=None):
 
 
 def rpy_matrix(az, ay, ax):
-    """RPY-MATRIX (az ay ax) creates a new rotation matrix which has been
+    """
+    rpy_matrix (az ay ax) creates a new rotation matrix which has been
     rotated ax radian around x-axis in WORLD, ay radian around y-axis in
     WORLD, and az radian around z axis in WORLD, in this order.
-    These angles can be extracted by the RPY-ANGLE function."""
+    These angles can be extracted by the rpy function.
+
+    Parameters
+    ----------
+    ax : float
+        rotated around x-axis in radian
+    ay : float
+        rotated around y-axis in radian
+    az : float
+        rotated around z-axis in radian
+
+    Returns
+    -------
+    r : np.ndarray
+        rotation matrix
+    """
     r = rotation_matrix(ax, 'x')
     r = rotate_matrix(r, ay, 'y', world=True)
     r = rotate_matrix(r, az, 'z', world=True)
