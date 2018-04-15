@@ -417,8 +417,21 @@ def rodrigues(axis, theta):
 
 
 def rotation_angle(mat):
-    """Inverse Rodrigues formula
+    """
+    Inverse Rodrigues formula
     Convert Rotation-Matirx to Axis-Angle
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        rotation matrix, shape (3, 3)
+
+    Returns
+    -------
+    theta : float
+        rotation angle in radian
+    axis : np.ndarray
+        rotation axis
     """
     mat = _check_valid_rotation(mat)
     if np.array_equal(mat, np.eye(3)):
