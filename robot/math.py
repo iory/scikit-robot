@@ -148,12 +148,16 @@ def transform(m, v):
 
 def rotation_matrix(theta, axis):
     """
-    Args:
-        theta (scalar): radian vector
-        axis (str): rotation axis such that 'x', 'y', 'z'
+    Return the rotation matrix associated with counterclockwise rotation
+    about the given axis by theta radians.
 
-    Return the rotation matrix associated with counterclockwise rotation about
-    the given axis by theta radians.
+    Parameters
+    ----------
+    theta : float
+        radian
+    axis : string or list
+        rotation axis such that 'x', 'y', 'z'
+        [0, 0, 1], [0, 1, 0], [1, 0, 0]
     """
     axis = _wrap_axis(axis)
     axis = axis / np.sqrt(np.dot(axis, axis))
