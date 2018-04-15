@@ -204,7 +204,19 @@ def rpy_matrix(az, ay, ax):
 
 
 def rpy_angle(matrix):
-    """Decomposing a rotation matrix"""
+    """
+    Decomposing a rotation matrix
+
+    Parameters
+    ----------
+    matrix : list or np.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    rpy : np.ndarray
+        pair of rpy in yaw-pitch-roll order.
+    """
     r = np.arctan2(matrix[2, 1], matrix[2, 2])
     p = np.arctan2(- matrix[2, 0],
                    np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
