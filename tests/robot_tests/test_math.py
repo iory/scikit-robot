@@ -13,10 +13,13 @@ from robot.math import normalize_vector
 from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
+from robot.math import quaternion_from_axis_angle
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_slerp
 from robot.math import rotate_matrix
+from robot.math import rotation_angle
+from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_matrix
 
@@ -31,6 +34,60 @@ class TestMath(unittest.TestCase):
                       [0.319745, 0.939037, -0.126384],
                       [-0.135709, 0.177398, 0.974737]]),
             decimal=5)
+
+    def test_rpy_matrix(self):
+        testing.assert_almost_equal(
+            rpy_matrix(0, 0, 0),
+            np.eye(3))
+
+        testing.assert_almost_equal(
+            rpy_matrix(pi / 6, pi / 5, pi / 3),
+            np.array([[0.700629, 0.190839, 0.687531],
+                      [0.404508, 0.687531, -0.603054],
+                      [-0.587785, 0.700629, 0.404508]]))
+
+    def test_rotation_matrix(self):
+        testing.assert_almost_equal(
+            rotation_matrix(pi, [1, 1, 1]),
+            np.array([[-0.33333333,  0.66666667,  0.66666667],
+                      [ 0.66666667, -0.33333333,  0.66666667],
+                      [ 0.66666667,  0.66666667, -0.33333333]]))
+
+        testing.assert_almost_equal(
+            rotation_matrix(2 * pi, [1, 1, 1]),
+            np.eye(3))
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [1, 0, 0]),
+            np.array([[1.0, 0.0, 0.0],
+                      [0.0, 0.5, -0.866025],
+                      [0.0, 0.866025, 0.5]]),
+            decimal=5)
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [0, 1, 0]),
+            np.array([[0.5, 0.0, 0.866025],
+                      [0.0, 1.0, 0.0],
+                      [-0.866025, 0.0, 0.5]]),
+            decimal=5)
+
+        testing.assert_almost_equal(
+            rotation_matrix(pi / 3, [0, 0, 1]),
+            np.array([[0.5, -0.866025, 0.0],
+                      [0.866025, 0.5, 0.0],
+                      [0.0, 0.0, 1.0]]),
+            decimal=5)
+
+    def test_rotation_angle(self):
+        rot = rpy_matrix(-1.220e-08, -5.195e-09, 1.333e-09)
+        with self.assertRaises(ValueError):
+            rotation_angle(rot)
+
+        rot = rpy_matrix(-1.220e-08, -5.195e-09, -1.333e-09)
+        with self.assertRaises(ValueError):
+            rotation_angle(rot)
+
+        self.assertEqual(rotation_angle(np.eye(3)), None)
 
     def test_outer_product_matrix(self):
         testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
@@ -173,3 +230,9 @@ class TestMath(unittest.TestCase):
         angle = math.acos(np.dot(q0, q))
         testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
                                     2.0)
+
+    def test_quaternion_from_axis_angle(self):
+        q = quaternion_from_axis_angle(0.1, [1, 0, 0])
+        testing.assert_almost_equal(
+            q,
+            matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))

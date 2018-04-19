@@ -148,12 +148,16 @@ def transform(m, v):
 
 def rotation_matrix(theta, axis):
     """
-    Args:
-        theta (scalar): radian vector
-        axis (str): rotation axis such that 'x', 'y', 'z'
+    Return the rotation matrix associated with counterclockwise rotation
+    about the given axis by theta radians.
 
-    Return the rotation matrix associated with counterclockwise rotation about
-    the given axis by theta radians.
+    Parameters
+    ----------
+    theta : float
+        radian
+    axis : string or list
+        rotation axis such that 'x', 'y', 'z'
+        [0, 0, 1], [0, 1, 0], [1, 0, 0]
     """
     axis = _wrap_axis(axis)
     axis = axis / np.sqrt(np.dot(axis, axis))
@@ -173,10 +177,26 @@ def rotate_matrix(matrix, theta, axis, world=None):
 
 
 def rpy_matrix(az, ay, ax):
-    """RPY-MATRIX (az ay ax) creates a new rotation matrix which has been
+    """
+    rpy_matrix (az ay ax) creates a new rotation matrix which has been
     rotated ax radian around x-axis in WORLD, ay radian around y-axis in
     WORLD, and az radian around z axis in WORLD, in this order.
-    These angles can be extracted by the RPY-ANGLE function."""
+    These angles can be extracted by the rpy function.
+
+    Parameters
+    ----------
+    ax : float
+        rotated around x-axis in radian
+    ay : float
+        rotated around y-axis in radian
+    az : float
+        rotated around z-axis in radian
+
+    Returns
+    -------
+    r : np.ndarray
+        rotation matrix
+    """
     r = rotation_matrix(ax, 'x')
     r = rotate_matrix(r, ay, 'y', world=True)
     r = rotate_matrix(r, az, 'z', world=True)
@@ -184,7 +204,19 @@ def rpy_matrix(az, ay, ax):
 
 
 def rpy_angle(matrix):
-    """Decomposing a rotation matrix"""
+    """
+    Decomposing a rotation matrix
+
+    Parameters
+    ----------
+    matrix : list or np.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    rpy : np.ndarray
+        pair of rpy in yaw-pitch-roll order.
+    """
     r = np.arctan2(matrix[2, 1], matrix[2, 2])
     p = np.arctan2(- matrix[2, 0],
                    np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
@@ -385,13 +417,29 @@ def rodrigues(axis, theta):
 
 
 def rotation_angle(mat):
-    """Inverse Rodrigues formula
+    """
+    Inverse Rodrigues formula
     Convert Rotation-Matirx to Axis-Angle
+
+    Parameters
+    ----------
+    mat : np.ndarray
+        rotation matrix, shape (3, 3)
+
+    Returns
+    -------
+    theta : float
+        rotation angle in radian
+    axis : np.ndarray
+        rotation axis
     """
     mat = _check_valid_rotation(mat)
     if np.array_equal(mat, np.eye(3)):
         return None
     theta = np.arccos((np.trace(mat) - 1) / 2)
+    if abs(theta) < _EPS:
+        raise ValueError("Rotation Angle is too small. \nvalue : {}".
+                         format(theta))
     axis = 1.0 / (2 * np.sin(theta)) * \
            np.array([mat[2, 1] - mat[1, 2], mat[0, 2] - mat[2, 0], mat[1, 0] - mat[0, 1]])
     return theta, axis
@@ -530,6 +578,31 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     q = (sin((1.0 - fraction) * angle) * q0 +
          sin(fraction * angle) * q1) * isin
     return q
+
+
+def quaternion_from_axis_angle(theta, axis):
+    """
+    Return the quaternion associated with counterclockwise rotation
+    about the given axis by theta radians.
+
+    Parameters
+    ----------
+    theta : float
+        radian
+    axis : list or np.ndarray
+        length is 3. should be normalized.
+
+    Returns
+    -------
+    quaternion : np.ndarray
+        [w, x, y, z] order
+    """
+    s = sin(theta / 2)
+    x = axis[0] * s
+    y = axis[1] * s
+    z = axis[2] * s
+    w = cos(theta / 2)
+    return np.array([w, x, y, z], dtype=np.float64)
 
 
 def random_rotation():
