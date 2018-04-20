@@ -6,14 +6,15 @@ from robot.math import _wrap_axis
 from robot.math import matrix2quaternion
 from robot.math import matrix_log
 from robot.math import normalize_vector
+from robot.math import quaternion2matrix
 from robot.math import random_rotation
 from robot.math import random_translation
 from robot.math import rotate_matrix
 from robot.math import rotation_angle
 from robot.math import rotation_matrix
+from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
-from robot.math import quaternion2matrix
 
 
 def transform_coords(c1, c2):
@@ -54,12 +55,18 @@ class Coordinates(object):
 
     @rotation.setter
     def rotation(self, rotation):
+        rotation = np.array(rotation)
         # Convert quaternions
-        if len(rotation) == 4:
+        if rotation.shape == (4,):
             q = np.array([q for q in rotation])
             if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
-                raise ValueError('Invalid quaternion. Must be norm 1.0')
+                raise ValueError('Invalid quaternion. Must be '
+                                 'norm 1.0, get {}'.
+                                 format(np.linalg.norm(q)))
             rotation = quaternion2matrix(q)
+        elif rotation.shape == (3,):
+            # Convert [yaw-pitch-roll] to rotation matrix
+            rotation = rotation_matrix_from_rpy(rotation)
 
         # Convert lists and tuples
         if type(rotation) in (list, tuple):
@@ -95,7 +102,9 @@ class Coordinates(object):
             raise ValueError('Rotation must be specified as a 3x3 ndarray')
 
         if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
-            raise ValueError('Illegal rotation. Must have determinant == 1.0')
+            raise ValueError('Illegal rotation. Must have '
+                             'determinant == 1.0, get {}'.
+                             format(np.linalg.det(rotation)))
 
     def _check_valid_translation(self, translation):
         """Checks that the translation vector is valid.
@@ -168,6 +177,7 @@ class Coordinates(object):
         matrix[:3, 3] = self.pos
         return matrix
 
+    @property
     def quaternion(self):
         return matrix2quaternion(self.rot)
 
@@ -185,14 +195,20 @@ class Coordinates(object):
 
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
-            self = transform_coords(self, c)
+            tmp_coords = transform_coords(self, c)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         elif wrt == 'parent' or wrt == self.parent_link \
              or wrt == 'world':
-            self = transform_coords(c, self)
+            tmp_coords = transform_coords(c, self)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         elif isinstance(wrt, Coordinates):
-            self = transform_coords(wrt.inverse_transformation, self)
-            self = transform_coords(c, self)
-            self = transform_coords(wrt.worldcoords(), self)
+            tmp_coords = transform_coords(wrt.inverse_transformation, self)
+            tmp_coords = transform_coords(c, tmp_coords)
+            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         else:
             raise ValueError("transform wrt {} is not supported".format(wrt))
         return self.newcoords(self.rot, self.pos)
@@ -304,6 +320,9 @@ class Coordinates(object):
     def copy_worldcoords(self):
         return self.coords()
 
+    def update(self):
+        pass
+
     def worldrot(self):
         return self.rot
 
@@ -311,17 +330,15 @@ class Coordinates(object):
         return self.pos
 
     def newcoords(self, c, pos=None):
-        if isinstance(c, Coordinates):
-            self.rot = copy.deepcopy(c.rot)
-            self.pos = copy.deepcopy(c.pos)
-        elif pos is not None:
-            c = np.array(c)
-            if not c.shape == (3, 3):
-                c = rpy_matrix(c[0], c[1], c[2])
-            self.rot = copy.deepcopy(c)
-            self.pos = copy.deepcopy(pos)
+        """
+        Update of coords is always done through newcoords
+        """
+        if pos is not None:
+            self.rotation = copy.deepcopy(c)
+            self.translation = copy.deepcopy(pos)
         else:
-            raise NotImplementedError
+            self.rotation = copy.deepcopy(c.rotation)
+            self.translation = copy.deepcopy(c.translation)
         return self
 
     def __repr__(self):
@@ -372,8 +389,8 @@ class CascadedCoords(Coordinates):
     def changed(self):
         if self._changed is False:
             self._changed = True
-            for child_link in self.child_links:
-                child_link.changed()
+            return [c.changed() for c in self.child_links]
+        return [False]
 
     def parentcoords(self):
         if self.parent_link:
@@ -425,7 +442,9 @@ class CascadedCoords(Coordinates):
         if isinstance(wrt, Coordinates):
             raise NotImplementedError
         elif wrt == 'local' or wrt == self:  # multiply c from the left
-            self = transform_coords(self, c)
+            tmp_coords = transform_coords(self, c)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         else:
             raise NotImplementedError
         return self.newcoords(self.rot, self.pos)
@@ -440,6 +459,7 @@ class CascadedCoords(Coordinates):
             else:
                 self._worldcoords.rot = self.rot
                 self._worldcoords.pos = self.pos
+            self.update()
             self._changed = False
         return self._worldcoords
 
@@ -455,6 +475,9 @@ class CascadedCoords(Coordinates):
     @property
     def parent(self):
         return self.parent_link
+
+    def update(self):
+        pass
 
 
 def make_coords(*args, **kwargs):
