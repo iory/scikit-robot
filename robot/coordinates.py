@@ -385,8 +385,8 @@ class CascadedCoords(Coordinates):
     def changed(self):
         if self._changed is False:
             self._changed = True
-            for child_link in self.child_links:
-                child_link.changed()
+            return [c.changed() for c in self.child_links]
+        return [False]
 
     def parentcoords(self):
         if self.parent_link:
