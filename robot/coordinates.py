@@ -326,17 +326,15 @@ class Coordinates(object):
         return self.pos
 
     def newcoords(self, c, pos=None):
-        if isinstance(c, Coordinates):
-            self.rot = copy.deepcopy(c.rot)
-            self.pos = copy.deepcopy(c.pos)
-        elif pos is not None:
-            c = np.array(c)
-            if not c.shape == (3, 3):
-                c = rpy_matrix(c[0], c[1], c[2])
-            self.rot = copy.deepcopy(c)
-            self.pos = copy.deepcopy(pos)
+        """
+        Update of coords is always done through newcoords
+        """
+        if pos is not None:
+            self.rotation = copy.deepcopy(c)
+            self.translation = copy.deepcopy(pos)
         else:
-            raise NotImplementedError
+            self.rotation = copy.deepcopy(c.rotation)
+            self.translation = copy.deepcopy(c.translation)
         return self
 
     def __repr__(self):
