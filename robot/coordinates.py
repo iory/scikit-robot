@@ -168,6 +168,7 @@ class Coordinates(object):
         matrix[:3, 3] = self.pos
         return matrix
 
+    @property
     def quaternion(self):
         return matrix2quaternion(self.rot)
 
