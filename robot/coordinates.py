@@ -191,14 +191,20 @@ class Coordinates(object):
 
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
-            self = transform_coords(self, c)
+            tmp_coords = transform_coords(self, c)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         elif wrt == 'parent' or wrt == self.parent_link \
              or wrt == 'world':
-            self = transform_coords(c, self)
+            tmp_coords = transform_coords(c, self)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         elif isinstance(wrt, Coordinates):
-            self = transform_coords(wrt.inverse_transformation, self)
-            self = transform_coords(c, self)
-            self = transform_coords(wrt.worldcoords(), self)
+            tmp_coords = transform_coords(wrt.inverse_transformation, self)
+            tmp_coords = transform_coords(c, tmp_coords)
+            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         else:
             raise ValueError("transform wrt {} is not supported".format(wrt))
         return self.newcoords(self.rot, self.pos)
@@ -434,7 +440,9 @@ class CascadedCoords(Coordinates):
         if isinstance(wrt, Coordinates):
             raise NotImplementedError
         elif wrt == 'local' or wrt == self:  # multiply c from the left
-            self = transform_coords(self, c)
+            tmp_coords = transform_coords(self, c)
+            self.rotation = tmp_coords.rotation
+            self.translation = tmp_coords.translation
         else:
             raise NotImplementedError
         return self.newcoords(self.rot, self.pos)
