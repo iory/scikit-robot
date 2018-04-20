@@ -60,7 +60,9 @@ class Coordinates(object):
         if rotation.shape == (4,):
             q = np.array([q for q in rotation])
             if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
-                raise ValueError('Invalid quaternion. Must be norm 1.0')
+                raise ValueError('Invalid quaternion. Must be '
+                                 'norm 1.0, get {}'.
+                                 format(np.linalg.norm(q)))
             rotation = quaternion2matrix(q)
         elif rotation.shape == (3,):
             # Convert [yaw-pitch-roll] to rotation matrix
@@ -100,7 +102,9 @@ class Coordinates(object):
             raise ValueError('Rotation must be specified as a 3x3 ndarray')
 
         if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
-            raise ValueError('Illegal rotation. Must have determinant == 1.0')
+            raise ValueError('Illegal rotation. Must have '
+                             'determinant == 1.0, get {}'.
+                             format(np.linalg.det(rotation)))
 
     def _check_valid_translation(self, translation):
         """Checks that the translation vector is valid.
