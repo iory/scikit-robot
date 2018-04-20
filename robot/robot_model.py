@@ -15,6 +15,7 @@ from robot.math import sr_inverse
 from robot.optimizer import solve_qp
 from robot.utils.urdf import URDF
 from robot import worldcoords
+from robot.geo import midcoords
 
 
 logger = getLogger(__name__)
@@ -1258,6 +1259,38 @@ class RobotModel(CascadedLink):
 
         if len(links) > 0:
             worldcoords.add_child(self.link_list[0])
+
+    def fix_leg_to_coords(self, fix_coords, leg='both', mid=0.5):
+        """
+        Fix robot's legs to a coords
+        In the Following codes, leged robot is assumed.
+
+        Parameters
+        ----------
+        fix_coords : Coordinates
+            target coordinate
+        leg : string
+            ['both', 'rleg', 'rleg', 'left', 'right']
+        mid : float
+            ratio of legs coord.
+        """
+        if not any(self.legs):
+            return None
+        if leg == 'left' or leg == 'lleg':
+            support_coords = self.lleg.end_coords.copy_worldcoords()
+        elif leg == 'right' or leg == 'rleg':
+            support_coords = self.rleg.end_coords.copy_worldcoords()
+        else:
+            support_coords = midcoords(
+                mid,
+                self.lleg.end_coords.copy_worldcoords(),
+                self.rleg.end_coords.copy_worldcoords())
+        tmp_coords = fix_coords.copy_worldcoords()
+        move_coords = support_coords.transformation(self)
+        tmp_coords.transform(move_coords, 'local')
+        self.newcoords(tmp_coords)
+        self.worldcoords()
+        return tmp_coords
 
     @property
     def rarm(self):
