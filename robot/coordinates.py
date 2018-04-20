@@ -11,6 +11,7 @@ from robot.math import random_translation
 from robot.math import rotate_matrix
 from robot.math import rotation_angle
 from robot.math import rotation_matrix
+from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
 from robot.math import quaternion2matrix
@@ -54,12 +55,16 @@ class Coordinates(object):
 
     @rotation.setter
     def rotation(self, rotation):
+        rotation = np.array(rotation)
         # Convert quaternions
-        if len(rotation) == 4:
+        if rotation.shape == (4,):
             q = np.array([q for q in rotation])
             if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
                 raise ValueError('Invalid quaternion. Must be norm 1.0')
             rotation = quaternion2matrix(q)
+        elif rotation.shape == (3,):
+            # Convert [yaw-pitch-roll] to rotation matrix
+            rotation = rotation_matrix_from_rpy(rotation)
 
         # Convert lists and tuples
         if type(rotation) in (list, tuple):
