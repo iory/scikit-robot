@@ -305,6 +305,9 @@ class Coordinates(object):
     def copy_worldcoords(self):
         return self.coords()
 
+    def update(self):
+        pass
+
     def worldrot(self):
         return self.rot
 
@@ -441,6 +444,7 @@ class CascadedCoords(Coordinates):
             else:
                 self._worldcoords.rot = self.rot
                 self._worldcoords.pos = self.pos
+            self.update()
             self._changed = False
         return self._worldcoords
 
@@ -456,6 +460,9 @@ class CascadedCoords(Coordinates):
     @property
     def parent(self):
         return self.parent_link
+
+    def update(self):
+        pass
 
 
 def make_coords(*args, **kwargs):
