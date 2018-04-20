@@ -6,6 +6,7 @@ from robot.math import _wrap_axis
 from robot.math import matrix2quaternion
 from robot.math import matrix_log
 from robot.math import normalize_vector
+from robot.math import quaternion2matrix
 from robot.math import random_rotation
 from robot.math import random_translation
 from robot.math import rotate_matrix
@@ -14,7 +15,6 @@ from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
-from robot.math import quaternion2matrix
 
 
 def transform_coords(c1, c2):
