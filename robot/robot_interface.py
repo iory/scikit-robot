@@ -59,11 +59,13 @@ class RobotInterface(object):
         if rospy.get_param('use_sim_time', False) and \
            ros_current_time.to_sec() == 0 and \
            ros_current_time.to_nsec() == 0:
-            rospy.logdebug('[{}] /use_sim_time is TRUE, check if /clock is published'.format(rospy.get_name()))
+            rospy.logdebug(
+                '[{}] /use_sim_time is TRUE, check if /clock is published'.format(rospy.get_name()))
             while ros_current_time.to_sec() == 0 and ros_current_time.to_nsec():
                 diff_time = datetime.datetime.now() - start_time
                 if diff_time.seconds > wait_seconds:
-                    rospy.logfatal("[{}] /use_sim_time is TRUE but /clock is NOT PUBLISHED".format(rospy.get_name()))
+                    rospy.logfatal(
+                        "[{}] /use_sim_time is TRUE but /clock is NOT PUBLISHED".format(rospy.get_name()))
                     rospy.logfatal("[{}] {} seconds elapsed. aborting...".
                                    format(rospy.get_name(), wait_seconds))
                     sys.exit(1)
@@ -80,7 +82,7 @@ class RobotInterface(object):
         if self.namespace:
             rospy.Subscriber("{}/{}".format(
                 self.namespace, joint_states_topic),
-                             JointState)
+                JointState)
         else:
             rospy.Subscriber(joint_states_topic, JointState,
                              self.joint_state_callback, queue_size=1)
@@ -214,7 +216,8 @@ class RobotInterface(object):
                 tmp_actions.append(action)
             for action in tmp_actions:
                 if self.controller_timeout is None:
-                    rospy.logwarn("Waiting for actionlib interface forever because controler-timeout is None")
+                    rospy.logwarn(
+                        "Waiting for actionlib interface forever because controler-timeout is None")
                 if not (self.joint_action_enable and
                         action.wait_for_server(rospy.Duration(self.controller_timeout))):
                     rospy.logwarn("{} is not respond, {}_interface is disable".
@@ -311,7 +314,8 @@ class RobotInterface(object):
         if controller_type is None:
             controller_type = self.controller_type
         if not (controller_type in self.controller_table):
-            rospy.logwarn('controller_type {} not found'.format(controller_type))
+            rospy.logwarn(
+                'controller_type {} not found'.format(controller_type))
             return False
 
         # check and decide time
@@ -333,7 +337,8 @@ class RobotInterface(object):
             # Safe Mode (Speed will be 5 * fastest_time)
             time = 5.0 * fastest_time
         else:
-            raise ValueError("angle_vector time is invalid args: {}".format(time))
+            raise ValueError(
+                "angle_vector time is invalid args: {}".format(time))
 
         # for simulation mode
         if self.is_simulation_mode():
@@ -530,16 +535,19 @@ class RobotInterface(object):
             """
             return reduce(lambda x, y: x + y, xlst)
 
-        unordered_joint_names = set(flatten([c['joint_names'] for c in self.default_controller()]))
+        unordered_joint_names = set(
+            flatten([c['joint_names'] for c in self.default_controller()]))
         joint_list = self.robot.joint_list
         diff_avs = end - start
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
                 if isinstance(joint, LinearJoint):
-                    time = scale * (0.001 * abs(diff_angle)) * joint.max_joint_velocity
+                    time = scale * (0.001 * abs(diff_angle)) * \
+                        joint.max_joint_velocity
                 else:
-                    time = scale * deg2rad(abs(diff_angle)) * joint.max_joint_velocity
+                    time = scale * deg2rad(abs(diff_angle)) * \
+                        joint.max_joint_velocity
             else:
                 time = 0
             time_list.append(time)

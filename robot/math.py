@@ -74,11 +74,13 @@ def _check_valid_translation(translation):
     """Checks that the translation vector is valid.
     """
     if not isinstance(translation, np.ndarray) or not np.issubdtype(translation.dtype, np.number):
-        raise ValueError('Translation must be specified as numeric numpy array')
+        raise ValueError(
+            'Translation must be specified as numeric numpy array')
 
     t = translation.squeeze()
     if len(t.shape) != 1 or t.shape[0] != 3:
-        raise ValueError('Translation must be specified as a 3-vector, 3x1 ndarray, or 1x3 ndarray')
+        raise ValueError(
+            'Translation must be specified as a 3-vector, 3x1 ndarray, or 1x3 ndarray')
 
 
 def sr_inverse(J, k=1.0, weight_vector=None):
@@ -324,7 +326,7 @@ def outer_product_matrix(v):
     w2 0 -w0
     -w1 w0 0
     """
-    return np.array([[  0,   -v[2],  v[1]],
+    return np.array([[0,   -v[2],  v[1]],
                      [v[2],    0,   -v[0]],
                      [-v[1], v[0],     0]])
 
@@ -407,12 +409,12 @@ def rodrigues(axis, theta):
                             [a[1] * a[0], a[1] * a[1], a[1] * a[2]],
                             [a[2] * a[0], a[2] * a[1], a[2] * a[2]]])
 
-    cross_prod = np.array([[   0,    a[2],  - a[1]],
+    cross_prod = np.array([[0,    a[2],  - a[1]],
                            [- a[2],    0,     a[0]],
-                           [  a[1], - a[0],    0]])
+                           [a[1], - a[0],    0]])
     mat = np.eye(3) * np.cos(theta) + \
-          cross_prod * np.sin(theta) + \
-          tensor_prod * (1 - np.cos(theta))
+        cross_prod * np.sin(theta) + \
+        tensor_prod * (1 - np.cos(theta))
     return mat
 
 
@@ -441,7 +443,8 @@ def rotation_angle(mat):
         raise ValueError("Rotation Angle is too small. \nvalue : {}".
                          format(theta))
     axis = 1.0 / (2 * np.sin(theta)) * \
-           np.array([mat[2, 1] - mat[1, 2], mat[0, 2] - mat[2, 0], mat[1, 0] - mat[0, 1]])
+        np.array([mat[2, 1] - mat[1, 2], mat[0, 2] -
+                  mat[2, 0], mat[1, 0] - mat[0, 1]])
     return theta, axis
 
 

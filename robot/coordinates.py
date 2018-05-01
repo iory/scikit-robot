@@ -156,8 +156,8 @@ class Coordinates(object):
         if wrt == 'local' or wrt == self:
             inv = transform_coords(inv, c2)
         elif wrt == 'parent' or \
-             wrt == self.parent_link or \
-             wrt == 'world':
+                wrt == self.parent_link or \
+                wrt == 'world':
             inv = transform_coords(c2, inv)
         elif isinstance(wrt, Coordinates):
             xw = wrt.worldcoords()
@@ -199,7 +199,7 @@ class Coordinates(object):
             self.rotation = tmp_coords.rotation
             self.translation = tmp_coords.translation
         elif wrt == 'parent' or wrt == self.parent_link \
-             or wrt == 'world':
+                or wrt == 'world':
             tmp_coords = transform_coords(c, self)
             self.rotation = tmp_coords.rotation
             self.translation = tmp_coords.translation
@@ -246,7 +246,7 @@ class Coordinates(object):
             a0 = self.axis(rotation_axis)
             a1 = coords.axis(rotation_axis)
             dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a1)) * \
+                                np.arccos(np.dot(a0, a1)) *
                                 normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
@@ -255,7 +255,7 @@ class Coordinates(object):
             if need_mirror_for_nearest_axis(self, coords, ax) is False:
                 a2 = - a2
             dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a2)) * \
+                                np.arccos(np.dot(a0, a2)) *
                                 normalize_vector(np.cross(a0, a2)))
         elif rotation_axis is False:
             dif_rot = np.array([0, 0, 0])
