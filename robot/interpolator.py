@@ -31,7 +31,8 @@ class Interpolator(object):
         else:
             self.time_list = time_list
         if len(position_list) != len(time_list) + 1:
-            raise ValueError("length of position_list must be length of time_list + 1")
+            raise ValueError(
+                "length of position_list must be length of time_list + 1")
 
         self.time = 0.0
         self.segment_time = 0.0
@@ -77,7 +78,8 @@ class LinearInterpolator(Interpolator):
         v1 = self.position_list[self.segment]
         v2 = self.position_list[self.segment + 1]
         if self.segment > 0:
-            total_time = self.time_list[self.segment] - self.time_list[self.segment - 1]
+            total_time = self.time_list[self.segment] - \
+                self.time_list[self.segment - 1]
         else:
             total_time = self.time_list[self.segment]
         t1 = self.segment_time
@@ -109,11 +111,13 @@ class MinjerkInterpolator(Interpolator):
         """
         Interpolator.reset(self, **kwargs)
         if velocity_list is None:
-            self.velocity_list = [np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
+            self.velocity_list = [
+                np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
         else:
             self.velocity_list = velocity_list
         if acceleration_list is None:
-            self.acceleration_list = [np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
+            self.acceleration_list = [
+                np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
         else:
             self.acceleration_list = acceleration_list
 
@@ -128,7 +132,8 @@ class MinjerkInterpolator(Interpolator):
         ai = self.acceleration_list[self.segment]
         af = self.acceleration_list[self.segment + 1]
         if self.segment > 0:
-            total_time = self.time_list[self.segment] - self.time_list[self.segment - 1]
+            total_time = self.time_list[self.segment] - \
+                self.time_list[self.segment - 1]
         else:
             total_time = self.time_list[self.segment]
 
@@ -136,7 +141,8 @@ class MinjerkInterpolator(Interpolator):
         # B=(gv-(v+a*t))/(t*t)
         # C=(ga-a)/toi
 
-        A = (xf - (xi + total_time * vi + (total_time ** 2) * 0.5 * ai)) / (total_time ** 3)
+        A = (xf - (xi + total_time * vi + (total_time ** 2)
+                   * 0.5 * ai)) / (total_time ** 3)
         B = (vf - (vi + total_time * ai)) / (total_time ** 2)
         C = (af - ai) / total_time
 
@@ -159,22 +165,22 @@ class MinjerkInterpolator(Interpolator):
         # a=2*a2+6*a3*t+12*a4*t*t+20*a5*t*t*t
 
         self.position = a0 + \
-                        self.segment_time ** 1 * a1 + \
-                        self.segment_time ** 2 * a2 + \
-                        self.segment_time ** 3 * a3 + \
-                        self.segment_time ** 4 * a4 + \
-                        self.segment_time ** 5 * a5
+            self.segment_time ** 1 * a1 + \
+            self.segment_time ** 2 * a2 + \
+            self.segment_time ** 3 * a3 + \
+            self.segment_time ** 4 * a4 + \
+            self.segment_time ** 5 * a5
 
         self.velocity = a1 + \
-                        self.segment_time ** 1 * a2 + \
-                        self.segment_time ** 2 * a3 + \
-                        self.segment_time ** 3 * a4 + \
-                        self.segment_time ** 4 * a5
+            self.segment_time ** 1 * a2 + \
+            self.segment_time ** 2 * a3 + \
+            self.segment_time ** 3 * a4 + \
+            self.segment_time ** 4 * a5
 
         self.acceleration = a2 + \
-                            self.segment_time ** 1 * a3 + \
-                            self.segment_time ** 2 * a4 + \
-                            self.segment_time ** 3 * a5
+            self.segment_time ** 1 * a3 + \
+            self.segment_time ** 2 * a4 + \
+            self.segment_time ** 3 * a5
         return self.position
 
 

@@ -27,7 +27,8 @@ from robot.math import rpy_matrix
 class TestMath(unittest.TestCase):
 
     def test_midrot(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
+        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+            np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
         testing.assert_almost_equal(
             midrot(0.5, m1, np.eye(3)),
             np.array([[0.937735, -0.294516, 0.184158],
@@ -50,8 +51,8 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             rotation_matrix(pi, [1, 1, 1]),
             np.array([[-0.33333333,  0.66666667,  0.66666667],
-                      [ 0.66666667, -0.33333333,  0.66666667],
-                      [ 0.66666667,  0.66666667, -0.33333333]]))
+                      [0.66666667, -0.33333333,  0.66666667],
+                      [0.66666667,  0.66666667, -0.33333333]]))
 
         testing.assert_almost_equal(
             rotation_matrix(2 * pi, [1, 1, 1]),
@@ -96,7 +97,8 @@ class TestMath(unittest.TestCase):
                                              [-2.0, 1.0, 0.0]]))
 
     def test_matrix_exponent(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
+        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+            np.eye(3), 0.2, "x"), 0.4, "y"), 0.6, 'z')
         testing.assert_almost_equal(
             matrix_exponent(matrix_log(m1)), m1,
             decimal=5)
@@ -162,8 +164,8 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             rpy_matrix(-pi, 0, pi / 2),
             np.array([[-1, 0, 0],
-                      [ 0, 0, 1],
-                      [ 0, 1, 0]]))
+                      [0, 0, 1],
+                      [0, 1, 0]]))
         testing.assert_almost_equal(
             rpy_matrix(0, 0, 0),
             np.eye(3))
@@ -172,8 +174,8 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             rotation_matrix_from_rpy([-pi, 0, pi / 2]),
             np.array([[-1, 0, 0],
-                      [ 0, 0, 1],
-                      [ 0, 1, 0]]))
+                      [0, 0, 1],
+                      [0, 1, 0]]))
         testing.assert_almost_equal(
             rotation_matrix_from_rpy([0, 0, 0]),
             np.eye(3))
@@ -219,7 +221,7 @@ class TestMath(unittest.TestCase):
 
     def test_quaternion_slerp(self):
         q0 = [-0.84289035, -0.14618244, -0.12038416,  0.50366081]
-        q1 = [ 0.28648105, -0.61500146,  0.73395791,  0.03174259]
+        q1 = [0.28648105, -0.61500146,  0.73395791,  0.03174259]
         q = quaternion_slerp(q0, q1, 0.0)
         testing.assert_almost_equal(q, q0)
 

@@ -8,6 +8,7 @@ python:
 install:
   - pip install --upgrade pip setuptools wheel
   - pip install hacking
+  - pip install autopep8
   - pip install coveralls
   - pip install Cython
   - pip install pyyaml
@@ -15,6 +16,8 @@ install:
   - python setup.py develop
 
 script:
+  - autopep8 -r . --diff | tee check_autopep8
+  - test ! -s check_autopep8
   - nosetests -x tests --with-coverage --cover-package robot
 
 sudo: false
