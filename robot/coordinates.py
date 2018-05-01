@@ -13,13 +13,15 @@ from robot.math import rotate_matrix
 from robot.math import rotation_angle
 from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
+from robot.math import rpy2quaternion
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
+from robot.math import quaternion_multiply
 
 
 def transform_coords(c1, c2):
     pos = c1.pos + np.dot(c1.rot, c2.pos)
-    rot = np.dot(c1.rot, c2.rot)
+    rot = quaternion2matrix(quaternion_multiply(c1._q, c2._q))
     return Coordinates(pos=pos, rot=rot)
 
 
@@ -58,15 +60,18 @@ class Coordinates(object):
         rotation = np.array(rotation)
         # Convert quaternions
         if rotation.shape == (4,):
-            q = np.array([q for q in rotation])
-            if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
+            self._q = np.array([q for q in rotation])
+            if np.abs(np.linalg.norm(self._q) - 1.0) > 1e-3:
                 raise ValueError('Invalid quaternion. Must be '
                                  'norm 1.0, get {}'.
-                                 format(np.linalg.norm(q)))
-            rotation = quaternion2matrix(q)
+                                 format(np.linalg.norm(self._q)))
+            rotation = quaternion2matrix(self._q)
         elif rotation.shape == (3,):
             # Convert [yaw-pitch-roll] to rotation matrix
-            rotation = rotation_matrix_from_rpy(rotation)
+            self._q = rpy2quaternion(rotation)
+            rotation = quaternion2matrix(self._q)
+        else:
+            self._q = matrix2quaternion(rotation)
 
         # Convert lists and tuples
         if type(rotation) in (list, tuple):
