@@ -184,7 +184,7 @@ def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
     j_rot = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, child_reverse, transform_coords)
     p_diff = np.matmul(transform_coords.worldrot().T,
-                    (move_target.worldpos() - child_link.worldpos()))
+                       (move_target.worldpos() - child_link.worldpos()))
     j_translation = np.cross(j_rot, p_diff)
     j_translation = calc_dif_with_axis(j_translation, translation_axis)
     fik[row:row+len(j_translation), column] = j_translation
@@ -406,7 +406,8 @@ class CascadedLink(CascadedCoords):
         if union_link_list is None:
             union_link_list = self.calc_union_link_list(self.link_list)
         dav = self.calc_joint_angle_speed(union_vel, *args, **kwargs)
-        gains = self.calc_joint_angle_speed_gain(union_link_list, dav, periodic_time)
+        gains = self.calc_joint_angle_speed_gain(
+            union_link_list, dav, periodic_time)
         dav = np.min(gains) * dav
         i = 0
         l = 0
@@ -632,7 +633,6 @@ class CascadedLink(CascadedCoords):
             translation_axis = [translation_axis]
         if not isinstance(rotation_axis, list):
             rotation_axis = [rotation_axis]
-
 
         thre = 1.0
         rthre = np.deg2rad(1)
