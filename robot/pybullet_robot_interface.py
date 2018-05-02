@@ -1,42 +1,39 @@
 import pybullet as p
 import numpy as np
 
-from robot.robot_model import RobotModel
 from robot.math import quaternion2rpy
 
 
-class PybulletRobotInterface(RobotModel):
+class PybulletRobotInterface(object):
 
-    def __init__(self, urdf_path, *args, **kwargs):
-        super(PybulletRobotInterface, self).__init__(
-            *args, **kwargs)
-        self.load_urdf(urdf_path)
-        self.robot_id = None
+    def __init__(self, robot, urdf_path, *args, **kwargs):
+        super(PybulletRobotInterface, self).__init__(*args, **kwargs)
+        self.robot = robot
+        self.robot_id = p.loadURDF(urdf_path, [0, 0, 0])
+        self.load_bullet()
         self.realtime_simualtion = False
 
-    def load_bullet(self, p, robot_id):
-        joint_num = p.getNumJoints(robot_id)
-
-        self.robot_id = robot_id
+    def load_bullet(self):
+        joint_num = p.getNumJoints(self.robot_id)
         joint_ids = [None] * joint_num
         for i in range(len(joint_ids)):
-            joint_name = p.getJointInfo(robot_id, i)[1]
+            joint_name = p.getJointInfo(self.robot_id, i)[1]
             try:
-                idx = self.joint_names.index(joint_name.decode('utf-8'))
+                idx = self.robot.joint_names.index(joint_name.decode('utf-8'))
             except ValueError:
                 continue
             if idx != -1:
                 joint_ids[idx] = i
         self.joint_ids = joint_ids
 
-    def send_angle_vector(self, angle_vector=None, realtime_simualtion=None):
+    def angle_vector(self, angle_vector=None, realtime_simualtion=None):
         if realtime_simualtion is not None and isinstance(realtime_simualtion, bool):
             self.realtime_simualtion = realtime_simualtion
 
         if self.robot_id is None:
-            return self.angle_vector()
+            return self.robot.angle_vector()
         if angle_vector is None:
-            angle_vector = self.angle_vector()
+            angle_vector = self.robot.angle_vector()
 
         for idx, angle in zip(self.joint_ids, angle_vector):
             if idx is None:
@@ -56,7 +53,7 @@ class PybulletRobotInterface(RobotModel):
 
         return angle_vector
 
-    def wait_interpolation(self):
+    def wait_interpolation(self, thresh=0.05):
         while True:
             p.stepSimulation()
             wait = False
@@ -65,7 +62,7 @@ class PybulletRobotInterface(RobotModel):
                     continue
                 _, velocity, _, _ = p.getJointState(self.robot_id,
                                                     idx)
-                if velocity > 0.05:
+                if velocity > thresh:
                     wait = True
             if wait is False:
                 break
@@ -75,7 +72,7 @@ class PybulletRobotInterface(RobotModel):
         if self.robot_id is None:
             return self.angle_vector()
 
-        for idx, joint in zip(self.joint_ids, self.joint_list):
+        for idx, joint in zip(self.joint_ids, self.robot.joint_list):
             if idx is None:
                 continue
             joint_state = p.getJointState(self.robot_id,
@@ -84,6 +81,6 @@ class PybulletRobotInterface(RobotModel):
         pos, orientation = p.getBasePositionAndOrientation(self.robot_id)
         rpy, _ = quaternion2rpy([orientation[3], orientation[0],
                                  orientation[1], orientation[2]])
-        self.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
-                                 pos=pos)
+        self.robot.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
+                                       pos=pos)
         return self.angle_vector()
