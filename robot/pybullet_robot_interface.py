@@ -6,8 +6,13 @@ from robot.math import quaternion2rpy
 
 class PybulletRobotInterface(object):
 
-    def __init__(self, robot, urdf_path, *args, **kwargs):
+    def __init__(self, robot, urdf_path=None, *args, **kwargs):
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
+        if urdf_path is None:
+            if robot.urdf_path is not None:
+                urdf_path = robot.urdf_path
+            else:
+                raise ValueError('urdf_path should be given.')
         self.robot = robot
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0])
         self.load_bullet()
@@ -25,6 +30,12 @@ class PybulletRobotInterface(object):
             if idx != -1:
                 joint_ids[idx] = i
         self.joint_ids = joint_ids
+
+        self.force = 200
+        self.max_velcity = 1.0
+        self.position_gain = 0.1
+        self.target_velocity = 0.0
+        self.velocity_gain = 0.1
 
     def angle_vector(self, angle_vector=None, realtime_simualtion=None):
         if realtime_simualtion is not None and isinstance(realtime_simualtion, bool):
@@ -44,10 +55,11 @@ class PybulletRobotInterface(object):
                                         jointIndex=idx,
                                         controlMode=p.POSITION_CONTROL,
                                         targetPosition=np.deg2rad(angle),
-                                        targetVelocity=0.01,
-                                        force=100,
-                                        positionGain=0.01,
-                                        velocityGain=1)
+                                        targetVelocity=self.target_velocity,
+                                        force=self.force,
+                                        positionGain=self.position_gain,
+                                        velocityGain=self.velocity_gain,
+                                        maxVelocity=self.max_velcity)
             else:
                 p.resetJointState(self.robot_id, idx, np.deg2rad(angle))
 
