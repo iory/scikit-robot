@@ -6,8 +6,13 @@ from robot.math import quaternion2rpy
 
 class PybulletRobotInterface(object):
 
-    def __init__(self, robot, urdf_path, *args, **kwargs):
+    def __init__(self, robot, urdf_path=None, *args, **kwargs):
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
+        if urdf_path is None:
+            if robot.urdf_path is not None:
+               urdf_path = robot.urdf_path
+            else:
+                raise ValueError('urdf_path should be given.')
         self.robot = robot
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0])
         self.load_bullet()
