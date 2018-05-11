@@ -10,7 +10,7 @@ class PybulletRobotInterface(object):
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
         if urdf_path is None:
             if robot.urdf_path is not None:
-               urdf_path = robot.urdf_path
+                urdf_path = robot.urdf_path
             else:
                 raise ValueError('urdf_path should be given.')
         self.robot = robot
