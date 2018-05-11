@@ -1161,6 +1161,8 @@ class RobotModel(CascadedLink):
         if len(link_list) > 0:
             worldcoords.add_child(self.link_list[0])
 
+        self.urdf_path = None
+
     def reset_pose(self):
         raise NotImplementedError()
 
@@ -1171,6 +1173,7 @@ class RobotModel(CascadedLink):
         return self.angle_vector(np.zeros_like(self.angle_vector()))
 
     def load_urdf(self, urdf_path):
+        self.urdf_path = urdf_path
         self.robot_urdf = URDF.from_xml_string(open(urdf_path).read())
         root_link = self.robot_urdf.link_map[self.robot_urdf.get_root()]
 
