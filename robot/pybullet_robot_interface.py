@@ -1,12 +1,38 @@
-import pybullet as p
+import importlib
+
 import numpy as np
 
 from robot.math import quaternion2rpy
 
 
+_available = False
+_import_checked = False
+p = None
+
+
+def _check_available():
+    global _available
+    global _import_checked
+    global p
+    if not _import_checked:
+        try:
+            p = importlib.import_module('pybullet')
+        except (ImportError, TypeError):
+            _available = False
+        finally:
+            _import_checked = True
+            _available = True
+    if not _available:
+        raise ImportError('pybullet is not installed on your environment, '
+                          'so nothing will be drawn at this time. '
+                          'Please install pybullet.\n\n'
+                          '  $ pip install pybullet\n')
+
+
 class PybulletRobotInterface(object):
 
     def __init__(self, robot, urdf_path=None, *args, **kwargs):
+        _check_available()
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
         if urdf_path is None:
             if robot.urdf_path is not None:
@@ -17,6 +43,11 @@ class PybulletRobotInterface(object):
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0])
         self.load_bullet()
         self.realtime_simualtion = False
+
+    @staticmethod
+    def available():
+        _check_available()
+        return _available
 
     def load_bullet(self):
         joint_num = p.getNumJoints(self.robot_id)
