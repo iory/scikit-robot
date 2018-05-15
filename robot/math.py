@@ -593,13 +593,14 @@ def quaternion_from_axis_angle(theta, axis):
     theta : float
         radian
     axis : list or np.ndarray
-        length is 3. should be normalized.
+        length is 3. Automatically normalize in this function
 
     Returns
     -------
     quaternion : np.ndarray
         [w, x, y, z] order
     """
+    axis = normalize_vector(axis)
     s = sin(theta / 2)
     x = axis[0] * s
     y = axis[1] * s
