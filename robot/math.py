@@ -593,19 +593,62 @@ def quaternion_from_axis_angle(theta, axis):
     theta : float
         radian
     axis : list or np.ndarray
-        length is 3. should be normalized.
+        length is 3. Automatically normalize in this function
 
     Returns
     -------
     quaternion : np.ndarray
         [w, x, y, z] order
     """
+    axis = normalize_vector(axis)
     s = sin(theta / 2)
     x = axis[0] * s
     y = axis[1] * s
     z = axis[2] * s
     w = cos(theta / 2)
     return np.array([w, x, y, z], dtype=np.float64)
+
+
+def axis_angle_from_quaternion(quat):
+    """
+    Converts a quaternion into the axis-angle representation.
+
+    Parameters
+    ----------
+    quat : np.ndarray
+        quaternion [w, x, y, z]
+
+    Returns
+    -------
+    TODO
+    """
+    quat = np.array(quat, dtype=np.float64)
+    x, y, z, w = quat
+    sinang = y ** 2 + z ** 2 + w ** 2
+    if sinang == 0:
+        return np.array([0, 0, 0])
+    if x < 0:
+        _quat = - quat
+    else:
+        _quat = quat
+    sinang = np.sqrt(sinang)
+    f = 2.0 * np.arctan2(sinang, _quat[0]) / sinang
+    return f * np.array([_quat[1], _quat[2], _quat[3]])
+
+
+def axis_angle_from_matrix(rotation):
+    """
+    Converts the rotation of a matrix into axis-angle representation.
+
+    Parameters
+    ----------
+    TODO
+
+    Returns
+    -------
+    TODO
+    """
+    return axis_angle_from_quaternion(quat_from_rotation_matrix(rotation))
 
 
 def random_rotation():
