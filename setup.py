@@ -15,6 +15,7 @@ install_requires = [
     'ordered_set',
     'pybullet',
     'quadprog',
+    'sympy',
 ]
 
 setup(
