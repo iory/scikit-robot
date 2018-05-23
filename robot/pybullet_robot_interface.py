@@ -81,18 +81,18 @@ class PybulletRobotInterface(object):
             if idx is None:
                 continue
 
-            if self.realtime_simualtion:
-                p.setJointMotorControl2(bodyIndex=self.robot_id,
-                                        jointIndex=idx,
-                                        controlMode=p.POSITION_CONTROL,
-                                        targetPosition=np.deg2rad(angle),
-                                        targetVelocity=self.target_velocity,
-                                        force=self.force,
-                                        positionGain=self.position_gain,
-                                        velocityGain=self.velocity_gain,
-                                        maxVelocity=self.max_velcity)
-            else:
+            if self.realtime_simualtion is False:
                 p.resetJointState(self.robot_id, idx, np.deg2rad(angle))
+
+            p.setJointMotorControl2(bodyIndex=self.robot_id,
+                                    jointIndex=idx,
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPosition=np.deg2rad(angle),
+                                    targetVelocity=self.target_velocity,
+                                    force=self.force,
+                                    positionGain=self.position_gain,
+                                    velocityGain=self.velocity_gain,
+                                    maxVelocity=self.max_velcity)
 
         return angle_vector
 
