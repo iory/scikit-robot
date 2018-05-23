@@ -31,7 +31,7 @@ def _check_available():
 
 class PybulletRobotInterface(object):
 
-    def __init__(self, robot, urdf_path=None, *args, **kwargs):
+    def __init__(self, robot, urdf_path=None, use_fixed_base=False, *args, **kwargs):
         _check_available()
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
         if urdf_path is None:
@@ -40,7 +40,8 @@ class PybulletRobotInterface(object):
             else:
                 raise ValueError('urdf_path should be given.')
         self.robot = robot
-        self.robot_id = p.loadURDF(urdf_path, [0, 0, 0])
+        self.robot_id = p.loadURDF(urdf_path, [0, 0, 0],
+                                   useFixedBase=use_fixed_base)
         self.load_bullet()
         self.realtime_simualtion = False
 
