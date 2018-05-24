@@ -1249,7 +1249,7 @@ class RobotModel(CascadedLink):
                                          xyz)
             # TODO fix automatically update default_coords
             link_maps[j.child].joint.default_coords = Coordinates(pos=link_maps[j.child].pos,
-                                                                  rot=link_maps[j.child].rot)
+                                                                  rot=link_maps[j.child].rotation)
 
         # TODO duplicate of __init__
         self.link_list = links
