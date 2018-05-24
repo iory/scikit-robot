@@ -20,6 +20,9 @@ from robot.geo import midcoords
 
 logger = getLogger(__name__)
 
+_default_max_joint_velocity = 1.0
+_default_max_joint_torque = 1.0
+
 
 def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
     dav_gain = abs(joint.max_joint_velocity / (dav[i] / periodic_time))
@@ -72,6 +75,10 @@ class Joint(object):
         self.child_link = child_link
         self.min_angle = min_angle
         self.max_angle = max_angle
+        if max_joint_velocity is None:
+            max_joint_velocity = _default_max_joint_velocity
+        if max_joint_torque is None:
+            max_joint_torque = _default_max_joint_torque
         self.max_joint_velocity = max_joint_velocity
         self.joint_min_max_table = joint_min_max_table
         self.joint_min_max_target = joint_min_max_target
