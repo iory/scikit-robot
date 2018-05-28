@@ -1,6 +1,9 @@
-from robot.utils.basics import *
-import sys
+from logging import getLogger
 import copy
+
+from robot.utils.basics import *
+
+logger = getLogger(__name__)
 
 # @todo Get rid of "import *"
 # @todo Make this work with decorators
@@ -27,7 +30,7 @@ def reflect(cls, *args, **kwargs):
 
 def on_error(message):
     """ What to do on an error. This can be changed to raise an exception. """
-    sys.stderr.write(message + '\n')
+    logger.error(message)
 
 
 skip_default = False
