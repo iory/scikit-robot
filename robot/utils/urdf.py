@@ -226,7 +226,7 @@ class Inertia(xmlr.Object):
 
 
 xmlr.reflect(Inertia,
-             params=[xmlr.Attribute(key, float) for key in Inertia.KEYS])
+             params=[xmlr.Attribute(key, float, required=False) for key in Inertia.KEYS])
 
 
 class Inertial(xmlr.Object):
@@ -265,10 +265,10 @@ class JointLimit(xmlr.Object):
 
 
 xmlr.reflect(JointLimit, params=[
-    xmlr.Attribute('effort', float),
+    xmlr.Attribute('effort', float, required=False),
     xmlr.Attribute('lower', float, False, 0),
     xmlr.Attribute('upper', float, False, 0),
-    xmlr.Attribute('velocity', float)
+    xmlr.Attribute('velocity', float, required=False)
 ])
 
 # FIXME: we are missing __str__ here.
