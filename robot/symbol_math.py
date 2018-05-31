@@ -102,7 +102,7 @@ def affine_simplify(T):
     return Matrix(T.shape[0], T.shape[1], [trigsimp(x.expand()) for x in T])
 
 
-def numpy_vector_to_sympy(v, precision=None):
+def numpy_vector_to_sympy(v, precision=8):
     return Matrix(len(v), 1, [convert_real_to_rational(x, precision) for x in v])
 
 
