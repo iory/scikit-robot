@@ -11,6 +11,7 @@ from setuptools import setup
 setup_requires = []
 install_requires = [
     'cvxopt',
+    'future',
     'numpy>=1.9.0',
     'ordered_set',
     'pybullet',
