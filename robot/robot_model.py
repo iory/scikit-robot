@@ -161,7 +161,7 @@ class RotationalJoint(Joint):
         self._joint_angle = v
         # (send child-link :replace-coords default-coords)
         # (send child-link :rotate (deg2rad joint-angle) axis))
-        self.child_link.rot = self.default_coords.rot.copy()
+        self.child_link.rotation = self.default_coords.rotation.copy()
         self.child_link.pos = self.default_coords.pos.copy()
         self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
         return self._joint_angle
@@ -266,7 +266,7 @@ class LinearJoint(Joint):
                                .format(self, v, self.min_angle))
                 v = self.min_angle
             self._joint_angle = v
-        self.child_link.rot = self.default_coords.rot.copy()
+        self.child_link.rotation = self.default_coords.rotation.copy()
         self.child_link.pos = self.default_coords.pos.copy()
         self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
         return self._joint_angle
