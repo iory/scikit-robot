@@ -296,10 +296,10 @@ class Coordinates(object):
             self.rotation = self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
             self.rotation = rotate_matrix(self.rotation, theta, axis,
-                                     True)
+                                          True)
         elif wrt == 'parent' or wrt == 'world':
             self.rotation = rotate_matrix(self.rotation, theta,
-                                     axis)
+                                          axis)
         elif isinstance(wrt, Coordinates):  # C1'=C2*R*C2(-1)*C1
             self.rotation = self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
