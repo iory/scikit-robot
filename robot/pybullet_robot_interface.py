@@ -115,7 +115,7 @@ class PybulletRobotInterface(object):
                     continue
                 _, velocity, _, _ = p.getJointState(self.robot_id,
                                                     idx)
-                if velocity > thresh:
+                if abs(velocity) > thresh:
                     wait = True
             if wait is False:
                 break
