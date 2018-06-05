@@ -40,8 +40,7 @@ class Kuka(RobotModel):
                       self.lbr_iiwa_with_wsg50__lbr_iiwa_link_4,
                       self.lbr_iiwa_with_wsg50__lbr_iiwa_link_5,
                       self.lbr_iiwa_with_wsg50__lbr_iiwa_link_6,
-                      self.lbr_iiwa_with_wsg50__lbr_iiwa_link_7,
-                      self.rarm_end_coords]
+                      self.lbr_iiwa_with_wsg50__lbr_iiwa_link_7]
         rarm_joints = []
         for link in rarm_links:
             if hasattr(link, 'joint'):
