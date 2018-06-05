@@ -219,12 +219,21 @@ def rpy_angle(matrix):
     rpy : np.ndarray
         pair of rpy in yaw-pitch-roll order.
     """
-    r = np.arctan2(matrix[2, 1], matrix[2, 2])
-    p = np.arctan2(- matrix[2, 0],
-                   np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
-    y = np.arctan2(matrix[1, 0], matrix[0, 0])
-    rpy = np.array([y, p, r])
-    return rpy, np.pi - rpy
+    a = np.arctan2(matrix[1, 0], matrix[0, 0])
+    sa = np.sin(a)
+    ca = np.cos(a)
+    b = np.arctan2(-matrix[2, 0], ca * matrix[0, 0] + sa * matrix[1, 0])
+    c = np.arctan2(sa * matrix[0, 2] - ca * matrix[1, 2],
+                   -sa * matrix[0, 1] + ca * matrix[1, 1])
+    rpy = np.array([a, b, c])
+
+    a = a + np.pi
+    sa = np.sin(a)
+    ca = np.cos(a)
+    b = np.arctan2(-matrix[2, 0], ca * matrix[0, 0] + sa * matrix[1, 0])
+    c = np.arctan2(sa * matrix[0, 2] - ca * matrix[1, 2],
+                   -sa * matrix[0, 1] + ca * matrix[1, 1])
+    return rpy, np.array([a, b, c])
 
 
 def normalize_vector(v, ord=2):
