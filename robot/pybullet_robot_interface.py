@@ -41,8 +41,13 @@ class PybulletRobotInterface(object):
             else:
                 raise ValueError('urdf_path should be given.')
         self.robot = robot
-        if connect == 1 or connect == 2:
+        if connect == 2:
             p.connect(connect)
+        elif connect == 1:
+            try:
+                p.connect(connect)
+            except Exception as e:
+                print(e)
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0],
                                    useFixedBase=use_fixed_base)
 
