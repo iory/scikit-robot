@@ -50,3 +50,17 @@ class Kuka(RobotModel):
                        joint_list=rarm_joints)
         r.end_coords = self.rarm_end_coords
         return r
+
+    def close_hand(self, av=None):
+        if av is None:
+            av = self.angle_vector()
+        av[-2] = 0
+        av[-4] = 0
+        return self.angle_vector(av)
+
+    def open_hand(self, default_angle=10, av=None):
+        if av is None:
+            av = self.angle_vector()
+        av[-2] = default_angle
+        av[-4] = -default_angle
+        return self.angle_vector(av)
