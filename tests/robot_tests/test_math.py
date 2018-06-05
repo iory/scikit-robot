@@ -21,6 +21,7 @@ from robot.math import rotate_matrix
 from robot.math import rotation_angle
 from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
+from robot.math import rpy_angle
 from robot.math import rpy_matrix
 
 
@@ -46,6 +47,13 @@ class TestMath(unittest.TestCase):
             np.array([[0.700629, 0.190839, 0.687531],
                       [0.404508, 0.687531, -0.603054],
                       [-0.587785, 0.700629, 0.404508]]))
+
+    def test_rpy_angle(self):
+        a, b = rpy_angle(rpy_matrix(pi / 6, pi / 5, pi / 3))
+        testing.assert_almost_equal(
+            a, np.array([pi / 6, pi / 5, pi / 3]))
+        testing.assert_almost_equal(
+            b, np.array([3.66519143, 2.51327412, -2.0943951]))
 
     def test_rotation_matrix(self):
         testing.assert_almost_equal(
