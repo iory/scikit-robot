@@ -268,7 +268,7 @@ class LinearJoint(Joint):
             self._joint_angle = v
         self.child_link.rotation = self.default_coords.rotation.copy()
         self.child_link.pos = self.default_coords.pos.copy()
-        self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
+        self.child_link.rotate(self._joint_angle, self.axis)
         return self._joint_angle
 
     @property
@@ -1224,8 +1224,8 @@ class RobotModel(CascadedLink):
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child],
-                    min_angle=j.limit.lower * 1000.0,
-                    max_angle=j.limit.upper * 1000.0,
+                    min_angle=j.limit.lower,
+                    max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
