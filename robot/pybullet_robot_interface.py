@@ -3,6 +3,8 @@ import importlib
 import numpy as np
 
 from robot.math import quaternion2rpy
+from robot.robot_model import LinearJoint
+from robot.robot_model import RotationalJoint
 
 
 _available = False
@@ -87,17 +89,25 @@ class PybulletRobotInterface(object):
         if angle_vector is None:
             angle_vector = self.robot.angle_vector()
 
-        for idx, angle in zip(self.joint_ids, angle_vector):
+        for i, (idx, angle) in enumerate(zip(self.joint_ids, angle_vector)):
             if idx is None:
                 continue
 
+            joint = self.robot.joint_list[i]
+            if isinstance(joint, RotationalJoint):
+                angle = np.deg2rad(angle)
+            elif isinstance(joint, LinearJoint):
+                angle = 0.001 * angle
+            else:
+                raise ValueError('{} is not supported'.
+                                 format(type(joint)))
             if self.realtime_simualtion is False:
-                p.resetJointState(self.robot_id, idx, np.deg2rad(angle))
+                p.resetJointState(self.robot_id, idx, angle)
 
             p.setJointMotorControl2(bodyIndex=self.robot_id,
                                     jointIndex=idx,
                                     controlMode=p.POSITION_CONTROL,
-                                    targetPosition=np.deg2rad(angle),
+                                    targetPosition=angle,
                                     targetVelocity=self.target_velocity,
                                     force=self.force,
                                     positionGain=self.position_gain,
