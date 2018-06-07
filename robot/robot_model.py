@@ -1239,12 +1239,8 @@ class RobotModel(CascadedLink):
         for j in self.robot_urdf.joints:
             if j.type in ['fixed']:
                 continue
-            elif j.type in ['prismatic']:
-                rpy = np.zeros(3, dtype=np.float32)
-                xyz = np.zeros(3, dtype=np.float32)
-            else:
-                rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
-                xyz = np.array(j.origin.xyz, dtype=np.float32)
+            rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
+            xyz = np.array(j.origin.xyz, dtype=np.float32)
             link_maps[j.child].newcoords(rpy,
                                          xyz)
             # TODO fix automatically update default_coords
