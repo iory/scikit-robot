@@ -1219,13 +1219,15 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
             elif j.type == 'prismatic':
+                # http://wiki.ros.org/urdf/XML/joint
+                # meters for prismatic joints
                 joint = LinearJoint(
                     axis=j.axis,
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child],
-                    min_angle=j.limit.lower,
-                    max_angle=j.limit.upper,
+                    min_angle=1000 * j.limit.lower,
+                    max_angle=1000 * j.limit.upper,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
