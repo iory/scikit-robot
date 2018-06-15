@@ -1,7 +1,8 @@
 import unittest
 
-from numpy import testing
 from numpy import deg2rad
+from numpy import pi
+from numpy import testing
 
 from robot.coordinates import make_coords
 
@@ -20,3 +21,13 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             c.transformation(d).worldrot(),
             make_coords(rot=[deg2rad(10), 0, 0]).worldrot())
+
+    def rotate(self):
+        c = make_coords(pos=[1, 2, 3])
+        c.rotate(pi / 7.0, 'y', 'world')
+        c.rotate(pi / 11.0, 'x', 'local')
+        testing.assert_almost_equal(
+            c.worldrot(),
+            [[0.900969, 0.122239, 0.416308],
+             [0.0, 0.959493, -0.281733],
+             [-0.433884, 0.253832, 0.864473]])
