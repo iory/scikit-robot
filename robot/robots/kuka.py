@@ -1,5 +1,6 @@
 import os
 
+from cached_property import cached_property
 import numpy as np
 
 import robot
@@ -32,7 +33,7 @@ class Kuka(RobotModel):
         return self.angle_vector([0, 10, 0, -90, 0, 90,
                                   0, 0, 0, 0, 0, 0])
 
-    @property
+    @cached_property
     def rarm(self):
         rarm_links = [self.lbr_iiwa_with_wsg50__lbr_iiwa_link_1,
                       self.lbr_iiwa_with_wsg50__lbr_iiwa_link_2,
