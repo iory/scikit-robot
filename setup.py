@@ -10,6 +10,7 @@ from setuptools import setup
 
 setup_requires = []
 install_requires = [
+    'cached-property',
     'cvxopt',
     'future',
     'numpy>=1.9.0',
