@@ -1,5 +1,6 @@
 import os
 
+from cached_property import cached_property
 import numpy as np
 
 import robot
@@ -55,7 +56,7 @@ class Fetch(RobotModel):
         self.head_tilt_joint.joint_angle(0.0)
         return self.angle_vector()
 
-    @property
+    @cached_property
     def rarm(self):
         rarm_links = [self.shoulder_pan_link,
                       self.shoulder_lift_link,
