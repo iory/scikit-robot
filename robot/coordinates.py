@@ -201,22 +201,16 @@ class Coordinates(object):
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
             tmp_coords = transform_coords(self, c)
-            self.rotation = tmp_coords.rotation
-            self.translation = tmp_coords.translation
         elif wrt == 'parent' or wrt == self.parent_link \
                 or wrt == 'world':
             tmp_coords = transform_coords(c, self)
-            self.rotation = tmp_coords.rotation
-            self.translation = tmp_coords.translation
         elif isinstance(wrt, Coordinates):
             tmp_coords = transform_coords(wrt.inverse_transformation, self)
             tmp_coords = transform_coords(c, tmp_coords)
             tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
-            self.rotation = tmp_coords.rotation
-            self.translation = tmp_coords.translation
         else:
             raise ValueError("transform wrt {} is not supported".format(wrt))
-        return self.newcoords(self.rotation, self.pos)
+        return self.newcoords(tmp_coords)
 
     def rpy_angle(self):
         return rpy_angle(self.rotation)
