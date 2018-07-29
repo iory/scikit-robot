@@ -414,16 +414,14 @@ def rodrigues(axis, theta):
         3x3 rotation matrix
     """
     a = axis / np.linalg.norm(axis)
-    tensor_prod = np.array([[a[0] * a[0], a[0] * a[1], a[0] * a[2]],
-                            [a[1] * a[0], a[1] * a[1], a[1] * a[2]],
-                            [a[2] * a[0], a[2] * a[1], a[2] * a[2]]])
-
-    cross_prod = np.array([[0,    a[2],  - a[1]],
-                           [- a[2],    0,     a[0]],
-                           [a[1], - a[0],    0]])
-    mat = np.eye(3) * np.cos(theta) + \
-        cross_prod * np.sin(theta) + \
-        tensor_prod * (1 - np.cos(theta))
+    cross_prod = np.array([[0, -a[2],   a[1]],
+                           [a[2],     0,  -a[0]],
+                           [-a[1],  a[0],      0]])
+    ctheta = np.cos(theta)
+    stheta = np.sin(theta)
+    mat = np.eye(3) + \
+        cross_prod * stheta + \
+        np.matmul(cross_prod, cross_prod) * (1 - ctheta)
     return mat
 
 
