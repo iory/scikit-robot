@@ -17,6 +17,7 @@ from robot.math import quaternion_from_axis_angle
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_slerp
+from robot.math import rodrigues
 from robot.math import rotate_matrix
 from robot.math import rotation_angle
 from robot.math import rotation_matrix
@@ -86,6 +87,17 @@ class TestMath(unittest.TestCase):
                       [0.866025, 0.5, 0.0],
                       [0.0, 0.0, 1.0]]),
             decimal=5)
+
+    def test_rodrigues(self):
+        mat = rpy_matrix(pi / 6, pi / 5, pi / 3)
+        theta, axis = rotation_angle(mat)
+        rec_mat = rodrigues(axis, theta)
+        testing.assert_array_almost_equal(mat, rec_mat)
+
+        mat = rpy_matrix(- pi / 6, - pi / 5, - pi / 3)
+        theta, axis = rotation_angle(mat)
+        rec_mat = rodrigues(axis, theta)
+        testing.assert_array_almost_equal(mat, rec_mat)
 
     def test_rotation_angle(self):
         rot = rpy_matrix(-1.220e-08, -5.195e-09, 1.333e-09)
