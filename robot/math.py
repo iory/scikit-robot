@@ -439,16 +439,18 @@ def rotation_matrix_from_rpy(rpy):
     return quaternion2matrix(quat_from_rpy(rpy))
 
 
-def rodrigues(axis, theta):
+def rodrigues(axis, theta=None):
     """Rodrigues formula
 
     Args:
         axis (np.array or list): [x, y, z]
-        theta: radian
+        theta: radian or None
 
     Returns:
         3x3 rotation matrix
     """
+    if theta is None:
+        theta = np.sqrt(np.sum(axis ** 2))
     a = axis / np.linalg.norm(axis)
     cross_prod = np.array([[0, -a[2],   a[1]],
                            [a[2],     0,  -a[0]],
