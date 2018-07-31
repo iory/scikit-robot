@@ -113,6 +113,12 @@ class TestMath(unittest.TestCase):
         rec_mat = rodrigues(axis, theta)
         testing.assert_array_almost_equal(mat, rec_mat)
 
+        # case of theta is None
+        axis = np.array([np.pi, 0, 0], 'f')
+        rec_mat = rodrigues(axis)
+        testing.assert_array_almost_equal(
+            rpy_angle(rec_mat)[0], np.array([0.0, 0.0, -np.pi], 'f'))
+
     def test_rotation_angle(self):
         rot = rpy_matrix(-1.220e-08, -5.195e-09, 1.333e-09)
         with self.assertRaises(ValueError):
