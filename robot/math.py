@@ -83,6 +83,42 @@ def _check_valid_translation(translation):
             'Translation must be specified as a 3-vector, 3x1 ndarray, or 1x3 ndarray')
 
 
+def wxyz2xyzw(quat):
+    """
+    Convert quaternion [w, x, y, z] to [x, y, z, w] order
+
+    Parameters
+    ----------
+    quat : list or np.ndarray
+        quaternion [w, x, y, z]
+    Returns
+    -------
+    quaternion : np.ndarray
+        quaternion [x, y, z, w]
+    """
+    if isinstance(quat, list):
+        quat = np.array(quat)
+    return np.roll(quat, -1)
+
+
+def xyzw2wxyz(quat):
+    """
+    Convert quaternion [x, y, z, w] to [w, x, y, z] order
+
+    Parameters
+    ----------
+    quat : list or np.ndarray
+        quaternion [x, y, z, w]
+    Returns
+    -------
+    quaternion : np.ndarray
+        quaternion [w, x, y, z]
+    """
+    if isinstance(quat, list):
+        quat = np.array(quat)
+    return np.roll(quat, 1)
+
+
 def sr_inverse(J, k=1.0, weight_vector=None):
     """returns sr-inverse of given mat"""
     r, _ = J.shape
