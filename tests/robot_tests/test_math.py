@@ -24,9 +24,23 @@ from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
+from robot.math import wxyz2xyzw
+from robot.math import xyzw2wxyz
 
 
 class TestMath(unittest.TestCase):
+
+    def test_xyzw2wxyz(self):
+        xyzw = np.array([0, 0, 0, 1])
+        wxyz = xyzw2wxyz(xyzw)
+        testing.assert_equal(
+            wxyz, np.array([1, 0, 0, 0]))
+
+    def test_wxyz2xyzw(self):
+        wxyz = np.array([1, 0, 0, 0])
+        xyzw = wxyz2xyzw(wxyz)
+        testing.assert_equal(
+            xyzw, np.array([0, 0, 0, 1]))
 
     def test_midrot(self):
         m1 = rotate_matrix(rotate_matrix(rotate_matrix(
