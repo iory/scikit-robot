@@ -13,6 +13,7 @@ from robot.math import normalize_vector
 from robot.math import outer_product_matrix
 from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
+from robot.math import quaternion_distance
 from robot.math import quaternion_from_axis_angle
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
@@ -20,8 +21,10 @@ from robot.math import quaternion_slerp
 from robot.math import rodrigues
 from robot.math import rotate_matrix
 from robot.math import rotation_angle
+from robot.math import rotation_distance
 from robot.math import rotation_matrix
 from robot.math import rotation_matrix_from_rpy
+from robot.math import rpy2quaternion
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
 from robot.math import wxyz2xyzw
@@ -228,6 +231,17 @@ class TestMath(unittest.TestCase):
             testing.assert_almost_equal(rpy_matrix(y, p, r),
                                         rotation_matrix_from_rpy([y, p, r]))
 
+    def test_rotation_distance(self):
+        mat1 = np.eye(3)
+        mat2 = np.eye(3)
+        diff_theta = rotation_distance(mat1, mat2)
+        self.assertEqual(diff_theta, 0.0)
+
+        mat1 = rpy_matrix(0, 0, np.pi)
+        mat2 = np.eye(3)
+        diff_theta = rotation_distance(mat1, mat2)
+        self.assertEqual(diff_theta, np.pi)
+
     def test_quaternion_multiply(self):
         q0 = [1, 0, 0, 0]
         q = quaternion_multiply(q0, q0)
@@ -272,6 +286,15 @@ class TestMath(unittest.TestCase):
         angle = math.acos(np.dot(q0, q))
         testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
                                     2.0)
+
+    def test_quaternion_distance(self):
+        q1 = rpy2quaternion([0, 0, 0])
+        q2 = rpy2quaternion([0, 0, 0])
+        self.assertEqual(quaternion_distance(q1, q2), 0.0)
+
+        q1 = rpy2quaternion([np.pi, 0, 0])
+        q2 = rpy2quaternion([0, 0, 0])
+        self.assertEqual(quaternion_distance(q1, q2), np.pi)
 
     def test_quaternion_from_axis_angle(self):
         q = quaternion_from_axis_angle(0.1, [1, 0, 0])
