@@ -493,6 +493,28 @@ def rotation_angle(mat):
     return theta, axis
 
 
+def rotation_distance(mat1, mat2):
+    """
+
+    Return the distance of rotation matrixes.
+
+    Parameters
+    ----------
+    mat1 : list or np.ndarray
+    mat2 : list or np.ndarray
+        3x3 matrix
+
+    Return
+    ------
+    diff_theta : float
+        distance of rotation matrixes in radian.
+    """
+    mat1 = _check_valid_rotation(mat1)
+    mat2 = _check_valid_rotation(mat2)
+    diff_theta = np.arccos((np.trace(np.matmul(mat1.T, mat2)) - 1.0) / 2.0)
+    return diff_theta
+
+
 def quaternion_multiply(quaternion1, quaternion0):
     """
     Return multiplication of two quaternions.
@@ -626,6 +648,26 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     q = (sin((1.0 - fraction) * angle) * q0 +
          sin(fraction * angle) * q1) * isin
     return q
+
+
+def quaternion_distance(q1, q2):
+    """
+    Return the distance of quaternion.
+
+    Parameters
+    ----------
+    q1 : list or np.ndarray
+    q2 : list or np.ndarray
+        [w, x, y, z] order
+
+    Return
+    ------
+    diff_theta : float
+        distance of q1 and q2 in radian.
+    """
+    diff_theta = 2.0 * np.arccos(
+        np.abs(np.dot(q1, q2)))
+    return diff_theta
 
 
 def quaternion_from_axis_angle(theta, axis):
