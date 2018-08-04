@@ -5,11 +5,21 @@ from numpy import pi
 from numpy import testing
 
 from robot.coordinates import make_coords
+from robot.geo import midcoords
 from robot.geo import orient_coords_to_axis
 from robot.math import matrix2quaternion
 
 
 class TestGeo(unittest.TestCase):
+
+    def test_midcoords(self):
+        a = make_coords(pos=[1.0, 1.0, 1.0])
+        b = make_coords()
+        c = midcoords(0.5, a, b)
+        testing.assert_array_equal(c.worldpos(),
+                                   [0.5, 0.5, 0.5])
+        testing.assert_array_equal(matrix2quaternion(c.worldrot()),
+                                   [1, 0, 0, 0])
 
     def test_orient_coords_to_axis(self):
         target_coords = make_coords(pos=[1.0, 1.0, 1.0])
