@@ -268,11 +268,13 @@ class Coordinates(object):
 
     def rotate_with_matrix(self, mat, wrt='local'):
         if wrt == 'local' or wrt == self:
-            self.rotation = np.matmul(self.rotation, mat)
-            self.newcoords(self.rotation, self.pos)
-        elif wrt == 'parent' or wrt == self.parent_link:
-            self.rotation = np.matmul(mat, self.rotation)
-            self.newcoords(self.rotation, self.pos)
+            rot = np.matmul(self.rotation, mat)
+            self.newcoords(rot, self.pos)
+        elif wrt == 'parent' or wrt == self.parent_link or \
+                wrt == 'world' or wrt == None or \
+                wrt == worldcoords:
+            rot = np.matmul(mat, self.rotation)
+            self.newcoords(rot, self.pos)
         elif isinstance(wrt, Coordinates):
             r2 = wrt.worldrot()
             r2t = r2.T
@@ -281,20 +283,21 @@ class Coordinates(object):
             self.rotation = np.matmul(r2t, self.rotation)
         else:
             raise ValueError('wrt {} is not supported'.format(wrt))
+        return self
 
     def rotate(self, theta, axis=None, wrt="local"):
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
-            self.rotation = self.rotate_with_matrix(
+            self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
         elif axis is None or axis is False:
-            self.rotation = self.rotate_with_matrix(theta, wrt)
+            self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
             self.rotation = rotate_matrix(self.rotation, theta, axis)
         elif wrt == 'parent' or wrt == 'world':
             self.rotation = rotate_matrix(self.rotation, theta,
                                           axis, True)
         elif isinstance(wrt, Coordinates):  # C1'=C2*R*C2(-1)*C1
-            self.rotation = self.rotate_with_matrix(
+            self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
