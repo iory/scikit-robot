@@ -27,6 +27,7 @@ from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy2quaternion
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
+from robot.math import triple_product
 from robot.math import wxyz2xyzw
 from robot.math import xyzw2wxyz
 
@@ -44,6 +45,13 @@ class TestMath(unittest.TestCase):
         xyzw = wxyz2xyzw(wxyz)
         testing.assert_equal(
             xyzw, np.array([0, 0, 0, 1]))
+
+    def test_triple_product(self):
+        a = np.array([1, 0, 3])
+        b = np.array([2, 0, 0])
+        c = np.array([0, 1, 0])
+        ret = triple_product(a, b, c)
+        self.assertEqual(ret, 6)
 
     def test_midrot(self):
         m1 = rotate_matrix(rotate_matrix(rotate_matrix(
