@@ -119,6 +119,25 @@ def xyzw2wxyz(quat):
     return np.roll(quat, 1)
 
 
+def triple_product(a, b, c):
+    """
+
+    Returns Triple Product
+    https://en.wikipedia.org/wiki/Triple_product
+
+    Parameters
+    ----------
+    a : numpy.ndarray
+    b : numpy.ndarray
+    c : numpy.ndarray
+
+    Returns
+    -------
+    triple product
+    """
+    return np.dot(a, np.cross(b, c))
+
+
 def sr_inverse(J, k=1.0, weight_vector=None):
     """returns sr-inverse of given mat"""
     r, _ = J.shape
