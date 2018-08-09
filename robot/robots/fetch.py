@@ -1,7 +1,6 @@
 import os
 
 from cached_property import cached_property
-import numpy as np
 
 import robot
 from robot.robot_model import RobotModel
@@ -26,7 +25,7 @@ class Fetch(RobotModel):
 
         self.rarm_end_coords = CascadedCoords(parent=self.gripper_link,
                                               name='rarm_end_coords')
-        self.rarm_end_coords.translate(np.array([0, 0, 0], dtype=np.float32))
+        self.rarm_end_coords.translate([0, 0, 0])
         self.rarm_end_coords.rotate(0, axis='z')
         self.end_coords = [self.rarm_end_coords]
 
