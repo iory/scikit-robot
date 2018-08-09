@@ -585,6 +585,19 @@ class CascadedLink(CascadedCoords):
 
     def calc_vel_from_pos(self, dif_pos, translation_axis,
                           p_limit=100.0):
+        """
+
+        Parameters
+        ----------
+        dif_pos : np.ndarray
+            [mm] order
+        translation_axis : str
+            see calc_dif_with_axis
+
+        Returns
+        -------
+        vel_p : np.ndarray
+        """
         if LA.norm(dif_pos) > p_limit:
             dif_pos = p_limit * normalize_vector(dif_pos)
         dif_pos = 0.001 * dif_pos  # scale [mm] -> [m]
