@@ -705,17 +705,28 @@ class CascadedLink(CascadedCoords):
                              centroid_thre=None, target_centroid_pos=None,
                              centroid_offset_func=None, cog_translation_axis=None,
                              update_mass_properties=True):
-        translation_axis = _wrap_axis(translation_axis)
-        rotation_axis = _wrap_axis(rotation_axis)
+        """
+
+        check ik convergence
+
+        Parameters
+        ----------
+        dif_pos : list of np.ndarray
+        dif_rot : list of np.ndarray
+
+        translation_axis : list of axis
+        rotation_axis : list of axis
+            see _wrap_axis
+        """
+        translation_axis = list(map(_wrap_axis, translation_axis))
+        rotation_axis = list(map(_wrap_axis, rotation_axis))
 
         for i in range(len(dif_pos)):
-            if translation_axis[i]:
-                if LA.norm(dif_pos[i]) > thre[i]:
-                    return False
+            if LA.norm(dif_pos[i]) > thre[i]:
+                return False
         for i in range(len(dif_rot)):
-            if rotation_axis[i]:
-                if LA.norm(dif_rot[i]) > rthre[i]:
-                    return False
+            if LA.norm(dif_rot[i]) > rthre[i]:
+                return False
         if target_centroid_pos is not None:
             raise NotImplementedError
             # (setq success (and success (send self :cog-convergence-check centroid-thre target-centroid-pos
