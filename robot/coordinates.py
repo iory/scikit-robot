@@ -256,7 +256,7 @@ class Coordinates(object):
             dif_rot = np.matmul(self.worldrot().T,
                                 np.arccos(np.dot(a0, a2)) *
                                 normalize_vector(np.cross(a0, a2)))
-        elif rotation_axis is False:
+        elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
             dif_rotmatrix = np.matmul(self.worldrot().T,
