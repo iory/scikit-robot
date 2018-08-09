@@ -26,7 +26,8 @@ class Kuka(RobotModel):
             name='rarm_end_coords')
         self.rarm_end_coords.translate(
             np.array([0, 30, 250], dtype=np.float32))
-        self.rarm_end_coords.rotate(0, axis='z')
+        self.rarm_end_coords.rotate(- np.pi / 2.0, axis='y')
+        self.rarm_end_coords.rotate(- np.pi / 2.0, axis='x')
         self.end_coords = [self.rarm_end_coords]
 
     def reset_manip_pose(self):
