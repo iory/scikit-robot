@@ -1,5 +1,7 @@
 import unittest
 
+import numpy as np
+
 import robot
 
 
@@ -25,3 +27,36 @@ class TestRobotModel(unittest.TestCase):
                           fetch.forearm_roll_link,
                           fetch.wrist_flex_link,
                           fetch.wrist_roll_link])
+
+    def test_inverse_kinematics(self):
+        kuka = robot.robots.Kuka()
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+
+        kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate([
+            100, 200, -100], 'local')
+        kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True)
+        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
+        dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+        kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().\
+            rotate(- np.pi / 6.0, 'y', 'local')
+        kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True)
+        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
+        dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
