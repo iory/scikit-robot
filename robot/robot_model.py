@@ -1029,6 +1029,31 @@ class CascadedLink(CascadedCoords):
                       solver=solver)
         return qd
 
+    def find_link_route(self, to, frm=None):
+        pl = to.parent_link
+        # if to is not included in self.link_list, just trace parent-link
+        if pl and self.link_list.index(to) == -1:
+            return self.find_link_route(pl, frm)
+        # if self.link_list, append "to" link
+        if pl and not (to == frm):
+            return self.find_link_route(pl, frm) + [to]
+        # if link_route, just return "frm" link
+        if pl and to == frm:
+            return [frm]
+        return []
+
+    def link_lists(self, to, frm=None):
+        """
+
+        Find link list from to link to frm link.
+
+        """
+        ret1 = self.find_link_route(to, frm)
+        if frm and not ret1[0] == frm:
+            ret2 = self.find_link_route(frm, ret1[0])
+            ret1 = ret2[::-1] + ret1
+        return ret1
+
     def reset_joint_angle_limit_weight_old(self, union_link_list):
         tmp_joint_angle_limit_weight_old = self.find_joint_angle_limit_weight_old_from_union_link_list(
             union_link_list)
@@ -1262,7 +1287,6 @@ class RobotModel(CascadedLink):
         for joint in joint_list:
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
-        self.root_link.parent_link = self
         self.add_child(self.root_link)
 
         if len(links) > 0:
