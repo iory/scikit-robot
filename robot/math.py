@@ -689,6 +689,26 @@ def quaternion_distance(q1, q2):
     return diff_theta
 
 
+def quaternion_norm(q):
+    """
+
+    Return the norm of quaternion.
+
+    Parameters
+    ----------
+    q : list or np.ndarray
+        [w, x, y, z] order
+
+    Return
+    ------
+    norm_q : float
+        quaternion norm of q
+    """
+    q = np.array(q)
+    norm_q = np.sqrt(np.dot(q.T, q))
+    return norm_q
+
+
 def quaternion_from_axis_angle(theta, axis):
     """
     Return the quaternion associated with counterclockwise rotation
