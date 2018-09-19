@@ -21,8 +21,8 @@ from robot.math import quaternion_multiply
 
 def transform_coords(c1, c2):
     pos = c1.pos + np.dot(c1.rotation, c2.pos)
-    rot = quaternion2matrix(quaternion_multiply(c1._q, c2._q))
-    return Coordinates(pos=pos, rot=rot)
+    q = quaternion_multiply(c1._q, c2._q)
+    return Coordinates(pos=pos, rot=q)
 
 
 class Coordinates(object):
