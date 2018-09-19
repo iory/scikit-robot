@@ -167,6 +167,12 @@ class DualQuaternion(object):
         dqt = dq0 * (1 - t) + dq1 * t
         return dqt.normalized
 
+    def enforce_positive_q_rot_w(self):
+        assert(self.norm[0] > 1e-8)
+        q_rot_w = self.qr[0]
+        if q_rot_w < 0.0:
+            self.dq = -self.dq
+
     def screw_axis(self):
         """
 
