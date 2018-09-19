@@ -3,6 +3,7 @@ from numbers import Number
 import numpy as np
 
 from robot.math import quaternion_conjugate
+from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 
 
@@ -156,6 +157,13 @@ class DualQuaternion(object):
             else:
                 screw_axis = np.zeros(3, dtype=np.float64)
         return screw_axis, rotation, translation
+
+    def inverse(self):
+        if self.norm[0] < 1.0e-8:
+            return None
+        inv_qr = quaternion_inverse(self.qr)
+        return DualQuaternion(
+            inv_qr, - quaternion_multiply(quaternion_multiply(inv_qr, self.qd), inv_qr))
 
     def __add__(self, val):
         if not isinstance(val, DualQuaternion):
