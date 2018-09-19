@@ -46,6 +46,17 @@ class TestDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             dq.quaternion, [-0.4, 0.2, 0.8, 0.4])
 
+    def test_normalize(self):
+        qr1 = normalize_vector(np.array([1, 2, 3, 4]))
+        x, y, z = np.array([1, 2, 3])
+        qd1 = 0.5 * quaternion_multiply(np.array([0, x, y, z]), qr1)
+        dq1 = DualQuaternion(qr1, qd1)
+        dq1.normalize()
+
+        testing.assert_almost_equal(
+            dq1.dq, [0.18257419, 0.36514837, 0.54772256, 0.73029674,
+                     -1.82574186, 0., 0.36514837, 0.18257419])
+
     def test_screw_axis(self):
         dq = DualQuaternion()
         screw_axis, rotation, translation = dq.screw_axis()
