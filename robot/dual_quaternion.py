@@ -2,6 +2,7 @@ from numbers import Number
 
 import numpy as np
 
+from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
@@ -49,6 +50,34 @@ class DualQuaternion(object):
             if not np.allclose(norm[0], [1]):
                 raise ValueError("Dual quaternoin's norm "
                                  "should be 1, but gives {}".format(norm[0]))
+
+    @property
+    def translation(self):
+        dq = self.normalized
+        q_rot = dq.qr
+        if (q_rot[0] < 0.0):
+            q_rot = - q_rot
+        translation = quaternion_multiply((2.0 * dq.qd), quaternion_conjugate(dq.qr))
+        return translation[1:]
+
+    @property
+    def rotation(self):
+        dq = self.normalized
+        return quaternion2matrix(dq.qr)
+
+    @property
+    def quaternion(self):
+        dq = self.normalized
+        return dq.qr
+
+    @property
+    def dq(self):
+        return np.concatenate([self.qr, self.qd])
+
+    @dq.setter
+    def dq(self, dq):
+        self.qr = dq[0:4]
+        self.qd = dq[4:8]
 
     @property
     def qr(self):
@@ -114,6 +143,16 @@ class DualQuaternion(object):
         qr = self.qr / real_norm
         qd = self.qd / real_norm
         return DualQuaternion(qr, qd, True)
+
+    @property
+    def scalar(self):
+        """
+
+        The scalar part of the dual quaternion.
+
+        """
+        scalar = (self + self.conjugate) * 0.5
+        return scalar
 
     def copy(self):
         """
@@ -188,6 +227,9 @@ class DualQuaternion(object):
             return DualQuaternion(new_qr, new_qd, False)
         raise TypeError('Cannot multiply dual quaternion '
                         'with object of type {}'.format(type(val)))
+
+    def __rmul__(self, val):
+        return self.__mul__(val)
 
     def __str__(self):
         return '{0}+{1}e'.format(self.qr, self.qd)
