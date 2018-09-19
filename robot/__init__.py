@@ -1,3 +1,9 @@
+import pkg_resources
+
+
+__version__ = pkg_resources.get_distribution('robot').version
+
+
 from robot import coordinates
 
 worldcoords = coordinates.CascadedCoords()
