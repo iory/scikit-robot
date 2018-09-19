@@ -110,9 +110,6 @@ class DualQuaternion(object):
             qd_wxyz = [0, qd_wxyz[0], qd_wxyz[1], qd_wxyz[2]]
         elif len(qd_wxyz) != 4:
             raise ValueError
-        if qd_wxyz[0] != 0:
-            raise ValueError('First value of Qd must be 0, but gives {}'.
-                             format(qd_wxyz))
         self._qd = np.array(qd_wxyz, dtype=np.float64)
 
     @property
