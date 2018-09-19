@@ -101,10 +101,18 @@ class DualQuaternion(object):
 
         return (qr_norm, qd_norm)
 
+    def normalize(self):
+        real_norm = np.linalg.norm(self.qr)
+        self.qr = self.qr / real_norm
+        self.qd = self.qd / real_norm
+        return self
+
     @property
     def normalized(self):
-        qr = self.qr / 1.0 / np.linalg.norm(self.qr)
-        return DualQuaternion(qr, self.qd, True)
+        real_norm = np.linalg.norm(self.qr)
+        qr = self.qr / real_norm
+        qd = self.qd / real_norm
+        return DualQuaternion(qr, qd, True)
 
     def copy(self):
         """
