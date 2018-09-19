@@ -126,6 +126,29 @@ class DualQuaternion(object):
         dqt = dq0 * (1 - t) + dq1 * t
         return dqt.normalized
 
+    def screw_axis(self):
+        """
+
+        Calculates rotation, translation and screw axis from dual quaternion.
+
+        """
+        qr_w = self.qr[0]
+        rotation = 2.0 * np.rad2deg(np.arccos(qr_w))
+        rotation = np.mod(rotation, 360.0)
+
+        qd_w = self.qd[0]
+        if rotation > 1.0e-12:
+            s = np.sin(rotation / 2.0 * np.pi / 180.0)
+            translation = -2.0 * qd_w / s
+            screw_axis = self.qr[1:] / s
+        else:
+            translation = 2.0 * np.sqrt(np.sum(self.qd[1:] ** 2))
+            if translation > 1.0e-12:
+                screw_axis = 2.0 * self.qd[1:] / translation
+            else:
+                screw_axis = np.zeros(3, dtype=np.float64)
+        return screw_axis, rotation, translation
+
     def __add__(self, val):
         if not isinstance(val, DualQuaternion):
             raise TypeError('Cannot add dual quaternion with '
