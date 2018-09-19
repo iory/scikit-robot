@@ -57,6 +57,14 @@ class TestDualQuaternion(unittest.TestCase):
             dq1.dq, [0.18257419, 0.36514837, 0.54772256, 0.73029674,
                      -1.82574186, 0., 0.36514837, 0.18257419])
 
+    def test_scalar(self):
+        qr = np.array([4, 1, 2, 3])
+        qt = np.array([1, 1, 3, 3])
+        dq = DualQuaternion(qr, qt)
+        scalar = dq.scalar
+        testing.assert_equal(
+            scalar.dq, [4, 0, 0, 0, 1, 0, 0, 0])
+
     def test_screw_axis(self):
         dq = DualQuaternion()
         screw_axis, rotation, translation = dq.screw_axis()
