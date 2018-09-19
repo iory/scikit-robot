@@ -709,6 +709,26 @@ def quaternion_norm(q):
     return norm_q
 
 
+def quaternion_normalize(q):
+    """
+
+    Return the normalized quaternion.
+
+    Parameters
+    ----------
+    q : list or np.ndarray
+        [w, x, y, z] order
+
+    Return
+    ------
+    normalized_q : float
+        normalized quaternion
+    """
+    q = np.array(q)
+    normalized_q = q / quaternion_norm(q)
+    return normalized_q
+
+
 def quaternion_from_axis_angle(theta, axis):
     """
     Return the quaternion associated with counterclockwise rotation
