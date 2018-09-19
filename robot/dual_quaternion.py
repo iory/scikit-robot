@@ -233,3 +233,17 @@ class DualQuaternion(object):
     def __repr__(self):
         return "DualQuaternion({0},{1})".format(
             repr(self.qr), repr(self.qd))
+
+    def pose(self):
+        self.normalize()
+        dq = self
+
+        pose = np.zeros(7)
+        q_rot = dq.qr
+        if (q_rot[0] < 0.0):
+            q_rot = -q_rot
+        translation = quaternion_multiply((2.0 * dq.qd), quaternion_conjugate(dq.qr))
+
+        pose[0:3] = translation[1:].copy()
+        pose[3:7] = q_rot.copy()
+        return pose.copy()
