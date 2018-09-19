@@ -6,6 +6,7 @@ from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
+from robot.math import quaternion_norm
 
 
 class DualQuaternion(object):
@@ -122,24 +123,19 @@ class DualQuaternion(object):
 
     @property
     def norm(self):
-        qr_c = quaternion_conjugate(self._qr)
-        qd_c = quaternion_conjugate(self._qd)
-
-        qr_norm = np.linalg.norm(quaternion_multiply(self._qr, qr_c))
-        qd_norm = np.linalg.norm(quaternion_multiply(self._qr, qd_c) +
-                                 quaternion_multiply(self._qd, qr_c))
-
+        qr_norm = quaternion_norm(self.qr)
+        qd_norm = np.dot(self.qr, self.qd) / qr_norm
         return (qr_norm, qd_norm)
 
     def normalize(self):
-        real_norm = np.linalg.norm(self.qr)
+        real_norm = quaternion_norm(self.qr)
         self.qr = self.qr / real_norm
         self.qd = self.qd / real_norm
         return self
 
     @property
     def normalized(self):
-        real_norm = np.linalg.norm(self.qr)
+        real_norm = quaternion_norm(self.qr)
         qr = self.qr / real_norm
         qd = self.qd / real_norm
         return DualQuaternion(qr, qd, True)
@@ -208,12 +204,9 @@ class DualQuaternion(object):
         if not isinstance(val, DualQuaternion):
             raise TypeError('Cannot add dual quaternion with '
                             'object of type {}'.format(type(val)))
-
-        new_qr = self.qr + val.qr
-        new_qd = self.qd + val.qd
-        new_qr = new_qr / np.linalg.norm(new_qr)
-
-        return DualQuaternion(new_qr, new_qd, False)
+        dq = DualQuaternion()
+        dq.dq = self.dq + val.dq
+        return dq
 
     def __mul__(self, val):
         if isinstance(val, DualQuaternion):
