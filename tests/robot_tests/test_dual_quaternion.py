@@ -74,3 +74,14 @@ class TestDualQuaternion(unittest.TestCase):
             rotation, 0)
         testing.assert_equal(
             translation, 0)
+
+        dq = DualQuaternion([9.99961895e-01, 1.05970598e-16, 8.69655833e-03, -7.61002163e-04],
+                            [-4.33680869e-18, -1.66533454e-16, -1.12628320e-04, -1.28709063e-03])
+        screw_axis, rotation, translation = dq.screw_axis()
+        testing.assert_almost_equal(
+            screw_axis, [1.21389616e-14, 9.96193187e-01, -8.71730105e-02],
+            decimal=4)
+        testing.assert_almost_equal(
+            rotation, 1.0003730688205559, decimal=4)
+        testing.assert_almost_equal(
+            translation, 9.935652945166209e-16, decimal=4)
