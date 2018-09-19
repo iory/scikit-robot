@@ -35,7 +35,7 @@ class DualQuaternion(object):
     def __init__(self,
                  qr=[1, 0, 0, 0],
                  qd=[0, 0, 0, 0],
-                 enforce_unit_norm=True):
+                 enforce_unit_norm=False):
         """
         Initialize a dual quaternion.
 
