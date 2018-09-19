@@ -26,7 +26,7 @@ install_requires = [
     'future',
     'numpy>=1.9.0',
     'ordered_set',
-    'pybullet',
+    'pybullet>=2.1.9',
     'quadprog',
     'sympy',
 ]
