@@ -58,7 +58,8 @@ class DualQuaternion(object):
         q_rot = dq.qr
         if (q_rot[0] < 0.0):
             q_rot = - q_rot
-        translation = quaternion_multiply((2.0 * dq.qd), quaternion_conjugate(dq.qr))
+        translation = quaternion_multiply(
+            (2.0 * dq.qd), quaternion_conjugate(dq.qr))
         return translation[1:]
 
     @property
@@ -242,7 +243,8 @@ class DualQuaternion(object):
         q_rot = dq.qr
         if (q_rot[0] < 0.0):
             q_rot = -q_rot
-        translation = quaternion_multiply((2.0 * dq.qd), quaternion_conjugate(dq.qr))
+        translation = quaternion_multiply(
+            (2.0 * dq.qd), quaternion_conjugate(dq.qr))
 
         pose[0:3] = translation[1:].copy()
         pose[3:7] = q_rot.copy()
