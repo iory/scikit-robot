@@ -669,9 +669,35 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     return q
 
 
-def quaternion_distance(q1, q2):
+def quaternion_distance(q1, q2, absolute=False):
     """
     Return the distance of quaternion.
+
+    Parameters
+    ----------
+    q1 : list or np.ndarray
+    q2 : list or np.ndarray
+        [w, x, y, z] order
+    absolute : bool
+        if True, return distance accounting for the sign ambiguity.
+
+    Return
+    ------
+    diff_theta : float
+        distance of q1 and q2 in radian.
+    """
+    if absolute is True:
+        diff_theta = 2.0 * np.arccos(
+            np.abs(np.dot(q1, q2)))
+    else:
+        diff_theta = 2.0 * np.arccos(np.dot(q1, q2))
+    return diff_theta
+
+
+def quaternion_absolute_distance(q1, q2):
+    """
+
+    Return the absolute distance of quaternion.
 
     Parameters
     ----------
@@ -682,11 +708,9 @@ def quaternion_distance(q1, q2):
     Return
     ------
     diff_theta : float
-        distance of q1 and q2 in radian.
+        absolute distance of q1 and q2 in radian.
     """
-    diff_theta = 2.0 * np.arccos(
-        np.abs(np.dot(q1, q2)))
-    return diff_theta
+    return quaternion_distance(q1, q2, True)
 
 
 def quaternion_norm(q):
