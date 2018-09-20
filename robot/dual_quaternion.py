@@ -7,6 +7,7 @@ from robot.math import quaternion_conjugate
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_norm
+from robot.math import quaternion_normalize
 
 
 class DualQuaternion(object):
@@ -43,6 +44,10 @@ class DualQuaternion(object):
         ----------
 
         """
+        if len(qd) == 3:
+            x, y, z = qd
+            qr = quaternion_normalize(qr)
+            qd = 0.5 * (quaternion_multiply([0, x, y, z], qr))
         self.qr = qr
         self.qd = qd
 
