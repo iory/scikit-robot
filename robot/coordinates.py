@@ -2,11 +2,13 @@ import copy
 
 import numpy as np
 
+from robot.dual_quaternion import DualQuaternion
 from robot.math import _wrap_axis
 from robot.math import matrix2quaternion
 from robot.math import matrix_log
 from robot.math import normalize_vector
 from robot.math import quaternion2matrix
+from robot.math import quaternion_multiply
 from robot.math import random_rotation
 from robot.math import random_translation
 from robot.math import rotate_matrix
@@ -16,7 +18,6 @@ from robot.math import rotation_matrix_from_rpy
 from robot.math import rpy2quaternion
 from robot.math import rpy_angle
 from robot.math import rpy_matrix
-from robot.math import quaternion_multiply
 
 
 def transform_coords(c1, c2):
@@ -185,6 +186,13 @@ class Coordinates(object):
     @property
     def quaternion(self):
         return matrix2quaternion(self.rotation)
+
+    @property
+    def dual_quaternion(self):
+        qr = normalize_vector(self.quaternion)
+        x, y, z = self.translation
+        qd = quaternion_multiply(np.array([0, x, y, z]), qr) * 0.5
+        return DualQuaternion(qr, qd)
 
     def parent_orientation(self, v, wrt):
         if wrt == 'local' or wrt == self:

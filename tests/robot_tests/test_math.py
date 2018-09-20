@@ -17,6 +17,8 @@ from robot.math import quaternion_distance
 from robot.math import quaternion_from_axis_angle
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
+from robot.math import quaternion_norm
+from robot.math import quaternion_normalize
 from robot.math import quaternion_slerp
 from robot.math import rodrigues
 from robot.math import rotate_matrix
@@ -303,6 +305,24 @@ class TestMath(unittest.TestCase):
         q1 = rpy2quaternion([np.pi, 0, 0])
         q2 = rpy2quaternion([0, 0, 0])
         self.assertEqual(quaternion_distance(q1, q2), np.pi)
+
+    def test_quaternion_norm(self):
+        q = np.array([1, 0, 0, 0])
+        self.assertEqual(quaternion_norm(q), 1.0)
+
+        q = np.array([0, 0, 0, 0])
+        self.assertEqual(quaternion_norm(q), 0.0)
+
+    def test_quaternion_normalize(self):
+        q = np.array([1, 0, 0, 0])
+        testing.assert_equal(
+            quaternion_normalize(q),
+            [1, 0, 0, 0])
+
+        q = np.array([1, 2, 3, 4])
+        testing.assert_almost_equal(
+            quaternion_normalize(q),
+            [0.18257419, 0.36514837, 0.54772256, 0.73029674])
 
     def test_quaternion_from_axis_angle(self):
         q = quaternion_from_axis_angle(0.1, [1, 0, 0])

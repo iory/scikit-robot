@@ -2,8 +2,11 @@ from numbers import Number
 
 import numpy as np
 
+from robot.math import quaternion2matrix
 from robot.math import quaternion_conjugate
+from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
+from robot.math import quaternion_norm
 
 
 class DualQuaternion(object):
@@ -32,7 +35,7 @@ class DualQuaternion(object):
     def __init__(self,
                  qr=[1, 0, 0, 0],
                  qd=[0, 0, 0, 0],
-                 enforce_unit_norm=True):
+                 enforce_unit_norm=False):
         """
         Initialize a dual quaternion.
 
@@ -48,6 +51,35 @@ class DualQuaternion(object):
             if not np.allclose(norm[0], [1]):
                 raise ValueError("Dual quaternoin's norm "
                                  "should be 1, but gives {}".format(norm[0]))
+
+    @property
+    def translation(self):
+        dq = self.normalized
+        q_rot = dq.qr
+        if (q_rot[0] < 0.0):
+            q_rot = - q_rot
+        translation = quaternion_multiply(
+            (2.0 * dq.qd), quaternion_conjugate(dq.qr))
+        return translation[1:]
+
+    @property
+    def rotation(self):
+        dq = self.normalized
+        return quaternion2matrix(dq.qr)
+
+    @property
+    def quaternion(self):
+        dq = self.normalized
+        return dq.qr
+
+    @property
+    def dq(self):
+        return np.concatenate([self.qr, self.qd])
+
+    @dq.setter
+    def dq(self, dq):
+        self.qr = dq[0:4]
+        self.qd = dq[4:8]
 
     @property
     def qr(self):
@@ -79,9 +111,6 @@ class DualQuaternion(object):
             qd_wxyz = [0, qd_wxyz[0], qd_wxyz[1], qd_wxyz[2]]
         elif len(qd_wxyz) != 4:
             raise ValueError
-        if qd_wxyz[0] != 0:
-            raise ValueError('First value of Qd must be 0, but gives {}'.
-                             format(qd_wxyz))
         self._qd = np.array(qd_wxyz, dtype=np.float64)
 
     @property
@@ -92,19 +121,32 @@ class DualQuaternion(object):
 
     @property
     def norm(self):
-        qr_c = quaternion_conjugate(self._qr)
-        qd_c = quaternion_conjugate(self._qd)
-
-        qr_norm = np.linalg.norm(quaternion_multiply(self._qr, qr_c))
-        qd_norm = np.linalg.norm(quaternion_multiply(self._qr, qd_c) +
-                                 quaternion_multiply(self._qd, qr_c))
-
+        qr_norm = quaternion_norm(self.qr)
+        qd_norm = np.dot(self.qr, self.qd) / qr_norm
         return (qr_norm, qd_norm)
+
+    def normalize(self):
+        real_norm = quaternion_norm(self.qr)
+        self.qr = self.qr / real_norm
+        self.qd = self.qd / real_norm
+        return self
 
     @property
     def normalized(self):
-        qr = self.qr / 1.0 / np.linalg.norm(self.qr)
-        return DualQuaternion(qr, self.qd, True)
+        real_norm = quaternion_norm(self.qr)
+        qr = self.qr / real_norm
+        qd = self.qd / real_norm
+        return DualQuaternion(qr, qd, True)
+
+    @property
+    def scalar(self):
+        """
+
+        The scalar part of the dual quaternion.
+
+        """
+        scalar = (self + self.conjugate) * 0.5
+        return scalar
 
     def copy(self):
         """
@@ -126,16 +168,49 @@ class DualQuaternion(object):
         dqt = dq0 * (1 - t) + dq1 * t
         return dqt.normalized
 
+    def enforce_positive_q_rot_w(self):
+        assert(self.norm[0] > 1e-8)
+        q_rot_w = self.qr[0]
+        if q_rot_w < 0.0:
+            self.dq = -self.dq
+
+    def screw_axis(self):
+        """
+
+        Calculates rotation, translation and screw axis from dual quaternion.
+
+        """
+        qr_w = self.qr[0]
+        rotation = 2.0 * np.rad2deg(np.arccos(qr_w))
+        rotation = np.mod(rotation, 360.0)
+
+        qd_w = self.qd[0]
+        if rotation > 1.0e-12:
+            s = np.sin(rotation / 2.0 * np.pi / 180.0)
+            translation = -2.0 * qd_w / s
+            screw_axis = self.qr[1:] / s
+        else:
+            translation = 2.0 * np.sqrt(np.sum(self.qd[1:] ** 2))
+            if translation > 1.0e-12:
+                screw_axis = 2.0 * self.qd[1:] / translation
+            else:
+                screw_axis = np.zeros(3, dtype=np.float64)
+        return screw_axis, rotation, translation
+
+    def inverse(self):
+        if self.norm[0] < 1.0e-8:
+            return None
+        inv_qr = quaternion_inverse(self.qr)
+        return DualQuaternion(
+            inv_qr, - quaternion_multiply(quaternion_multiply(inv_qr, self.qd), inv_qr))
+
     def __add__(self, val):
         if not isinstance(val, DualQuaternion):
             raise TypeError('Cannot add dual quaternion with '
                             'object of type {}'.format(type(val)))
-
-        new_qr = self.qr + val.qr
-        new_qd = self.qd + val.qd
-        new_qr = new_qr / np.linalg.norm(new_qr)
-
-        return DualQuaternion(new_qr, new_qd, False)
+        dq = DualQuaternion()
+        dq.dq = self.dq + val.dq
+        return dq
 
     def __mul__(self, val):
         if isinstance(val, DualQuaternion):
@@ -150,9 +225,27 @@ class DualQuaternion(object):
         raise TypeError('Cannot multiply dual quaternion '
                         'with object of type {}'.format(type(val)))
 
+    def __rmul__(self, val):
+        return self.__mul__(val)
+
     def __str__(self):
         return '{0}+{1}e'.format(self.qr, self.qd)
 
     def __repr__(self):
         return "DualQuaternion({0},{1})".format(
             repr(self.qr), repr(self.qd))
+
+    def pose(self):
+        self.normalize()
+        dq = self
+
+        pose = np.zeros(7)
+        q_rot = dq.qr
+        if (q_rot[0] < 0.0):
+            q_rot = -q_rot
+        translation = quaternion_multiply(
+            (2.0 * dq.qd), quaternion_conjugate(dq.qr))
+
+        pose[0:3] = translation[1:].copy()
+        pose[3:7] = q_rot.copy()
+        return pose.copy()
