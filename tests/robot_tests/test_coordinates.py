@@ -89,6 +89,11 @@ class TestCoordinates(unittest.TestCase):
             coord_b.inverse_transformation().quaternion,
             [0.20692513, 0.50841015, 0.82812527, 0.1136206])
 
+        # check inverse of transformation(worldcoords)
+        testing.assert_almost_equal(
+            coord_a.inverse_transformation().worldpos(),
+            coord_a.transformation(make_coords()).worldpos())
+
     def rotate(self):
         c = make_coords(pos=[1, 2, 3])
         c.rotate(pi / 7.0, 'y', 'world')
