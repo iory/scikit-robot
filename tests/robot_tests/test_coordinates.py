@@ -52,6 +52,21 @@ class TestCoordinates(unittest.TestCase):
             [-2, -2, -2])
 
     def test_transformation(self):
+        coord_a = make_coords(pos=[0, 0, 1])
+        coord_b = make_coords(pos=[1, 0, 0])
+        testing.assert_almost_equal(
+            coord_a.transformation(coord_b).worldpos(),
+            [1, 0, -1])
+        testing.assert_almost_equal(
+            coord_a.transformation(coord_b).quaternion,
+            [1, 0, 0, 0])
+        testing.assert_almost_equal(
+            coord_b.transformation(coord_a).worldpos(),
+            [-1, 0, 1])
+        testing.assert_almost_equal(
+            coord_b.transformation(coord_a).quaternion,
+            [1, 0, 0, 0])
+
         c = make_coords(rot=[deg2rad(10), 0, 0])
         d = make_coords(rot=[deg2rad(20), 0, 0])
         testing.assert_almost_equal(
