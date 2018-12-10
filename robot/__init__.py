@@ -9,7 +9,6 @@ from robot import coordinates
 worldcoords = coordinates.CascadedCoords()
 
 from robot import geo  # NOQA
-from robot import ik  # NOQA
 from robot import interpolator  # NOQA
 from robot import math  # NOQA
 from robot import optimizer  # NOQA

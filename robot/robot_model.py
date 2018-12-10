@@ -1243,6 +1243,8 @@ class RobotModel(CascadedLink):
         joint_list = []
         joint_names = []
         for j in self.robot_urdf.joints:
+            if j.axis is None:
+                j.axis = 'z'
             if j.type in ['fixed']:
                 link_maps[j.parent].add_child(link_maps[j.child])
                 link_maps[j.child].parent_link = link_maps[j.parent]
@@ -1290,8 +1292,12 @@ class RobotModel(CascadedLink):
         for j in self.robot_urdf.joints:
             if j.type in ['fixed']:
                 continue
-            rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
-            xyz = np.array(j.origin.xyz, dtype=np.float32)
+            if j.origin is None:
+                rpy = np.zeros(3, dtype=np.float32)
+                xyz = np.zeros(3, dtype=np.float32)
+            else:
+                rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
+                xyz = np.array(j.origin.xyz, dtype=np.float32)
             link_maps[j.child].newcoords(rpy,
                                          xyz)
             # TODO fix automatically update default_coords

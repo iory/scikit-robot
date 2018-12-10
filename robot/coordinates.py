@@ -431,6 +431,23 @@ class CascadedCoords(Coordinates):
             return self.newcoords(self.rotation, self.pos)
 
     def rotate(self, theta, axis, wrt='local'):
+        """
+        Rotate this coordinate relative to axis by theta radians
+        with respect to wrt.
+
+        Parameters
+        ----------
+        theta : float
+            radian
+        axis : string or numpy.ndarray
+            'x', 'y', 'z' or vector
+        wrt : string or Coordinates
+
+        Returns
+        -------
+        self
+
+        """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)

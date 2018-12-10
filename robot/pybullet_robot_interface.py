@@ -3,6 +3,7 @@ import importlib
 import numpy as np
 
 from robot.math import quaternion2rpy
+from robot.math import matrix2quaternion
 from robot.robot_model import LinearJoint
 from robot.robot_model import RotationalJoint
 
@@ -147,3 +148,79 @@ class PybulletRobotInterface(object):
         self.robot.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
                                        pos=pos)
         return self.angle_vector()
+
+
+remove_user_item_indices = []
+
+
+def draw(c):
+    coord = c.copy_worldcoords()
+    orientation = matrix2quaternion(coord.worldrot())
+    orientation = np.array([orientation[1],
+                            orientation[2],
+                            orientation[3],
+                            orientation[0]])
+    createPoseMarker(c.worldpos(),
+                     orientation,
+                     lineWidth=4,
+                     lineLength=2)
+
+
+def flush():
+    global remove_user_item_indices
+    for idx in remove_user_item_indices:
+        p.removeUserDebugItem(idx)
+    remove_user_item_indices = []
+
+
+def createPoseMarker(position=np.array([0, 0, 0]),
+                     orientation=np.array([0, 0, 0, 1]),
+                     text="",
+                     xColor=np.array([1, 0, 0]),
+                     yColor=np.array([0, 1, 0]),
+                     zColor=np.array([0, 0, 1]),
+                     textColor=np.array([0, 0, 0]),
+                     lineLength=0.1,
+                     lineWidth=1,
+                     textSize=1,
+                     textPosition=np.array([0, 0, 0.1]),
+                     textOrientation=None,
+                     lifeTime=0,
+                     parentObjectUniqueId=-1,
+                     parentLinkIndex=-1,
+                     physicsClientId=0):
+    """
+
+    Create a pose marker that identifies a position and orientation
+    in space with 3 colored lines.
+
+    """
+
+    global remove_user_item_indices
+    pts = np.array([[0, 0, 0], [lineLength, 0, 0], [
+                   0, lineLength, 0], [0, 0, lineLength]])
+    rotIdentity = np.array([0, 0, 0, 1])
+    po, _ = p.multiplyTransforms(position, orientation, pts[0, :], rotIdentity)
+    px, _ = p.multiplyTransforms(position, orientation, pts[1, :], rotIdentity)
+    py, _ = p.multiplyTransforms(position, orientation, pts[2, :], rotIdentity)
+    pz, _ = p.multiplyTransforms(position, orientation, pts[3, :], rotIdentity)
+    idx = p.addUserDebugLine(po, px, xColor, lineWidth, lifeTime,
+                             parentObjectUniqueId, parentLinkIndex,
+                             physicsClientId)
+    remove_user_item_indices.append(idx)
+    idx = p.addUserDebugLine(po, py, yColor, lineWidth, lifeTime,
+                             parentObjectUniqueId, parentLinkIndex,
+                             physicsClientId)
+    remove_user_item_indices.append(idx)
+    idx = p.addUserDebugLine(po, pz, zColor, lineWidth, lifeTime,
+                             parentObjectUniqueId, parentLinkIndex,
+                             physicsClientId)
+    remove_user_item_indices.append(idx)
+    if textOrientation is None:
+        textOrientation = orientation
+    idx = p.addUserDebugText(text, [0, 0, 0.1], textColorRGB=textColor,
+                             textSize=textSize,
+                             parentObjectUniqueId=parentObjectUniqueId,
+                             parentLinkIndex=parentLinkIndex,
+                             physicsClientId=physicsClientId)
+    remove_user_item_indices.append(idx)
