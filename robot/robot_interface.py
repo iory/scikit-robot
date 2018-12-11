@@ -94,9 +94,6 @@ class RobotInterface(object):
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
 
-        if self.is_simulation_mode():
-            raise NotImplementedError
-
     def wait_until_update_all_joints(self, tgt_tm):
         """
         TODO
@@ -203,6 +200,7 @@ class RobotInterface(object):
             TODO
         """
         tmp_actions = []
+        tmp_actions_name = []
         if create_actions:
             for controller in self.default_controller():
                 controller_action = controller["controller_action"]
@@ -214,7 +212,8 @@ class RobotInterface(object):
                                                 controller_action,
                                                 controller["action_type"])
                 tmp_actions.append(action)
-            for action in tmp_actions:
+                tmp_actions_name.append(controller_action)
+            for action, action_name in zip(tmp_actions, tmp_actions_name):
                 if self.controller_timeout is None:
                     rospy.logwarn(
                         "Waiting for actionlib interface forever because controler-timeout is None")
@@ -222,8 +221,10 @@ class RobotInterface(object):
                         action.wait_for_server(rospy.Duration(self.controller_timeout))):
                     rospy.logwarn("{} is not respond, {}_interface is disable".
                                   format(action, self.robot.name))
-                    # rospy.logwarn("make sure that you can run 'rostopic echo /{0}/goal' and 'rostopic info /{0}/goal'".
-                    #               format(action.name))
+                    rospy.logwarn("make sure that you can run "
+                                  "'rostopic echo /{0}/status' "
+                                  "and 'rostopic info /{0}/status'".
+                                  format(action_name))
                     if joint_enable_check:
                         self.joint_action_enable = False
                         return []
