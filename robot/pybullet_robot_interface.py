@@ -65,6 +65,7 @@ class PybulletRobotInterface(object):
     def load_bullet(self):
         joint_num = p.getNumJoints(self.robot_id)
         joint_ids = [None] * joint_num
+        joint_name_to_joint_id = {}
         for i in range(len(joint_ids)):
             joint_name = p.getJointInfo(self.robot_id, i)[1]
             try:
@@ -73,7 +74,11 @@ class PybulletRobotInterface(object):
                 continue
             if idx != -1:
                 joint_ids[idx] = i
+                joint_name_to_joint_id[joint_name] = i
+            else:
+                joint_name_to_joint_id[joint_name] = idx
         self.joint_ids = joint_ids
+        self.joint_name_to_joint_id = joint_name_to_joint_id
 
         self.force = 200
         self.max_velcity = 1.0
@@ -90,9 +95,8 @@ class PybulletRobotInterface(object):
         if angle_vector is None:
             angle_vector = self.robot.angle_vector()
 
-        for i, (idx, angle) in enumerate(zip(self.joint_ids, angle_vector)):
-            if idx is None:
-                continue
+        for i, (joint, angle) in enumerate(zip(self.robot.joint_list, angle_vector)):
+            idx = self.joint_name_to_joint_id[joint.name]
 
             joint = self.robot.joint_list[i]
             if isinstance(joint, RotationalJoint):
