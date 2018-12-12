@@ -74,9 +74,9 @@ class PybulletRobotInterface(object):
                 continue
             if idx != -1:
                 joint_ids[idx] = i
-                joint_name_to_joint_id[joint_name] = i
+                joint_name_to_joint_id[joint_name.decode('utf-8')] = i
             else:
-                joint_name_to_joint_id[joint_name] = idx
+                joint_name_to_joint_id[joint_name.decode('utf-8')] = idx
         self.joint_ids = joint_ids
         self.joint_name_to_joint_id = joint_name_to_joint_id
 
