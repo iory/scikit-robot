@@ -20,3 +20,4 @@ from robot import utils  # NOQA
 from robot.misc import listify  # NOQA
 from robot.pybullet_robot_interface import PybulletRobotInterface  # NOQA
 from robot.utils.urdf import URDF  # NOQA
+from robot import quaternion  # NOQA
