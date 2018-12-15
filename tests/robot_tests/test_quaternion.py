@@ -89,12 +89,12 @@ class TestQuaternion(unittest.TestCase):
     def test_conjugate(self):
         q = Quaternion()
         testing.assert_almost_equal(
-            q.conjugate().q,
+            q.conjugate.q,
             [1.0, 0.0, 0.0, 0.0])
 
         q = Quaternion(q=[1, -1, -2, -3])
         testing.assert_almost_equal(
-            q.conjugate().q,
+            q.conjugate.q,
             [1, 1, 2, 3])
 
     def test_inverse(self):
