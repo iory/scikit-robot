@@ -107,6 +107,7 @@ class Quaternion(object):
     def copy(self):
         return Quaternion(q=self.q.copy())
 
+    @property
     def conjugate(self):
         new_q = [self.w, -self.x, -self.y, -self.z]
         return Quaternion(q=new_q)
