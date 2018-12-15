@@ -122,6 +122,13 @@ class Quaternion(object):
     def inverse(self):
         return Quaternion(q=quaternion_inverse(self.q))
 
+    def T(self):
+        """Return 4x4 transformation matrix"""
+        matrix = np.zeros((4, 4), dtype=np.float64)
+        matrix[3, 3] = 1.0
+        matrix[:3, :3] = self.rotation
+        return matrix
+
     def __add__(self, cls):
         new_q = self.q + cls.q
         return Quaternion(q=new_q)
