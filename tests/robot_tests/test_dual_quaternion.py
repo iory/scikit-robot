@@ -86,6 +86,37 @@ class TestDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             translation, 9.935652945166209e-16, decimal=4)
 
+    def test_axis(self):
+        dq = DualQuaternion()
+        axis = dq.axis
+        testing.assert_equal(
+            axis, np.array([0, 0, 0]))
+
+        dq = DualQuaternion(
+            [9.99961895e-01, 1.05970598e-16,
+             8.69655833e-03, -7.61002163e-04],
+            [-4.33680869e-18, -1.66533454e-16,
+             -1.12628320e-04, -1.28709063e-03])
+        axis = dq.axis
+        testing.assert_almost_equal(
+            axis, [1.21389616e-14, 9.96193187e-01, -8.71730105e-02],
+            decimal=4)
+
+    def test_angle(self):
+        dq = DualQuaternion()
+        rotation = dq.angle
+        testing.assert_equal(
+            rotation, 0)
+
+        dq = DualQuaternion(
+            [9.99961895e-01, 1.05970598e-16,
+             8.69655833e-03, -7.61002163e-04],
+            [-4.33680869e-18, -1.66533454e-16,
+             -1.12628320e-04, -1.28709063e-03])
+        rotation = dq.angle
+        testing.assert_almost_equal(
+            rotation, 0.017459723251179834, decimal=4)
+
     def test_pose(self):
         dq = DualQuaternion()
         pose = dq.pose()
