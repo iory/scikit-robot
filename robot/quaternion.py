@@ -5,6 +5,7 @@ import numpy as np
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_norm
+from robot.math import normalize_vector
 
 
 class Quaternion(object):
@@ -16,7 +17,10 @@ class Quaternion(object):
                  z=0.0,
                  q=None):
         if q is None:
-            self.q = [w, x, y, z]
+            if isinstance(w, list) and len(w) == 4:
+                self.q = w
+            else:
+                self.q = [w, x, y, z]
         else:
             self.q = q
 
@@ -47,6 +51,39 @@ class Quaternion(object):
     @property
     def w(self):
         return self.q[0]
+
+    @property
+    def xyz(self):
+        return self.q[1:]
+
+    @property
+    def axis(self):
+        """Return axis of this quaternion.
+
+        Return:
+        axis (~numpy.ndarray) : normalized axis
+        """
+        if self.w > 1.0:
+            q = self.normalized()
+        else:
+            q = self
+
+        # quaternion is normalized
+        # q.w is less than 1.0, so term always positive.
+        s = np.sqrt(1 - q.w ** 2)
+
+        if s < 0.001:
+            axis = q.xyz
+        else:
+            axis = q.xyz / s
+        axis = normalize_vector(axis)
+        return axis
+
+    @property
+    def angle(self):
+        q = self.normalized()
+        theta = 2.0 * np.arccos(q.w)
+        return theta
 
     def norm(self):
         return quaternion_norm(self.q)
