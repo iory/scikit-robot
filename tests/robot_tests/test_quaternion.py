@@ -17,6 +17,11 @@ class TestQuaternion(unittest.TestCase):
         Quaternion(numpy_q)
         Quaternion(q=numpy_q)
 
+    def test_rotation(self):
+        q = Quaternion([1, 0, 0, 0])
+        testing.assert_almost_equal(
+            q.rotation, np.eye(3))
+
     def test_axis(self):
         q = Quaternion(w=0.7071, x=0.7071)
         testing.assert_almost_equal(
