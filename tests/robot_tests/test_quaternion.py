@@ -110,3 +110,9 @@ class TestQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             q.inverse().q,
             [1.0, 0.0, 0.0, 0.0])
+
+    def test_T(self):
+        q = Quaternion()
+        testing.assert_almost_equal(
+            q.T(),
+            np.eye(4))
