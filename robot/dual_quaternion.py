@@ -2,7 +2,6 @@ from numbers import Number
 
 import numpy as np
 
-from robot.math import quaternion2matrix
 from robot.math import quaternion_multiply
 from robot.math import quaternion_normalize
 from robot.quaternion import Quaternion
@@ -68,7 +67,7 @@ class DualQuaternion(object):
     @property
     def rotation(self):
         dq = self.normalized
-        return quaternion2matrix(dq.qr)
+        return dq.qr.rotation
 
     @property
     def quaternion(self):
