@@ -225,6 +225,14 @@ class DualQuaternion(object):
         return DualQuaternion(
             inv_qr, - inv_qr * self.qd * inv_qr)
 
+    def T(self):
+        """Return 4x4 transformation matrix"""
+        matrix = np.zeros((4, 4), dtype=np.float64)
+        matrix[3, 3] = 1.0
+        matrix[:3, :3] = self.rotation
+        matrix[:3, 3] = self.translation
+        return matrix
+
     def __add__(self, val):
         if not isinstance(val, DualQuaternion):
             raise TypeError('Cannot add dual quaternion with '
