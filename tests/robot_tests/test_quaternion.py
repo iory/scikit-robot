@@ -10,9 +10,12 @@ class TestQuaternion(unittest.TestCase):
 
     def test_init(self):
         q = [1, 0, 0, 0]
+        numpy_q = np.array(q)
         Quaternion(q)
         Quaternion(q=q)
         Quaternion(q[0], q[1], q[2], q[3])
+        Quaternion(numpy_q)
+        Quaternion(q=numpy_q)
 
     def test_axis(self):
         q = Quaternion(w=0.7071, x=0.7071)

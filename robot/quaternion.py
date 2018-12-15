@@ -17,7 +17,8 @@ class Quaternion(object):
                  z=0.0,
                  q=None):
         if q is None:
-            if isinstance(w, list) and len(w) == 4:
+            if (isinstance(w, list) or isinstance(w, np.ndarray)) and \
+               len(w) == 4:
                 self.q = w
             else:
                 self.q = [w, x, y, z]
