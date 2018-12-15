@@ -84,7 +84,7 @@ class TestQuaternion(unittest.TestCase):
         q = Quaternion()
 
         testing.assert_almost_equal(
-            q.norm(), 1.0)
+            q.norm, 1.0)
 
     def test_conjugate(self):
         q = Quaternion()
