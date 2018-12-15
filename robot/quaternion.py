@@ -64,7 +64,7 @@ class Quaternion(object):
         axis (~numpy.ndarray) : normalized axis
         """
         if self.w > 1.0:
-            q = self.normalized()
+            q = self.normalized
         else:
             q = self
 
@@ -81,22 +81,24 @@ class Quaternion(object):
 
     @property
     def angle(self):
-        q = self.normalized()
+        q = self.normalized
         theta = 2.0 * np.arccos(q.w)
         return theta
 
+    @property
     def norm(self):
         return quaternion_norm(self.q)
 
     def normalize(self):
         """Normalize this quaternion"""
-        norm = self.norm()
+        norm = self.norm
         if norm > 1e-8:
             self.q = self.q / norm
 
+    @property
     def normalized(self):
         """Return Normalized quaternion"""
-        norm = self.norm()
+        norm = self.norm
         q = self.q.copy()
         if norm > 1e-8:
             q = q / norm
