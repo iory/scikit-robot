@@ -132,3 +132,9 @@ class TestDualQuaternion(unittest.TestCase):
         pose = dq.pose()
         testing.assert_almost_equal(
             pose, [0, 0, 0, 1, 0, 0, 0])
+
+    def test_T(self):
+        dq = DualQuaternion()
+        testing.assert_almost_equal(
+            dq.T(),
+            np.eye(4))
