@@ -2,10 +2,11 @@ from numbers import Number
 
 import numpy as np
 
+from robot.math import normalize_vector
+from robot.math import quaternion2matrix
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_norm
-from robot.math import normalize_vector
 
 
 class Quaternion(object):
@@ -56,6 +57,11 @@ class Quaternion(object):
     @property
     def xyz(self):
         return self.q[1:]
+
+    @property
+    def rotation(self):
+        """Return rotation matrix"""
+        return quaternion2matrix(self.q)
 
     @property
     def axis(self):
