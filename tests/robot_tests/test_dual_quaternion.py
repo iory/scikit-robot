@@ -7,6 +7,7 @@ from numpy import testing
 
 from robot.dual_quaternion import DualQuaternion
 from robot.math import normalize_vector
+from robot.math import quaternion2matrix
 from robot.math import quaternion_multiply
 
 
@@ -45,6 +46,15 @@ class TestDualQuaternion(unittest.TestCase):
             dq.translation, [0, 4, 6])
         testing.assert_almost_equal(
             dq.quaternion.q, [-0.4, 0.2, 0.8, 0.4])
+
+    def test_rotation(self):
+        qr = normalize_vector(np.array([1, 2, 3, 4]))
+        x, y, z = np.array([1, 2, 3])
+        qd = 0.5 * quaternion_multiply(np.array([0, x, y, z]), qr)
+        dq = DualQuaternion(qr, qd)
+
+        testing.assert_almost_equal(
+            dq.rotation, quaternion2matrix(qr))
 
     def test_normalize(self):
         qr1 = normalize_vector(np.array([1, 2, 3, 4]))
