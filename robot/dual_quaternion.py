@@ -183,6 +183,14 @@ class DualQuaternion(object):
         if q_rot_w < 0.0:
             self.dq = -self.dq
 
+    @property
+    def axis(self):
+        return self.qr.axis
+
+    @property
+    def angle(self):
+        return self.qr.angle
+
     def screw_axis(self):
         """
 
