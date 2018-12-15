@@ -30,7 +30,7 @@ class Quaternion(object):
 
     @q.setter
     def q(self, quaternion):
-        quaternion = np.array(quaternion, dtype=np.float32)
+        quaternion = np.array(quaternion, dtype=np.float64)
         if not (quaternion.shape == (4,)):
             raise ValueError("quaternion should be of shape (4,)."
                              " get {}".format(quaternion.shape))
