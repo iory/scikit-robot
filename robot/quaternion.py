@@ -2,6 +2,8 @@ from numbers import Number
 
 import numpy as np
 
+from robot.math import normalize_vector
+from robot.math import quaternion2matrix
 from robot.math import quaternion_inverse
 from robot.math import quaternion_multiply
 from robot.math import quaternion_norm
@@ -16,7 +18,11 @@ class Quaternion(object):
                  z=0.0,
                  q=None):
         if q is None:
-            self.q = [w, x, y, z]
+            if (isinstance(w, list) or isinstance(w, np.ndarray)) and \
+               len(w) == 4:
+                self.q = w
+            else:
+                self.q = [w, x, y, z]
         else:
             self.q = q
 
@@ -26,7 +32,7 @@ class Quaternion(object):
 
     @q.setter
     def q(self, quaternion):
-        quaternion = np.array(quaternion, dtype=np.float32)
+        quaternion = np.array(quaternion, dtype=np.float64)
         if not (quaternion.shape == (4,)):
             raise ValueError("quaternion should be of shape (4,)."
                              " get {}".format(quaternion.shape))
@@ -48,18 +54,58 @@ class Quaternion(object):
     def w(self):
         return self.q[0]
 
+    @property
+    def xyz(self):
+        return self.q[1:]
+
+    @property
+    def rotation(self):
+        """Return rotation matrix"""
+        return quaternion2matrix(self.q)
+
+    @property
+    def axis(self):
+        """Return axis of this quaternion.
+
+        Return:
+        axis (~numpy.ndarray) : normalized axis
+        """
+        if self.w > 1.0:
+            q = self.normalized
+        else:
+            q = self
+
+        # quaternion is normalized
+        # q.w is less than 1.0, so term always positive.
+        s = np.sqrt(1 - q.w ** 2)
+
+        if s < 0.001:
+            axis = q.xyz
+        else:
+            axis = q.xyz / s
+        axis = normalize_vector(axis)
+        return axis
+
+    @property
+    def angle(self):
+        q = self.normalized
+        theta = 2.0 * np.arccos(q.w)
+        return theta
+
+    @property
     def norm(self):
         return quaternion_norm(self.q)
 
     def normalize(self):
         """Normalize this quaternion"""
-        norm = self.norm()
+        norm = self.norm
         if norm > 1e-8:
             self.q = self.q / norm
 
+    @property
     def normalized(self):
         """Return Normalized quaternion"""
-        norm = self.norm()
+        norm = self.norm
         q = self.q.copy()
         if norm > 1e-8:
             q = q / norm
@@ -68,12 +114,20 @@ class Quaternion(object):
     def copy(self):
         return Quaternion(q=self.q.copy())
 
+    @property
     def conjugate(self):
         new_q = [self.w, -self.x, -self.y, -self.z]
         return Quaternion(q=new_q)
 
     def inverse(self):
         return Quaternion(q=quaternion_inverse(self.q))
+
+    def T(self):
+        """Return 4x4 transformation matrix"""
+        matrix = np.zeros((4, 4), dtype=np.float64)
+        matrix[3, 3] = 1.0
+        matrix[:3, :3] = self.rotation
+        return matrix
 
     def __add__(self, cls):
         new_q = self.q + cls.q
