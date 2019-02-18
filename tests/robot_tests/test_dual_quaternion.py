@@ -138,3 +138,16 @@ class TestDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             dq.T(),
             np.eye(4))
+
+    def test_enforce_positive_q_rot_w(self):
+        dq = DualQuaternion([-1, 1, 1, 1])
+        dq.enforce_positive_q_rot_w()
+        testing.assert_almost_equal(
+            dq.qr.q,
+            [1, -1, -1, -1])
+
+        dq = DualQuaternion([1, 1, 1, 1])
+        dq.enforce_positive_q_rot_w()
+        testing.assert_almost_equal(
+            dq.qr.q,
+            [1, 1, 1, 1])
