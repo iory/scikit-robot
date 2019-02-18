@@ -178,7 +178,7 @@ class DualQuaternion(object):
 
     def enforce_positive_q_rot_w(self):
         assert(self.norm[0] > 1e-8)
-        q_rot_w = self.qr[0]
+        q_rot_w = self.qr.w
         if q_rot_w < 0.0:
             self.dq = -self.dq
 
