@@ -184,6 +184,63 @@ class RotationalJoint(Joint):
         return calc_jacobian_rotational(*args, **kwargs)
 
 
+class FixedJoint(Joint):
+
+    def __init__(self,
+                 *args, **kwargs):
+        super(FixedJoint, self).__init__(
+            max_joint_velocity=0.0,
+            max_joint_torque=0.0,
+            *args, **kwargs)
+        self._joint_angle = 0.0
+        self.min_angle = 0.0
+        self.max_angle = 0.0
+        self.joint_velocity = 0.0  # [rad/s]
+        self.joint_acceleration = 0.0  # [rad/s^2]
+        self.joint_torque = 0.0  # [Nm]
+
+    def joint_angle(self, v=None, relative=None):
+        "Return joint-angle if v is not set, \
+        if v is given, set joint angle. v is rotational value in degree."
+        if v is None:
+            return self._joint_angle
+        if self.joint_min_max_table and self.joint_min_max_target:
+            self.min_angle = self.joint_min_max_table_min_angle
+            self.max_angle = self.joint_min_max_table_max_angle
+        if relative:
+            v += self.joint_angle()
+        if v > self.max_angle:
+            logger.warning("{} :joint-angle({}) violate max-angle({})"
+                           .format(self, v, self.max_angle))
+            v = self.max_angle
+        elif v < self.min_angle:
+            logger.warning("{} :joint-angle({}) violate min-angle({})"
+                           .format(self, v, self.min_angle))
+            v = self.min_angle
+        self._joint_angle = v
+        self.child_link.rotation = self.default_coords.rotation.copy()
+        self.child_link.pos = self.default_coords.pos.copy()
+        self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
+        return self._joint_angle
+
+    @property
+    def joint_dof(self):
+        "Returns DOF of rotational joint, 1."
+        return 0
+
+    def calc_angle_speed_gain(self, dav, i, periodic_time):
+        return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
+
+    def speed_to_angle(self, v):
+        return np.rad2deg(v)
+
+    def angle_to_speed(self, v):
+        return np.deg2rad(v)
+
+    def calc_jacobian(self, *args, **kwargs):
+        return calc_jacobian_rotational(*args, **kwargs)
+
+
 def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
                              world_default_coords, child_reverse,
                              move_target, transform_coords, rotation_axis,
@@ -1246,9 +1303,10 @@ class RobotModel(CascadedLink):
             if j.axis is None:
                 j.axis = 'z'
             if j.type in ['fixed']:
-                link_maps[j.parent].add_child(link_maps[j.child])
-                link_maps[j.child].parent_link = link_maps[j.parent]
-                continue
+                joint = FixedJoint(
+                    name=j.name,
+                    parent_link=link_maps[j.parent],
+                    child_link=link_maps[j.child])
             elif j.type == 'revolute':
                 joint = RotationalJoint(
                     axis=j.axis,
@@ -1282,16 +1340,15 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
-            joint_list.append(joint)
-            joint_names.append(joint.name)
+            if not (j.type == 'fixed'):
+                joint_list.append(joint)
+                joint_names.append(joint.name)
 
             link_maps[j.parent].add_child(link_maps[j.child])
             link_maps[j.child].parent_link = link_maps[j.parent]
             link_maps[j.child].add_joint(joint)
 
         for j in self.robot_urdf.joints:
-            if j.type in ['fixed']:
-                continue
             if j.origin is None:
                 rpy = np.zeros(3, dtype=np.float32)
                 xyz = np.zeros(3, dtype=np.float32)
@@ -1301,8 +1358,9 @@ class RobotModel(CascadedLink):
             link_maps[j.child].newcoords(rpy,
                                          xyz)
             # TODO fix automatically update default_coords
-            link_maps[j.child].joint.default_coords = Coordinates(pos=link_maps[j.child].pos,
-                                                                  rot=link_maps[j.child].rotation)
+            link_maps[j.child].joint.default_coords = Coordinates(
+                pos=link_maps[j.child].pos,
+                rot=link_maps[j.child].rotation)
 
         # TODO duplicate of __init__
         self.link_list = links
