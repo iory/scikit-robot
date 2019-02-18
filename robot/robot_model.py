@@ -25,7 +25,10 @@ _default_max_joint_torque = 1.0
 
 
 def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
-    dav_gain = abs(joint.max_joint_velocity / (dav[i] / periodic_time))
+    if dav[i] == 0 or periodic_time == 0:
+        dav_gain = 1.0
+    else:
+        dav_gain = abs(joint.max_joint_velocity / (dav[i] / periodic_time))
     return min(dav_gain, 1.0)
 
 
