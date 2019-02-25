@@ -544,10 +544,10 @@ class RobotInterface(object):
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
                 if isinstance(joint, LinearJoint):
-                    time = scale * (0.001 * abs(diff_angle)) * \
+                    time = scale * (0.001 * abs(diff_angle)) / \
                         joint.max_joint_velocity
                 else:
-                    time = scale * deg2rad(abs(diff_angle)) * \
+                    time = scale * deg2rad(abs(diff_angle)) / \
                         joint.max_joint_velocity
             else:
                 time = 0
