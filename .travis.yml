@@ -15,8 +15,7 @@ install:
   - python setup.py develop
 
 script:
-  - autopep8 -r . --diff | tee check_autopep8
-  - test ! -s check_autopep8
+  - autopep8 -r . --diff --exit-code
   - nosetests -x tests --with-coverage --cover-package robot
 
 sudo: false
