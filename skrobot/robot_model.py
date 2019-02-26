@@ -717,6 +717,10 @@ class CascadedLink(CascadedCoords):
         thre = 1.0
         rthre = np.deg2rad(1)
         for i in range(stop):
+            # TODO(unknown): A simplified implementation of Euslisp's IK
+            #                (e.g., null space, additional jacobian).
+            # https://github.com/iory/scikit-robot/blob/232e1a27aa931e4526ab534a487fb13a008405d1/skrobot/robot_model.py#L719-L746
+            # https://github.com/euslisp/jskeus/blob/d52624b6fb7afe7cfe48064501c083626b48fb06/irteus/irtmodel.l#L2061-L2132
             J = self.calc_jacobian_from_link_list(move_target=move_target,
                                                   link_list=link_list,
                                                   translation_axis=translation_axis,
