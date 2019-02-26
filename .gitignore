@@ -4,5 +4,5 @@
 build
 \#*\#
 .\#*
-robot.egg-info/
+skrobot.egg-info/
 dist/
