@@ -10,7 +10,7 @@ from setuptools import setup
 
 def listup_package_data():
     data_files = []
-    for root, _, files in os.walk('robot/models_robot'):
+    for root, _, files in os.walk('robot/data'):
         for filename in files:
             data_files.append(
                 os.path.join(

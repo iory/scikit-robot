@@ -8,11 +8,11 @@ import robot
 class TestRobotModel(unittest.TestCase):
 
     def test_init(self):
-        fetch = robot.robots.Fetch()
+        fetch = robot.robot_models.Fetch()
         fetch.angle_vector()
 
     def test_find_link_route(self):
-        fetch = robot.robots.Fetch()
+        fetch = robot.robot_models.Fetch()
         ret = fetch.find_link_route(fetch.torso_lift_link)
         self.assertEqual(ret,
                          [fetch.torso_lift_link])
@@ -29,7 +29,7 @@ class TestRobotModel(unittest.TestCase):
                           fetch.wrist_roll_link])
 
     def test_inverse_kinematics(self):
-        kuka = robot.robots.Kuka()
+        kuka = robot.robot_models.Kuka()
         move_target = kuka.rarm.end_coords
         link_list = kuka.rarm.link_list
 

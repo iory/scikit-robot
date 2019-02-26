@@ -1,9 +1,7 @@
-import os
-
 from cached_property import cached_property
 import numpy as np
 
-import robot
+from robot.data import kuka_urdfpath
 from robot.robot_model import RobotModel
 from robot.coordinates import CascadedCoords
 
@@ -16,8 +14,7 @@ class Kuka(RobotModel):
     def __init__(self, urdf_path=None, *args, **kwargs):
         super(Kuka, self).__init__(*args, **kwargs)
         if urdf_path is None:
-            urdf_path = os.path.join(os.path.dirname(robot.__file__),
-                                     'models_robot/kuka_description/kuka.urdf')
+            urdf_path = kuka_urdfpath()
         self.urdf_path = urdf_path
         self.load_urdf(urdf_path)
 
