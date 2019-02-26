@@ -6,16 +6,16 @@ import robot
 class TestPR2(unittest.TestCase):
 
     def test_init(self):
-        pr2 = robot.robots.PR2()
+        pr2 = robot.robot_models.PR2()
 
 
 class TestFetch(unittest.TestCase):
 
     def test_init(self):
-        fetch = robot.robots.Fetch()
+        fetch = robot.robot_models.Fetch()
 
 
 class TestKuka(unittest.TestCase):
 
     def test_init(self):
-        kuka = robot.robots.Kuka()
+        kuka = robot.robot_models.Kuka()
