@@ -1,8 +1,6 @@
-import os
-
 from cached_property import cached_property
 
-import robot
+from robot.data import fetch_urdfpath
 from robot.robot_model import RobotModel
 from robot.coordinates import CascadedCoords
 
@@ -18,8 +16,7 @@ class Fetch(RobotModel):
     def __init__(self, urdf_path=None, *args, **kwargs):
         super(Fetch, self).__init__(*args, **kwargs)
         if urdf_path is None:
-            urdf_path = os.path.join(os.path.dirname(robot.__file__),
-                                     'models_robot/fetch_description/robots/fetch.urdf')
+            urdf_path = fetch_urdfpath()
         self.urdf_path = urdf_path
         self.load_urdf(urdf_path)
 
