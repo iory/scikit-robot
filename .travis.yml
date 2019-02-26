@@ -16,6 +16,6 @@ install:
 
 script:
   - autopep8 -r . --diff --exit-code
-  - nosetests -x tests --with-coverage --cover-package robot
+  - nosetests -x tests --with-coverage --cover-package skrobot
 
 sudo: false
