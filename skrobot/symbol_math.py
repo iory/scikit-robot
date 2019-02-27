@@ -148,8 +148,8 @@ def round_matrix(T, precision=8):
     else:
         axisangle = axisangle / angle
         logger.debug('rotation angle: %f, axis=[%f,%f,%f]' %
-                     (angle * 180 / pi).evalf(),
-                     axisangle[0], axisangle[1], axisangle[2])
+                     ((angle * 180 / pi).evalf(),
+                      axisangle[0], axisangle[1], axisangle[2]))
         accurate_axis_angle = Matrix(
             3, 1, [convert_real_to_rational(x, precision - 3)
                    for x in axisangle])
