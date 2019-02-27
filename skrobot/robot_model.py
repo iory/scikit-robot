@@ -357,14 +357,34 @@ class Link(CascadedCoords):
         super(Link, self).__init__(*args, **kwargs)
         self.centroid = centroid
         self.joint = None
+        self._child_links = []
+        self._parent_link = None
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
+
+    @property
+    def parent_link(self):
+        return self._parent_link
 
     def add_joint(self, j):
         self.joint = j
 
     def delete_joint(self, j):
         self.joint = None
+
+    def add_child_links(self, child_link):
+        """Add child link"""
+        if child_link is not None and child_link not in self._child_links:
+            self._child_links.append(child_link)
+
+    def del_child_link(self):
+        self._child_links = []
+
+    def add_parent_link(self, parent_link):
+        self._parent_link = parent_link
+
+    def del_parent_link(self, parent_link):
+        self._parent_link = None
 
 
 class CascadedLink(CascadedCoords):
