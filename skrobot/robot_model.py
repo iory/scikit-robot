@@ -14,7 +14,6 @@ from skrobot.math import normalize_vector
 from skrobot.math import sr_inverse
 from skrobot.optimizer import solve_qp
 from skrobot.utils.urdf import URDF
-from skrobot import worldcoords
 from skrobot.geo import midcoords
 
 
@@ -1306,9 +1305,6 @@ class RobotModel(CascadedLink):
         for joint in joint_list:
             self.__dict__[joint.name] = joint
 
-        if len(link_list) > 0:
-            worldcoords.add_child(self.link_list[0])
-
         self.urdf_path = None
 
     def reset_pose(self):
@@ -1379,9 +1375,10 @@ class RobotModel(CascadedLink):
                 joint_list.append(joint)
                 joint_names.append(joint.name)
 
-            link_maps[j.parent].add_child(link_maps[j.child])
-            link_maps[j.child].parent_link = link_maps[j.parent]
+            link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
+            link_maps[j.child].add_parent_link(link_maps[j.parent])
+            link_maps[j.parent].add_child_links(link_maps[j.child])
 
         for j in self.robot_urdf.joints:
             if j.origin is None:
@@ -1410,10 +1407,7 @@ class RobotModel(CascadedLink):
         for joint in joint_list:
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
-        self.add_child(self.root_link)
-
-        if len(links) > 0:
-            worldcoords.add_child(self.link_list[0])
+        self.assoc(self.root_link)
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
