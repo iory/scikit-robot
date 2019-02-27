@@ -14,7 +14,6 @@ from skrobot.math import normalize_vector
 from skrobot.math import sr_inverse
 from skrobot.optimizer import solve_qp
 from skrobot.utils.urdf import URDF
-from skrobot import worldcoords
 from skrobot.geo import midcoords
 
 
@@ -357,14 +356,34 @@ class Link(CascadedCoords):
         super(Link, self).__init__(*args, **kwargs)
         self.centroid = centroid
         self.joint = None
+        self._child_links = []
+        self._parent_link = None
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
+
+    @property
+    def parent_link(self):
+        return self._parent_link
 
     def add_joint(self, j):
         self.joint = j
 
     def delete_joint(self, j):
         self.joint = None
+
+    def add_child_links(self, child_link):
+        """Add child link"""
+        if child_link is not None and child_link not in self._child_links:
+            self._child_links.append(child_link)
+
+    def del_child_link(self):
+        self._child_links = []
+
+    def add_parent_link(self, parent_link):
+        self._parent_link = parent_link
+
+    def del_parent_link(self, parent_link):
+        self._parent_link = None
 
 
 class CascadedLink(CascadedCoords):
@@ -1118,6 +1137,12 @@ class CascadedLink(CascadedCoords):
         return qd
 
     def find_link_route(self, to, frm=None):
+        def _check_type(obj):
+            if obj is not None and not isinstance(obj, Link):
+                raise TypeError('Support only Link class. '
+                                'get type=={}'.format(type(obj)))
+        _check_type(to)
+        _check_type(frm)
         pl = to.parent_link
         # if to is not included in self.link_list, just trace parent-link
         if pl and self.link_list.index(to) == -1:
@@ -1128,6 +1153,8 @@ class CascadedLink(CascadedCoords):
         # if link_route, just return "frm" link
         if pl and to == frm:
             return [frm]
+
+        # parent is None
         return []
 
     def link_lists(self, to, frm=None):
@@ -1278,9 +1305,6 @@ class RobotModel(CascadedLink):
         for joint in joint_list:
             self.__dict__[joint.name] = joint
 
-        if len(link_list) > 0:
-            worldcoords.add_child(self.link_list[0])
-
         self.urdf_path = None
 
     def reset_pose(self):
@@ -1351,9 +1375,10 @@ class RobotModel(CascadedLink):
                 joint_list.append(joint)
                 joint_names.append(joint.name)
 
-            link_maps[j.parent].add_child(link_maps[j.child])
-            link_maps[j.child].parent_link = link_maps[j.parent]
+            link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
+            link_maps[j.child].add_parent_link(link_maps[j.parent])
+            link_maps[j.parent].add_child_links(link_maps[j.child])
 
         for j in self.robot_urdf.joints:
             if j.origin is None:
@@ -1382,10 +1407,7 @@ class RobotModel(CascadedLink):
         for joint in joint_list:
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
-        self.add_child(self.root_link)
-
-        if len(links) > 0:
-            worldcoords.add_child(self.link_list[0])
+        self.assoc(self.root_link)
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
