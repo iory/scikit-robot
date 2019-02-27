@@ -567,3 +567,6 @@ def coordinates_distance(c1, c2, c=None):
     if c is None:
         c = c1.transformation(c2)
     return np.linalg.norm(c.worldpos()), rotation_angle(c.worldrot())[0]
+
+
+worldcoords = CascadedCoords(name='worldcoords')
