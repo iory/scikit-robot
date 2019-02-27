@@ -4,7 +4,9 @@ from numpy import deg2rad
 from numpy import pi
 from numpy import testing
 
+from skrobot.math import rotation_matrix
 from skrobot.coordinates import make_coords
+from skrobot.coordinates import make_cascoords
 
 
 class TestCoordinates(unittest.TestCase):
@@ -104,3 +106,88 @@ class TestCoordinates(unittest.TestCase):
             [[0.900969, 0.122239, 0.416308],
              [0.0, 0.959493, -0.281733],
              [-0.433884, 0.253832, 0.864473]])
+
+
+class TestCascadedCoordinates(unittest.TestCase):
+
+    def test_changed(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0])
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2])
+        self.assertEquals(a._changed, True)
+        self.assertEquals(b._changed, True)
+        a.assoc(b)
+        self.assertEquals(a._changed, False)
+        self.assertEquals(b._changed, True)
+        a.rotate(pi / 2.0, 'z')
+        self.assertEquals(a._changed, True)
+        self.assertEquals(b._changed, True)
+        b.worldrot()
+        self.assertEquals(a._changed, False)
+        self.assertEquals(b._changed, False)
+
+    def test_assoc(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0],
+                           name='a')
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2],
+                           name='b')
+        a.assoc(b)
+        testing.assert_almost_equal(
+            b.worldrot(),
+            [[0.5, 0, 0.866025],
+             [0, 1.0, 0.0],
+             [-0.866025, 0, 0.5]],
+            decimal=5)
+        a.rotate(pi / 2.0, 'z')
+        testing.assert_almost_equal(
+            a.worldrot(),
+            [[2.22044605e-16, -1.00000000e+00,  0.00000000e+00],
+             [5.00000000e-01,  1.11022302e-16, -8.66025404e-01],
+             [8.66025404e-01,  1.92296269e-16,  5.00000000e-01]],
+            decimal=5)
+        testing.assert_almost_equal(
+            b.worldrot(),
+            [[0.75, -0.5, -0.433013],
+             [0.625, 0.75, 0.216506],
+             [0.216506, -0.433013, 0.875]],
+            decimal=5)
+        testing.assert_almost_equal(
+            a.worldpos(),
+            [0.1, 0, 0])
+        testing.assert_almost_equal(
+            b.worldpos(),
+            [-0.07320508, -0.08660254,  0.05])
+
+    def test_dissoc(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0],
+                           name='a')
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2],
+                           name='b')
+        a.assoc(b)
+        a.dissoc(b)
+        testing.assert_almost_equal(
+            b.worldrot(),
+            rotation_matrix(pi / 3, 'y'),
+            decimal=5)
+        a.rotate(pi / 2.0, 'z')
+        testing.assert_almost_equal(
+            a.worldrot(),
+            [[2.22044605e-16, -1.00000000e+00,  0.00000000e+00],
+             [5.00000000e-01,  1.11022302e-16, -8.66025404e-01],
+             [8.66025404e-01,  1.92296269e-16,  5.00000000e-01]],
+            decimal=5)
+        testing.assert_almost_equal(
+            b.worldrot(),
+            rotation_matrix(pi / 3, 'y'),
+            decimal=5)
+        testing.assert_almost_equal(
+            a.worldpos(),
+            [0.1, 0, 0])
+        testing.assert_almost_equal(
+            b.worldpos(),
+            [0.1, 0, 0.2])
