@@ -1118,6 +1118,12 @@ class CascadedLink(CascadedCoords):
         return qd
 
     def find_link_route(self, to, frm=None):
+        def _check_type(obj):
+            if obj is not None and not isinstance(obj, Link):
+                raise TypeError('Support only Link class. '
+                                'get type=={}'.format(type(obj)))
+        _check_type(to)
+        _check_type(frm)
         pl = to.parent_link
         # if to is not included in self.link_list, just trace parent-link
         if pl and self.link_list.index(to) == -1:
@@ -1128,6 +1134,8 @@ class CascadedLink(CascadedCoords):
         # if link_route, just return "frm" link
         if pl and to == frm:
             return [frm]
+
+        # parent is None
         return []
 
     def link_lists(self, to, frm=None):
