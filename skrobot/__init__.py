@@ -5,9 +5,6 @@ __version__ = pkg_resources.get_distribution('skrobot').version
 
 
 from skrobot import coordinates
-
-worldcoords = coordinates.CascadedCoords()
-
 from skrobot import geo  # NOQA
 from skrobot import interpolator  # NOQA
 from skrobot import math  # NOQA
