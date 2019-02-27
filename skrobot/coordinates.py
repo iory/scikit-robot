@@ -50,7 +50,7 @@ class Coordinates(object):
         self.translation = pos
         self.rpy = rpy
         self.name = name
-        self.parent_link = None
+        self.parent = None
 
     @property
     def rotation(self):
@@ -128,6 +128,9 @@ class Coordinates(object):
     def dimension(self):
         return len(self.pos)
 
+    def changed(self):
+        return False
+
     def translate(self, vec, wrt='local'):
         """translate this coordinates. unit is [mm]"""
         vec = np.array(vec, dtype=np.float64)
@@ -162,7 +165,7 @@ class Coordinates(object):
         if wrt == 'local' or wrt == self:
             inv = transform_coords(inv, c2)
         elif wrt == 'parent' or \
-                wrt == self.parent_link or \
+                wrt == self.parent or \
                 wrt == 'world':
             inv = transform_coords(c2, inv)
         elif isinstance(wrt, Coordinates):
@@ -198,7 +201,7 @@ class Coordinates(object):
         if wrt == 'local' or wrt == self:
             return np.matmul(self.rotation, v)
         if wrt == 'parent' \
-           or wrt == self.parent_link \
+           or wrt == self.parent \
            or wrt == 'world':
             return v
         raise ValueError('wrt {} not supported'.format(wrt))
@@ -209,7 +212,7 @@ class Coordinates(object):
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
             tmp_coords = transform_coords(self, c)
-        elif wrt == 'parent' or wrt == self.parent_link \
+        elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
             tmp_coords = transform_coords(c, self)
         elif isinstance(wrt, Coordinates):
@@ -278,7 +281,7 @@ class Coordinates(object):
         if wrt == 'local' or wrt == self:
             rot = np.matmul(self.rotation, mat)
             self.newcoords(rot, self.pos)
-        elif wrt == 'parent' or wrt == self.parent_link or \
+        elif wrt == 'parent' or wrt == self.parent or \
                 wrt == 'world' or wrt == None or \
                 wrt == worldcoords:
             rot = np.matmul(mat, self.rotation)
@@ -380,15 +383,44 @@ class CascadedCoords(Coordinates):
         super(CascadedCoords, self).__init__(*args, **kwargs)
         self.manager = self
         self._changed = True
-        # self.worldcoords = Coordinates(rot=rot, pos=pos)
+        self._descendants = []
 
-        self.child_links = []
-        if parent:
-            self.parent_link = parent
-            self.parent_link.add_child(self)
+        self.parent = parent
+        if parent is not None:
+            self.parent.assoc(self)
         self._worldcoords = Coordinates(pos=self.pos,
                                         rot=self.rotation)
-        self.descendants = []
+
+    @property
+    def descendants(self):
+        return self._descendants
+
+    def assoc(self, child, c=None):
+        if not (child in self.descendants):
+            if c is None:
+                c = self.worldcoords().transformation(
+                    child.worldcoords())
+            child.obey(self)
+            child.newcoords(c)
+            self._descendants.append(child)
+            return child
+
+    def obey(self, mother):
+        if self.parent is not None:
+            self.parent.dissoc(self)
+        self.parent = mother
+
+    def dissoc(self, child):
+        if child in self.descendants:
+            c = child.worldcoords().copy_coords()
+            self._descendants.remove(child)
+            child.disobey(self)
+            child.newcoords(c)
+
+    def disobey(self, mother):
+        if self.parent == mother:
+            self.parent = None
+        return self.parent
 
     def newcoords(self, c, pos=None):
         super(CascadedCoords, self).newcoords(c, pos)
@@ -398,12 +430,12 @@ class CascadedCoords(Coordinates):
     def changed(self):
         if self._changed is False:
             self._changed = True
-            return [c.changed() for c in self.child_links]
+            return [c.changed() for c in self.descendants]
         return [False]
 
     def parentcoords(self):
-        if self.parent_link:
-            return self.parent_link.worldcoords()
+        if self.parent:
+            return self.parent.worldcoords()
 
     def transform_vector(self, v):
         return self.worldcoords().transform_vector(v)
@@ -415,7 +447,7 @@ class CascadedCoords(Coordinates):
         if wrt == 'local' or wrt == self:
             self.rotation = np.dot(self.rotation, matrix)
             return self.newcoords(self.rotation, self.pos)
-        elif wrt == 'parent' or wrt == self.parent_link:
+        elif wrt == 'parent' or wrt == self.parent:
             self.rotation = np.matmul(matrix, self.rotation)
             return self.newcoords(self.rotation, self.pos)
         else:
@@ -457,7 +489,7 @@ class CascadedCoords(Coordinates):
         if wrt == 'local' or wrt == self:
             self.rotation = rotate_matrix(self.rotation, theta, axis)
             return self.newcoords(self.rotation, self.pos)
-        elif wrt == 'parent' or wrt == self.parent_link:
+        elif wrt == 'parent' or wrt == self.parent:
             self.rotation = rotate_matrix(self.rotation, theta, axis)
             return self.newcoords(self.rotation, self.pos)
         else:
@@ -478,9 +510,9 @@ class CascadedCoords(Coordinates):
     def worldcoords(self):
         """Calculate rotation and position in the world."""
         if self._changed:
-            if self.parent_link:
+            if self.parent:
                 self._worldcoords = transform_coords(
-                    self.parent_link.worldcoords(),
+                    self.parent.worldcoords(),
                     self)
             else:
                 self._worldcoords.rotation = self.rotation
@@ -493,17 +525,25 @@ class CascadedCoords(Coordinates):
         return self.worldcoords().rotation
 
     def worldpos(self):
-        return self.worldcoords().pos
-
-    def add_child(self, child_link):
-        self.child_links.append(child_link)
+        return self.worldcoords().translation
 
     @property
     def parent(self):
-        return self.parent_link
+        return self._parent
+
+    @parent.setter
+    def parent(self, c):
+        if not (c is None or coordinates_p(c)):
+            raise ValueError('parent should be None or Coordinates. '
+                             'get type=={}'.format(type(c)))
+        self._parent = c
 
     def update(self):
         pass
+
+
+def coordinates_p(x):
+    return isinstance(x, Coordinates)
 
 
 def make_coords(*args, **kwargs):
