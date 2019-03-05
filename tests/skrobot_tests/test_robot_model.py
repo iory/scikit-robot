@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+from numpy import testing
 
 import skrobot
 
@@ -78,3 +79,14 @@ class TestRobotModel(unittest.TestCase):
         dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+    def test_calc_jacobian_for_interlocking_joints(self):
+        r = skrobot.robot_models.Fetch()
+        jacobian = r.calc_jacobian_for_interlocking_joints(
+            r.rarm.link_list,
+            interlocking_joint_pairs=[
+                (r.shoulder_pan_joint, r.elbow_flex_joint)])
+        testing.assert_almost_equal(
+            np.array([[1, 0, 0, -1, 0, 0, 0]],
+                     dtype='f'),
+            jacobian)
