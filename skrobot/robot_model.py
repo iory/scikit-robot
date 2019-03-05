@@ -1301,6 +1301,12 @@ class CascadedLink(CascadedCoords):
             dim = 6 * 1
         else:
             dim = 6 * len(rotation_axis)
+        if len(rotation_axis) != len(translation_axis):
+            raise ValueError('list length differ: '
+                             'len(translation_axis)!=len(rotation_axis) '
+                             '{}!={}'.
+                             format(len(rotation_axis),
+                                    len(translation_axis)))
 
         for axis in itertools.chain(translation_axis, rotation_axis):
             if axis in ['x', 'y', 'z', 'xx', 'yy', 'zz']:
