@@ -26,6 +26,18 @@ class Fetch(RobotModel):
         self.rarm_end_coords.rotate(0, axis='z')
         self.end_coords = [self.rarm_end_coords]
 
+        self.link_list = [self.base_link,
+                          self.torso_lift_link,
+                          self.shoulder_pan_link,
+                          self.shoulder_lift_link,
+                          self.upperarm_roll_link,
+                          self.elbow_flex_link,
+                          self.forearm_roll_link,
+                          self.wrist_flex_link,
+                          self.wrist_roll_link,
+                          self.head_pan_link,
+                          self.head_tilt_link]
+
     def reset_pose(self):
         self.torso_lift_joint.joint_angle(0)
         self.shoulder_pan_joint.joint_angle(75.6304)
