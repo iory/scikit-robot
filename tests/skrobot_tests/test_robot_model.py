@@ -89,6 +89,19 @@ class TestRobotModel(unittest.TestCase):
             [fetch.rarm.link_list, fetch.rarm.link_list])
         self.assertEqual(joint_dimension, 7)
 
+    def test_calc_target_axis_dimension(self):
+        fetch = skrobot.robot_models.Fetch()
+        dimension = fetch.calc_target_axis_dimension(
+            False, False)
+        self.assertEqual(dimension, 0)
+        dimension = fetch.calc_target_axis_dimension(
+            [True, True], [True, True])
+        self.assertEqual(dimension, 12)
+
+        with self.assertRaises(ValueError):
+            dimension = fetch.calc_target_axis_dimension(
+                [True, False], True)
+
     def test_calc_jacobian_for_interlocking_joints(self):
         r = skrobot.robot_models.Fetch()
         jacobian = r.calc_jacobian_for_interlocking_joints(
