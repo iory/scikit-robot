@@ -11,6 +11,24 @@ class TestRobotModel(unittest.TestCase):
         fetch = skrobot.robot_models.Fetch()
         fetch.angle_vector()
 
+    def test_calc_union_link_list(self):
+        fetch = skrobot.robot_models.Fetch()
+        links = fetch.calc_union_link_list([fetch.rarm.link_list,
+                                            fetch.rarm.link_list,
+                                            fetch.link_list])
+        self.assertEqual([l.name for l in links],
+                         ['shoulder_pan_link',
+                          'shoulder_lift_link',
+                          'upperarm_roll_link',
+                          'elbow_flex_link',
+                          'forearm_roll_link',
+                          'wrist_flex_link',
+                          'wrist_roll_link',
+                          'base_link',
+                          'torso_lift_link',
+                          'head_pan_link',
+                          'head_tilt_link'])
+
     def test_find_link_route(self):
         fetch = skrobot.robot_models.Fetch()
         ret = fetch.find_link_route(fetch.torso_lift_link)
