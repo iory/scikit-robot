@@ -7,6 +7,7 @@ from ordered_set import OrderedSet
 
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
+from skrobot.coordinates import make_coords
 from skrobot.math import _wrap_axis
 from skrobot.math import manipulability
 from skrobot.math import midpoint
@@ -15,6 +16,8 @@ from skrobot.math import sr_inverse
 from skrobot.optimizer import solve_qp
 from skrobot.utils.urdf import URDF
 from skrobot.geo import midcoords
+from skrobot.geo import orient_coords_to_axis
+from skrobot.utils.listify import listify
 
 
 logger = getLogger(__name__)
@@ -194,6 +197,7 @@ class FixedJoint(Joint):
             max_joint_velocity=0.0,
             max_joint_torque=0.0,
             *args, **kwargs)
+        self.axis = [0, 0, 1]
         self._joint_angle = 0.0
         self.min_angle = 0.0
         self.max_angle = 0.0
@@ -253,7 +257,7 @@ def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = np.cross(j_rot, p_diff)
     j_translation = calc_dif_with_axis(j_translation, translation_axis)
-    fik[row:row+len(j_translation), column] = j_translation
+    fik[row:row + len(j_translation), column] = j_translation
     j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
     fik[row + len(j_translation):
         row + len(j_translation) + len(j_rotation),
@@ -491,10 +495,16 @@ class CascadedLink(CascadedCoords):
                     *args, **kwargs):
         if union_link_list is None:
             union_link_list = self.calc_union_link_list(self.link_list)
+
         dav = self.calc_joint_angle_speed(union_vel, *args, **kwargs)
-        gains = self.calc_joint_angle_speed_gain(
+
+        tmp_gain = self.calc_joint_angle_speed_gain(
             union_link_list, dav, periodic_time)
-        dav = np.min(gains) * dav
+        min_gain = 1.0
+        for i in range(len(tmp_gain)):
+            if tmp_gain[i] < min_gain:
+                min_gain = tmp_gain[i]
+        dav = min_gain * dav
         i = 0
         l = 0
         while l < len(union_link_list):
@@ -692,105 +702,425 @@ class CascadedLink(CascadedCoords):
         vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
         return vel_r
 
-    def inverse_kinematics_loop(self,
-                                dif_pos,
-                                dif_rot,
-                                link_list=None,
-                                move_target=None,
-                                translation_axis=True,
-                                rotation_axis=False,
-                                thre=None,
-                                rthre=None,
-                                dif_pos_ratio=1.0,
-                                dif_rot_ratio=1.0,
-                                union_link_list=None,
-                                target_coords=None,):
-        if thre is None:
-            thre = 1
-        if rthre is None:
-            rthre = np.deg2rad(1)
+    def inverse_kinematics_loop(
+            self,
+            dif_pos, dif_rot,
+            stop=1,
+            loop=0,
+            link_list=None,
+            move_target=None,
+            rotation_axis=True,
+            translation_axis=True,
+            thre=None,
+            rthre=None,
+            dif_pos_ratio=1.0,
+            dif_rot_ratio=1.0,
+            union_link_list=None,
+            target_coords=None,
+            jacobi=None,
+            additional_check=None,
+            additional_jacobi=None,
+            additional_vel=None,
+            centroid_thre=1.0,
+            target_centroid_pos=None,
+            centroid_offset_func=None,
+            cog_translation_axis='z',
+            cog_null_space=None,
+            cog_gain=1.0,
+            min_loop=None,
+            inverse_kinematics_hook=[],
+            **kwargs):
+        """
 
-    def inverse_kinematics(self,
-                           target_coords,
-                           move_target=None,
-                           link_list=None,
-                           translation_axis=True,
-                           rotation_axis=False,
-                           stop=100,
-                           inverse_kinematics_hook=[],
-                           *args, **kwargs):
+        inverse-kinematics-loop is one loop calculation for inverse_kinematics.
+        In this method, joint position difference satisfying workspace difference (dif_pos, dif_rot) are
+        calculated and joint angles are updated.
+
+        """
         if move_target is None:
             raise NotImplementedError
-        if link_list is None:
-            link_list = self.link_list
+        move_target = listify(move_target)
 
-        if not isinstance(move_target, list):
-            move_target = [move_target]
-        if not isinstance(target_coords, list):
-            target_coords = [target_coords]
-        if not isinstance(translation_axis, list):
-            translation_axis = [translation_axis]
-        if not isinstance(rotation_axis, list):
-            rotation_axis = [rotation_axis]
+        n = len(move_target)
+        if rotation_axis is None:
+            rotation_axis = listify(True, n)
+        if translation_axis is None:
+            translation_axis = listify(True, n)
+        if thre is None:
+            thre = listify(1, n)
+        if rthre is None:
+            rthre = listify(np.deg2rad(1), n)
+        if min_loop is None:
+            min_loop = stop // 10
 
-        thre = 1.0
-        rthre = np.deg2rad(1)
-        for i in range(stop):
-            # TODO(unknown): A simplified implementation of Euslisp's IK
-            #                (e.g., null space, additional jacobian).
-            # https://github.com/iory/scikit-robot/blob/232e1a27aa931e4526ab534a487fb13a008405d1/skrobot/robot_model.py#L719-L746
-            # https://github.com/euslisp/jskeus/blob/d52624b6fb7afe7cfe48064501c083626b48fb06/irteus/irtmodel.l#L2061-L2132
-            J = self.calc_jacobian_from_link_list(move_target=move_target,
-                                                  link_list=link_list,
-                                                  translation_axis=translation_axis,
-                                                  rotation_axis=rotation_axis)
-            success = True
-            union_vels = np.array([])
-            for mv, tc, trans_axis, rot_axis in zip(move_target,
-                                                    target_coords,
-                                                    translation_axis,
-                                                    rotation_axis):
-                dif_pos = mv.difference_position(tc,
-                                                 translation_axis=trans_axis)
-                dif_rot = mv.difference_rotation(tc,
-                                                 rotation_axis=rot_axis)
-                dif_pos *= 1000.0
-
-                vel_pos = self.calc_vel_from_pos(dif_pos, trans_axis)
-                vel_rot = self.calc_vel_from_rot(dif_rot, rot_axis)
-                union_vel = np.concatenate([vel_pos, vel_rot])
-                union_vels = np.concatenate([union_vels, union_vel])
-
-                if translation_axis is not None:
-                    success = success and (LA.norm(dif_pos) < thre)
-                if rotation_axis is not None:
-                    success = success and (LA.norm(dif_rot) < rthre)
-
-            for hook in inverse_kinematics_hook:
-                hook()
-
-            # success = self.ik_convergence_check(
-            #     dif_pos,
-            #     dif_rot,
-            #     rotation_axis,
-            #     translation_axis,
-            #     thre, rthre,
-            #     centroid_thre=None, target_centroid_pos=None,
-            #     centroid_offset_func=None, cog_translation_axis=None,
-            #     update_mass_properties=False)
-
-            if success:
-                break
-
+        # (if target-centroid-pos (send self :update-mass-properties))
+        # ;; dif-pos, dif-rot, move-target, rotation-axis, translation-axis, link-list
+        # ;; -> both list and atom OK.
+        tmp_dim = []
+        tmp_dims = []
+        vec_count = 0
+        success = True
+        p_limit = kwargs.pop('p_limit', None)
+        r_limit = kwargs.pop('r_limit', None)
+        if union_link_list is None:
             union_link_list = self.calc_union_link_list(link_list)
-            self.move_joints_avoidance(
-                union_vels,
-                union_link_list=union_link_list,
+            # ;; tempolary reset weight for prevision joint-angle-limit-weight-old using hash-table
+            # (if (/= (length union-link-list) (length link-list))
+            #     (send self :reset-joint-angle-limit-weight-old union-link-list)))
+        if link_list is None or not isinstance(link_list[0], list):
+            link_list = [link_list]
+        move_target = listify(move_target)
+        target_coords = listify(target_coords)
+        dif_pos = listify(dif_pos)
+        dif_rot = listify(dif_rot)
+        rotation_axis = listify(rotation_axis)
+        translation_axis = listify(translation_axis)
+        thre = listify(thre)
+        rthre = listify(rthre)
+
+        # argument check
+        if not (len(translation_axis) ==
+                len(rotation_axis) ==
+                len(move_target) ==
+                len(link_list) ==
+                len(dif_pos) ==
+                len(dif_rot)):
+            logger.error("list length differ : translation-axis {} rotation-axis {} "
+                         "move-target {} link-list {} dif-pos {} dif-rot".
+                         format(len(translation_axis),
+                                len(rotation_axis),
+                                len(move_target),
+                                len(link_list),
+                                len(dif_pos),
+                                len(dif_rot)))
+            return "ik-continuous"
+
+        for i in range(len(rotation_axis)):
+            tmp_dims.append(np.zeros(self.calc_target_axis_dimension(
+                rotation_axis[i], translation_axis[i]), 'f'))
+        tmp_dim = np.zeros(self.calc_target_axis_dimension(
+            rotation_axis, translation_axis), 'f')
+        # (if (memq :tmp-dims ik-args)
+        #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
+        #   (progn
+        #     (dotimes (i (length rotation-axis))
+        #       (push (instantiate float-vector (send self :calc-target-axis-dimension (elt rotation-axis i) (elt translation-axis i))) tmp-dims))
+        #     (setq tmp-dims (nreverse tmp-dims))))
+        # (if (memq :tmp-dim ik-args)
+        #     (setq tmp-dim (cadr (memq :tmp-dim ik-args)))
+        #   (setq tmp-dim (instantiate float-vector (send self :calc-target-axis-dimension rotation-axis translation-axis))))
+
+        if callable(jacobi):
+            jacobi = jacobi(
+                link_list,
+                move_target,
+                translation_axis,
+                rotation_axis)
+        if jacobi is None:
+            jacobi = self.calc_jacobian_from_link_list(
+                move_target=move_target,
                 link_list=link_list,
+                translation_axis=translation_axis,
+                rotation_axis=rotation_axis,
+                # method_args
+            )
+
+        # convergence check
+        if min_loop is not None:
+            success = loop >= min_loop
+
+        if success is True:
+            success = self.ik_convergence_check(
+                # loop >= min_loop if min_loop is not None else True,
+                dif_pos,
+                dif_rot,
+                rotation_axis,
+                translation_axis,
+                thre,
+                rthre,
+                centroid_thre,
+                target_centroid_pos,
+                centroid_offset_func,
+                cog_translation_axis,
+                # update_mass_properties=False
+            )
+        if additional_check is not None:
+            success |= additional_check()
+
+        # calculation of move-coords velocities from vel-p and vel-r
+        for i in range(len(move_target)):
+            tmp_dim = tmp_dims[i]
+            if p_limit is not None:
+                vel_p = self.calc_vel_from_pos(
+                    dif_pos[i], translation_axis[i], p_limit)
+            else:
+                vel_p = self.calc_vel_from_pos(
+                    dif_pos[i], translation_axis[i])
+            if r_limit is not None:
+                vel_r = self.calc_vel_from_rot(
+                    dif_rot[i], rotation_axis[i], r_limit)
+            else:
+                vel_r = self.calc_vel_from_rot(
+                    dif_rot[i], rotation_axis[i])
+            for j in range(len(vel_p)):
+                tmp_dim[j] = dif_pos_ratio * vel_p[j]
+            for j in range(len(vel_r)):
+                tmp_dim[j + len(vel_p)] = dif_rot_ratio * vel_r[j]
+            # (when (send self :get :ik-target-error)
+            #   (push (list vel-p vel-r) (cdr (assoc (read-from-string (format nil ":target-~d" i)) (send self :get :ik-target-error)))))
+
+        vec_count = 0
+        for i in range(len(tmp_dims)):
+            for j in range(len(tmp_dims[i])):
+                tmp_dim[j + vec_count] = tmp_dims[i][j]
+            vec_count += len(tmp_dims[i])
+
+        # Use cog jacobian as first task
+        # (when (and (not cog-null-space) target-centroid-pos)
+        #   (setq additional-jacobi
+        #         (append (list (send self :calc-cog-jacobian-from-link-list
+        #                             :update-mass-properties nil
+        #                             :link-list union-link-list
+        #                             :translation-axis cog-translation-axis))
+        #                 additional-jacobi))
+        #   (let ((tmp-cog-gain (if (> cog-gain 1.0) 1.0 cog-gain)))
+        #     (setq additional-vel
+        #           (append (list
+        #                    (send self :calc-vel-for-cog tmp-cog-gain cog-translation-axis target-centroid-pos
+        #                          :centroid-offset-func centroid-offset-func
+        #                          :update-mass-properties nil))
+        #                   additional-vel))
+        #     (when (send self :get :ik-target-error)
+        #       (push (car additional-vel) (cdr (assoc :centroid (send self :get :ik-target-error)))))
+        #     ))
+
+        # ;; append additional-jacobi and additional-vel
+        # (let (add-vel-list (row0) add-vel add-jacobi)
+        #   (when additional-jacobi
+        #     (setq add-vel-list (mapcar #'(lambda (x) (if (functionp x) (funcall x link-list) x)) additional-vel))
+        #     (setq row0 (- (length tmp-dim) (reduce #'+ (mapcar #'length add-vel-list))))
+        #     (dotimes (i-add-jacobi (length additional-jacobi))
+        #       (setq add-jacobi (elt additional-jacobi i-add-jacobi))
+        #       (setq add-jacobi (if (functionp add-jacobi) (funcall add-jacobi link-list) add-jacobi))
+        #       (setq add-vel (elt add-vel-list i-add-jacobi))
+        #       (dotimes (i-row (array-dimension add-jacobi 0))
+        #         ;; set additional-jacobi
+        #         (dotimes (i-col (array-dimension jacobi 1))
+        #           (setf (aref jacobi (+ row0 i-row) i-col) (aref add-jacobi i-row i-col)))
+        #         (setf (elt tmp-dim (+ row0 i-row)) (elt add-vel i-row))
+        #         )
+        #       (setq row0 (+ row0 (length add-vel)))
+        #       (when (and debug-view (not (memq :no-message debug-view)))
+        #         (format-array add-jacobi (format nil "add-J~a    :" i-add-jacobi))
+        #         (format-array add-vel (format nil "add-v~a    :" i-add-jacobi)))
+        #       (when (send self :get :ik-target-error)
+        #         (if (and (not cog-null-space) target-centroid-pos (/= i-add-jacobi 0)) ;; First additional-vel is for COG, so neglect
+        #             (push (car additional-vel) (cdr (assoc (read-from-string (format nil ":additional-~d" (- i-add-jacobi 1))) (send self :get :ik-target-error))))))
+        #       )))
+
+        # check loop end
+        if success:
+            return 'ik-succeed'
+
+        for hook in inverse_kinematics_hook:
+            hook()
+        self.collision_pair_list = None
+        self.move_joints_avoidance(
+            tmp_dim,
+            union_link_list=union_link_list,
+            link_list=link_list,
+            rotation_axis=rotation_axis,
+            translation_axis=translation_axis,
+            jacobi=jacobi,
+            **kwargs)
+        return "ik-continuous"
+
+    def inverse_kinematics(
+            self,
+            target_coords,
+            stop=50,
+            link_list=None,
+            move_target=None,
+            revert_if_fail=True,
+            rotation_axis=True,
+            translation_axis=True,
+            joint_args=None,
+            thre=None,
+            rthre=None,
+            union_link_list=None,
+            centroid_thre=1.0,
+            target_centroid_pos=None,
+            centroid_offset_func=None,
+            cog_translation_axis='z',
+            cog_null_space=False,
+            periodic_time=0.5,
+            check_collision=None,
+            additional_jacobi=None,
+            additional_vel=None,
+            **kwargs):
+        target_coords = listify(target_coords)
+        if callable(union_link_list):
+            union_link_list = union_link_list(link_list)
+        else:
+            union_link_list = self.calc_union_link_list(link_list)
+
+        if thre is None:
+            if isinstance(move_target, list):
+                thre = [1] * len(move_target)
+            else:
+                thre = [1]
+        if rthre is None:
+            if isinstance(move_target, list):
+                rthre = [np.deg2rad(1)] * len(move_target)
+            else:
+                rthre = [np.deg2rad(1)]
+
+        # (av0 (send-all (remove-duplicates
+        #     (append (send-all union-link-list :joint) joint-list))
+        #                  :joint-angle))
+        c0 = None
+        if self.parent is None:
+            c0 = self.copy_worldcoords()
+        target_coords0 = target_coords
+        success = True
+        # (old-analysis-level (send-all union-link-list :analysis-level))
+        # (send-all union-link-list :analysis-level :coords)
+
+        # argument check
+        if link_list is None or move_target is None:
+            logger.error("both :link-list and :move-target required")
+            return True
+        if (translation_axis is None or translation_axis is False) and \
+           (rotation_axis is None or rotation_axis is False):
+            return True
+        if not isinstance(link_list[0], list):
+            link_list = [link_list]
+        move_target = listify(move_target)
+        rotation_axis = listify(rotation_axis)
+        translation_axis = listify(translation_axis)
+        thre = listify(thre)
+        rthre = listify(rthre)
+        if additional_jacobi is not None:
+            raise NotImplementedError
+        if additional_vel is not None:
+            raise NotImplementedError
+
+        if not (len(translation_axis) ==
+                len(rotation_axis) ==
+                len(move_target) ==
+                len(link_list) ==
+                len(target_coords)):
+            logger.error('list length differ : translation_axis {}'
+                         ', rotation_axis {}, move_target {} '
+                         'link_list {}, target_coords {}'.format(
+                             len(translation_axis), len(rotation_axis),
+                             len(move_target), len(link_list),
+                             len(target_coords)))
+            return False
+
+        # if not(len(additional_jacobi) ==
+        #        len(additional_vel)):
+        #     logger.error('list length differ : additional_jacobi {}, '
+        #                  'additional_vel {}'.format(
+        #                      len(additional_jacobi), len(additional_vel)))
+        #     return False
+
+        # tmp_additional_jacobi = list(map(lambda aj : aj(link_list) if callable(aj) else aj))
+        #    (let ((tmp-additional-jacobi (mapcar #'(lambda (aj) (if (functionp aj) (funcall aj link-list) aj)) additional-jacobi)))
+        #      (setq ik-args (nconc (send* self :inverse-kinematics-args
+        #                                  :translation-axis translation-axis
+        #                                  :rotation-axis rotation-axis
+        #                                  ;; evaluate additional-jacobi function and calculate row dimension of additional-jacobi
+        #                                  :additional-jacobi-dimension
+        #                                  (+ (if (and (not cog-null-space) target-centroid-pos)
+        #                                         (send self :calc-target-axis-dimension nil cog-translation-axis)
+        #                                       0)
+        #                                     (reduce #'+ (mapcar #'(lambda (aj) (array-dimension (if (functionp aj) (funcall aj link-list) aj) 0)) tmp-additional-jacobi)))
+        #                                  :union-link-list union-link-list args) args)))
+        #    (send self :reset-joint-angle-limit-weight-old union-link-list) ;; reset weight
+        #    (when (memq dump-command '(:always-with-debug-log :fail-only-with-debug-log))
+        #      ;; If ik debug information log is enabled, initialize empty list for ik target errors.
+        #      (send self :put :ik-target-error
+        #            (append
+        #             (let ((tmp-count -1)) (mapcar #'(lambda (x) (list (read-from-string (format nil ":target-~d" (incf tmp-count))))) (make-list (length target-coords)))) ;; For target-coords error
+        #             (if target-centroid-pos (list (list :centroid))) ;; For taget-centroid-pos error
+        #             (let ((tmp-count -1)) (mapcar #'(lambda (x) (list (read-from-string (format nil ":additional-~d" (incf tmp-count))))) (make-list (length additional-vel)))) ;; For additional-vel error
+        #             )))
+
+        # inverse_kinematics loop
+        loop = 0
+        while loop < stop:
+            loop += 1
+            target_coords = list(map(
+                lambda x: x() if callable(x) else x,
+                target_coords))
+            dif_pos = list(map(lambda mv, tc, trans_axis:
+                               1000 *
+                               mv.difference_position(
+                                   tc, translation_axis=trans_axis),
+                               move_target, target_coords, translation_axis))
+            dif_rot = list(map(lambda mv, tc, rot_axis:
+                               mv.difference_rotation(
+                                   tc, rotation_axis=rot_axis),
+                               move_target, target_coords, rotation_axis))
+
+            success = self.inverse_kinematics_loop(
+                dif_pos, dif_rot,
+                target_coords=target_coords,
+                periodic_time=periodic_time,
+                stop=stop,
+                loop=loop,
                 rotation_axis=rotation_axis,
                 translation_axis=translation_axis,
-                jacobi=J,
-                *args, **kwargs)
+                move_target=move_target,
+                union_link_list=union_link_list,
+                thre=thre,
+                rthre=rthre,
+                additional_jacobi=additional_jacobi,
+                additional_vel=additional_vel,
+                # ik_args=ik_args,
+                **kwargs)
+            print(success)
+            if success == 'ik-succeed':
+                return success
+
+        if target_centroid_pos is not None:
+            self.update_mass_properties()
+
+        target_coords = list(map(lambda x: x() if callable(x) else x,
+                                 target_coords))
+        dif_pos = list(map(lambda mv, tc, trans_axis:
+                           mv.difference_position(
+                               tc, translation_axis=trans_axis),
+                           move_target, target_coords, translation_axis))
+        dif_rot = list(map(lambda mv, tc, rot_axis:
+                           mv.difference_rotation(tc, rotation_axis=rot_axis),
+                           move_target, target_coords, rotation_axis))
+
+        # success
+        success = self.ik_convergence_check(dif_pos, dif_rot,
+                                            rotation_axis, translation_axis,
+                                            thre, rthre, centroid_thre, target_centroid_pos,
+                                            centroid_offset_func, cog_translation_axis,
+                                            update_mass_properties=False)
+        # update difference
+        # (mapcar #'(lambda (l a) (send l :analysis-level a)) union-link-list old-analysis-level)
+
+        # ;; reset weight
+        #    (send self :reset-joint-angle-limit-weight-old union-link-list)
+        #    ;; Get final ik success result flag
+        #    (if check-collision (setq collision-status (send self :self-collision-check)))
+        #    (setq success (and (or success (not revert-if-fail)) (not collision-status)))
+        #    ;; check solved or not
+        if success:
+            return self.angle_vector()
+
+        #  (mapc #'(lambda (j a) (send* j :joint-angle a joint-args))
+        #        (remove-duplicates
+        #   (append (send-all union-link-list :joint) joint-list)) av0)
+        #        (if c0 (send self :newcoords c0))
+        #  nil))
+        #    ))
 
     def ik_convergence_check(self,
                              dif_pos,
@@ -825,10 +1155,6 @@ class CascadedLink(CascadedCoords):
                 return False
         if target_centroid_pos is not None:
             raise NotImplementedError
-            # (setq success (and success (send self :cog-convergence-check centroid-thre target-centroid-pos
-            #                         :centroid-offset-func centroid-offset-func
-            #                         :translation-axis cog-translation-axis
-            #                         :update-mass-properties update-mass-properties))))
         return True
 
     def inverse_kinematics_optimization(self,
@@ -845,6 +1171,7 @@ class CascadedLink(CascadedCoords):
                                         thre=1.0,
                                         rthre=np.deg2rad(1.0),
                                         *args, **kwargs):
+
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
         if not isinstance(move_target, list):
@@ -1145,7 +1472,7 @@ class CascadedLink(CascadedCoords):
         _check_type(frm)
         pl = to.parent_link
         # if to is not included in self.link_list, just trace parent-link
-        if pl and self.link_list.index(to) == -1:
+        if pl and not (to in self.link_list):
             return self.find_link_route(pl, frm)
         # if self.link_list, append "to" link
         if pl and not (to == frm):
@@ -1299,12 +1626,13 @@ class RobotModel(CascadedLink):
         self.joint_names = []
         for joint in self.joint_list:
             self.joint_names.append(joint.name)
+            joint.child_link.add_parent_link(joint.parent_link)
+            joint.parent_link.add_child_links(joint.child_link)
 
         for link in self.link_list:
             self.__dict__[link.name] = link
         for joint in joint_list:
             self.__dict__[joint.name] = joint
-
         self.urdf_path = None
 
     def reset_pose(self):
@@ -1331,6 +1659,10 @@ class RobotModel(CascadedLink):
         joint_list = []
         joint_names = []
         for j in self.robot_urdf.joints:
+            if j.limit is None:
+                j.type = 'fixed'
+            if j.origin is None:
+                j.type = 'fixed'
             if j.axis is None:
                 j.axis = 'z'
             if j.type in ['fixed']:
@@ -1371,9 +1703,8 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
-            if not (j.type == 'fixed'):
-                joint_list.append(joint)
-                joint_names.append(joint.name)
+            joint_list.append(joint)
+            joint_names.append(joint.name)
 
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
@@ -1483,3 +1814,202 @@ class RobotModel(CascadedLink):
     def joint_max_angles(self):
         return np.array([joint.max_angle for joint in self.joint_list],
                         dtype=np.float64)
+
+    def inverse_kinematics(
+            self,
+            target_coords,
+            move_target,
+            link_list=None,
+            **kwargs):
+        """
+
+        solve inverse kinematics, move move-target to target-coords
+        look-at-target suppots t, nil, float-vector, coords, list of float-vector, list of coords
+        link-list is set by default based on move-target -> root link link-list
+
+        """
+        if link_list is None:
+            if not isinstance(move_target, list):
+                link_list = self.link_lists(move_target.parent)
+            else:
+                link_list = list(
+                    map(lambda mt: self.link_lists(mt.parent),
+                        move_target))
+
+        target_coords = listify(target_coords)
+        super(RobotModel, self).inverse_kinematics(
+            target_coords, move_target=move_target,
+            link_list=link_list,
+            **kwargs)
+        # (send self :look-at-target look-at-target :target-coords target-coords)
+
+    def inverse_kinematics_loop(self,
+                                dif_pos,
+                                dif_rot,
+                                move_target,
+                                link_list=None,
+                                target_coords=None,
+                                **kwargs):
+        """
+        move move_target using dif_pos and dif_rot
+
+        Parameters
+        ----------
+        TODO
+
+        Returns
+        -------
+        TODO
+        """
+        target_coords = listify(target_coords)
+        if link_list is None:
+            if not isinstance(move_target, list):
+                link_list = self.link_lists(move_target.parent)
+            else:
+                link_list = list(
+                    map(lambda mt: self.link_lists(mt.parent),
+                        move_target))
+
+        return super(RobotModel, self).inverse_kinematics_loop(
+            dif_pos, dif_rot,
+            link_list=link_list, move_target=move_target,
+            target_coords=target_coords, **kwargs)
+
+    def inverse_kinematics_loop_for_look_at(
+            self, move_target, look_at,
+            link_list,
+            rotation_axis='z',
+            translation_axis=False,
+            inverse_kinematics_hook=[],
+            rthre=0.001,
+            **kwargs):
+        """
+
+        Parameters
+        ----------
+        look_at : list or np.ndarray or Coordinates
+
+        Returns
+        -------
+
+        """
+        if isinstance(look_at, Coordinates):
+            look_at_pos = look_at.worldpos()
+        else:
+            look_at_pos = look_at
+
+        count = 0
+        stop = kwargs.pop('stop', 100)
+        p_dif_rot = None
+        dif_rot = None
+        joint_dimension = self.calc_target_joint_dimension(link_list)
+        target_coords = orient_coords_to_axis(
+            make_coords(pos=look_at_pos),
+            look_at_pos - move_target.worldpos())
+
+        return self.inverse_kinematics(target_coords,
+                                       move_target=move_target,
+                                       link_list=link_list,
+                                       translation_axis=translation_axis,
+                                       rotation_axis=rotation_axis)
+        # target_coordss = []
+        # while count < stop and \
+        #       (p_dif_rot is None or
+        #        LA.norm(p_dif_rot - dif_rot) > 1e-3):
+        #     count += 1
+        #     # orient target_coords to look at direction
+        #     target_coords = orient_coords_to_axis(
+        #         make_coords(pos=look_at_pos),
+        #         look_at_pos - move_target.worldpos())
+        #     target_coordss.append(target_coords.copy_worldcoords())
+
+        #     J = self.calc_jacobian_from_link_list(move_target=move_target,
+        #                                           link_list=link_list,
+        #                                           translation_axis=translation_axis,
+        #                                           rotation_axis=rotation_axis)
+        #     print(J)
+
+        #     p_dif_rot = dif_rot
+        #     dif_pos = move_target.difference_position(
+        #         target_coords, translation_axis=translation_axis)
+        #     dif_rot = move_target.difference_rotation(
+        #         target_coords, rotation_axis=rotation_axis)
+        #     # head_weight = np.ones(joint_dimension, 'f')
+        #     # head_nspace = np.zeros(joint_dimension, 'f')
+
+        #     # target_orient = target_coords.worldrot()[:, 2]
+        #     # move_orient = target_coords.worldrot()[:, 2]
+        #     # for joint_id, j in enumerate(map(lambda l: l.joint, link_list)):
+        #     #     axis_orient = j.parent_link.rotate_vector(_wrap_axis(j.axis))
+        #     #     # direciton of non continuous area
+        #     #     axis_orient2 = j.parent_link.rotate_vector([-1, 0, 0])
+        #     #     if (triple_product(axis_orient, move_orient, target_orient) < 0.0 and
+        #     #         triple_product(axis_orient, move_orient, axis_orient2) < 0.0 and
+        #     #         triple_product(axis_orient, axis_orient2, target_orient < 0.0)) or \
+        #     #         (triple_product(axis_orient, move_orient, target_orient) > 0.0 and
+        #     #          triple_product(axis_orient, move_orient, axis_orient2) > 0.0 and
+        #     #          triple_product(axis_orient, axis_orient2, target_orient > 0.0)):
+        #     #         if triple_product(axis_orient, move_orient, target_orient) > 0.0:
+        #     #             head_nspace[joint_id] = -1
+        #     #         else:
+        #     #             head_nspace[joint_id] = 1
+        #     #         head_weight = 0.01 * np.ones(joint_dimension, 'f')
+        #     #         head_weight[joint_id] = 0.0
+        #     #         break
+        #     print(dif_pos, dif_rot)
+        #     self.inverse_kinematics_loop(
+        #         dif_pos, dif_rot,
+        #         move_target=move_target,
+        #         rotation_axis=rotation_axis,
+        #         translation_axis=translation_axis,
+        #         link_list=link_list,
+        #         loop=count,
+        #         stop=stop,
+        #         target_coords=target_coords)
+
+        #     # vel_pos = self.calc_vel_from_pos(dif_pos, translation_axis)
+        #     # vel_rot = self.calc_vel_from_rot(dif_rot, rotation_axis)
+        #     # print(vel_pos, vel_rot)
+        #     # union_vels = np.array([])
+        #     # union_vel = np.concatenate([vel_pos, vel_rot])
+        #     # union_vels = np.concatenate([union_vels, union_vel])
+        #     # print('union-vel {}'.format(union_vels))
+
+        #     # # success = True
+        #     # # if rotation_axis is not None:
+        #     # #     success = success and (LA.norm(dif_rot) < rthre)
+
+        #     # if inverse_kinematics_hook:
+        #     #     for hook in inverse_kinematics_hook:
+        #     #         hook()
+
+        #     # # if success:
+        #     # #     return self.angle_vector()
+
+        #     # union_link_list = self.calc_union_link_list(link_list)
+        #     # self.move_joints_avoidance(
+        #     #     union_vels,
+        #     #     union_link_list=union_link_list,
+        #     #     link_list=link_list,
+        #     #     rotation_axis=rotation_axis,
+        #     #     translation_axis=translation_axis,
+        #     #     jacobi=J,
+        #     #     # *args, **kwargs
+        #     # )
+
+        # if p_dif_rot is not None and \
+        #    LA.norm(p_dif_rot - dif_rot) <= 1e-3:
+        #     return target_coordss
+        #     return self.angle_vector()
+
+        # # solve failed
+        # logger.warn('look at failed.')
+        # logger.warn('    count : {}'.format(count))
+        # if p_dif_rot is not None:
+        #     logger.warn(' p_dif_rot : {}/({})'.format
+        #                 (p_dif_rot, LA.norm(p_dif_rot)))
+        #     logger.warn('   dif_rot : {}/({})'.format
+        #                 (dif_rot, (LA.norm(dif_rot))))
+        #     logger.warn('      diff : {} < {}'.format
+        #                 (LA.norm(p_dif_rot - dif_rot), 1e-3))
+        # return target_coordss
