@@ -80,6 +80,15 @@ class TestRobotModel(unittest.TestCase):
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
+    def test_calc_target_joint_dimension(self):
+        fetch = skrobot.robot_models.Fetch()
+        joint_dimension = fetch.calc_target_joint_dimension(
+            fetch.rarm.link_list)
+        self.assertEqual(joint_dimension, 7)
+        joint_dimension = fetch.calc_target_joint_dimension(
+            [fetch.rarm.link_list, fetch.rarm.link_list])
+        self.assertEqual(joint_dimension, 7)
+
     def test_calc_jacobian_for_interlocking_joints(self):
         r = skrobot.robot_models.Fetch()
         jacobian = r.calc_jacobian_for_interlocking_joints(
