@@ -1616,6 +1616,40 @@ class CascadedLink(CascadedCoords):
             i += 1
         return fik
 
+    @property
+    def interlocking_joint_pairs(self):
+        """Interlocking joint pairs.
+        pairs are [(joint0, joint1), ...]
+        If users want to use interlocking joints, please overwrite this method.
+        """
+        return []
+
+    def calc_jacobian_for_interlocking_joints(
+            self, link_list, interlocking_joint_pairs=None):
+        if interlocking_joint_pairs is None:
+            interlocking_joint_pairs = self.interlocking_joint_pairs
+        union_link_list = self.calc_union_link_list(link_list)
+        joint_list = list(filter(lambda j: j is not None,
+                                 [l.joint for l in union_link_list]))
+        pairs = list(
+            filter(lambda pair:
+                   not ((pair[0] not in joint_list) and
+                        (pair[1] not in joint_list)),
+                   interlocking_joint_pairs))
+        jacobi = np.zeros((len(pairs),
+                           self.calc_target_joint_dimension(union_link_list)),
+                          'f')
+        for i, pair in enumerate(pairs):
+            index = sum(
+                [j.joint_dof for j in joint_list[:joint_list.index(
+                    pair[0])]])
+            jacobi[i][index] = 1.0
+            index = sum(
+                [j.joint_dof for j in joint_list[:joint_list.index(
+                    pair[1])]])
+            jacobi[i][index] = -1.0
+        return jacobi
+
 
 class RobotModel(CascadedLink):
 
