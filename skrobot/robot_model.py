@@ -13,6 +13,7 @@ from skrobot.math import manipulability
 from skrobot.math import midpoint
 from skrobot.math import normalize_vector
 from skrobot.math import sr_inverse
+from skrobot.math import make_matrix
 from skrobot.optimizer import solve_qp
 from skrobot.utils.urdf import URDF
 from skrobot.geo import midcoords
@@ -894,29 +895,24 @@ class CascadedLink(CascadedCoords):
         #       (push (car additional-vel) (cdr (assoc :centroid (send self :get :ik-target-error)))))
         #     ))
 
-        # ;; append additional-jacobi and additional-vel
-        # (let (add-vel-list (row0) add-vel add-jacobi)
-        #   (when additional-jacobi
-        #     (setq add-vel-list (mapcar #'(lambda (x) (if (functionp x) (funcall x link-list) x)) additional-vel))
-        #     (setq row0 (- (length tmp-dim) (reduce #'+ (mapcar #'length add-vel-list))))
-        #     (dotimes (i-add-jacobi (length additional-jacobi))
-        #       (setq add-jacobi (elt additional-jacobi i-add-jacobi))
-        #       (setq add-jacobi (if (functionp add-jacobi) (funcall add-jacobi link-list) add-jacobi))
-        #       (setq add-vel (elt add-vel-list i-add-jacobi))
-        #       (dotimes (i-row (array-dimension add-jacobi 0))
-        #         ;; set additional-jacobi
-        #         (dotimes (i-col (array-dimension jacobi 1))
-        #           (setf (aref jacobi (+ row0 i-row) i-col) (aref add-jacobi i-row i-col)))
-        #         (setf (elt tmp-dim (+ row0 i-row)) (elt add-vel i-row))
-        #         )
-        #       (setq row0 (+ row0 (length add-vel)))
-        #       (when (and debug-view (not (memq :no-message debug-view)))
-        #         (format-array add-jacobi (format nil "add-J~a    :" i-add-jacobi))
-        #         (format-array add-vel (format nil "add-v~a    :" i-add-jacobi)))
-        #       (when (send self :get :ik-target-error)
-        #         (if (and (not cog-null-space) target-centroid-pos (/= i-add-jacobi 0)) ;; First additional-vel is for COG, so neglect
-        #             (push (car additional-vel) (cdr (assoc (read-from-string (format nil ":additional-~d" (- i-add-jacobi 1))) (send self :get :ik-target-error))))))
-        #       )))
+        # append additional-jacobi and additional-vel
+        if additional_jacobi is not None:
+            additional_velocity_list = list(
+                map(lambda x:
+                    x(link_list) if callable(x) else x,
+                    additional_vel))
+            row0 = len(tmp_dim) - sum(map(len, additional_velocity_list))
+            for i_add_jacobi in range(len(additional_jacobi)):
+                add_jacobi = additional_jacobi[i_add_jacobi]
+                if callable(add_jacobi):
+                    add_jacobi = add_jacobi(link_list)
+                add_vel = additional_velocity_list[i_add_jacobi]
+                for i_row in range(add_jacobi.shape[0]):
+                    # set additional-jacobi
+                    for i_col in range(add_jacobi.shape[1]):
+                        jacobi[row0 + i_row][i_col] = add_jacobi[i_row][i_col]
+                    tmp_dim[row0 + i_row] = add_vel[i_row]
+                row0 += len(add_vel)
 
         # check loop end
         if success:
@@ -934,6 +930,33 @@ class CascadedLink(CascadedCoords):
             jacobi=jacobi,
             **kwargs)
         return "ik-continuous"
+
+    def inverse_kinematics_args(
+            self,
+            union_link_list=None,
+            rotation_axis=None,
+            translation_axis=None,
+            additional_jacobi_dimension=None,
+            **kwargs):
+        c = self.calc_target_joint_dimension(
+            union_link_list)
+        # add dimensions of additonal-jacobi
+        r = self.calc_target_axis_dimension(
+            rotation_axis, translation_axis) + additional_jacobi_dimension
+
+        fik = make_matrix(r, c)
+        ret = make_matrix(c, r)
+
+        tmp_dims = []
+        for ta, ra in zip(translation_axis, rotation_axis):
+            tmp_dims.append(np.zeros
+                            (self.calc_target_axis_dimension(ra, ta),
+                             'f'))
+        return dict(dim=r,
+                    fik=fik,
+                    fik_len=c,
+                    ret=ret,
+                    **kwargs)
 
     def inverse_kinematics(
             self,
@@ -955,8 +978,8 @@ class CascadedLink(CascadedCoords):
             cog_null_space=False,
             periodic_time=0.5,
             check_collision=None,
-            additional_jacobi=None,
-            additional_vel=None,
+            additional_jacobi=[],
+            additional_vel=[],
             **kwargs):
         target_coords = listify(target_coords)
         if callable(union_link_list):
@@ -1000,10 +1023,6 @@ class CascadedLink(CascadedCoords):
         translation_axis = listify(translation_axis)
         thre = listify(thre)
         rthre = listify(rthre)
-        if additional_jacobi is not None:
-            raise NotImplementedError
-        if additional_vel is not None:
-            raise NotImplementedError
 
         if not (len(translation_axis) ==
                 len(rotation_axis) ==
@@ -1018,34 +1037,32 @@ class CascadedLink(CascadedCoords):
                              len(target_coords)))
             return False
 
-        # if not(len(additional_jacobi) ==
-        #        len(additional_vel)):
-        #     logger.error('list length differ : additional_jacobi {}, '
-        #                  'additional_vel {}'.format(
-        #                      len(additional_jacobi), len(additional_vel)))
-        #     return False
+        if not(len(additional_jacobi) ==
+               len(additional_vel)):
+            logger.error('list length differ : additional_jacobi {}, '
+                         'additional_vel {}'.format(
+                             len(additional_jacobi), len(additional_vel)))
+            return False
 
-        # tmp_additional_jacobi = list(map(lambda aj : aj(link_list) if callable(aj) else aj))
-        #    (let ((tmp-additional-jacobi (mapcar #'(lambda (aj) (if (functionp aj) (funcall aj link-list) aj)) additional-jacobi)))
-        #      (setq ik-args (nconc (send* self :inverse-kinematics-args
-        #                                  :translation-axis translation-axis
-        #                                  :rotation-axis rotation-axis
-        #                                  ;; evaluate additional-jacobi function and calculate row dimension of additional-jacobi
-        #                                  :additional-jacobi-dimension
-        #                                  (+ (if (and (not cog-null-space) target-centroid-pos)
-        #                                         (send self :calc-target-axis-dimension nil cog-translation-axis)
-        #                                       0)
-        #                                     (reduce #'+ (mapcar #'(lambda (aj) (array-dimension (if (functionp aj) (funcall aj link-list) aj) 0)) tmp-additional-jacobi)))
-        #                                  :union-link-list union-link-list args) args)))
-        #    (send self :reset-joint-angle-limit-weight-old union-link-list) ;; reset weight
-        #    (when (memq dump-command '(:always-with-debug-log :fail-only-with-debug-log))
-        #      ;; If ik debug information log is enabled, initialize empty list for ik target errors.
-        #      (send self :put :ik-target-error
-        #            (append
-        #             (let ((tmp-count -1)) (mapcar #'(lambda (x) (list (read-from-string (format nil ":target-~d" (incf tmp-count))))) (make-list (length target-coords)))) ;; For target-coords error
-        #             (if target-centroid-pos (list (list :centroid))) ;; For taget-centroid-pos error
-        #             (let ((tmp-count -1)) (mapcar #'(lambda (x) (list (read-from-string (format nil ":additional-~d" (incf tmp-count))))) (make-list (length additional-vel)))) ;; For additional-vel error
-        #             )))
+        tmp_additional_jacobi = map(
+            lambda aj: aj(link_list) if callable(aj) else aj,
+            additional_jacobi)
+        if cog_null_space is None and target_centroid_pos is not None:
+            additional_jacobi_dimension = self.calc_target_axis_dimension(
+                False, cog_translation_axis)
+        else:
+            additional_jacobi_dimension = 0
+        additional_jacobi_dimension += sum(
+            map(lambda aj: (aj(link_list) if callable(aj) else aj).shape[0], tmp_additional_jacobi))
+        ik_args = self.inverse_kinematics_args(
+            union_link_list=union_link_list,
+            translation_axis=translation_axis,
+            rotation_axis=rotation_axis,
+            # evaluate additional-jacobi function and
+            # calculate row dimension of additional_jacobi
+            additional_jacobi_dimension=additional_jacobi_dimension,
+            **kwargs)
+        #    self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset weight
 
         # inverse_kinematics loop
         loop = 0
@@ -1073,14 +1090,13 @@ class CascadedLink(CascadedCoords):
                 rotation_axis=rotation_axis,
                 translation_axis=translation_axis,
                 move_target=move_target,
+                link_list=link_list,
                 union_link_list=union_link_list,
                 thre=thre,
                 rthre=rthre,
                 additional_jacobi=additional_jacobi,
                 additional_vel=additional_vel,
-                # ik_args=ik_args,
-                **kwargs)
-            print(success)
+                ik_args=ik_args)
             if success == 'ik-succeed':
                 return success
 
@@ -1655,6 +1671,25 @@ class CascadedLink(CascadedCoords):
                     pair[1])]])
             jacobi[i][index] = -1.0
         return jacobi
+
+    def calc_vel_for_interlocking_joints(
+            self, link_list,
+            interlocking_joint_pairs=None):
+        """Calculate 0 velocity for keeping
+        interlocking joint at the same joint angle."""
+        if interlocking_joint_pairs is None:
+            interlocking_joint_pairs = self.interlocking_joint_pairs
+        union_link_list = self.calc_union_link_list(link_list)
+        joint_list = list(filter(lambda j: j is not None,
+                                 [l.joint for l in union_link_list]))
+        pairs = list(
+            filter(lambda pair:
+                   not ((pair[0] not in joint_list) and
+                        (pair[1] not in joint_list)),
+                   interlocking_joint_pairs))
+        vel = np.zeros(len(pairs), 'f')
+        return vel
+
 
 
 class RobotModel(CascadedLink):
