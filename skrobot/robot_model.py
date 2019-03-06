@@ -2088,3 +2088,52 @@ class RobotModel(CascadedLink):
         #     logger.warn('      diff : {} < {}'.format
         #                 (LA.norm(p_dif_rot - dif_rot), 1e-3))
         # return target_coordss
+
+
+def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
+    # TODO current support only 1-dof joint
+    # fix unit system ;; [mm] -> [m], [deg] -> [rad]
+    # 1-dof joint such as rotational_joint and linear_joint
+    if jamm is None:
+        jamm = np.zeros(3, 'f')
+    jamm[0] = j.angle_to_speed(j.joint_angle())
+    jamm[1] = j.angle_to_speed(j.max_angle)
+    jamm[2] = j.angle_to_speed(j.min_angle)
+    return jamm
+
+
+def joint_angle_limit_weight(joint_list):
+    dims = calc_target_joint_dimension(joint_list)
+    res = np.zeros(dims, 'f')
+    k = 0
+    kk = 0
+    jamm = np.zeros(3, 'f')
+    for i in range(dims):
+        j = joint_list[k]
+        calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm)
+        joint_angle, joint_max, joint_min = jamm
+        e = np.deg2rad(1)
+        k += 1
+
+        # limitation
+        if np.isclose(joint_angle, joint_max, e) and \
+           np.isclose(joint_angle, joint_min, e):
+            pass
+        elif np.isclose(joint_angle, joint_max, e):
+            joint_angle = joint_max - e
+        elif np.isclose(joint_angle, joint_min, e):
+            joint_angle = joint_min + e
+        # calculate weight
+        if np.isclose(joint_angle, joint_max, e) and \
+           np.isclose(joint_angle, joint_min, e):
+            res[i] = float('inf')
+        else:
+            if np.isinf(joint_min) or np.isinf(joint_max):
+                r = 0.0
+            else:
+                r = abs(((joint_max - joint_min) ** 2) *
+                        (2.0 * joint_angle - joint_max - joint_min) /
+                        (4.0 * ((joint_max - joint_angle) ** 2) *
+                         ((joint_angle - joint_min) ** 2)))
+            res[i] = r
+    return res
