@@ -3,6 +3,9 @@ import unittest
 import numpy as np
 from numpy import testing
 
+from skrobot.robot_model import RotationalJoint
+from skrobot.coordinates import make_coords
+from skrobot.robot_model import joint_angle_limit_weight
 import skrobot
 
 
@@ -112,3 +115,31 @@ class TestRobotModel(unittest.TestCase):
             np.array([[1, 0, 0, -1, 0, 0, 0]],
                      dtype='f'),
             jacobian)
+
+    def test_joint_angle_limit_weight(self):
+        j1 = RotationalJoint(
+            child_link=make_coords(),
+            max_angle=32.3493,
+            min_angle=-122.349)
+        j1.joint_angle(-60.0)
+        testing.assert_almost_equal(
+            joint_angle_limit_weight([j1]),
+            3.1019381e-01)
+
+        j2 = RotationalJoint(
+            child_link=make_coords(),
+            max_angle=74.2725,
+            min_angle=-20.2598)
+        j2.joint_angle(74.0)
+        testing.assert_almost_equal(
+            joint_angle_limit_weight([j2]),
+            1.3539208e+03)
+
+        j3 = RotationalJoint(
+            child_link=make_coords(),
+            max_angle=float('inf'),
+            min_angle=-float('inf'))
+        j3.joint_angle(-20.0)
+        testing.assert_almost_equal(
+            joint_angle_limit_weight([j3]),
+            0.0)
