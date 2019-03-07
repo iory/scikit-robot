@@ -1918,7 +1918,7 @@ class RobotModel(CascadedLink):
                         move_target))
 
         target_coords = listify(target_coords)
-        super(RobotModel, self).inverse_kinematics(
+        return super(RobotModel, self).inverse_kinematics(
             target_coords, move_target=move_target,
             link_list=link_list,
             **kwargs)
