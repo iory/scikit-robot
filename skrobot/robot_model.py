@@ -157,12 +157,14 @@ class RotationalJoint(Joint):
         if relative:
             v += self.joint_angle()
         if v > self.max_angle:
-            logger.warning("{} :joint-angle({}) violate max-angle({})"
-                           .format(self, v, self.max_angle))
+            if not relative:
+                logger.warning("{} :joint-angle({}) violate max-angle({})"
+                               .format(self, v, self.max_angle))
             v = self.max_angle
         elif v < self.min_angle:
-            logger.warning("{} :joint-angle({}) violate min-angle({})"
-                           .format(self, v, self.min_angle))
+            if not relative:
+                logger.warning("{} :joint-angle({}) violate min-angle({})"
+                               .format(self, v, self.min_angle))
             v = self.min_angle
         self._joint_angle = v
         # (send child-link :replace-coords default-coords)
@@ -217,12 +219,14 @@ class FixedJoint(Joint):
         if relative:
             v += self.joint_angle()
         if v > self.max_angle:
-            logger.warning("{} :joint-angle({}) violate max-angle({})"
-                           .format(self, v, self.max_angle))
+            if not relative:
+                logger.warning("{} :joint-angle({}) violate max-angle({})"
+                               .format(self, v, self.max_angle))
             v = self.max_angle
         elif v < self.min_angle:
-            logger.warning("{} :joint-angle({}) violate min-angle({})"
-                           .format(self, v, self.min_angle))
+            if not relative:
+                logger.warning("{} :joint-angle({}) violate min-angle({})"
+                               .format(self, v, self.min_angle))
             v = self.min_angle
         self._joint_angle = v
         self.child_link.rotation = self.default_coords.rotation.copy()
@@ -322,12 +326,14 @@ class LinearJoint(Joint):
             if relative is not None:
                 v = v + self._joint_angle
             if v > self.max_angle:
-                logger.warning("{} :joint-angle({}) violate max-angle({})"
-                               .format(self, v, self.max_angle))
+                if not relative:
+                    logger.warning("{} :joint-angle({}) violate max-angle({})"
+                                   .format(self, v, self.max_angle))
                 v = self.max_angle
             elif v < self.min_angle:
-                logger.warning("{} :joint-angle({}) violate min-angle({})"
-                               .format(self, v, self.min_angle))
+                if not relative:
+                    logger.warning("{} :joint-angle({}) violate min-angle({})"
+                                   .format(self, v, self.min_angle))
                 v = self.min_angle
             self._joint_angle = v
             self.child_link.rotation = self.default_coords.rotation.copy()
