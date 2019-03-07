@@ -1004,9 +1004,9 @@ class CascadedLink(CascadedCoords):
             else:
                 rthre = [np.deg2rad(1)]
 
-        # (av0 (send-all (remove-duplicates
-        #     (append (send-all union-link-list :joint) joint-list))
-        #                  :joint-angle))
+        # store current angle vector
+        joint_list = list(set([l.joint for l in union_link_list] + self.joint_list))
+        av0 = [j.joint_angle() for j in joint_list]
         c0 = None
         if self.parent is None:
             c0 = self.copy_worldcoords()
@@ -1137,12 +1137,12 @@ class CascadedLink(CascadedCoords):
         if success:
             return self.angle_vector()
 
-        #  (mapc #'(lambda (j a) (send* j :joint-angle a joint-args))
-        #        (remove-duplicates
-        #   (append (send-all union-link-list :joint) joint-list)) av0)
-        #        (if c0 (send self :newcoords c0))
-        #  nil))
-        #    ))
+        # reset angle vector
+        for joint, angle in zip(joint_list, av0):
+            joint.joint_angle(angle)
+        if c0 is not None:
+            self.newcoords(c0)
+        return False
 
     def ik_convergence_check(self,
                              dif_pos,
