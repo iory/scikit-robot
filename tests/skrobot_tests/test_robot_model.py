@@ -83,6 +83,20 @@ class TestRobotModel(unittest.TestCase):
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
+        # ik failed case
+        av = kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().\
+            translate([10000, 0, 0], 'local')
+        ik_result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True)
+        self.assertEqual(ik_result, False)
+        testing.assert_array_equal(
+            av, kuka.angle_vector())
+
     def test_calc_target_joint_dimension(self):
         fetch = skrobot.robot_models.Fetch()
         joint_dimension = fetch.calc_target_joint_dimension(
