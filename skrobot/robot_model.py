@@ -967,7 +967,7 @@ class CascadedLink(CascadedCoords):
                 # update_mass_properties=False
             )
         if additional_check is not None:
-            success |= additional_check()
+            success &= additional_check()
 
         # calculation of move-coords velocities from vel-p and vel-r
         for i in range(len(move_target)):
