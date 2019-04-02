@@ -2250,3 +2250,31 @@ def joint_angle_limit_weight(joint_list):
                          ((joint_angle - joint_min) ** 2)))
             res[i] = r
     return res
+
+
+def joint_angle_limit_nspace(
+        joint_list,
+        n_joint_dimension=None):
+    """Calculate nspace weight for avoiding joint angle limit
+
+       dH/dq = (((t_max + t_min)/2 - t) / ((t_max - t_min)/2)) ^2
+
+    """
+    if n_joint_dimension is None:
+        n_joint_dimension = calc_target_joint_dimension(joint_list)
+    nspace = np.zeros(n_joint_dimension, 'f')
+    for i in range(n_joint_dimension):
+        joint = joint_list[i]
+        joint_angle, joint_max, joint_min = \
+            calc_joint_angle_min_max_for_limit_calculation(joint, i)
+
+        # calculate weight
+        if (joint_max - joint_min == 0.0) or \
+           np.isinf(joint_max) or np.isinf(joint_min):
+            r = 0.0
+        else:
+            r = ((joint_max + joint_min) - 2.0 * joint_angle) \
+                / (joint_max - joint_min)
+            r = np.sign(r) * (r ** 2)
+        nspace[i] = r
+    return nspace
