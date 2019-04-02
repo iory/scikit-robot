@@ -115,17 +115,17 @@ class TestCascadedCoordinates(unittest.TestCase):
                            pos=[0.1, 0, 0])
         b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
                            pos=[0.1, 0, 0.2])
-        self.assertEquals(a._changed, True)
-        self.assertEquals(b._changed, True)
+        self.assertEqual(a._changed, True)
+        self.assertEqual(b._changed, True)
         a.assoc(b)
-        self.assertEquals(a._changed, False)
-        self.assertEquals(b._changed, True)
+        self.assertEqual(a._changed, False)
+        self.assertEqual(b._changed, True)
         a.rotate(pi / 2.0, 'z')
-        self.assertEquals(a._changed, True)
-        self.assertEquals(b._changed, True)
+        self.assertEqual(a._changed, True)
+        self.assertEqual(b._changed, True)
         b.worldrot()
-        self.assertEquals(a._changed, False)
-        self.assertEquals(b._changed, False)
+        self.assertEqual(a._changed, False)
+        self.assertEqual(b._changed, False)
 
     def test_assoc(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
