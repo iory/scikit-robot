@@ -33,6 +33,47 @@ class TestRobotModel(unittest.TestCase):
                           'head_pan_link',
                           'head_tilt_link'])
 
+    def test_find_joint_angle_limit_weight_from_union_link_list(self):
+        fetch = skrobot.robot_models.Fetch()
+        links = fetch.calc_union_link_list([fetch.rarm.link_list])
+
+        # not set joint_angle_limit case
+        fetch.reset_joint_angle_limit_weight(links)
+        names, weights = fetch.\
+            find_joint_angle_limit_weight_from_union_link_list(links)
+        self.assertEqual(
+            weights,
+            False)
+
+        # set joint_angle_limit case
+        fetch.joint_angle_limit_weight_maps[names] = np.ones(len(names), 'f')
+        names, weights = fetch.\
+            find_joint_angle_limit_weight_from_union_link_list(links),
+        testing.assert_almost_equal(
+            weights,
+            np.ones(len(names), 'f'))
+
+    def test_reset_joint_angle_limit_weight(self):
+        fetch = skrobot.robot_models.Fetch()
+        links = fetch.calc_union_link_list([fetch.rarm.link_list])
+
+        # not set joint_angle_limit case
+        fetch.reset_joint_angle_limit_weight(links)
+        names, weights = fetch.\
+            find_joint_angle_limit_weight_from_union_link_list(links)
+        self.assertEqual(
+            weights,
+            False)
+
+        # set joint_angle_limit case
+        fetch.joint_angle_limit_weight_maps[names] = np.ones(len(names), 'f')
+        fetch.reset_joint_angle_limit_weight(links)
+        names, weights = fetch.\
+            find_joint_angle_limit_weight_from_union_link_list(links),
+        self.assertEqual(
+            weights,
+            False)
+
     def test_find_link_route(self):
         fetch = skrobot.robot_models.Fetch()
         ret = fetch.find_link_route(fetch.torso_lift_link)
