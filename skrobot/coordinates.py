@@ -209,6 +209,9 @@ class Coordinates(object):
     def rotate_vector(self, v):
         return np.matmul(self.rotation, v)
 
+    def inverse_rotate_vector(self, v):
+        return np.matmul(v, self.rotation)
+
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
             tmp_coords = transform_coords(self, c)
@@ -495,6 +498,12 @@ class CascadedCoords(Coordinates):
         else:
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
+
+    def rotate_vector(self, v):
+        return self.worldcoords().rotate_vector(v)
+
+    def inverse_rotate_vector(self, v):
+        return self.worldcoords().inverse_rotate_vector(v)
 
     def transform(self, c, wrt='local'):
         if isinstance(wrt, Coordinates):
