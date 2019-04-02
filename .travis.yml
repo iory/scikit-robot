@@ -6,15 +6,14 @@ python:
 
 install:
   - pip install --upgrade pip setuptools wheel
-  - pip install hacking
   - pip install autopep8
-  - pip install coveralls
   - pip install Cython
   - python setup.py develop
 
 script:
+  - pip install hacking pytest
   - autopep8 -r . --diff --exit-code
-  - nosetests -x tests --with-coverage --cover-package skrobot
+  - pytest -v tests
 
 sudo: false
 
