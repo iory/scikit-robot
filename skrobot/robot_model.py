@@ -727,6 +727,33 @@ class CascadedLink(CascadedCoords):
                              '0.0, given {}'.format(avoid_nspace_gain))
         return nspace
 
+    def calc_inverse_kinematics_nspace_from_link_list(
+            self,
+            link_list,
+            avoid_nspace_gain=0.01,
+            union_link_list=None,
+            n_joint_dimension=None,
+            null_space=None,
+            additional_nspace_list=[],
+            weight=None):
+        if union_link_list is None:
+            union_link_list = self.calc_union_link_list(link_list)
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(
+                union_link_list)
+        # calc null-space from joint-limit
+        nspace = self.calc_nspace_from_joint_limit(
+            avoid_nspace_gain, union_link_list, weight)
+
+        # add null-space from arguments
+        # TODO support additional_nspace_list
+
+        if callable(null_space):
+            null_space = null_space()
+        if null_space is not None:
+            nspace = null_space + nspace
+        return nspace
+
     def find_joint_angle_limit_weight_from_union_link_list(
             self, union_link_list):
         names = tuple(set([link.name for link in union_link_list]))
