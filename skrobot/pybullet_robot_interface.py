@@ -55,7 +55,7 @@ class PybulletRobotInterface(object):
                                    useFixedBase=use_fixed_base)
 
         self.load_bullet()
-        self.realtime_simualtion = False
+        self.realtime_simulation = False
 
     @staticmethod
     def available():
@@ -86,9 +86,9 @@ class PybulletRobotInterface(object):
         self.target_velocity = 0.0
         self.velocity_gain = 0.1
 
-    def angle_vector(self, angle_vector=None, realtime_simualtion=None):
-        if realtime_simualtion is not None and isinstance(realtime_simualtion, bool):
-            self.realtime_simualtion = realtime_simualtion
+    def angle_vector(self, angle_vector=None, realtime_simulation=None):
+        if realtime_simulation is not None and isinstance(realtime_simulation, bool):
+            self.realtime_simulation = realtime_simulation
 
         if self.robot_id is None:
             return self.robot.angle_vector()
@@ -106,7 +106,7 @@ class PybulletRobotInterface(object):
             else:
                 raise ValueError('{} is not supported'.
                                  format(type(joint)))
-            if self.realtime_simualtion is False:
+            if self.realtime_simulation is False:
                 p.resetJointState(self.robot_id, idx, angle)
 
             p.setJointMotorControl2(bodyIndex=self.robot_id,
