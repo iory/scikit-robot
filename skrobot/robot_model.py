@@ -409,6 +409,7 @@ class CascadedLink(CascadedCoords):
         self.bodies = []
         self.collision_avoidance_link_list = []
         self.end_coords_list = []
+        self.joint_angle_limit_weight_maps = {}
 
     def angle_vector(self, vec=None, av=None):
         "Returns angle-vector of this object, if vec is given, \
@@ -708,6 +709,19 @@ class CascadedLink(CascadedCoords):
             dif_rot = r_limit * normalize_vector(dif_rot)
         vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
         return vel_r
+
+    def find_joint_angle_limit_weight_from_union_link_list(
+            self, union_link_list):
+        names = tuple(set([link.name for link in union_link_list]))
+        if names in self.joint_angle_limit_weight_maps:
+            return self.joint_angle_limit_weight_maps[names]
+        else:
+            return (names, False)
+
+    def reset_joint_angle_limit_weight(self, union_link_list):
+        names, weights = self.joint_angle_limit_weight_maps(union_link_list)
+        if weights is not False:
+            self.joint_angle_limit_weight_maps[names] = (names, False)
 
     def inverse_kinematics_loop(
             self,
