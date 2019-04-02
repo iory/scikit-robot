@@ -758,7 +758,8 @@ class CascadedLink(CascadedCoords):
             return (names, False)
 
     def reset_joint_angle_limit_weight(self, union_link_list):
-        names, weights = self.joint_angle_limit_weight_maps(union_link_list)
+        names, weights = self.find_joint_angle_limit_weight_from_union_link_list(
+            union_link_list)
         if weights is not False:
             self.joint_angle_limit_weight_maps[names] = (names, False)
 
