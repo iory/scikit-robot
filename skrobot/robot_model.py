@@ -570,11 +570,13 @@ class CascadedLink(CascadedCoords):
                 link_list,
                 obstacles=obstacles)
 
-        # weight = self.calc_inverse_kinematics_weight_from_link_list(
-        #     link_list, weight=weight, fik_len=fik_len,
-        #     avoid_weight_gain=avoid_weight_gain,
-        #     union_link_list=union_link_list,
-        #     additional_weight_list=additional_weight_list)
+        weight = self.calc_inverse_kinematics_weight_from_link_list(
+            link_list, weight=weight,
+            n_joint_dimension=n_joint_dimension,
+            avoid_weight_gain=avoid_weight_gain,
+            union_link_list=union_link_list,
+            additional_weight_list=additional_weight_list
+        )
 
         # calc inverse jacobian and projection jacobian
         j_sharp = self.calc_inverse_jacobian(jacobi,
@@ -722,6 +724,90 @@ class CascadedLink(CascadedCoords):
         names, weights = self.joint_angle_limit_weight_maps(union_link_list)
         if weights is not False:
             self.joint_angle_limit_weight_maps[names] = (names, False)
+
+    def calc_weight_from_joint_limit(
+            self,
+            avoid_weight_gain,
+            link_list,
+            union_link_list,
+            weight,
+            n_joint_dimension=None):
+        """Calculate weight according to joint limit
+
+        """
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(
+                union_link_list)
+
+        link_names, previous_joint_angle_limit_weight = self.find_joint_angle_limit_weight_from_union_link_list(
+            union_link_list)
+        if previous_joint_angle_limit_weight is False:
+            previous_joint_angle_limit_weight = np.inf * np.ones(n_joint_dimension, 'f')
+            self.joint_angle_limit_weight_maps[link_names] = (
+                link_names, previous_joint_angle_limit_weight)
+
+        new_weight = np.zeros_like(weight, 'f')
+        joint_list = [l.joint for l in union_link_list
+                      if l.joint is not None]
+        if avoid_weight_gain > 0.0:
+            current_joint_angle_limit_weight = avoid_weight_gain * \
+                joint_angle_limit_weight(joint_list)
+            for i in range(n_joint_dimension):
+                if (current_joint_angle_limit_weight[i] -
+                    previous_joint_angle_limit_weight[i]) >= 0.0:
+                    new_weight[i] = 1.0 / \
+                        (1.0 + current_joint_angle_limit_weight[i])
+                else:
+                    new_weight[i] = 1.0
+                previous_joint_angle_limit_weight[i] = \
+                    current_joint_angle_limit_weight[i]
+        elif avoid_weight_gain == 0.0:
+            for i in range(n_joint_dimension):
+                new_weight[i] = weight[i]
+
+        w_cnt = 0
+        for ul in union_link_list:
+            dof = ul.joint.joint_dof
+            n_duplicate = sum([1 for x in link_list if ul in x])
+            if n_duplicate > 1:
+                for i in range(dof):
+                    new_weight[w_cnt + i] = new_weight[w_cnt + i] / n_duplicate
+            w_cnt += dof
+        return new_weight
+
+    def calc_inverse_kinematics_weight_from_link_list(
+            self,
+            link_list,
+            avoid_weight_gain=1.0,
+            union_link_list=None,
+            n_joint_dimension=None,
+            weight=None,
+            additional_weight_list=[]):
+        """Calculate all weight from link list
+
+        """
+        if not (isinstance(link_list[0], tuple) or
+                isinstance(link_list[0], list)):
+            link_list = [link_list]
+        if union_link_list is None:
+            union_link_list = self.calc_union_link_list(link_list)
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(
+                union_link_list)
+        if weight is None:
+            weight = np.ones(n_joint_dimension, 'f')
+
+        # TODO support additional_weight_list
+
+        tmp_weight = self.calc_weight_from_joint_limit(
+            avoid_weight_gain,
+            link_list,
+            union_link_list,
+            weight,
+            n_joint_dimension=n_joint_dimension)
+        for i in range(n_joint_dimension):
+            tmp_weight[i] = weight[i] * tmp_weight[i]
+        return tmp_weight
 
     def inverse_kinematics_loop(
             self,
