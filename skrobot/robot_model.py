@@ -900,8 +900,8 @@ class CascadedLink(CascadedCoords):
         # (if target-centroid-pos (send self :update-mass-properties))
         # ;; dif-pos, dif-rot, move-target, rotation-axis, translation-axis, link-list
         # ;; -> both list and atom OK.
-        tmp_dim = []
-        tmp_dims = []
+        union_vel = []
+        union_vels = []
         vec_count = 0
         success = True
         p_limit = kwargs.pop('p_limit', None)
@@ -940,10 +940,9 @@ class CascadedLink(CascadedCoords):
             return "ik-continuous"
 
         for i in range(len(rotation_axis)):
-            tmp_dims.append(np.zeros(self.calc_target_axis_dimension(
+            union_vels.append(np.zeros(self.calc_target_axis_dimension(
                 rotation_axis[i], translation_axis[i]), 'f'))
-        tmp_dim = np.zeros(self.calc_target_axis_dimension(
-            rotation_axis, translation_axis), 'f')
+        union_vel = np.zeros(self.calc_target_axis_dimension(rotation_axis, translation_axis), 'f')
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
         #   (progn
@@ -993,7 +992,7 @@ class CascadedLink(CascadedCoords):
 
         # calculation of move-coords velocities from vel-p and vel-r
         for i in range(len(move_target)):
-            tmp_dim = tmp_dims[i]
+            tmp_union_vel = union_vels[i]
             if p_limit is not None:
                 vel_p = self.calc_vel_from_pos(
                     dif_pos[i], translation_axis[i], p_limit)
@@ -1007,17 +1006,17 @@ class CascadedLink(CascadedCoords):
                 vel_r = self.calc_vel_from_rot(
                     dif_rot[i], rotation_axis[i])
             for j in range(len(vel_p)):
-                tmp_dim[j] = dif_pos_ratio * vel_p[j]
+                tmp_union_vel[j] = dif_pos_ratio * vel_p[j]
             for j in range(len(vel_r)):
-                tmp_dim[j + len(vel_p)] = dif_rot_ratio * vel_r[j]
+                tmp_union_vel[j + len(vel_p)] = dif_rot_ratio * vel_r[j]
             # (when (send self :get :ik-target-error)
             #   (push (list vel-p vel-r) (cdr (assoc (read-from-string (format nil ":target-~d" i)) (send self :get :ik-target-error)))))
 
         vec_count = 0
-        for i in range(len(tmp_dims)):
-            for j in range(len(tmp_dims[i])):
-                tmp_dim[j + vec_count] = tmp_dims[i][j]
-            vec_count += len(tmp_dims[i])
+        for i in range(len(union_vels)):
+            for j in range(len(union_vels[i])):
+                union_vel[j + vec_count] = union_vels[i][j]
+            vec_count += len(union_vels[i])
 
         # Use cog jacobian as first task
         # (when (and (not cog-null-space) target-centroid-pos)
@@ -1044,7 +1043,7 @@ class CascadedLink(CascadedCoords):
                 map(lambda x:
                     x(link_list) if callable(x) else x,
                     additional_vel))
-            row0 = len(tmp_dim) - sum(map(len, additional_velocity_list))
+            row0 = len(union_vel) - sum(map(len, additional_velocity_list))
             for i_add_jacobi in range(len(additional_jacobi)):
                 add_jacobi = additional_jacobi[i_add_jacobi]
                 if callable(add_jacobi):
@@ -1054,7 +1053,7 @@ class CascadedLink(CascadedCoords):
                     # set additional-jacobi
                     for i_col in range(add_jacobi.shape[1]):
                         jacobi[row0 + i_row][i_col] = add_jacobi[i_row][i_col]
-                    tmp_dim[row0 + i_row] = add_vel[i_row]
+                    union_vel[row0 + i_row] = add_vel[i_row]
                 row0 += len(add_vel)
 
         # check loop end
@@ -1065,7 +1064,7 @@ class CascadedLink(CascadedCoords):
             hook()
         self.collision_pair_list = None
         self.move_joints_avoidance(
-            tmp_dim,
+            union_vel,
             union_link_list=union_link_list,
             link_list=link_list,
             rotation_axis=rotation_axis,
@@ -1090,9 +1089,9 @@ class CascadedLink(CascadedCoords):
         fik = make_matrix(r, c)
         ret = make_matrix(c, r)
 
-        tmp_dims = []
+        union_vels = []
         for ta, ra in zip(translation_axis, rotation_axis):
-            tmp_dims.append(np.zeros
+            union_vels.append(np.zeros
                             (self.calc_target_axis_dimension(ra, ta),
                              'f'))
         return dict(dim=r,
