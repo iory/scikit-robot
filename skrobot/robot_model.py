@@ -1791,8 +1791,9 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
-            joint_list.append(joint)
-            joint_names.append(joint.name)
+            if j.type not in ['fixed']:
+                joint_list.append(joint)
+                joint_names.append(joint.name)
 
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
