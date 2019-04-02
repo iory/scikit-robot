@@ -635,19 +635,14 @@ class CascadedLink(CascadedCoords):
             #   (t
             #    0.0)))
 
-        tmp_nspace = None
-        # tmp_nspace = self.calc_inverse_kinematics_nspace_from_link_list(
-        #     link_list, union_link_list=union_link_list,
-        #     avoid_nspace_gain=avoid_nspace_gain,
-        #     cog_gain=cog_gain, target_centroid_pos=target_centroid_pos,
-        #     centroid_offset_func=centroid_offset_func,
-        #     cog_null_space=cog_null_space,
-        #     update_mass_properties=False,
-        #     cog_translation_axis=cog_translation_axis,
-        #     weight=weight,
-        #     n_joint_dimension=n_joint_dimension,
-        #     null_space=null_space,
-        #     additional_nspace_list=additional_nspace_list)
+        tmp_nspace = self.calc_inverse_kinematics_nspace_from_link_list(
+            link_list,
+            union_link_list=union_link_list,
+            avoid_nspace_gain=avoid_nspace_gain,
+            weight=weight,
+            n_joint_dimension=n_joint_dimension,
+            null_space=null_space,
+            additional_nspace_list=additional_nspace_list)
 
         # if len(self.collision_avoidance_null_vector):
         #     tmp_nspace += self.collision_avoidance_null_vector
@@ -1450,7 +1445,7 @@ class CascadedLink(CascadedCoords):
                                  angle_speed)
         # if use null space
         if ((isinstance(null_space, list) or isinstance(null_space, np.ndarray))
-                and n_joint_dimension == null_space):
+            and n_joint_dimension == len(null_space)):
             I = np.eye(n_joint_dimension)
             j_sharp_x += np.matmul(I - np.matmul(j_sharp, jacobi),
                                    null_space)
