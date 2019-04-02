@@ -1,25 +1,53 @@
-import numpy as np
+import time
 
-from skrobot.coordinates import Coordinates
-from skrobot.robot_models import Kuka
-from skrobot.pybullet_robot_interface import PybulletRobotInterface
-from skrobot.pybullet_robot_interface import draw
+import numpy as np
+import pybullet
+
+import skrobot
+
+
+def main():
+    # initialize robot
+    robot = skrobot.robot_models.Kuka()
+    interface = skrobot.pybullet_robot_interface.PybulletRobotInterface(robot)
+    pybullet.resetDebugVisualizerCamera(
+        cameraDistance=1.5,
+        cameraYaw=45,
+        cameraPitch=-45,
+        cameraTargetPosition=(0, 0, 0.5),
+    )
+    print('==> Initialized Kuka Robot on PyBullet')
+    for _ in range(100):
+        pybullet.stepSimulation()
+    time.sleep(3)
+
+    # reset pose
+    print('==> Moving to Reset Pose')
+    robot.reset_manip_pose()
+    interface.angle_vector(robot.angle_vector(), realtime_simulation=True)
+    interface.wait_interpolation()
+    time.sleep(3)
+
+    # ik
+    print('==> Solving Inverse Kinematics')
+    target_coords = skrobot.coordinates.Coordinates(
+        pos=[0.5, 0, 0]
+    ).rotate(np.pi / 2.0, 'y', 'local')
+    skrobot.pybullet_robot_interface.draw(target_coords)
+    robot.inverse_kinematics(
+        target_coords,
+        link_list=robot.rarm.link_list,
+        move_target=robot.rarm_end_coords,
+        rotation_axis=True,
+        stop=1000,
+    )
+    interface.angle_vector(robot.angle_vector(), realtime_simulation=True)
+    interface.wait_interpolation()
+
+    # wait
+    while pybullet.isConnected():
+        time.sleep(0.01)
 
 
 if __name__ == '__main__':
-    r = Kuka()
-    pri = PybulletRobotInterface(r)
-    r.reset_manip_pose()
-    pri.angle_vector(r.angle_vector())
-
-    target_coords = Coordinates(pos=[0.5, 0, 0]).\
-        rotate(np.pi / 2.0, 'y', 'local')
-    draw(target_coords)
-    r.inverse_kinematics(target_coords,
-                         link_list=r.rarm.link_list,
-                         move_target=r.rarm_end_coords,
-                         rotation_axis=True,
-                         stop=1000,
-                         inverse_kinematics_hook=[
-                             lambda: pri.angle_vector(r.angle_vector())])
-    pri.angle_vector(r.angle_vector())
+    main()
