@@ -24,9 +24,11 @@ install_requires = [
     'cached-property',
     'cvxopt',
     'future',
+    'lxml',
     'numpy>=1.9.0',
     'ordered_set',
     'pybullet>=2.1.9',
+    'pyyaml',
     'quadprog',
     'sympy',
 ]
