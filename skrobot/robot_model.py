@@ -712,6 +712,21 @@ class CascadedLink(CascadedCoords):
         vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
         return vel_r
 
+    def calc_nspace_from_joint_limit(self,
+                                     avoid_nspace_gain,
+                                     union_link_list,
+                                     weight):
+        """Calculate null-space according to joint limit
+
+        """
+        if avoid_nspace_gain > 0.0:
+            joint_list = [ul.joint for ul in union_link_list]
+            nspace = avoid_nspace_gain * weight * joint_angle_limit_nspace(joint_list)
+        else:
+            raise ValueError('avoid_nspace_gain should be greater than '
+                             '0.0, given {}'.format(avoid_nspace_gain))
+        return nspace
+
     def find_joint_angle_limit_weight_from_union_link_list(
             self, union_link_list):
         names = tuple(set([link.name for link in union_link_list]))
