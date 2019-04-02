@@ -2117,6 +2117,19 @@ def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
 
 
 def joint_angle_limit_weight(joint_list):
+    """Calculate joint angle limit from joint list
+
+    w_i = 1 + | dH/dt |      if d|dH/dt| >= 0
+        = 1                  if d|dH/dt| <  0
+    dH/dt = (t_max - t_min)^2 (2t - t_max - t_min) /
+            (4 (t_max - t)^2 (t - t_min)^2)
+
+    T. F. Chang and R.-V. Dubey: "A weighted least-norm solution based
+    scheme for avoiding joint limits for redundant manipulators",
+    in IEEE Trans. On Robotics and Automation,
+    11((2):286-292, April 1995.
+
+    """
     dims = calc_target_joint_dimension(joint_list)
     res = np.zeros(dims, 'f')
     k = 0
