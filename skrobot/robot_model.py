@@ -908,9 +908,9 @@ class CascadedLink(CascadedCoords):
         r_limit = kwargs.pop('r_limit', None)
         if union_link_list is None:
             union_link_list = self.calc_union_link_list(link_list)
-            # ;; tempolary reset weight for prevision joint-angle-limit-weight-old using hash-table
-            # (if (/= (length union-link-list) (length link-list))
-            #     (send self :reset-joint-angle-limit-weight-old union-link-list)))
+            # reset joint angle limit weight
+            if len(union_link_list) != len(link_list):
+                self.reset_joint_angle_limit_weight(union_link_list)
         if link_list is None or not isinstance(link_list[0], list):
             link_list = [link_list]
         move_target = listify(move_target)
