@@ -1239,7 +1239,7 @@ class CascadedLink(CascadedCoords):
                 rthre=rthre,
                 additional_jacobi=additional_jacobi,
                 additional_vel=additional_vel,
-                ik_args=ik_args)
+                **ik_args)
             if success == 'ik-succeed':
                 return success
 
