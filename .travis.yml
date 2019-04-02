@@ -10,8 +10,6 @@ install:
   - pip install autopep8
   - pip install coveralls
   - pip install Cython
-  - pip install pyyaml
-  - pip install lxml
   - python setup.py develop
 
 script:
