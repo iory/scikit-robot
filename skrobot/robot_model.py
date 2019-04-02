@@ -1261,15 +1261,11 @@ class CascadedLink(CascadedCoords):
                                             thre, rthre, centroid_thre, target_centroid_pos,
                                             centroid_offset_func, cog_translation_axis,
                                             update_mass_properties=False)
-        # update difference
-        # (mapcar #'(lambda (l a) (send l :analysis-level a)) union-link-list old-analysis-level)
 
-        # ;; reset weight
-        #    (send self :reset-joint-angle-limit-weight-old union-link-list)
-        #    ;; Get final ik success result flag
-        #    (if check-collision (setq collision-status (send self :self-collision-check)))
-        #    (setq success (and (or success (not revert-if-fail)) (not collision-status)))
-        #    ;; check solved or not
+        # reset joint angle limit weight
+        self.reset_joint_angle_limit_weight(union_link_list)
+
+        # TODO add collision check
         if success:
             return self.angle_vector()
 
