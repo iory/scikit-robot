@@ -538,7 +538,7 @@ class CascadedLink(CascadedCoords):
                               union_vel,
                               union_link_list=None,
                               link_list=None,
-                              fik_len=None,
+                              n_joint_dimension=None,
                               weight=None,
                               null_space=None,
                               avoid_nspace_gain=0.01,
@@ -558,10 +558,10 @@ class CascadedLink(CascadedCoords):
                               obstacles=None,
                               *args, **kwargs):
         angle_speed_collision_blending = 0.0
-        if fik_len is None:
-            fik_len = self.calc_target_joint_dimension(union_link_list)
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(union_link_list)
         if weight is None:
-            weight = np.ones(fik_len, dtype=np.float64)
+            weight = np.ones(n_joint_dimension, dtype=np.float64)
         if jacobi is None:
             logger.error('jacobi is required')
             return True
@@ -643,7 +643,7 @@ class CascadedLink(CascadedCoords):
         #     update_mass_properties=False,
         #     cog_translation_axis=cog_translation_axis,
         #     weight=weight,
-        #     fik_len=fik_len,
+        #     n_joint_dimension=n_joint_dimension,
         #     null_space=null_space,
         #     additional_nspace_list=additional_nspace_list)
 
@@ -974,7 +974,7 @@ class CascadedLink(CascadedCoords):
                              'f'))
         return dict(dim=r,
                     fik=fik,
-                    fik_len=c,
+                    n_joint_dimension=c,
                     ret=ret,
                     **kwargs)
 
@@ -1284,8 +1284,8 @@ class CascadedLink(CascadedCoords):
     def calc_joint_angle_speed_gain(self, union_link_list,
                                     dav,
                                     periodic_time):
-        fik_len = self.calc_target_joint_dimension(union_link_list)
-        av = np.zeros(fik_len)
+        n_joint_dimension = self.calc_target_joint_dimension(union_link_list)
+        av = np.zeros(n_joint_dimension)
         i = 0
         l = 0
         while l < len(union_link_list):
@@ -1309,7 +1309,7 @@ class CascadedLink(CascadedCoords):
             logger.warn(
                 'jacobi(j) or j_sharp(J#) is required in calc_joint_angle_speed')
             return null_space
-        fik_len = jacobi.shape[1]
+        n_joint_dimension = jacobi.shape[1]
 
         # dav = J#x + (I - J#J)y
         # calculate J#x
@@ -1322,8 +1322,8 @@ class CascadedLink(CascadedCoords):
                                  angle_speed)
         # if use null space
         if ((isinstance(null_space, list) or isinstance(null_space, np.ndarray))
-                and fik_len == null_space):
-            I = np.eye(fik_len)
+                and n_joint_dimension == null_space):
+            I = np.eye(n_joint_dimension)
             j_sharp_x += np.matmul(I - np.matmul(j_sharp, jacobi),
                                    null_space)
         return j_sharp_x
@@ -1566,7 +1566,7 @@ class CascadedLink(CascadedCoords):
                                      col_offset=0,
                                      dim=None,
                                      fik=None,
-                                     fik_len=None,
+                                     n_joint_dimension=None,
                                      *args, **kwargs):
         if link_list is None:
             link_list = self.link_list
@@ -1585,10 +1585,10 @@ class CascadedLink(CascadedCoords):
         if dim is None:
             dim = self.calc_target_axis_dimension(
                 rotation_axis, translation_axis)
-        if fik_len is None:
-            fik_len = self.calc_target_joint_dimension(link_list)
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(link_list)
         if fik is None:
-            fik = np.zeros((dim, fik_len), dtype=np.float32)
+            fik = np.zeros((dim, n_joint_dimension), dtype=np.float32)
 
         union_link_list = self.calc_union_link_list(link_list)
         jdim = self.calc_target_joint_dimension(union_link_list)
