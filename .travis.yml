@@ -19,3 +19,7 @@ script:
   - nosetests -x tests --with-coverage --cover-package skrobot
 
 sudo: false
+
+branches:
+  only:
+    - master
