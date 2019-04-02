@@ -46,9 +46,10 @@ class TestRobotModel(unittest.TestCase):
             False)
 
         # set joint_angle_limit case
-        fetch.joint_angle_limit_weight_maps[names] = np.ones(len(names), 'f')
+        fetch.joint_angle_limit_weight_maps[names] = (
+            names, np.ones(len(names), 'f'))
         names, weights = fetch.\
-            find_joint_angle_limit_weight_from_union_link_list(links),
+            find_joint_angle_limit_weight_from_union_link_list(links)
         testing.assert_almost_equal(
             weights,
             np.ones(len(names), 'f'))
@@ -66,10 +67,11 @@ class TestRobotModel(unittest.TestCase):
             False)
 
         # set joint_angle_limit case
-        fetch.joint_angle_limit_weight_maps[names] = np.ones(len(names), 'f')
+        fetch.joint_angle_limit_weight_maps[names] = (
+            names, np.ones(len(names), 'f'))
         fetch.reset_joint_angle_limit_weight(links)
         names, weights = fetch.\
-            find_joint_angle_limit_weight_from_union_link_list(links),
+            find_joint_angle_limit_weight_from_union_link_list(links)
         self.assertEqual(
             weights,
             False)
