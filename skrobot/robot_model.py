@@ -1950,20 +1950,18 @@ class RobotModel(CascadedLink):
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
-        self.inverse_kinematics(
+        return self.inverse_kinematics(
             self.end_coords.copy_worldcoords().translate(pos, wrt),
             move_target=self.end_coords,
             *args, **kwargs)
-        return self.angle_vector()
 
     def move_end_rot(self, angle, axis, wrt='local', *args, **kwargs):
         rotation_axis = kwargs.pop('rotation_axis', True)
-        self.inverse_kinematics(
+        return self.inverse_kinematics(
             self.end_coords.copy_worldcoords().rotate(angle, axis, wrt),
             move_target=self.end_coords,
             rotation_axis=rotation_axis,
             *args, **kwargs)
-        return self.angle_vector()
 
     def fix_leg_to_coords(self, fix_coords, leg='both', mid=0.5):
         """
