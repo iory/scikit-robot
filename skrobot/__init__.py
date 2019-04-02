@@ -4,7 +4,7 @@ import pkg_resources
 __version__ = pkg_resources.get_distribution('skrobot').version
 
 
-from skrobot import coordinates
+from skrobot import coordinates  # NOQA
 from skrobot import geo  # NOQA
 from skrobot import interpolator  # NOQA
 from skrobot import math  # NOQA
