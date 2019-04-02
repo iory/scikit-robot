@@ -559,7 +559,8 @@ class CascadedLink(CascadedCoords):
                               *args, **kwargs):
         angle_speed_collision_blending = 0.0
         if n_joint_dimension is None:
-            n_joint_dimension = self.calc_target_joint_dimension(union_link_list)
+            n_joint_dimension = self.calc_target_joint_dimension(
+                union_link_list)
         if weight is None:
             weight = np.ones(n_joint_dimension, dtype=np.float64)
         if jacobi is None:
@@ -716,7 +717,8 @@ class CascadedLink(CascadedCoords):
         """
         if avoid_nspace_gain > 0.0:
             joint_list = [ul.joint for ul in union_link_list]
-            nspace = avoid_nspace_gain * weight * joint_angle_limit_nspace(joint_list)
+            nspace = avoid_nspace_gain * weight * \
+                joint_angle_limit_nspace(joint_list)
         else:
             raise ValueError('avoid_nspace_gain should be greater than '
                              '0.0, given {}'.format(avoid_nspace_gain))
@@ -780,7 +782,8 @@ class CascadedLink(CascadedCoords):
         link_names, previous_joint_angle_limit_weight = self.find_joint_angle_limit_weight_from_union_link_list(
             union_link_list)
         if previous_joint_angle_limit_weight is False:
-            previous_joint_angle_limit_weight = np.inf * np.ones(n_joint_dimension, 'f')
+            previous_joint_angle_limit_weight = np.inf * \
+                np.ones(n_joint_dimension, 'f')
             self.joint_angle_limit_weight_maps[link_names] = (
                 link_names, previous_joint_angle_limit_weight)
 
@@ -792,7 +795,7 @@ class CascadedLink(CascadedCoords):
                 joint_angle_limit_weight(joint_list)
             for i in range(n_joint_dimension):
                 if (current_joint_angle_limit_weight[i] -
-                    previous_joint_angle_limit_weight[i]) >= 0.0:
+                        previous_joint_angle_limit_weight[i]) >= 0.0:
                     new_weight[i] = 1.0 / \
                         (1.0 + current_joint_angle_limit_weight[i])
                 else:
@@ -943,7 +946,8 @@ class CascadedLink(CascadedCoords):
         for i in range(len(rotation_axis)):
             union_vels.append(np.zeros(self.calc_target_axis_dimension(
                 rotation_axis[i], translation_axis[i]), 'f'))
-        union_vel = np.zeros(self.calc_target_axis_dimension(rotation_axis, translation_axis), 'f')
+        union_vel = np.zeros(self.calc_target_axis_dimension(
+            rotation_axis, translation_axis), 'f')
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
         #   (progn
@@ -1093,8 +1097,8 @@ class CascadedLink(CascadedCoords):
         union_vels = []
         for ta, ra in zip(translation_axis, rotation_axis):
             union_vels.append(np.zeros
-                            (self.calc_target_axis_dimension(ra, ta),
-                             'f'))
+                              (self.calc_target_axis_dimension(ra, ta),
+                               'f'))
         return dict(dim=r,
                     fik=fik,
                     n_joint_dimension=c,
@@ -1142,7 +1146,8 @@ class CascadedLink(CascadedCoords):
                 rthre = [np.deg2rad(1)]
 
         # store current angle vector
-        joint_list = list(set([l.joint for l in union_link_list] + self.joint_list))
+        joint_list = list(
+            set([l.joint for l in union_link_list] + self.joint_list))
         av0 = [j.joint_angle() for j in joint_list]
         c0 = None
         if self.parent is None:
@@ -1441,7 +1446,7 @@ class CascadedLink(CascadedCoords):
                                  angle_speed)
         # if use null space
         if ((isinstance(null_space, list) or isinstance(null_space, np.ndarray))
-            and n_joint_dimension == len(null_space)):
+                and n_joint_dimension == len(null_space)):
             I = np.eye(n_joint_dimension)
             j_sharp_x += np.matmul(I - np.matmul(j_sharp, jacobi),
                                    null_space)
@@ -1821,7 +1826,6 @@ class CascadedLink(CascadedCoords):
                    interlocking_joint_pairs))
         vel = np.zeros(len(pairs), 'f')
         return vel
-
 
 
 class RobotModel(CascadedLink):
