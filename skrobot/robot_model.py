@@ -1240,7 +1240,7 @@ class CascadedLink(CascadedCoords):
                 additional_vel=additional_vel,
                 **ik_args)
             if success == 'ik-succeed':
-                return success
+                break
 
         if target_centroid_pos is not None:
             self.update_mass_properties()
