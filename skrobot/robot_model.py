@@ -1538,13 +1538,6 @@ class CascadedLink(CascadedCoords):
             ret1 = ret2[::-1] + ret1
         return ret1
 
-    def reset_joint_angle_limit_weight_old(self, union_link_list):
-        tmp_joint_angle_limit_weight_old = self.find_joint_angle_limit_weight_old_from_union_link_list(
-            union_link_list)
-        if tmp_joint_angle_limit_weight_old is not None:
-            tmp_joint_angle_limit_weight_old[1:][0] = None
-        return tmp_joint_angle_limit_weight_old
-
     def calc_union_link_list(self, link_list):
         if not isinstance(link_list[0], list):
             return link_list
