@@ -871,6 +871,13 @@ def random_quaternion():
                     dtype=np.float64)
 
 
+def make_matrix(r, c):
+    """Wrapper of numpy array
+
+    """
+    return np.zeros((r, c), 'f')
+
+
 inverse_rodrigues = rotation_angle
 quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion
