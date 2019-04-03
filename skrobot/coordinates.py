@@ -209,6 +209,9 @@ class Coordinates(object):
     def rotate_vector(self, v):
         return np.matmul(self.rotation, v)
 
+    def inverse_rotate_vector(self, v):
+        return np.matmul(v, self.rotation)
+
     def transform(self, c, wrt='local'):
         if wrt == 'local' or wrt == self:
             tmp_coords = transform_coords(self, c)
@@ -255,18 +258,24 @@ class Coordinates(object):
         if rotation_axis in ['x', 'y', 'z']:
             a0 = self.axis(rotation_axis)
             a1 = coords.axis(rotation_axis)
-            dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a1)) *
-                                normalize_vector(np.cross(a0, a1)))
+            if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
+                dif_rot = np.array([0, 0, 0], 'f')
+            else:
+                dif_rot = np.matmul(self.worldrot().T,
+                                    np.arccos(np.dot(a0, a1)) *
+                                    normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
             a0 = self.axis(ax)
             a2 = coords.axis(ax)
             if need_mirror_for_nearest_axis(self, coords, ax) is False:
                 a2 = - a2
-            dif_rot = np.matmul(self.worldrot().T,
-                                np.arccos(np.dot(a0, a2)) *
-                                normalize_vector(np.cross(a0, a2)))
+            if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
+                dif_rot = np.array([0, 0, 0], 'f')
+            else:
+                dif_rot = np.matmul(self.worldrot().T,
+                                    np.arccos(np.dot(a0, a2)) *
+                                    normalize_vector(np.cross(a0, a2)))
         elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
@@ -495,6 +504,12 @@ class CascadedCoords(Coordinates):
         else:
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
+
+    def rotate_vector(self, v):
+        return self.worldcoords().rotate_vector(v)
+
+    def inverse_rotate_vector(self, v):
+        return self.worldcoords().inverse_rotate_vector(v)
 
     def transform(self, c, wrt='local'):
         if isinstance(wrt, Coordinates):
