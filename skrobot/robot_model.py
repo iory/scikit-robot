@@ -15,7 +15,6 @@ from skrobot.math import normalize_vector
 from skrobot.math import sr_inverse
 from skrobot.math import make_matrix
 from skrobot.optimizer import solve_qp
-from skrobot.utils.urdf import URDF
 from skrobot.geo import midcoords
 from skrobot.geo import orient_coords_to_axis
 from skrobot.utils.listify import listify
