@@ -15,6 +15,5 @@ from skrobot import robot_models  # NOQA
 from skrobot import symbol_math  # NOQA
 from skrobot import utils  # NOQA
 from skrobot.pybullet_robot_interface import PybulletRobotInterface  # NOQA
-from skrobot.utils.urdf import URDF  # NOQA
 from skrobot import quaternion  # NOQA
 from skrobot import data  # NOQA

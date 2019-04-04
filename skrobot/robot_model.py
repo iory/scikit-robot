@@ -10,15 +10,17 @@ from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.math import _wrap_axis
 from skrobot.math import manipulability
+from skrobot.math import rpy_angle
 from skrobot.math import midpoint
 from skrobot.math import normalize_vector
 from skrobot.math import sr_inverse
 from skrobot.math import make_matrix
 from skrobot.optimizer import solve_qp
-from skrobot.utils.urdf import URDF
 from skrobot.geo import midcoords
 from skrobot.geo import orient_coords_to_axis
 from skrobot.utils.listify import listify
+from skrobot.utils.urdf import URDF
+from skrobot.utils import urdf
 
 
 logger = getLogger(__name__)
@@ -1857,31 +1859,25 @@ class RobotModel(CascadedLink):
 
     def load_urdf(self, urdf_path):
         self.urdf_path = urdf_path
-        self.robot_urdf = URDF.from_xml_string(open(urdf_path).read())
-        root_link = self.robot_urdf.link_map[self.robot_urdf.get_root()]
+        self.urdf_robot_model = URDF.load(str(urdf_path))
+        root_link = self.urdf_robot_model.base_link
 
-        links = []
-        for link in self.robot_urdf.links:
-            l = Link(name=link.name)
-            links.append(l)
-
+        links = [Link(name=link.name) for link in self.urdf_robot_model.links]
         link_maps = {l.name: l for l in links}
 
         joint_list = []
         joint_names = []
-        for j in self.robot_urdf.joints:
+        for j in self.urdf_robot_model.joints:
             if j.limit is None:
-                j.type = 'fixed'
-            if j.origin is None:
-                j.type = 'fixed'
+                j.limit = urdf.JointLimit(0, 0)
             if j.axis is None:
                 j.axis = 'z'
-            if j.type in ['fixed']:
+            if j.joint_type == 'fixed':
                 joint = FixedJoint(
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child])
-            elif j.type == 'revolute':
+            elif j.joint_type == 'revolute':
                 joint = RotationalJoint(
                     axis=j.axis,
                     name=j.name,
@@ -1891,7 +1887,7 @@ class RobotModel(CascadedLink):
                     max_angle=np.rad2deg(j.limit.upper),
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
-            elif j.type == 'continuous':
+            elif j.joint_type == 'continuous':
                 joint = RotationalJoint(
                     axis=j.axis,
                     name=j.name,
@@ -1901,7 +1897,7 @@ class RobotModel(CascadedLink):
                     max_angle=np.inf,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
-            elif j.type == 'prismatic':
+            elif j.joint_type == 'prismatic':
                 # http://wiki.ros.org/urdf/XML/joint
                 # meters for prismatic joints
                 joint = LinearJoint(
@@ -1914,7 +1910,7 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
-            if j.type not in ['fixed']:
+            if j.joint_type not in ['fixed']:
                 joint_list.append(joint)
                 joint_names.append(joint.name)
 
@@ -1923,13 +1919,13 @@ class RobotModel(CascadedLink):
             link_maps[j.child].add_parent_link(link_maps[j.parent])
             link_maps[j.parent].add_child_links(link_maps[j.child])
 
-        for j in self.robot_urdf.joints:
+        for j in self.urdf_robot_model.joints:
             if j.origin is None:
                 rpy = np.zeros(3, dtype=np.float32)
                 xyz = np.zeros(3, dtype=np.float32)
             else:
-                rpy = np.array(j.origin.rpy, dtype=np.float32)[::-1]
-                xyz = np.array(j.origin.xyz, dtype=np.float32)
+                rpy = rpy_angle(j.origin[:3, :3])[0]
+                xyz = j.origin[:3, 3]
             link_maps[j.child].newcoords(rpy,
                                          xyz)
             # TODO fix automatically update default_coords
