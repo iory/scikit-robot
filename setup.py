@@ -25,12 +25,16 @@ install_requires = [
     'cvxopt',
     'future',
     'lxml',
+    'networkx',
     'numpy>=1.9.0',
     'ordered_set',
+    'pillow',
     'pybullet>=2.1.9',
     'pyyaml',
     'quadprog',
+    'six',
     'sympy',
+    'trimesh',
 ]
 
 setup(
