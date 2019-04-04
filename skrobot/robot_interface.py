@@ -1,28 +1,29 @@
-from logging import getLogger
 import datetime
-import sys
+from functools import reduce
+from logging import getLogger
 from numbers import Number
+import sys
 
 import numpy as np
 from numpy import deg2rad
 
-import rospy
 import actionlib
-from sensor_msgs.msg import JointState
 import control_msgs.msg
-import trajectory_msgs.msg
-
+import rospy
+from sensor_msgs.msg import JointState
 from skrobot.robot_model import LinearJoint
 from skrobot.robot_model import RotationalJoint
-
+import trajectory_msgs.msg
 
 logger = getLogger(__name__)
 
 
 class RobotInterface(object):
-    """
+    """RobotInterface is class for interacting real robot.
+
     RobotInterface is class for interacting real robot thorugh
     JointTrajectoryAction servers and JointState topics.
+
     """
 
     def __init__(self, robot=None,
@@ -31,7 +32,8 @@ class RobotInterface(object):
                  joint_states_queue_size=1,
                  controller_timeout=3,
                  namespace=None):
-        """
+        """Initialization of RobotInterface
+
         Parameters
         ----------
         robot : robot_model.RobotModel
@@ -47,11 +49,9 @@ class RobotInterface(object):
         namespace : string or None
             namespace of controller
 
-        Returns
-        -------
         """
         if rospy.rostime._rostime_initialized is False:
-            rospy.init_node("default_robot_interface")
+            rospy.init_node('default_robot_interface')
 
         wait_seconds = 180
         start_time = datetime.datetime.now()
@@ -60,17 +60,22 @@ class RobotInterface(object):
            ros_current_time.to_sec() == 0 and \
            ros_current_time.to_nsec() == 0:
             rospy.logdebug(
-                '[{}] /use_sim_time is TRUE, check if /clock is published'.format(rospy.get_name()))
-            while ros_current_time.to_sec() == 0 and ros_current_time.to_nsec():
+                '[{}] /use_sim_time is TRUE, check if /clock is published'.
+                format(rospy.get_name()))
+            while (ros_current_time.to_sec() == 0 and
+                   ros_current_time.to_nsec() == 0):
                 diff_time = datetime.datetime.now() - start_time
                 if diff_time.seconds > wait_seconds:
                     rospy.logfatal(
-                        "[{}] /use_sim_time is TRUE but /clock is NOT PUBLISHED".format(rospy.get_name()))
-                    rospy.logfatal("[{}] {} seconds elapsed. aborting...".
+                        '[{}] /use_sim_time is TRUE '
+                        'but /clock is NOT PUBLISHED'.format(rospy.get_name()))
+                    rospy.logfatal('[{}] {} seconds elapsed. aborting...'.
                                    format(rospy.get_name(), wait_seconds))
                     sys.exit(1)
-                rospy.logwarn("[{}] waiting /clock... {} seconds elapsed.".
-                              format(rospy.get_name(), diff_time.seconds + 1e-6 * diff_time.microseconds))
+                rospy.logwarn(
+                    '[{}] waiting /clock... {} seconds elapsed.'.
+                    format(rospy.get_name(),
+                           diff_time.seconds + 1e-6 * diff_time.microseconds))
                 ros_current_time = rospy.Time.now()
         rospy.loginfo('[{}] /clock is now published.'.format(rospy.get_name()))
 
@@ -80,7 +85,7 @@ class RobotInterface(object):
         self.joint_action_enable = True
         self.namespace = namespace
         if self.namespace:
-            rospy.Subscriber("{}/{}".format(
+            rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
                 JointState)
         else:
@@ -88,16 +93,14 @@ class RobotInterface(object):
                              self.joint_state_callback, queue_size=1)
 
         if default_controller is None:
-            default_controller = "default_controller"
+            default_controller = 'default_controller'
         self.controller_table = {}
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
 
     def wait_until_update_all_joints(self, tgt_tm):
-        """
-        TODO
-        """
+        """TODO"""
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
@@ -114,8 +117,7 @@ class RobotInterface(object):
         self.robot_state[key] = msg
 
     def update_robot_state(self, wait_until_update=False):
-        """
-        Update robot state
+        """Update robot state.
 
         Parameters
         ----------
@@ -183,7 +185,7 @@ class RobotInterface(object):
 
     def add_controller(self, controller_type, joint_enable_check=True,
                        create_actions=None):
-        """
+        """Add controller
 
         Parameters
         ----------
@@ -203,25 +205,28 @@ class RobotInterface(object):
         tmp_actions_name = []
         if create_actions:
             for controller in self.default_controller():
-                controller_action = controller["controller_action"]
+                controller_action = controller['controller_action']
                 if self.namespace is not None:
-                    controller_action = "{}/{}".format(
+                    controller_action = '{}/{}'.format(
                         self.namespace,
                         controller_action)
                 action = ControllerActionClient(self,
                                                 controller_action,
-                                                controller["action_type"])
+                                                controller['action_type'])
                 tmp_actions.append(action)
                 tmp_actions_name.append(controller_action)
             for action, action_name in zip(tmp_actions, tmp_actions_name):
                 if self.controller_timeout is None:
                     rospy.logwarn(
-                        "Waiting for actionlib interface forever because controler-timeout is None")
-                if not (self.joint_action_enable and
-                        action.wait_for_server(rospy.Duration(self.controller_timeout))):
-                    rospy.logwarn("{} is not respond, {}_interface is disable".
+                        'Waiting for actionlib interface forever '
+                        'because controler-timeout is None')
+                if not (
+                    self.joint_action_enable and action.wait_for_server(
+                        rospy.Duration(
+                            self.controller_timeout))):
+                    rospy.logwarn('{} is not respond, {}_interface is disable'.
                                   format(action, self.robot.name))
-                    rospy.logwarn("make sure that you can run "
+                    rospy.logwarn('make sure that you can run '
                                   "'rostopic echo /{0}/status' "
                                   "and 'rostopic info /{0}/status'".
                                   format(action_name))
@@ -246,10 +251,13 @@ class RobotInterface(object):
         return self.controller_table[controller_type]
 
     def default_controller(self):
-        return [dict(controller_action="fullbody_controller/follow_joint_trajectory_action",
-                     controller_state="fullbody_controller/state",
-                     action_type=control_msgs.msg.FollowJointTrajectoryAction,
-                     joint_names=[joint.name for joint in self.robot.joint_list])]
+        return [dict(
+            controller_action='fullbody_controller/'
+            'follow_joint_trajectory_action',
+            controller_state='fullbody_controller/state',
+            action_type=control_msgs.msg.FollowJointTrajectoryAction,
+            joint_names=[
+                    joint.name for joint in self.robot.joint_list])]
 
     def sub_angle_vector(self, v0, v1):
         ret = v0 - v1
@@ -276,9 +284,10 @@ class RobotInterface(object):
                      min_time=1.0,
                      end_coords_interpolation=None,
                      end_coords_interpolation_steps=10):
-        """
-        Send joind angle to robot, this method retuns immediately,
-        so use self.wait_interpolation to block until the motion stops.
+        """Send joint angle to robot
+
+        Send joint angle to robot. this method retuns immediately, so use
+        self.wait_interpolation to block until the motion stops.
 
         Parameters
         ----------
@@ -339,7 +348,7 @@ class RobotInterface(object):
             time = 5.0 * fastest_time
         else:
             raise ValueError(
-                "angle_vector time is invalid args: {}".format(time))
+                'angle_vector time is invalid args: {}'.format(time))
 
         # for simulation mode
         if self.is_simulation_mode():
@@ -360,14 +369,16 @@ class RobotInterface(object):
         return av
 
     def potentio_vector(self):
-        """
-        Retuns current robot angle vector, This method uses caced data
-        """
+        """Retuns current robot angle vector, This method uses caced data."""
         return self.robot.angle_vector()
 
-    def send_ros_controller(self, action, joint_names, start_time, traj_points):
-        """
-        TODO
+    def send_ros_controller(
+            self,
+            action,
+            joint_names,
+            start_time,
+            traj_points):
+        """TODO.
 
         Parameters
         ----------
@@ -432,9 +443,11 @@ class RobotInterface(object):
                               min_time=0.0,
                               end_coords_interpolation=None,
                               end_coords_interpolation_steps=10):
-        """
-        Send sequence of joind angle to robot, this method retuns immediately,
-        so use self.wait_interpolation to block until the motion stops.
+        """Send sequence of joint angles to robot
+
+        Send sequence of joint angle to robot, this method retuns
+        immediately, so use self.wait_interpolation to block until the motion
+        stops.
 
         Parameters
         ----------
@@ -443,16 +456,21 @@ class RobotInterface(object):
         times : list [list tm0 tm1 ... tmn]
             sequence of duration(float) from previous angle-vector
             to next goal [msec].
-            if times is atom, then use (list (make-list (length avs) :initial-element times))) for times
-            if designated each tmn is faster than fastest speed, use fastest speed
+            if times is atom, then use
+                (list (make-list (length avs) :initial-element times)))
+                for times
+            if designated each tmn is faster than fastest speed,
+                use fastest speed
             if tmn is nil, then it will use 1/scale of the fastest speed .
-            if :fastest is specefied, use fastest speed calcurated from max speed
+            if :fastest is specefied, use fastest speed calcurated
+                from max speed
         ctype : string
             controller method name
         start_time : float
             time to start moving
         scale : float
-            if times is not specified, it will use 1 / scale of the fastest speed
+            if times is not specified, it will use 1 / scale of the
+            fastest speed
         min_time : float
             minimum time for time to goal
         end_coords_interpolation : TODO
@@ -468,13 +486,10 @@ class RobotInterface(object):
             # (warn ";; controller-type: ~A not found" ctype)
             return False
 
-        traj_points = []
-        st = 0
-        av_prev = self.state.potentio_vector()
+        self.state.potentio_vector()
 
     def wait_interpolation(self, controller_type=None, timeout=0):
-        """
-        Wait until last sent motion is finished.
+        """Wait until last sent motion is finished.
 
         Parameters
         ----------
@@ -498,15 +513,14 @@ class RobotInterface(object):
                 controller_actions = self.controller_actions
             for action in controller_actions:
                 action.wait_for_result(timeout=rospy.Duration(timeout))
-        # TODO Fix return value
+        # TODO(Fix return value)
         return True
 
     def angle_vector_duration(
             self, start, end,
             scale=1.0, min_time=1.0,
             controller_type=None):
-        """
-        Calculate maximum time to reach goal for all joint
+        """Calculate maximum time to reach goal for all joint.
 
         Parameters
         ----------
@@ -523,8 +537,7 @@ class RobotInterface(object):
         """
 
         def flatten(xlst):
-            """
-            Flatten list
+            """Flatten list.
 
             Parameters
             ----------
@@ -555,8 +568,7 @@ class RobotInterface(object):
         return max(max(time_list), min_time)
 
     def is_simulation_mode(self):
-        """
-        Check if simulation mode
+        """Check if simulation mode.
 
         Returns
         -------
@@ -575,7 +587,7 @@ class ControllerActionClient(actionlib.SimpleActionClient):
         actionlib.SimpleActionClient.__init__(self, ns, ActionSpec)
 
     def action_feedback_cb(self, msg):
-        rospy.debug("action_feedback_cb {}".format(msg))
+        rospy.debug('action_feedback_cb {}'.format(msg))
         self.last_feedback_msg_stamp = msg.header.stamp
 
     def is_interpolating(self):

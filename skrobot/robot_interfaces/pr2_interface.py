@@ -1,15 +1,12 @@
-import rospy
 import control_msgs.msg
-import pr2_controllers_msgs.msg
+import rospy
 
 from skrobot.robot_interface import RobotInterface
 from skrobot.robot_model import RotationalJoint
 
 
 class PR2Interface(RobotInterface):
-    """
-    pr2 robot interface
-    """
+    """pr2 robot interface."""
 
     def __init__(self, *args, **kwargs):
         RobotInterface.__init__(
@@ -17,13 +14,13 @@ class PR2Interface(RobotInterface):
 
         # add controllers
         for ctype, name in [(self.larm_controller,
-                             "l_arm_controller/follow_joint_trajectory"),
+                             'l_arm_controller/follow_joint_trajectory'),
                             (self.rarm_controller,
-                             "r_arm_controller/follow_joint_trajectory"),
+                             'r_arm_controller/follow_joint_trajectory'),
                             (self.head_controller,
-                             "head_traj_controller/follow_joint_trajectory"),
+                             'head_traj_controller/follow_joint_trajectory'),
                             (self.torso_controller,
-                             "torso_controller/follow_joint_trajectory")]:
+                             'torso_controller/follow_joint_trajectory')]:
             pass
 
         # rospy.Subscriber('/r_gripper_controller/state',
@@ -34,9 +31,10 @@ class PR2Interface(RobotInterface):
         #                  lambda msg: self.pr2_fingertip_callback('larm'))
 
     def wait_interpolation(self, controller_type=None, timeout=0):
-        """
-        Overwrite for pr2
-        because some joint is still moving after joint-trajectory-action stops.
+        """Overwrite wait_interpolation
+
+        Overwrite for pr2 because some joint is still moving after joint-
+        trajectory-action stops.
 
         Parameters
         ----------
@@ -49,6 +47,7 @@ class PR2Interface(RobotInterface):
         -------
             return values are a list of is_interpolating for all controllers.
             if all interpolation has stopped, return True.
+
         """
         if self.is_simulation_mode():
             return super(PR2Interface, self).wait_interpolation(
@@ -61,56 +60,55 @@ class PR2Interface(RobotInterface):
                        abs(j.joint_velocity) < 0.001,
                        self.robot.joint_list)):
                 break
-        # TODO Fix return value
+        # TODO(Fix return value)
         return True
 
     @property
     def larm_controller(self):
         return dict(
-            controller_action="l_arm_controller/follow_joint_trajectory",
-            controller_state="l_arm_controller/state",
+            controller_action='l_arm_controller/follow_joint_trajectory',
+            controller_state='l_arm_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
-            joint_names=["l_shoulder_pan_joint",
-                         "l_shoulder_lift_joint",
-                         "l_upper_arm_roll_joint",
-                         "l_elbow_flex_joint",
-                         "l_forearm_roll_joint",
-                         "l_wrist_flex_joint",
-                         "l_wrist_roll_joint"])
+            joint_names=['l_shoulder_pan_joint',
+                         'l_shoulder_lift_joint',
+                         'l_upper_arm_roll_joint',
+                         'l_elbow_flex_joint',
+                         'l_forearm_roll_joint',
+                         'l_wrist_flex_joint',
+                         'l_wrist_roll_joint'])
 
     @property
     def rarm_controller(self):
         return dict(
-            controller_action="r_arm_controller/follow_joint_trajectory",
-            controller_state="r_arm_controller/state",
+            controller_action='r_arm_controller/follow_joint_trajectory',
+            controller_state='r_arm_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
-            joint_names=["r_shoulder_pan_joint",
-                         "r_shoulder_lift_joint",
-                         "r_upper_arm_roll_joint",
-                         "r_elbow_flex_joint",
-                         "r_forearm_roll_joint",
-                         "r_wrist_flex_joint",
-                         "r_wrist_roll_joint"])
+            joint_names=['r_shoulder_pan_joint',
+                         'r_shoulder_lift_joint',
+                         'r_upper_arm_roll_joint',
+                         'r_elbow_flex_joint',
+                         'r_forearm_roll_joint',
+                         'r_wrist_flex_joint',
+                         'r_wrist_roll_joint'])
 
     @property
     def head_controller(self):
         return dict(
-            controller_action="head_traj_controller/follow_joint_trajectory",
-            controller_state="head_traj_controller/state",
+            controller_action='head_traj_controller/follow_joint_trajectory',
+            controller_state='head_traj_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
-            joint_names=["head_pan_joint", "head_tilt_joint"])
+            joint_names=['head_pan_joint', 'head_tilt_joint'])
 
     @property
     def torso_controller(self):
         return dict(
-            controller_action="torso_controller/follow_joint_trajectory",
-            controller_state="torso_controller/state",
+            controller_action='torso_controller/follow_joint_trajectory',
+            controller_state='torso_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
-            joint_names=["torso_lift_joint"])
+            joint_names=['torso_lift_joint'])
 
     def default_controller(self):
-        """
-        Overriding default_controller
+        """Overriding default_controller.
 
         Returns
         -------

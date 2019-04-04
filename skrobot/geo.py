@@ -8,7 +8,7 @@ from skrobot.math import normalize_vector
 
 
 def midcoords(p, c1, c2):
-    """Returns mid (or p) coordinates of given two coordinates c1 and c2
+    """Returns mid (or p) coordinates of given two coordinates c1 and c2.
 
     Args:
         TODO
@@ -18,10 +18,9 @@ def midcoords(p, c1, c2):
 
 
 def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
-    """
+    """Orient axis to the direction
 
-    Orient axis in target_coords to the direction specified by "v" destructively.
-    v must be non-zero vector.
+    Orient axis in target_coords to the direction specified by v
 
     Parameters
     ----------

@@ -1,5 +1,5 @@
-from logging import getLogger
 import itertools
+from logging import getLogger
 
 import numpy as np
 import numpy.linalg as LA
@@ -8,19 +8,19 @@ from ordered_set import OrderedSet
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
-from skrobot.math import _wrap_axis
-from skrobot.math import manipulability
-from skrobot.math import rpy_angle
-from skrobot.math import midpoint
-from skrobot.math import normalize_vector
-from skrobot.math import sr_inverse
-from skrobot.math import make_matrix
-from skrobot.optimizer import solve_qp
 from skrobot.geo import midcoords
 from skrobot.geo import orient_coords_to_axis
+from skrobot.math import _wrap_axis
+from skrobot.math import make_matrix
+from skrobot.math import manipulability
+from skrobot.math import midpoint
+from skrobot.math import normalize_vector
+from skrobot.math import rpy_angle
+from skrobot.math import sr_inverse
+from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
-from skrobot.utils.urdf import URDF
 from skrobot.utils import urdf
+from skrobot.utils.urdf import URDF
 
 
 logger = getLogger(__name__)
@@ -130,7 +130,7 @@ class RotationalJoint(Joint):
                 raise ValueError
         elif isinstance(axis, list):
             if len(axis) != 3:
-                raise ValueError("Axis must be length 3(xyz)")
+                raise ValueError('Axis must be length 3(xyz)')
             self.axis = np.array(axis, dtype=np.float32)
         elif isinstance(axis, np.ndarray):
             self.axis = axis
@@ -149,8 +149,12 @@ class RotationalJoint(Joint):
         self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None):
-        "Return joint-angle if v is not set, \
-        if v is given, set joint angle. v is rotational value in degree."
+        """Joint angle method
+
+        Return joint-angle if v is not set, if v is given, set joint
+        angle.
+        v is rotational value in degree.
+        """
         if v is None:
             return self._joint_angle
         if self.joint_min_max_table and self.joint_min_max_target:
@@ -160,12 +164,12 @@ class RotationalJoint(Joint):
             v += self.joint_angle()
         if v > self.max_angle:
             if not relative:
-                logger.warning("{} :joint-angle({}) violate max-angle({})"
+                logger.warning('{} :joint-angle({}) violate max-angle({})'
                                .format(self, v, self.max_angle))
             v = self.max_angle
         elif v < self.min_angle:
             if not relative:
-                logger.warning("{} :joint-angle({}) violate min-angle({})"
+                logger.warning('{} :joint-angle({}) violate min-angle({})'
                                .format(self, v, self.min_angle))
             v = self.min_angle
         self._joint_angle = v
@@ -178,7 +182,7 @@ class RotationalJoint(Joint):
 
     @property
     def joint_dof(self):
-        "Returns DOF of rotational joint, 1."
+        """Returns DOF of rotational joint, 1."""
         return 1
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
@@ -211,34 +215,15 @@ class FixedJoint(Joint):
         self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None):
-        "Return joint-angle if v is not set, \
-        if v is given, set joint angle. v is rotational value in degree."
-        if v is None:
-            return self._joint_angle
-        if self.joint_min_max_table and self.joint_min_max_target:
-            self.min_angle = self.joint_min_max_table_min_angle
-            self.max_angle = self.joint_min_max_table_max_angle
-        if relative:
-            v += self.joint_angle()
-        if v > self.max_angle:
-            if not relative:
-                logger.warning("{} :joint-angle({}) violate max-angle({})"
-                               .format(self, v, self.max_angle))
-            v = self.max_angle
-        elif v < self.min_angle:
-            if not relative:
-                logger.warning("{} :joint-angle({}) violate min-angle({})"
-                               .format(self, v, self.min_angle))
-            v = self.min_angle
-        self._joint_angle = v
-        self.child_link.rotation = self.default_coords.rotation.copy()
-        self.child_link.pos = self.default_coords.pos.copy()
-        self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
+        """Joint angle method.
+
+        Return joint_angle
+        """
         return self._joint_angle
 
     @property
     def joint_dof(self):
-        "Returns DOF of rotational joint, 1."
+        """Returns DOF of rotational joint, 0."""
         return 0
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
@@ -322,19 +307,21 @@ class LinearJoint(Joint):
         self.joint_torque = 0.0  # [N]
 
     def joint_angle(self, v=None, relative=None):
-        """return joint-angle if v is not set, if v is given,
-        set joint angle. v is linear value in [mm]."""
+        """return joint-angle if v is not set, if v is given, set joint angle.
+
+        v is linear value in [mm].
+        """
         if v is not None:
             if relative is not None:
                 v = v + self._joint_angle
             if v > self.max_angle:
                 if not relative:
-                    logger.warning("{} :joint-angle({}) violate max-angle({})"
+                    logger.warning('{} :joint-angle({}) violate max-angle({})'
                                    .format(self, v, self.max_angle))
                 v = self.max_angle
             elif v < self.min_angle:
                 if not relative:
-                    logger.warning("{} :joint-angle({}) violate min-angle({})"
+                    logger.warning('{} :joint-angle({}) violate min-angle({})'
                                    .format(self, v, self.min_angle))
                 v = self.min_angle
             self._joint_angle = v
@@ -345,7 +332,7 @@ class LinearJoint(Joint):
 
     @property
     def joint_dof(self):
-        "Returns DOF of rotational joint, 1."
+        """Returns DOF of rotational joint, 1."""
         return 1
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
@@ -385,7 +372,7 @@ class Link(CascadedCoords):
         self.joint = None
 
     def add_child_links(self, child_link):
-        """Add child link"""
+        """Add child link."""
         if child_link is not None and child_link not in self._child_links:
             self._child_links.append(child_link)
 
@@ -413,79 +400,88 @@ class CascadedLink(CascadedCoords):
         self.end_coords_list = []
         self.joint_angle_limit_weight_maps = {}
 
-    def angle_vector(self, vec=None, av=None):
-        "Returns angle-vector of this object, if vec is given, \
-        it updates angles of all joint. If given angle-vector \
-        violate min/max range, the value is modified."
-        if av is None:
-            av = np.zeros(len(self.joint_list), dtype=np.float32)
+    def angle_vector(self, av=None, return_av=None):
+        """Returns angle vector
 
-        for idx, j in enumerate(self.joint_list):
-            if vec is not None:
-                vec = np.array(vec)
+        If av is given, it updates angles of all joint.
+        If given av violate min/max range, the value is modified.
+
+        """
+        if return_av is None:
+            return_av = np.zeros(len(self.joint_list), dtype=np.float32)
+
+        for index, j in enumerate(self.joint_list):
+            if av is not None:
+                av = np.array(av)
                 if not (j.joint_min_max_table is None or
                         j.joint_mix_max_target is None):
-                    # currently only 1dof joint is supported
-                    if j.joint_dof == 1 and j.joint_min_max_target.joint_dof == 1:
-                        # find index of joint-min-max-target
-                        ii = 0
-                        jj = self.joint_list[ii]
-
-                        while not jj == j.joint_min_max_target:
-                            ii += 1
-                            jj = self.joint_list[ii]
-                        tmp_joint_angle = vec[idx]
-                        tmp_target_joint_angle = vec[ii]
-                        tmp_joint_min_angle = j.joint_min_max_table_min_angle(
-                            tmp_target_joint_angle)
-                        tmp_joint_max_angle = j.joint_min_max_table_max_angle(
-                            tmp_target_joint_angle)
-                        tmp_target_joint_min_angle = j.joint_min_max_table_min_angle(
-                            tmp_joint_angle)
-                        tmp_target_joint_max_angle = j.joint_min_max_table_max_angle(
-                            tmp_joint_angle)
-
-                        if tmp_joint_min_angle <= tmp_joint_angle and tmp_joint_min_angle <= tmp_joint_max_angle:
-                            j.joint_angle = tmp_joint_angle
-                            jj.joint_angle = tmp_target_joint_angle
-                        else:
-                            i = 0.0
-                            while i > 1.0:
-                                tmp_joint_min_angle = j.joint_min_max_table_min_angle(
-                                    tmp_target_joint_angle)
-                                tmp_joint_max_angle = j.joint_min_max_table_max_angle(
-                                    tmp_target_joint_angle)
-                                tmp_target_joint_min_angle = j.joint_min_max_table_min_angle(
-                                    tmp_joint_angle)
-                                tmp_target_joint_max_angle = j.joint_min_max_table_max_angle(
-                                    tmp_joint_angle)
-
-                                if tmp_joint_angle < tmp_joint_min_angle:
-                                    tmp_joint_angle += (tmp_joint_min_angle -
-                                                        tmp_joint_angle) * i
-                                if tmp_joint_angle > tmp_joint_max_angle:
-                                    tmp_joint_angle += (tmp_joint_max_angle -
-                                                        tmp_joint_angle) * i
-                                if tmp_target_joint_angle < tmp_target_joint_min_angle:
-                                    tmp_target_joint_angle += (
-                                        tmp_target_joint_min_angle - tmp_target_joint_angle) * i
-                                if tmp_target_joint_angle > tmp_target_joint_max_angle:
-                                    tmp_target_joint_angle += (
-                                        tmp_target_joint_max_angle - tmp_target_joint_angle) * i
-                            j.joint_angle = tmp_joint_angle
-                            jj.joint_angle = tmp_target_joint_angle
-                            vec[idx] = tmp_joint_angle
-                            vec[ii] = tmp_target_joint_angle
+                    av = self.calc_joint_angle_from_min_max_table(index, j, av)
                 else:
                     if j.joint_dof == 1:
-                        j.joint_angle(vec[idx])
+                        j.joint_angle(av[index])
                     else:
-                        j.joint_angle(vec[idx:idx + j.joint_dof])
+                        j.joint_angle(av[index:index + j.joint_dof])
             for k in range(j.joint_dof):
                 if j.joint_dof == 1:
-                    av[idx] = j.joint_angle()
+                    return_av[index] = j.joint_angle()
                 else:
-                    av[idx] = j.joint_angle[k]()
+                    return_av[index] = j.joint_angle[k]()
+        return return_av
+
+    def calc_joint_angle_from_min_max_table(self, index, j, av):
+        # currently only 1dof joint is supported
+        if j.joint_dof == 1 and \
+           j.joint_min_max_target.joint_dof == 1:
+            # find index of joint-min-max-target
+            ii = 0
+            jj = self.joint_list[ii]
+
+            while not jj == j.joint_min_max_target:
+                ii += 1
+                jj = self.joint_list[ii]
+            tmp_joint_angle = av[index]
+            tmp_target_joint_angle = av[ii]
+            tmp_joint_min_angle = j.joint_min_max_table_min_angle(
+                tmp_target_joint_angle)
+            tmp_joint_max_angle = j.joint_min_max_table_max_angle(
+                tmp_target_joint_angle)
+            tmp_target_joint_min_angle = j.joint_min_max_table_min_angle(
+                tmp_joint_angle)
+            tmp_target_joint_max_angle = j.joint_min_max_table_max_angle(
+                tmp_joint_angle)
+
+            if tmp_joint_min_angle <= tmp_joint_angle and \
+               tmp_joint_min_angle <= tmp_joint_max_angle:
+                j.joint_angle = tmp_joint_angle
+                jj.joint_angle = tmp_target_joint_angle
+            else:
+                i = 0.0
+                while i > 1.0:
+                    tmp_joint_min_angle = j.joint_min_max_table_min_angle(
+                        tmp_target_joint_angle)
+                    tmp_joint_max_angle = j.joint_min_max_table_max_angle(
+                        tmp_target_joint_angle)
+                    tmp_target_joint_min_angle = \
+                        j.joint_min_max_table_min_angle(tmp_joint_angle)
+                    tmp_target_joint_max_angle = \
+                        j.joint_min_max_table_max_angle(tmp_joint_angle)
+                    if tmp_joint_angle < tmp_joint_min_angle:
+                        tmp_joint_angle += (tmp_joint_min_angle -
+                                            tmp_joint_angle) * i
+                    if tmp_joint_angle > tmp_joint_max_angle:
+                        tmp_joint_angle += (tmp_joint_max_angle -
+                                            tmp_joint_angle) * i
+                    if tmp_target_joint_angle < tmp_target_joint_min_angle:
+                        tmp_target_joint_angle += (tmp_target_joint_min_angle -
+                                                   tmp_target_joint_angle) * i
+                    if tmp_target_joint_angle > tmp_target_joint_max_angle:
+                        tmp_target_joint_angle += \
+                            (tmp_target_joint_max_angle -
+                             tmp_target_joint_angle) * i
+                j.joint_angle = tmp_joint_angle
+                jj.joint_angle = tmp_target_joint_angle
+                av[index] = tmp_joint_angle
+                av[ii] = tmp_target_joint_angle
         return av
 
     def __repr__(self):
@@ -493,7 +489,7 @@ class CascadedLink(CascadedCoords):
 
     def __str__(self):
         s = '['
-        s += " ".join([j.__str__() for j in self.link_list])
+        s += ' '.join([j.__str__() for j in self.link_list])
         s += ']'
         return s
 
@@ -516,16 +512,17 @@ class CascadedLink(CascadedCoords):
                 min_gain = tmp_gain[i]
         dav = min_gain * dav
         i = 0
-        l = 0
-        while l < len(union_link_list):
-            joint = union_link_list[l].joint
+        link_index = 0
+        while link_index < len(union_link_list):
+            joint = union_link_list[link_index].joint
             if joint.joint_dof == 1:
                 dtheta = joint.speed_to_angle(dav[i])
             else:
-                dtheta = joint.speed_to_angle(dav[i:i+joint.joint_dof])
-            union_link_list[l].joint.joint_angle(dtheta, relative=True)
+                dtheta = joint.speed_to_angle(dav[i:i + joint.joint_dof])
+            union_link_list[link_index].joint.joint_angle(
+                dtheta, relative=True)
             i += joint.joint_dof
-            l += 1
+            link_index += 1
         if move_joints_hook:
             for hook in move_joints_hook:
                 hook()
@@ -599,9 +596,9 @@ class CascadedLink(CascadedCoords):
         #
         # implimentation issue:
         # when link and object are collide,
-        #  p = (nearestpoint_on_object_surface - center_of_link )
+        # p = (nearestpoint_on_object_surface - center_of_link )
         # else
-        #  p =  (nearestpoint_on_object_surface - neareset_point_on_link_surface)
+        # p = (nearestpoint_on_object_surface - neareset_point_on_link_surface)
         #
         # H. Sugiura, M. Gienger, H. Janssen, C. Goerick: "Real-Time Self
         # Collision Avoidance for Humanoids by means of Nullspace Criteria
@@ -620,14 +617,16 @@ class CascadedLink(CascadedCoords):
            and avoid_collision_distance > 0.0 \
            and (avoid_collision_joint_gain > 0.0 or
                 avoid_collision_null_gain > 0.0):
-            angle_speed_collision_avoidance = \
-                self.collision_avoidance(avoid_collision_distance=avoid_collision_distance,
-                                         avoid_collision_null_gain=avoid_collision_null_gain,
-                                         avoid_collision_joint_gain=avoid_collision_joint_gain,
-                                         weight=weight,
-                                         collision_avoidance_link_pair=collision_avoidance_link_pair,
-                                         *args, **kwargs)
-            # (setq min-distance (car (elt (send self :get :collision-distance) 0)))
+            angle_speed_collision_avoidance = self.collision_avoidance(
+                avoid_collision_distance=avoid_collision_distance,
+                avoid_collision_null_gain=avoid_collision_null_gain,
+                avoid_collision_joint_gain=avoid_collision_joint_gain,
+                weight=weight,
+                collision_avoidance_link_pair=collision_avoidance_link_pair,
+                *args,
+                **kwargs)
+            # (setq min-distance
+            # (car (elt (send self :get :collision-distance) 0)))
             # (setq angle-speed-collision-blending
             #  (cond ((<= avoid-collision-joint-gain 0.0) 0.0)
             #   ((< min-distance (* 0.1 avoid-collision-distance))
@@ -682,7 +681,7 @@ class CascadedLink(CascadedCoords):
 
     def calc_vel_from_pos(self, dif_pos, translation_axis,
                           p_limit=100.0):
-        """
+        """Calculate velocity from difference position
 
         Parameters
         ----------
@@ -714,9 +713,7 @@ class CascadedLink(CascadedCoords):
                                      avoid_nspace_gain,
                                      union_link_list,
                                      weight):
-        """Calculate null-space according to joint limit
-
-        """
+        """Calculate null-space according to joint limit."""
         if avoid_nspace_gain > 0.0:
             joint_list = [ul.joint for ul in union_link_list]
             nspace = avoid_nspace_gain * weight * \
@@ -745,7 +742,7 @@ class CascadedLink(CascadedCoords):
             avoid_nspace_gain, union_link_list, weight)
 
         # add null-space from arguments
-        # TODO support additional_nspace_list
+        # TODO(support additional_nspace_list)
 
         if callable(null_space):
             null_space = null_space()
@@ -762,8 +759,9 @@ class CascadedLink(CascadedCoords):
             return (names, False)
 
     def reset_joint_angle_limit_weight(self, union_link_list):
-        names, weights = self.find_joint_angle_limit_weight_from_union_link_list(
-            union_link_list)
+        names, weights = \
+            self.find_joint_angle_limit_weight_from_union_link_list(
+                union_link_list)
         if weights is not False:
             self.joint_angle_limit_weight_maps[names] = (names, False)
 
@@ -774,15 +772,14 @@ class CascadedLink(CascadedCoords):
             union_link_list,
             weight,
             n_joint_dimension=None):
-        """Calculate weight according to joint limit
-
-        """
+        """Calculate weight according to joint limit."""
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(
                 union_link_list)
 
-        link_names, previous_joint_angle_limit_weight = self.find_joint_angle_limit_weight_from_union_link_list(
-            union_link_list)
+        link_names, previous_joint_angle_limit_weight = \
+            self.find_joint_angle_limit_weight_from_union_link_list(
+                union_link_list)
         if previous_joint_angle_limit_weight is False:
             previous_joint_angle_limit_weight = np.inf * \
                 np.ones(n_joint_dimension, 'f')
@@ -826,9 +823,7 @@ class CascadedLink(CascadedCoords):
             n_joint_dimension=None,
             weight=None,
             additional_weight_list=[]):
-        """Calculate all weight from link list
-
-        """
+        """Calculate all weight from link list."""
         if not (isinstance(link_list[0], tuple) or
                 isinstance(link_list[0], list)):
             link_list = [link_list]
@@ -840,7 +835,7 @@ class CascadedLink(CascadedCoords):
         if weight is None:
             weight = np.ones(n_joint_dimension, 'f')
 
-        # TODO support additional_weight_list
+        # TODO(support additional_weight_list)
 
         tmp_weight = self.calc_weight_from_joint_limit(
             avoid_weight_gain,
@@ -880,12 +875,11 @@ class CascadedLink(CascadedCoords):
             min_loop=None,
             inverse_kinematics_hook=[],
             **kwargs):
-        """
+        """inverse-kinematics-loop is one loop calculation.
 
-        inverse-kinematics-loop is one loop calculation for inverse_kinematics.
-        In this method, joint position difference satisfying workspace difference (dif_pos, dif_rot) are
-        calculated and joint angles are updated.
-
+        In this method, joint position difference satisfying workspace
+        difference (dif_pos, dif_rot) are calculated and joint angles
+        are updated.
         """
         if move_target is None:
             raise NotImplementedError
@@ -904,7 +898,8 @@ class CascadedLink(CascadedCoords):
             min_loop = stop // 10
 
         # (if target-centroid-pos (send self :update-mass-properties))
-        # ;; dif-pos, dif-rot, move-target, rotation-axis, translation-axis, link-list
+        # ;; dif-pos, dif-rot, move-target,
+        # rotation-axis, translation-axis, link-list
         # ;; -> both list and atom OK.
         union_vel = []
         union_vels = []
@@ -935,15 +930,16 @@ class CascadedLink(CascadedCoords):
                 len(link_list) ==
                 len(dif_pos) ==
                 len(dif_rot)):
-            logger.error("list length differ : translation-axis {} rotation-axis {} "
-                         "move-target {} link-list {} dif-pos {} dif-rot".
-                         format(len(translation_axis),
-                                len(rotation_axis),
-                                len(move_target),
-                                len(link_list),
-                                len(dif_pos),
-                                len(dif_rot)))
-            return "ik-continuous"
+            logger.error(
+                'list length differ : translation-axis {} rotation-axis {} '
+                'move-target {} link-list {} dif-pos {} dif-rot'. format(
+                    len(translation_axis),
+                    len(rotation_axis),
+                    len(move_target),
+                    len(link_list),
+                    len(dif_pos),
+                    len(dif_rot)))
+            return 'ik-continuous'
 
         for i in range(len(rotation_axis)):
             union_vels.append(np.zeros(self.calc_target_axis_dimension(
@@ -954,11 +950,15 @@ class CascadedLink(CascadedCoords):
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
         #   (progn
         #     (dotimes (i (length rotation-axis))
-        #       (push (instantiate float-vector (send self :calc-target-axis-dimension (elt rotation-axis i) (elt translation-axis i))) tmp-dims))
+        #       (push (instantiate float-vector
+        # (send self :calc-target-axis-dimension
+        # (elt rotation-axis i) (elt translation-axis i))) tmp-dims))
         #     (setq tmp-dims (nreverse tmp-dims))))
         # (if (memq :tmp-dim ik-args)
         #     (setq tmp-dim (cadr (memq :tmp-dim ik-args)))
-        #   (setq tmp-dim (instantiate float-vector (send self :calc-target-axis-dimension rotation-axis translation-axis))))
+        #   (setq tmp-dim (instantiate float-vector
+        # (send self
+        # :calc-target-axis-dimension rotation-axis translation-axis))))
 
         if callable(jacobi):
             jacobi = jacobi(
@@ -1017,7 +1017,7 @@ class CascadedLink(CascadedCoords):
             for j in range(len(vel_r)):
                 tmp_union_vel[j + len(vel_p)] = dif_rot_ratio * vel_r[j]
             # (when (send self :get :ik-target-error)
-            #   (push (list vel-p vel-r) (cdr (assoc (read-from-string (format nil ":target-~d" i)) (send self :get :ik-target-error)))))
+            #   (push (list vel-p vel-r) (cdr (assoc (read-from-string (format
 
         vec_count = 0
         for i in range(len(union_vels)):
@@ -1036,12 +1036,13 @@ class CascadedLink(CascadedCoords):
         #   (let ((tmp-cog-gain (if (> cog-gain 1.0) 1.0 cog-gain)))
         #     (setq additional-vel
         #           (append (list
-        #                    (send self :calc-vel-for-cog tmp-cog-gain cog-translation-axis target-centroid-pos
+        # (send self :calc-vel-for-cog tmp-cog-gain cog-translation-axis
+        #                                                target-centroid-pos
         #                          :centroid-offset-func centroid-offset-func
         #                          :update-mass-properties nil))
         #                   additional-vel))
         #     (when (send self :get :ik-target-error)
-        #       (push (car additional-vel) (cdr (assoc :centroid (send self :get :ik-target-error)))))
+        #       (push (car additional-vel) (cdr (assoc :centroid (send self :ge
         #     ))
 
         # append additional-jacobi and additional-vel
@@ -1078,7 +1079,7 @@ class CascadedLink(CascadedCoords):
             translation_axis=translation_axis,
             jacobi=jacobi,
             **kwargs)
-        return "ik-continuous"
+        return 'ik-continuous'
 
     def inverse_kinematics_args(
             self,
@@ -1154,14 +1155,13 @@ class CascadedLink(CascadedCoords):
         c0 = None
         if self.parent is None:
             c0 = self.copy_worldcoords()
-        target_coords0 = target_coords
         success = True
         # (old-analysis-level (send-all union-link-list :analysis-level))
         # (send-all union-link-list :analysis-level :coords)
 
         # argument check
         if link_list is None or move_target is None:
-            logger.error("both :link-list and :move-target required")
+            logger.error('both :link-list and :move-target required')
             return True
         if (translation_axis is None or translation_axis is False) and \
            (rotation_axis is None or rotation_axis is False):
@@ -1202,8 +1202,9 @@ class CascadedLink(CascadedCoords):
                 False, cog_translation_axis)
         else:
             additional_jacobi_dimension = 0
-        additional_jacobi_dimension += sum(
-            map(lambda aj: (aj(link_list) if callable(aj) else aj).shape[0], tmp_additional_jacobi))
+        additional_jacobi_dimension += sum(map(lambda aj: (
+            aj(link_list) if callable(aj) else aj).shape[0],
+                                               tmp_additional_jacobi))
         ik_args = self.inverse_kinematics_args(
             union_link_list=union_link_list,
             translation_axis=translation_axis,
@@ -1212,7 +1213,8 @@ class CascadedLink(CascadedCoords):
             # calculate row dimension of additional_jacobi
             additional_jacobi_dimension=additional_jacobi_dimension,
             **kwargs)
-        #    self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset weight
+        # self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset
+        # weight
 
         # inverse_kinematics loop
         loop = 0
@@ -1264,16 +1266,23 @@ class CascadedLink(CascadedCoords):
                            move_target, target_coords, rotation_axis))
 
         # success
-        success = self.ik_convergence_check(dif_pos, dif_rot,
-                                            rotation_axis, translation_axis,
-                                            thre, rthre, centroid_thre, target_centroid_pos,
-                                            centroid_offset_func, cog_translation_axis,
-                                            update_mass_properties=False)
+        success = self.ik_convergence_check(
+            dif_pos,
+            dif_rot,
+            rotation_axis,
+            translation_axis,
+            thre,
+            rthre,
+            centroid_thre,
+            target_centroid_pos,
+            centroid_offset_func,
+            cog_translation_axis,
+            update_mass_properties=False)
 
         # reset joint angle limit weight
         self.reset_joint_angle_limit_weight(union_link_list)
 
-        # TODO add collision check
+        # TODO(add collision check)
         if success:
             return self.angle_vector()
 
@@ -1284,18 +1293,20 @@ class CascadedLink(CascadedCoords):
             self.newcoords(c0)
         return False
 
-    def ik_convergence_check(self,
-                             dif_pos,
-                             dif_rot,
-                             rotation_axis,
-                             translation_axis,
-                             thre, rthre,
-                             centroid_thre=None, target_centroid_pos=None,
-                             centroid_offset_func=None, cog_translation_axis=None,
-                             update_mass_properties=True):
-        """
-
-        check ik convergence
+    def ik_convergence_check(
+            self,
+            dif_pos,
+            dif_rot,
+            rotation_axis,
+            translation_axis,
+            thre,
+            rthre,
+            centroid_thre=None,
+            target_centroid_pos=None,
+            centroid_offset_func=None,
+            cog_translation_axis=None,
+            update_mass_properties=True):
+        """check ik convergence.
 
         Parameters
         ----------
@@ -1346,12 +1357,13 @@ class CascadedLink(CascadedCoords):
                 len(rotation_axis) ==
                 len(translation_axis) ==
                 len(target_coords)):
-            logger.error("list length differ : target_coords {} translation_axis {} \
-            rotation_axis {} move_target {}".
-                         format(len(target_coords),
-                                len(translation_axis),
-                                len(rotation_axis),
-                                len(move_target)))
+            logger.error(
+                'list length differ : target_coords {} translation_axis {} \
+            rotation_axis {} move_target {}'. format(
+                    len(target_coords),
+                    len(translation_axis),
+                    len(rotation_axis),
+                    len(move_target)))
 
         union_link_list = self.calc_union_link_list(link_list)
         for i in range(stop):
@@ -1413,13 +1425,13 @@ class CascadedLink(CascadedCoords):
         n_joint_dimension = self.calc_target_joint_dimension(union_link_list)
         av = np.zeros(n_joint_dimension)
         i = 0
-        l = 0
-        while l < len(union_link_list):
-            j = union_link_list[l].joint
+        link_index = 0
+        while link_index < len(union_link_list):
+            j = union_link_list[link_index].joint
             for k in range(j.joint_dof):
                 av[i + k] = j.calc_angle_speed_gain(dav, i, periodic_time)
             i += j.joint_dof
-            l += 1
+            link_index += 1
         return av
 
     def calc_joint_angle_speed(self,
@@ -1433,7 +1445,8 @@ class CascadedLink(CascadedCoords):
         # argument check
         if jacobi is None and j_sharp is None:
             logger.warn(
-                'jacobi(j) or j_sharp(J#) is required in calc_joint_angle_speed')
+                'jacobi(j) or j_sharp(J#) is required '
+                'in calc_joint_angle_speed')
             return null_space
         n_joint_dimension = jacobi.shape[1]
 
@@ -1447,10 +1460,11 @@ class CascadedLink(CascadedCoords):
                                  j_sharp_x,
                                  angle_speed)
         # if use null space
-        if ((isinstance(null_space, list) or isinstance(null_space, np.ndarray))
-                and n_joint_dimension == len(null_space)):
-            I = np.eye(n_joint_dimension)
-            j_sharp_x += np.matmul(I - np.matmul(j_sharp, jacobi),
+        t = type(null_space)
+        if (t is list or t is np.ndarray) and \
+           n_joint_dimension == len(null_space):
+            I_matrix = np.eye(n_joint_dimension)
+            j_sharp_x += np.matmul(I_matrix - np.matmul(j_sharp, jacobi),
                                    null_space)
         return j_sharp_x
 
@@ -1515,10 +1529,11 @@ class CascadedLink(CascadedCoords):
         P = np.zeros((n, n))
         v = np.zeros(n)
 
-        J = self.calc_jacobian_from_link_list(move_target=move_target,
-                                              link_list=link_list,
-                                              translation_axis=translation_axis,
-                                              rotation_axis=rotation_axis)
+        J = self.calc_jacobian_from_link_list(
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=translation_axis,
+            rotation_axis=rotation_axis)
         union_vels = np.array([])
         for mv, tc, trans_axis, rot_axis, w, g in zip(move_target,
                                                       target_coords,
@@ -1526,7 +1541,7 @@ class CascadedLink(CascadedCoords):
                                                       rotation_axis,
                                                       weight,
                                                       gain):
-            # TODO duplicate of jacobian based ik
+            # TODO(duplicate of jacobian based ik)
             dif_pos = mv.difference_position(tc,
                                              translation_axis=trans_axis)
             dif_rot = mv.difference_rotation(tc,
@@ -1653,11 +1668,7 @@ class CascadedLink(CascadedCoords):
         return []
 
     def link_lists(self, to, frm=None):
-        """
-
-        Find link list from to link to frm link.
-
-        """
+        """Find link list from to link to frm link."""
         ret1 = self.find_link_route(to, frm)
         if frm and not ret1[0] == frm:
             ret2 = self.find_link_route(frm, ret1[0])
@@ -1673,8 +1684,8 @@ class CascadedLink(CascadedCoords):
             return list(OrderedSet(list(itertools.chain(*link_list))))
 
     def calc_target_joint_dimension(self, link_list):
-        return calc_target_joint_dimension(map(lambda l: l.joint,
-                                               self.calc_union_link_list(link_list)))
+        return calc_target_joint_dimension(
+            map(lambda l: l.joint, self.calc_union_link_list(link_list)))
 
     def calc_jacobian_from_link_list(self,
                                      move_target,
@@ -1736,11 +1747,19 @@ class CascadedLink(CascadedCoords):
             ul = union_link_list[i]
             row = 0
 
-            for link_list, move_target, transform_coord, rotation_axis, translation_axis \
-                    in zip(link_lists, move_targets, transform_coords, rotation_axes, translation_axes):
+            for (link_list,
+                 move_target,
+                 transform_coord,
+                 rotation_axis,
+                 translation_axis) in zip(
+                     link_lists,
+                     move_targets,
+                     transform_coords,
+                     rotation_axes,
+                     translation_axes):
                 if ul in link_list:
                     length = len(link_list)
-                    l = link_list.index(ul)
+                    ll = link_list.index(ul)
                     joint = ul.joint
 
                     def find_parent(parent_link, link_list):
@@ -1752,10 +1771,13 @@ class CascadedLink(CascadedCoords):
 
                     if not isinstance(joint.child_link, Link):
                         child_reverse = False
-                    elif ((l + 1 < length) and
-                          not joint.child_link == find_parent(link_list[l + 1].parent_link, link_list)) or \
-                         ((l + 1 == length) and
-                          (not joint.child_link == find_parent(move_target.parent, link_list))):
+                    elif ((ll + 1 < length) and
+                          not joint.child_link ==
+                          find_parent(link_list[ll + 1].parent_link,
+                                      link_list)) or \
+                         ((ll + 1 == length) and
+                          (not joint.child_link ==
+                           find_parent(move_target.parent, link_list))):
                         child_reverse = True
                     else:
                         child_reverse = False
@@ -1764,13 +1786,22 @@ class CascadedLink(CascadedCoords):
                     child_link = joint.child_link
                     parent_link = joint.parent_link
                     default_coords = joint.default_coords
-                    world_default_coords = parent_link.copy_worldcoords().transform(
-                        default_coords)
+                    world_default_coords = parent_link.copy_worldcoords().\
+                        transform(default_coords)
 
-                    fik = joint.calc_jacobian(fik, row, col, joint, paxis,
-                                              child_link, world_default_coords, child_reverse,
-                                              move_target, transform_coord, rotation_axis,
-                                              translation_axis)
+                    fik = joint.calc_jacobian(
+                        fik,
+                        row,
+                        col,
+                        joint,
+                        paxis,
+                        child_link,
+                        world_default_coords,
+                        child_reverse,
+                        move_target,
+                        transform_coord,
+                        rotation_axis,
+                        translation_axis)
                 row += self.calc_target_axis_dimension(rotation_axis,
                                                        translation_axis)
             col += joint.joint_dof
@@ -1780,8 +1811,9 @@ class CascadedLink(CascadedCoords):
     @property
     def interlocking_joint_pairs(self):
         """Interlocking joint pairs.
-        pairs are [(joint0, joint1), ...]
-        If users want to use interlocking joints, please overwrite this method.
+
+        pairs are [(joint0, joint1), ...] If users want to use
+        interlocking joints, please overwrite this method.
         """
         return []
 
@@ -1814,8 +1846,10 @@ class CascadedLink(CascadedCoords):
     def calc_vel_for_interlocking_joints(
             self, link_list,
             interlocking_joint_pairs=None):
-        """Calculate 0 velocity for keeping
-        interlocking joint at the same joint angle."""
+        """Calculate 0 velocity for keeping interlocking joint.
+
+        at the same joint angle.
+        """
         if interlocking_joint_pairs is None:
             interlocking_joint_pairs = self.interlocking_joint_pairs
         union_link_list = self.calc_union_link_list(link_list)
@@ -1928,12 +1962,12 @@ class RobotModel(CascadedLink):
                 xyz = j.origin[:3, 3]
             link_maps[j.child].newcoords(rpy,
                                          xyz)
-            # TODO fix automatically update default_coords
+            # TODO(fix automatically update default_coords)
             link_maps[j.child].joint.default_coords = Coordinates(
                 pos=link_maps[j.child].pos,
                 rot=link_maps[j.child].rotation)
 
-        # TODO duplicate of __init__
+        # TODO(duplicate of __init__)
         self.link_list = links
         self.joint_list = joint_list
 
@@ -1964,8 +1998,8 @@ class RobotModel(CascadedLink):
             *args, **kwargs)
 
     def fix_leg_to_coords(self, fix_coords, leg='both', mid=0.5):
-        """
-        Fix robot's legs to a coords
+        """Fix robot's legs to a coords
+
         In the Following codes, leged robot is assumed.
 
         Parameters
@@ -2027,12 +2061,12 @@ class RobotModel(CascadedLink):
             move_target,
             link_list=None,
             **kwargs):
-        """
+        """Solve inverse kinematics.
 
-        solve inverse kinematics, move move-target to target-coords
-        look-at-target suppots t, nil, float-vector, coords, list of float-vector, list of coords
-        link-list is set by default based on move-target -> root link link-list
-
+        solve inverse kinematics, move move-target to target-coords look-at-
+        target suppots t, nil, float-vector, coords, list of float-vector, list
+        of coords link-list is set by default based on move-target -> root link
+        link-list.
         """
         if link_list is None:
             if not isinstance(move_target, list):
@@ -2047,7 +2081,6 @@ class RobotModel(CascadedLink):
             target_coords, move_target=move_target,
             link_list=link_list,
             **kwargs)
-        # (send self :look-at-target look-at-target :target-coords target-coords)
 
     def inverse_kinematics_loop(self,
                                 dif_pos,
@@ -2056,8 +2089,7 @@ class RobotModel(CascadedLink):
                                 link_list=None,
                                 target_coords=None,
                                 **kwargs):
-        """
-        move move_target using dif_pos and dif_rot
+        """move move_target using dif_pos and dif_rot.
 
         Parameters
         ----------
@@ -2089,7 +2121,7 @@ class RobotModel(CascadedLink):
             inverse_kinematics_hook=[],
             rthre=0.001,
             **kwargs):
-        """
+        """Solve look at inverse kinematics
 
         Parameters
         ----------
@@ -2104,11 +2136,8 @@ class RobotModel(CascadedLink):
         else:
             look_at_pos = look_at
 
-        count = 0
-        stop = kwargs.pop('stop', 100)
-        p_dif_rot = None
-        dif_rot = None
-        joint_dimension = self.calc_target_joint_dimension(link_list)
+        kwargs.pop('stop', 100)
+        self.calc_target_joint_dimension(link_list)
         target_coords = orient_coords_to_axis(
             make_coords(pos=look_at_pos),
             look_at_pos - move_target.worldpos())
@@ -2143,25 +2172,32 @@ class RobotModel(CascadedLink):
         #     # head_weight = np.ones(joint_dimension, 'f')
         #     # head_nspace = np.zeros(joint_dimension, 'f')
 
-        #     # target_orient = target_coords.worldrot()[:, 2]
-        #     # move_orient = target_coords.worldrot()[:, 2]
-        #     # for joint_id, j in enumerate(map(lambda l: l.joint, link_list)):
-        #     #     axis_orient = j.parent_link.rotate_vector(_wrap_axis(j.axis))
-        #     #     # direciton of non continuous area
-        #     #     axis_orient2 = j.parent_link.rotate_vector([-1, 0, 0])
-        #     #     if (triple_product(axis_orient, move_orient, target_orient) < 0.0 and
-        #     #         triple_product(axis_orient, move_orient, axis_orient2) < 0.0 and
-        #     #         triple_product(axis_orient, axis_orient2, target_orient < 0.0)) or \
-        #     #         (triple_product(axis_orient, move_orient, target_orient) > 0.0 and
-        #     #          triple_product(axis_orient, move_orient, axis_orient2) > 0.0 and
-        #     #          triple_product(axis_orient, axis_orient2, target_orient > 0.0)):
-        #     #         if triple_product(axis_orient, move_orient, target_orient) > 0.0:
-        #     #             head_nspace[joint_id] = -1
-        #     #         else:
-        #     #             head_nspace[joint_id] = 1
-        #     #         head_weight = 0.01 * np.ones(joint_dimension, 'f')
-        #     #         head_weight[joint_id] = 0.0
-        #     #         break
+        # target_orient = target_coords.worldrot()[:, 2]
+        # move_orient = target_coords.worldrot()[:, 2]
+        # for joint_id, j in enumerate(map(lambda l: l.joint, link_list)):
+        #     axis_orient = j.parent_link.rotate_vector(_wrap_axis(j.axis))
+        #     # direciton of non continuous area
+        #     axis_orient2 = j.parent_link.rotate_vector([-1, 0, 0])
+        #     if (triple_product(axis_orient, move_orient, target_orient)
+        # < 0.0 and
+        #         triple_product(axis_orient, move_orient, axis_orient2)
+        # < 0.0 and
+        #         triple_product(axis_orient, axis_orient2, target_orient
+        # < 0.0)) or \
+        #         (triple_product(axis_orient, move_orient, target_orient)
+        # > 0.0 and
+        #          triple_product(axis_orient, move_orient, axis_orient2)
+        # > 0.0 and
+        #          triple_product(axis_orient, axis_orient2, target_orient
+        # > 0.0)):
+        #         if triple_product(axis_orient, move_orient, target_orient)
+        # > 0.0:
+        #             head_nspace[joint_id] = -1
+        #         else:
+        #             head_nspace[joint_id] = 1
+        #         head_weight = 0.01 * np.ones(joint_dimension, 'f')
+        #         head_weight[joint_id] = 0.0
+        #         break
         #     print(dif_pos, dif_rot)
         #     self.inverse_kinematics_loop(
         #         dif_pos, dif_rot,
@@ -2222,7 +2258,7 @@ class RobotModel(CascadedLink):
 
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
-    # TODO current support only 1-dof joint
+    # TODO(current support only 1-dof joint)
     # fix unit system ;; [mm] -> [m], [deg] -> [rad]
     # 1-dof joint such as rotational_joint and linear_joint
     if jamm is None:
@@ -2234,7 +2270,7 @@ def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
 
 
 def joint_angle_limit_weight(joint_list):
-    """Calculate joint angle limit from joint list
+    """Calculate joint angle limit from joint list.
 
     w_i = 1 + | dH/dt |      if d|dH/dt| >= 0
         = 1                  if d|dH/dt| <  0
@@ -2245,7 +2281,6 @@ def joint_angle_limit_weight(joint_list):
     scheme for avoiding joint limits for redundant manipulators",
     in IEEE Trans. On Robotics and Automation,
     11((2):286-292, April 1995.
-
     """
     dims = calc_target_joint_dimension(joint_list)
     res = np.zeros(dims, 'f')
@@ -2286,10 +2321,9 @@ def joint_angle_limit_weight(joint_list):
 def joint_angle_limit_nspace(
         joint_list,
         n_joint_dimension=None):
-    """Calculate nspace weight for avoiding joint angle limit
+    """Calculate nspace weight for avoiding joint angle limit.
 
-       dH/dq = (((t_max + t_min)/2 - t) / ((t_max - t_min)/2)) ^2
-
+    dH/dq = (((t_max + t_min)/2 - t) / ((t_max - t_min)/2)) ^2
     """
     if n_joint_dimension is None:
         n_joint_dimension = calc_target_joint_dimension(joint_list)
