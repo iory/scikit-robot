@@ -20,6 +20,7 @@ from skrobot.geo import midcoords
 from skrobot.geo import orient_coords_to_axis
 from skrobot.utils.listify import listify
 from skrobot.utils.urdf import URDF
+from skrobot.utils import urdf
 
 
 logger = getLogger(__name__)
@@ -1867,6 +1868,8 @@ class RobotModel(CascadedLink):
         joint_list = []
         joint_names = []
         for j in self.urdf_robot_model.joints:
+            if j.limit is None:
+                j.limit = urdf.JointLimit(0, 0)
             if j.axis is None:
                 j.axis = 'z'
             if j.joint_type == 'fixed':
