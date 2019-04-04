@@ -34,8 +34,8 @@ class Quaternion(object):
     def q(self, quaternion):
         quaternion = np.array(quaternion, dtype=np.float64)
         if not (quaternion.shape == (4,)):
-            raise ValueError("quaternion should be of shape (4,)."
-                             " get {}".format(quaternion.shape))
+            raise ValueError('quaternion should be of shape (4,).'
+                             ' get {}'.format(quaternion.shape))
         self._q = quaternion
 
     @property
@@ -60,7 +60,7 @@ class Quaternion(object):
 
     @property
     def rotation(self):
-        """Return rotation matrix"""
+        """Return rotation matrix."""
         return quaternion2matrix(self.q)
 
     @property
@@ -97,14 +97,14 @@ class Quaternion(object):
         return quaternion_norm(self.q)
 
     def normalize(self):
-        """Normalize this quaternion"""
+        """Normalize this quaternion."""
         norm = self.norm
         if norm > 1e-8:
             self.q = self.q / norm
 
     @property
     def normalized(self):
-        """Return Normalized quaternion"""
+        """Return Normalized quaternion."""
         norm = self.norm
         q = self.q.copy()
         if norm > 1e-8:
@@ -123,7 +123,7 @@ class Quaternion(object):
         return Quaternion(q=quaternion_inverse(self.q))
 
     def T(self):
-        """Return 4x4 transformation matrix"""
+        """Return 4x4 transformation matrix."""
         matrix = np.zeros((4, 4), dtype=np.float64)
         matrix[3, 3] = 1.0
         matrix[:3, :3] = self.rotation
@@ -146,7 +146,7 @@ class Quaternion(object):
             return Quaternion(q=q * cls)
         else:
             raise TypeError("Quaternion's multiplication is only supported "
-                            "Number or Quaternion. get {}".format(type(cls)))
+                            'Number or Quaternion. get {}'.format(type(cls)))
 
     def __rmul__(self, cls):
         if isinstance(cls, Number):
@@ -154,7 +154,7 @@ class Quaternion(object):
             return Quaternion(q=cls * q)
         else:
             raise TypeError("Quaternion's multiplication is only supported "
-                            "Number or Quaternion. get {}".format(type(cls)))
+                            'Number or Quaternion. get {}'.format(type(cls)))
 
     def __truediv__(self, cls):
         if isinstance(cls, Quaternion):
@@ -164,7 +164,7 @@ class Quaternion(object):
             return Quaternion(q=q / cls)
         else:
             raise TypeError("Quaternion's division is only supported "
-                            "Number or Quaternion. get {}".format(type(cls)))
+                            'Number or Quaternion. get {}'.format(type(cls)))
 
     def __div__(self, cls):
         return self.__truediv__(cls)

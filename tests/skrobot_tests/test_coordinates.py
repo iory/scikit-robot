@@ -4,9 +4,9 @@ from numpy import deg2rad
 from numpy import pi
 from numpy import testing
 
-from skrobot.math import rotation_matrix
-from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_cascoords
+from skrobot.coordinates import make_coords
+from skrobot.math import rotation_matrix
 
 
 class TestCoordinates(unittest.TestCase):
@@ -87,7 +87,7 @@ class TestCoordinates(unittest.TestCase):
         coord_b = make_coords(pos=pos, rot=q)
         testing.assert_almost_equal(
             coord_b.inverse_transformation().worldpos(),
-            [-0.41549991, -0.12132025,  0.83588229])
+            [-0.41549991, -0.12132025, 0.83588229])
         testing.assert_almost_equal(
             coord_b.inverse_transformation().quaternion,
             [0.20692513, 0.50841015, 0.82812527, 0.1136206])
@@ -144,9 +144,9 @@ class TestCascadedCoordinates(unittest.TestCase):
         a.rotate(pi / 2.0, 'z')
         testing.assert_almost_equal(
             a.worldrot(),
-            [[2.22044605e-16, -1.00000000e+00,  0.00000000e+00],
-             [5.00000000e-01,  1.11022302e-16, -8.66025404e-01],
-             [8.66025404e-01,  1.92296269e-16,  5.00000000e-01]],
+            [[2.22044605e-16, -1.00000000e+00, 0.00000000e+00],
+             [5.00000000e-01, 1.11022302e-16, -8.66025404e-01],
+             [8.66025404e-01, 1.92296269e-16, 5.00000000e-01]],
             decimal=5)
         testing.assert_almost_equal(
             b.worldrot(),
@@ -159,7 +159,7 @@ class TestCascadedCoordinates(unittest.TestCase):
             [0.1, 0, 0])
         testing.assert_almost_equal(
             b.worldpos(),
-            [-0.07320508, -0.08660254,  0.05])
+            [-0.07320508, -0.08660254, 0.05])
 
     def test_dissoc(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
@@ -177,9 +177,9 @@ class TestCascadedCoordinates(unittest.TestCase):
         a.rotate(pi / 2.0, 'z')
         testing.assert_almost_equal(
             a.worldrot(),
-            [[2.22044605e-16, -1.00000000e+00,  0.00000000e+00],
-             [5.00000000e-01,  1.11022302e-16, -8.66025404e-01],
-             [8.66025404e-01,  1.92296269e-16,  5.00000000e-01]],
+            [[2.22044605e-16, -1.00000000e+00, 0.00000000e+00],
+             [5.00000000e-01, 1.11022302e-16, -8.66025404e-01],
+             [8.66025404e-01, 1.92296269e-16, 5.00000000e-01]],
             decimal=5)
         testing.assert_almost_equal(
             b.worldrot(),

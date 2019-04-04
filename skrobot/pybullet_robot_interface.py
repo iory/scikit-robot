@@ -2,8 +2,8 @@ import importlib
 
 import numpy as np
 
-from skrobot.math import quaternion2rpy
 from skrobot.math import matrix2quaternion
+from skrobot.math import quaternion2rpy
 from skrobot.robot_model import LinearJoint
 from skrobot.robot_model import RotationalJoint
 
@@ -87,7 +87,8 @@ class PybulletRobotInterface(object):
         self.velocity_gain = 0.1
 
     def angle_vector(self, angle_vector=None, realtime_simulation=None):
-        if realtime_simulation is not None and isinstance(realtime_simulation, bool):
+        if realtime_simulation is not None and isinstance(
+                realtime_simulation, bool):
             self.realtime_simulation = realtime_simulation
 
         if self.robot_id is None:
@@ -95,7 +96,8 @@ class PybulletRobotInterface(object):
         if angle_vector is None:
             angle_vector = self.robot.angle_vector()
 
-        for i, (joint, angle) in enumerate(zip(self.robot.joint_list, angle_vector)):
+        for i, (joint, angle) in enumerate(
+                zip(self.robot.joint_list, angle_vector)):
             idx = self.joint_name_to_joint_id[joint.name]
 
             joint = self.robot.joint_list[i]
@@ -184,12 +186,12 @@ def draw(c,
                             orientation[2],
                             orientation[3],
                             orientation[0]])
-    createPoseMarker(c.worldpos(),
-                     orientation,
-                     text=text,
-                     lineWidth=line_width,
-                     lineLength=line_length,
-                     parentLinkIndex=parent_link_index)
+    create_pose_marker(c.worldpos(),
+                       orientation,
+                       text=text,
+                       lineWidth=line_width,
+                       lineLength=line_length,
+                       parentLinkIndex=parent_link_index)
 
 
 def flush():
@@ -203,25 +205,25 @@ def flush():
     remove_user_item_indices = []
 
 
-def createPoseMarker(position=np.array([0, 0, 0]),
-                     orientation=np.array([0, 0, 0, 1]),
-                     text="",
-                     xColor=np.array([1, 0, 0]),
-                     yColor=np.array([0, 1, 0]),
-                     zColor=np.array([0, 0, 1]),
-                     textColor=np.array([0, 0, 0]),
-                     lineLength=0.1,
-                     lineWidth=1,
-                     textSize=1,
-                     textPosition=np.array([0, 0, 0.1]),
-                     textOrientation=None,
-                     lifeTime=0,
-                     parentObjectUniqueId=-1,
-                     parentLinkIndex=-1):
-    """
+def create_pose_marker(position=np.array([0, 0, 0]),
+                       orientation=np.array([0, 0, 0, 1]),
+                       text='',
+                       xColor=np.array([1, 0, 0]),
+                       yColor=np.array([0, 1, 0]),
+                       zColor=np.array([0, 0, 1]),
+                       textColor=np.array([0, 0, 0]),
+                       lineLength=0.1,
+                       lineWidth=1,
+                       textSize=1,
+                       textPosition=np.array([0, 0, 0.1]),
+                       textOrientation=None,
+                       lifeTime=0,
+                       parentObjectUniqueId=-1,
+                       parentLinkIndex=-1):
+    """Create a pose marker
 
-    Create a pose marker that identifies a position and orientation
-    in space with 3 colored lines.
+    Create a pose marker that identifies a position and orientation in space
+    with 3 colored lines.
 
     """
     global remove_user_item_indices

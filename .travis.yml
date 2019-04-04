@@ -6,13 +6,12 @@ python:
 
 install:
   - pip install --upgrade pip setuptools wheel
-  - pip install autopep8
   - pip install Cython
   - python setup.py develop
 
 script:
   - pip install hacking pytest
-  - autopep8 -r . --diff --exit-code
+  - flake8 .
   - pytest -v tests
 
 sudo: false

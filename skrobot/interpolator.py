@@ -12,15 +12,15 @@ class Interpolator(object):
 
     def reset(self, position_list=None,
               time_list=None):
-        """"Initialize interpolator
+        """"Initialize interpolator.
 
         Args:
             position-list:
                 list of control point
             time-list:
                 list of time from start for each control point,
-                time in fisrt contrall point is zero, so length of this list is length of control point minus 1
-
+                time in fisrt contrall point is zero, so length
+                of this list is length of control point minus 1
         """
         if position_list is None:
             position_list = self.position_list
@@ -32,7 +32,7 @@ class Interpolator(object):
             self.time_list = time_list
         if len(position_list) != len(time_list) + 1:
             raise ValueError(
-                "length of position_list must be length of time_list + 1")
+                'length of position_list must be length of time_list + 1')
 
         self.time = 0.0
         self.segment_time = 0.0
@@ -74,7 +74,7 @@ class LinearInterpolator(Interpolator):
         Interpolator.__init__(self)
 
     def interpolation(self):
-        """Linear Interpolation"""
+        """Linear Interpolation."""
         v1 = self.position_list[self.segment]
         v2 = self.position_list[self.segment + 1]
         if self.segment > 0:
@@ -98,7 +98,7 @@ class MinjerkInterpolator(Interpolator):
               velocity_list=None,
               acceleration_list=None,
               **kwargs):
-        """
+        """Initialize interpolator
 
         Args:
             position_list:
@@ -112,19 +112,19 @@ class MinjerkInterpolator(Interpolator):
         Interpolator.reset(self, **kwargs)
         if velocity_list is None:
             self.velocity_list = [
-                np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
+                np.zeros(len(self.position_list[0]))
+                for _ in range(self.segment_num + 1)]
         else:
             self.velocity_list = velocity_list
         if acceleration_list is None:
             self.acceleration_list = [
-                np.zeros(len(self.position_list[0])) for _ in range(self.segment_num + 1)]
+                np.zeros(len(self.position_list[0]))
+                for _ in range(self.segment_num + 1)]
         else:
             self.acceleration_list = acceleration_list
 
     def interpolation(self):
-        """Minjerk interpolator, a.k.a Hoff & Arbib
-
-        """
+        """Minjerk interpolator, a.k.a Hoff & Arbib."""
         xi = self.position_list[self.segment]
         xf = self.position_list[self.segment + 1]
         vi = self.velocity_list[self.segment]
