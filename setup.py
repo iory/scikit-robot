@@ -25,7 +25,7 @@ install_requires = [
     'cvxopt',
     'future',
     'lxml',
-    'networkx',
+    'networkx==2.2.0',
     'numpy>=1.9.0',
     'ordered_set',
     'pillow',
