@@ -56,13 +56,17 @@ def _wrap_axis(axis):
 
 
 def _check_valid_rotation(rotation):
-    """Checks that the given rotation matrix is valid.
-    """
+    """Checks that the given rotation matrix is valid."""
     rotation = np.array(rotation)
-    if not isinstance(rotation, np.ndarray) or not np.issubdtype(rotation.dtype, np.number):
+    if not isinstance(
+            rotation,
+            np.ndarray) or not np.issubdtype(
+            rotation.dtype,
+            np.number):
         raise ValueError('Rotation must be specified as numeric numpy array')
 
-    if len(rotation.shape) != 2 or rotation.shape[0] != 3 or rotation.shape[1] != 3:
+    if len(rotation.shape) != 2 or \
+       rotation.shape[0] != 3 or rotation.shape[1] != 3:
         raise ValueError('Rotation must be specified as a 3x3 ndarray')
 
     if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
@@ -71,21 +75,24 @@ def _check_valid_rotation(rotation):
 
 
 def _check_valid_translation(translation):
-    """Checks that the translation vector is valid.
-    """
-    if not isinstance(translation, np.ndarray) or not np.issubdtype(translation.dtype, np.number):
+    """Checks that the translation vector is valid."""
+    if not isinstance(
+            translation,
+            np.ndarray) or not np.issubdtype(
+            translation.dtype,
+            np.number):
         raise ValueError(
             'Translation must be specified as numeric numpy array')
 
     t = translation.squeeze()
     if len(t.shape) != 1 or t.shape[0] != 3:
         raise ValueError(
-            'Translation must be specified as a 3-vector, 3x1 ndarray, or 1x3 ndarray')
+            'Translation must be specified as a 3-vector, '
+            '3x1 ndarray, or 1x3 ndarray')
 
 
 def wxyz2xyzw(quat):
-    """
-    Convert quaternion [w, x, y, z] to [x, y, z, w] order
+    """Convert quaternion [w, x, y, z] to [x, y, z, w] order.
 
     Parameters
     ----------
@@ -102,8 +109,7 @@ def wxyz2xyzw(quat):
 
 
 def xyzw2wxyz(quat):
-    """
-    Convert quaternion [x, y, z, w] to [w, x, y, z] order
+    """Convert quaternion [x, y, z, w] to [w, x, y, z] order.
 
     Parameters
     ----------
@@ -120,10 +126,7 @@ def xyzw2wxyz(quat):
 
 
 def triple_product(a, b, c):
-    """
-
-    Returns Triple Product
-    https://en.wikipedia.org/wiki/Triple_product
+    """Returns Triple Product https://en.wikipedia.org/wiki/Triple_product.
 
     Parameters
     ----------
@@ -139,7 +142,7 @@ def triple_product(a, b, c):
 
 
 def sr_inverse(J, k=1.0, weight_vector=None):
-    """returns sr-inverse of given mat"""
+    """returns sr-inverse of given mat."""
     r, _ = J.shape
 
     # without weight
@@ -170,6 +173,7 @@ def sr_inverse_org(J, k=1.0):
 
 def manipulability(J):
     """return manipulability of given matrix.
+
     https://www.jstage.jst.go.jp/article/jrsj1983/2/1/2_1_63/_article/-char/ja/
     """
     return np.sqrt(max(0.0, np.linalg.det(np.matmul(J, J.T))))
@@ -180,7 +184,7 @@ def midpoint(p, a, b):
 
 
 def midrot(p, r1, r2):
-    """Returns mid (or p) rotation matrix of given two matrix r1 and r2"""
+    """Returns mid (or p) rotation matrix of given two matrix r1 and r2."""
     r1 = _check_valid_rotation(r1)
     r2 = _check_valid_rotation(r2)
     r = np.matmul(r1.T, r2)
@@ -190,7 +194,8 @@ def midrot(p, r1, r2):
 
 
 def transform(m, v):
-    """
+    """Return transform m v
+
     Args:
         m (np.array): 3 x 3 matrix
         v (np.array or list): vector
@@ -204,7 +209,8 @@ def transform(m, v):
 
 
 def rotation_matrix(theta, axis):
-    """
+    """Return the rotation matrix.
+
     Return the rotation matrix associated with counterclockwise rotation
     about the given axis by theta radians.
 
@@ -234,20 +240,21 @@ def rotate_matrix(matrix, theta, axis, world=None):
 
 
 def rpy_matrix(az, ay, ax):
-    """
-    rpy_matrix (az ay ax) creates a new rotation matrix which has been
-    rotated ax radian around x-axis in WORLD, ay radian around y-axis in
-    WORLD, and az radian around z axis in WORLD, in this order.
-    These angles can be extracted by the rpy function.
+    """Return rotation matrix from yaw-pitch-roll
+
+    This function creates a new rotation matrix which has been
+    rotated ax radian around x-axis in WORLD, ay radian around y-axis in WORLD,
+    and az radian around z axis in WORLD, in this order. These angles can be
+    extracted by the rpy function.
 
     Parameters
     ----------
-    ax : float
-        rotated around x-axis in radian
-    ay : float
-        rotated around y-axis in radian
     az : float
-        rotated around z-axis in radian
+        rotated around z-axis(yaw) in radian.
+    ay : float
+        rotated around y-axis(pitch) in radian.
+    ax : float
+        rotated around x-axis(roll) in radian.
 
     Returns
     -------
@@ -261,8 +268,7 @@ def rpy_matrix(az, ay, ax):
 
 
 def rpy_angle(matrix):
-    """
-    Decomposing a rotation matrix
+    """Decomposing a rotation matrix.
 
     Parameters
     ----------
@@ -338,7 +344,7 @@ def matrix2quaternion(m):
 
 
 def quaternion2matrix(q):
-    """Returns matrix of given quaternion"""
+    """Returns matrix of given quaternion."""
     q0 = q[0]
     q1 = q[1]
     q2 = q[2]
@@ -375,14 +381,15 @@ def matrix_log(m):
 
 
 def matrix_exponent(omega, p=1.0):
-    """Returns exponent of given omega"""
+    """Returns exponent of given omega."""
     w = np.linalg.norm(omega)
     amat = outer_product_matrix(normalize_vector(omega))
-    return np.eye(3) + np.sin(w * p) * amat + (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
+    return np.eye(3) + np.sin(w * p) * amat + \
+        (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
 
 
 def outer_product_matrix(v):
-    """Returns outer product matrix of given v
+    """Returns outer product matrix of given v.
 
     returns outer product matrix of given v
     matrix(a) v = a * v
@@ -390,14 +397,13 @@ def outer_product_matrix(v):
     w2 0 -w0
     -w1 w0 0
     """
-    return np.array([[0,   -v[2],  v[1]],
-                     [v[2],    0,   -v[0]],
-                     [-v[1], v[0],     0]])
+    return np.array([[0, -v[2], v[1]],
+                     [v[2], 0, -v[0]],
+                     [-v[1], v[0], 0]])
 
 
 def quaternion2rpy(q):
-    """
-    Roll-pitch-yaw angles of a quaternion.
+    """Roll-pitch-yaw angles of a quaternion.
 
     Parameters
     ----------
@@ -422,8 +428,7 @@ def quaternion2rpy(q):
 
 
 def rpy2quaternion(rpy):
-    """
-    Quaternion frmo yaw-pitch-roll angles.
+    """Quaternion frmo yaw-pitch-roll angles.
 
     Parameters
     ----------
@@ -446,8 +451,7 @@ def rpy2quaternion(rpy):
 
 
 def rotation_matrix_from_rpy(rpy):
-    """
-    Rotation matrix from yaw-pitch-roll angles.
+    """Rotation matrix from yaw-pitch-roll angles.
 
     Args:
         rpy (np.array or list): [yaw, pitch, roll]
@@ -459,7 +463,7 @@ def rotation_matrix_from_rpy(rpy):
 
 
 def rodrigues(axis, theta=None):
-    """Rodrigues formula
+    """Rodrigues formula.
 
     Args:
         axis (np.array or list): [x, y, z]
@@ -471,9 +475,9 @@ def rodrigues(axis, theta=None):
     if theta is None:
         theta = np.sqrt(np.sum(axis ** 2))
     a = axis / np.linalg.norm(axis)
-    cross_prod = np.array([[0, -a[2],   a[1]],
-                           [a[2],     0,  -a[0]],
-                           [-a[1],  a[0],      0]])
+    cross_prod = np.array([[0, -a[2], a[1]],
+                           [a[2], 0, -a[0]],
+                           [-a[1], a[0], 0]])
     ctheta = np.cos(theta)
     stheta = np.sin(theta)
     mat = np.eye(3) + \
@@ -483,9 +487,7 @@ def rodrigues(axis, theta=None):
 
 
 def rotation_angle(mat):
-    """
-    Inverse Rodrigues formula
-    Convert Rotation-Matirx to Axis-Angle
+    """Inverse Rodrigues formula Convert Rotation-Matirx to Axis-Angle.
 
     Parameters
     ----------
@@ -504,7 +506,7 @@ def rotation_angle(mat):
         return None
     theta = np.arccos((np.trace(mat) - 1) / 2)
     if abs(theta) < _EPS:
-        raise ValueError("Rotation Angle is too small. \nvalue : {}".
+        raise ValueError('Rotation Angle is too small. \nvalue : {}'.
                          format(theta))
     axis = 1.0 / (2 * np.sin(theta)) * \
         np.array([mat[2, 1] - mat[1, 2], mat[0, 2] -
@@ -513,9 +515,7 @@ def rotation_angle(mat):
 
 
 def rotation_distance(mat1, mat2):
-    """
-
-    Return the distance of rotation matrixes.
+    """Return the distance of rotation matrixes.
 
     Parameters
     ----------
@@ -535,8 +535,7 @@ def rotation_distance(mat1, mat2):
 
 
 def quaternion_multiply(quaternion1, quaternion0):
-    """
-    Return multiplication of two quaternions.
+    """Return multiplication of two quaternions.
 
     Parameters
     ----------
@@ -564,8 +563,7 @@ def quaternion_multiply(quaternion1, quaternion0):
 
 
 def quaternion_conjugate(quaternion):
-    """
-    Return conjugate of quaternion.
+    """Return conjugate of quaternion.
 
     Parameters
     ----------
@@ -588,8 +586,7 @@ def quaternion_conjugate(quaternion):
 
 
 def quaternion_inverse(quaternion):
-    """
-    Return inverse of quaternion
+    """Return inverse of quaternion.
 
     Parameters
     ----------
@@ -611,8 +608,7 @@ def quaternion_inverse(quaternion):
 
 
 def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
-    """
-    Return spherical linear interpolation between two quaternions.
+    """Return spherical linear interpolation between two quaternions.
 
     Parameters
     ----------
@@ -670,8 +666,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
 
 
 def quaternion_distance(q1, q2, absolute=False):
-    """
-    Return the distance of quaternion.
+    """Return the distance of quaternion.
 
     Parameters
     ----------
@@ -695,9 +690,7 @@ def quaternion_distance(q1, q2, absolute=False):
 
 
 def quaternion_absolute_distance(q1, q2):
-    """
-
-    Return the absolute distance of quaternion.
+    """Return the absolute distance of quaternion.
 
     Parameters
     ----------
@@ -714,9 +707,7 @@ def quaternion_absolute_distance(q1, q2):
 
 
 def quaternion_norm(q):
-    """
-
-    Return the norm of quaternion.
+    """Return the norm of quaternion.
 
     Parameters
     ----------
@@ -734,9 +725,7 @@ def quaternion_norm(q):
 
 
 def quaternion_normalize(q):
-    """
-
-    Return the normalized quaternion.
+    """Return the normalized quaternion.
 
     Parameters
     ----------
@@ -754,9 +743,10 @@ def quaternion_normalize(q):
 
 
 def quaternion_from_axis_angle(theta, axis):
-    """
-    Return the quaternion associated with counterclockwise rotation
-    about the given axis by theta radians.
+    """Return the quaternion from axis angle
+
+    This function returns quaternion associated with counterclockwise
+    rotation about the given axis by theta radians.
 
     Parameters
     ----------
@@ -780,8 +770,7 @@ def quaternion_from_axis_angle(theta, axis):
 
 
 def axis_angle_from_quaternion(quat):
-    """
-    Converts a quaternion into the axis-angle representation.
+    """Converts a quaternion into the axis-angle representation.
 
     Parameters
     ----------
@@ -807,8 +796,7 @@ def axis_angle_from_quaternion(quat):
 
 
 def axis_angle_from_matrix(rotation):
-    """
-    Converts the rotation of a matrix into axis-angle representation.
+    """Converts the rotation of a matrix into axis-angle representation.
 
     Parameters
     ----------
@@ -844,8 +832,7 @@ def random_translation():
 
 
 def random_quaternion():
-    """
-    Generate uniform random unit quaternion.
+    """Generate uniform random unit quaternion.
 
     Returns
     -------
@@ -872,9 +859,7 @@ def random_quaternion():
 
 
 def make_matrix(r, c):
-    """Wrapper of numpy array
-
-    """
+    """Wrapper of numpy array."""
     return np.zeros((r, c), 'f')
 
 

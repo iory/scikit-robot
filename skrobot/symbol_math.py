@@ -1,16 +1,15 @@
 from logging import getLogger
 
+import numpy as np
 from sympy import Abs
+from sympy import eye
 from sympy import Float
 from sympy import Matrix
+from sympy import pi
 from sympy import Rational
 from sympy import S
-from sympy import eye
-from sympy import pi
 from sympy import sqrt
 from sympy import trigsimp
-
-import numpy as np
 
 from skrobot.math import axis_angle_from_matrix
 
@@ -28,8 +27,7 @@ def convert_real_to_rational(x, precision=8):
 
 
 def get_matrix_from_quaternion(quat):
-    """
-    Get Rotation Matirx from quaternion
+    """Get Rotation Matirx from quaternion.
 
     Parameters
     ----------
@@ -103,7 +101,10 @@ def affine_simplify(T):
 
 
 def numpy_vector_to_sympy(v, precision=8):
-    return Matrix(len(v), 1, [convert_real_to_rational(x, precision) for x in v])
+    return Matrix(
+        len(v), 1, [
+            convert_real_to_rational(
+                x, precision) for x in v])
 
 
 def multiply_matrices(Ts):
@@ -114,9 +115,10 @@ def multiply_matrices(Ts):
 
 
 def round_matrix(T, precision=8):
-    """
-    given a sympy matrix, will round the matrix and snap all its
-    values to 15, 30, 45, 60, and 90 degrees.
+    """Return round matrix
+
+    Given a sympy matrix, will round the matrix and snap all its values to
+    15, 30, 45, 60, and 90 degrees.
 
     Parameters
     ----------

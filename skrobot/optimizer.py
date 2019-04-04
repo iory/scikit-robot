@@ -6,8 +6,8 @@ from skrobot.optimizers.quadprog_solver import solve_qp as quadprog_solve_qp
 
 
 def solve_qp(P, q, G, h, A=None, b=None, solver='cvxopt', sym_proj=False):
-    """n
-    Solve a Quadratic Program defined as:
+    """n Solve a Quadratic Program defined as:
+
     .. math::
         \\begin{eqnarray}
         \\mathrm{minimize} & & (1/2) x^T P x + q^T x \\\\
@@ -45,4 +45,4 @@ def solve_qp(P, q, G, h, A=None, b=None, solver='cvxopt', sym_proj=False):
         return cvxopt_solve_qp(P, q, G, h, A, b, sym_proj=sym_proj)
     elif solver == 'quadprog':
         return quadprog_solve_qp(P, q, G, h, A, b, sym_proj=sym_proj)
-    raise ValueError("QP solver {} not supported".format(solver))
+    raise ValueError('QP solver {} not supported'.format(solver))

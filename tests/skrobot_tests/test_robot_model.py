@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 from numpy import testing
 
-from skrobot.robot_model import RotationalJoint
+import skrobot
 from skrobot.coordinates import make_coords
 from skrobot.robot_model import joint_angle_limit_weight
-import skrobot
+from skrobot.robot_model import RotationalJoint
 
 
 class TestRobotModel(unittest.TestCase):
