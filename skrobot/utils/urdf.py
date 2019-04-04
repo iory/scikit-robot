@@ -18,8 +18,9 @@ import PIL
 import six
 import trimesh
 
-from skrobot.math import rpy_matrix
+from skrobot.math import normalize_vector
 from skrobot.math import rpy_angle
+from skrobot.math import rpy_matrix
 
 
 def parse_origin(node):
@@ -1943,7 +1944,7 @@ class Joint(URDFType):
             value = np.asanyarray(value).astype(np.float)
             if value.shape != (3,):
                 raise ValueError('Invalid shape for axis, should be (3,)')
-            value = value / np.linalg.norm(value)
+            value = normalize_vector(value)
         self._axis = value
 
     @property
