@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 from sympy import Matrix
 
-from skrobot.symbol_math import round_matrix
 from skrobot.math import rotation_matrix
+from skrobot.symbol_math import round_matrix
 
 
 class TestMath(unittest.TestCase):
@@ -17,9 +17,9 @@ class TestMath(unittest.TestCase):
 
         assert(round_matrix(rotation) == Matrix(
             [[0, -1, 0, 0],
-             [1,  0, 0, 0],
-             [0,  0, 1, 0],
-             [0,  0, 0, 1]]))
+             [1, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 0, 0, 1]]))
 
         rotation = np.eye(4)
         rotation[:3, :3] = rotation_matrix(np.pi / 3, [1, 1, 1])

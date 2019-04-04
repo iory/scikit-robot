@@ -2,9 +2,7 @@ from skrobot.robot_model import RobotModel
 
 
 class PR2(RobotModel):
-    """
-    PR2 Robot Model
-    """
+    """PR2 Robot Model."""
 
     def __init__(self, *args, **kwargs):
         RobotModel.__init__(self, *args, **kwargs)

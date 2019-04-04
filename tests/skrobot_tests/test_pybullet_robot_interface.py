@@ -8,4 +8,4 @@ class TestPybulletRobotInterface(unittest.TestCase):
 
     def test_init(self):
         fetch = skrobot.robot_models.Fetch()
-        pri = PybulletRobotInterface(fetch, connect=2)
+        PybulletRobotInterface(fetch, connect=2)

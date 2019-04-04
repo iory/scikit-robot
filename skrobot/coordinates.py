@@ -14,7 +14,6 @@ from skrobot.math import random_translation
 from skrobot.math import rotate_matrix
 from skrobot.math import rotation_angle
 from skrobot.math import rotation_matrix
-from skrobot.math import rotation_matrix_from_rpy
 from skrobot.math import rpy2quaternion
 from skrobot.math import rpy_angle
 from skrobot.math import rpy_matrix
@@ -95,8 +94,7 @@ class Coordinates(object):
         self.pos = translation.squeeze() * 1.
 
     def _check_valid_rotation(self, rotation):
-        """Checks that the given rotation matrix is valid.
-        """
+        """Checks that the given rotation matrix is valid."""
         if not isinstance(rotation, np.ndarray) or \
            not np.issubdtype(rotation.dtype, np.number):
             raise ValueError('Rotation must be specified \
@@ -113,8 +111,7 @@ class Coordinates(object):
                              format(np.linalg.det(rotation)))
 
     def _check_valid_translation(self, translation):
-        """Checks that the translation vector is valid.
-        """
+        """Checks that the translation vector is valid."""
         if not isinstance(translation, np.ndarray) or \
            not np.issubdtype(translation.dtype, np.number):
             raise ValueError('Translation must be specified \
@@ -132,25 +129,36 @@ class Coordinates(object):
         return False
 
     def translate(self, vec, wrt='local'):
-        """translate this coordinates. unit is [mm]"""
+        """translate this coordinates.
+
+        unit is [mm]
+        """
         vec = np.array(vec, dtype=np.float64)
         vec /= 1000.0
         return self.newcoords(self.rotation,
                               self.parent_orientation(vec, wrt) + self.pos)
 
     def transform_vector(self, v):
-        """"Vector v given in the local coords
-        is converted to world representation"""
+        """"Return vector represented at world frame.
+
+        Vector v given in the local coords is converted to world
+        representation.
+
+        """
         return np.matmul(self.rotation, v) + self.pos
 
     def inverse_transform_vector(self, vec):
-        """vec in world coordinates -> local"""
-        return np.matmul(self.rotation.T, vec) - np.matmul(self.rotation.T, self.pos)
+        """Transform vector in world coordinates to local coordinates"""
+        return np.matmul(self.rotation.T, vec) - \
+            np.matmul(self.rotation.T, self.pos)
 
     def inverse_transformation(self, dest=None):
-        """Create a new coordinate
-        with inverse transformation of
-        this coordinate system."""
+        """Return a invese transformation of this coordinate system.
+
+        Create a new coordinate with inverse transformation of this
+        coordinate system.
+
+        """
         if dest is None:
             dest = Coordinates()
         dest.rotation = self.rotation.T
@@ -175,11 +183,11 @@ class Coordinates(object):
                                    inv)
             inv = transform_coords(inv, xw)
         else:
-            raise ValueError("wrt {} not supported".format(wrt))
+            raise ValueError('wrt {} not supported'.format(wrt))
         return inv
 
     def T(self):
-        """Return 4x4 transformation matrix"""
+        """Return 4x4 transformation matrix."""
         matrix = np.zeros((4, 4), dtype=np.float64)
         matrix[3, 3] = 1.0
         matrix[:3, :3] = self.rotation
@@ -223,7 +231,7 @@ class Coordinates(object):
             tmp_coords = transform_coords(c, tmp_coords)
             tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
         else:
-            raise ValueError("transform wrt {} is not supported".format(wrt))
+            raise ValueError('transform wrt {} is not supported'.format(wrt))
         return self.newcoords(tmp_coords)
 
     def rpy_angle(self):
@@ -235,7 +243,9 @@ class Coordinates(object):
 
     def difference_position(self, coords,
                             translation_axis=True):
-        """return diffece in positoin of given coords, translation-axis can take (:x, :y, :z, :xy, :yz, :zx)."""
+        """Return differences in positoin of given coords.
+
+        """
         dif_pos = self.inverse_transform_vector(coords.worldpos())
         translation_axis = _wrap_axis(translation_axis)
         dif_pos[translation_axis == 1] = 0.0
@@ -243,8 +253,9 @@ class Coordinates(object):
 
     def difference_rotation(self, coords,
                             rotation_axis=True):
-        """return diffece in rotation of given coords, rotation-axis can take
-        (:x, :y, :z, :xx, :yy, :zz, :xm, :ym, :zm)"""
+        """Return differences in rotation of given coords.
+
+        """
         def need_mirror_for_nearest_axis(coords0, coords1, ax):
             a0 = coords0.axis(ax)
             a1 = coords1.axis(ax)
@@ -291,7 +302,7 @@ class Coordinates(object):
             rot = np.matmul(self.rotation, mat)
             self.newcoords(rot, self.pos)
         elif wrt == 'parent' or wrt == self.parent or \
-                wrt == 'world' or wrt == None or \
+                wrt == 'world' or wrt is None or \
                 wrt == worldcoords:
             rot = np.matmul(mat, self.rotation)
             self.newcoords(rot, self.pos)
@@ -305,7 +316,7 @@ class Coordinates(object):
             raise ValueError('wrt {} is not supported'.format(wrt))
         return self
 
-    def rotate(self, theta, axis=None, wrt="local"):
+    def rotate(self, theta, axis=None, wrt='local'):
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
@@ -327,8 +338,7 @@ class Coordinates(object):
         return self.copy_coords()
 
     def copy_coords(self):
-        """Returns a deep copy of the Coordinates.
-        """
+        """Returns a deep copy of the Coordinates."""
         return Coordinates(pos=copy.deepcopy(self.worldpos()),
                            rot=copy.deepcopy(self.worldrot()))
 
@@ -351,9 +361,7 @@ class Coordinates(object):
         return self.pos
 
     def newcoords(self, c, pos=None):
-        """
-        Update of coords is always done through newcoords
-        """
+        """Update of coords is always done through newcoords."""
         if pos is not None:
             self.rotation = copy.deepcopy(c)
             self.translation = copy.deepcopy(pos)
@@ -366,7 +374,7 @@ class Coordinates(object):
         return self.__str__()
 
     def __str__(self):
-        rot = self.worldrot()
+        self.worldrot()
         pos = self.worldpos()
         self.rpy = rpy_angle(self.rotation)[0]
         if self.name:
@@ -472,7 +480,8 @@ class CascadedCoords(Coordinates):
             return self.newcoords(self.rotation, self.pos)
 
     def rotate(self, theta, axis, wrt='local'):
-        """
+        """Rotate this coordinate.
+
         Rotate this coordinate relative to axis by theta radians
         with respect to wrt.
 
@@ -487,7 +496,6 @@ class CascadedCoords(Coordinates):
         Returns
         -------
         self
-
         """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             return self.rotate_with_matrix(
