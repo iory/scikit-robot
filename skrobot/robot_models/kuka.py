@@ -1,15 +1,13 @@
-from cached_property import cached_property
 import numpy as np
 
+from cached_property import cached_property
+from skrobot.coordinates import CascadedCoords
 from skrobot.data import kuka_urdfpath
 from skrobot.robot_model import RobotModel
-from skrobot.coordinates import CascadedCoords
 
 
 class Kuka(RobotModel):
-    """
-    Kuka Robot Model
-    """
+    """Kuka Robot Model."""
 
     def __init__(self, urdf_path=None, *args, **kwargs):
         super(Kuka, self).__init__(*args, **kwargs)

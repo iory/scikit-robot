@@ -4,8 +4,8 @@ from quadprog import solve_qp as _solve_qp
 
 
 def solve_qp(P, q, G, h, A=None, b=None, sym_proj=False):
-    """
-    Solve a Quadratic Program defined as:
+    """Solve a Quadratic Program defined as:
+
     .. math::
         \\begin{eqnarray}
         \\mathrm{minimize} & & (1/2) x^T P x + q^T x \\\\

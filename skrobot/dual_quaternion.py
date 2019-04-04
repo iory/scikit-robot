@@ -8,8 +8,7 @@ from skrobot.quaternion import Quaternion
 
 
 class DualQuaternion(object):
-    """
-    Class for handling dual quaternions and their interpolations.
+    """Class for handling dual quaternions and their interpolations.
 
     Attributes
     ----------
@@ -34,12 +33,10 @@ class DualQuaternion(object):
                  qr=[1, 0, 0, 0],
                  qd=[0, 0, 0, 0],
                  enforce_unit_norm=False):
-        """
-        Initialize a dual quaternion.
+        """Initialize a dual quaternion.
 
         Parameters
         ----------
-
         """
         if (isinstance(qd, list) or isinstance(qd, np.ndarray)) and \
            len(qd) == 3:
@@ -53,7 +50,7 @@ class DualQuaternion(object):
             norm = self.norm
             if not np.allclose(norm[0], [1]):
                 raise ValueError("Dual quaternoin's norm "
-                                 "should be 1, but gives {}".format(norm[0]))
+                                 'should be 1, but gives {}'.format(norm[0]))
 
     @property
     def translation(self):
@@ -85,7 +82,8 @@ class DualQuaternion(object):
 
     @property
     def qr(self):
-        """
+        """Return orientation
+
         Returns
         -------
         self._qr : np.narray
@@ -102,7 +100,8 @@ class DualQuaternion(object):
 
     @property
     def qd(self):
-        """
+        """Return translation
+
         Returns
         -------
         self._qd : np.narray
@@ -148,17 +147,12 @@ class DualQuaternion(object):
 
     @property
     def scalar(self):
-        """
-
-        The scalar part of the dual quaternion.
-
-        """
+        """The scalar part of the dual quaternion."""
         scalar = (self + self.conjugate) * 0.5
         return scalar
 
     def copy(self):
-        """
-        Return a copy of this quaternion.
+        """Return a copy of this quaternion.
 
         Returns
         -------
@@ -170,8 +164,8 @@ class DualQuaternion(object):
     @staticmethod
     def interpolate(dq0, dq1, t):
         if not 0 <= t <= 1:
-            raise ValueError("Interpolation step must be between 0 and 1, "
-                             "but gives {}".format(t))
+            raise ValueError('Interpolation step must be between 0 and 1, '
+                             'but gives {}'.format(t))
 
         dqt = dq0 * (1 - t) + dq1 * t
         return dqt.normalized
@@ -191,15 +185,15 @@ class DualQuaternion(object):
         return self.qr.angle
 
     def screw_axis(self):
-        """
+        """Return screw axis
 
-        Calculates rotation, translation and screw axis from dual quaternion.
+        Calculates rotation, translation and screw axis from dual
+        quaternion.
 
         Returns:
         screw_axis (~numpy.ndarray) : screw axis of this dual quaternion
         theta (~float) : radian
         translation (~float) :
-
         """
         qr_w = self.qr.w
         theta = 2.0 * np.arccos(qr_w)
@@ -226,7 +220,7 @@ class DualQuaternion(object):
             inv_qr, - inv_qr * self.qd * inv_qr)
 
     def T(self):
-        """Return 4x4 transformation matrix"""
+        """Return 4x4 transformation matrix."""
         matrix = np.zeros((4, 4), dtype=np.float64)
         matrix[3, 3] = 1.0
         matrix[:3, :3] = self.rotation
@@ -260,7 +254,7 @@ class DualQuaternion(object):
         return '{0}+{1}e'.format(self.qr, self.qd)
 
     def __repr__(self):
-        return "DualQuaternion({0},{1})".format(
+        return 'DualQuaternion({0},{1})'.format(
             repr(self.qr), repr(self.qd))
 
     def pose(self):

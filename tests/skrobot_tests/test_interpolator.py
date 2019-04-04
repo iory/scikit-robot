@@ -1,8 +1,7 @@
 import unittest
 
-from numpy import pi
-from numpy import testing
 import numpy as np
+from numpy import testing
 
 from skrobot.interpolator import LinearInterpolator
 from skrobot.interpolator import MinjerkInterpolator
