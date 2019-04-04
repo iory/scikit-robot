@@ -2,9 +2,7 @@ import numpy as np
 
 
 def vector3p(vec):
-    """
-
-    Checks that the translation vector is valid.
+    """Checks that the translation vector is valid.
 
     Parameters
     ----------
@@ -24,9 +22,7 @@ def vector3p(vec):
 
 
 def vectorp(vec):
-    """
-
-    Checks that the translation vector is valid.
+    """Checks that the translation vector is valid.
 
     Parameters
     ----------

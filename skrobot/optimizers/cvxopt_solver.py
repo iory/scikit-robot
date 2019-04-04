@@ -21,5 +21,5 @@ def solve_qp(P, q, G, h,
         args.extend([cvxmat(A), cvxmat(b)])
     sol = qp(*args, solver=solver)
     if not ('optimal' in sol['status']):
-        raise ValueError("QP optimum not found: %s" % sol['status'])
+        raise ValueError('QP optimum not found: %s' % sol['status'])
     return np.array(sol['x']).reshape((P.shape[1],))

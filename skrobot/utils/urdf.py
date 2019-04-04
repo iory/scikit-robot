@@ -24,7 +24,9 @@ from skrobot.math import rpy_matrix
 
 
 def parse_origin(node):
-    """Find the ``origin`` subelement of an XML node and convert it into a 4x4
+    """Find the ``origin`` subelement of an XML node and convert it
+
+    Find the ``origin`` subelement of an XML node and convert it into a 4x4
     homogenous transformation matrix.
 
     Parameters
@@ -274,8 +276,10 @@ class URDFType(object):
 
     @classmethod
     def _parse_simple_elements(cls, node, path):
-        """Parse all elements in the _ELEMENTS array from the children of this
-        node.
+        """Parse all elements in the _ELEMENTS array
+
+        Parse all elements in the _ELEMENTS array from the children of
+        this node.
 
         Parameters
         ----------
@@ -314,6 +318,8 @@ class URDFType(object):
     @classmethod
     def _parse(cls, node, path):
         """Parse all elements and attributes in the _ELEMENTS and _ATTRIBS
+
+        Parse all elements and attributes in the _ELEMENTS and _ATTRIBS
         arrays for a node.
 
         Parameters
@@ -354,8 +360,7 @@ class URDFType(object):
         return cls(**cls._parse(node, path))
 
     def _unparse_attrib(self, val_type, val):
-        """Convert a Python value into a string for storage in an XML
-        attribute.
+        """Convert a Python value into a string for storage in an XML attribute.
 
         Parameters
         ----------
@@ -376,8 +381,10 @@ class URDFType(object):
         return val
 
     def _unparse_simple_attribs(self, node):
-        """Convert all Python types from the _ATTRIBS array back into
-        attributes for an XML node.
+        """Convert all Python types from the _ATTRIBS array
+
+        Convert all Python types from the _ATTRIBS array
+        back into attributes for an XML node.
 
         Parameters
         ----------
@@ -391,8 +398,10 @@ class URDFType(object):
                 node.attrib[a] = self._unparse_attrib(t, v)
 
     def _unparse_simple_elements(self, node, path):
-        """Unparse all Python types from the _ELEMENTS array back into child
-        nodes of an XML node.
+        """Unparse all Python types from the _ELEMENTS array
+
+        Unparse all Python types from the _ELEMENTS array
+        back into child nodes of an XML node.
 
         Parameters
         ----------
@@ -415,7 +424,9 @@ class URDFType(object):
                     node.append(v._to_xml(node, path))
 
     def _unparse(self, path):
-        """Create a node for this object and unparse all elements and
+        """Create a node
+
+        Create a node for this object and unparse all elements and
         attributes in the class arrays.
 
         Parameters
@@ -480,6 +491,7 @@ class Box(URDFType):
     @property
     def size(self):
         """(3,) float : The length, width, and height of the box in meters.
+
         """
         return self._size
 
@@ -490,7 +502,9 @@ class Box(URDFType):
 
     @property
     def meshes(self):
-        """list of :class:`~trimesh.base.Trimesh` : The triangular meshes
+        """Return list of Trimesh.
+
+        list of :class:`~trimesh.base.Trimesh` : The triangular meshes
         that represent this object.
         """
         if len(self._meshes) == 0:
@@ -523,6 +537,7 @@ class Cylinder(URDFType):
     @property
     def radius(self):
         """float : The radius of the cylinder in meters.
+
         """
         return self._radius
 
@@ -534,6 +549,7 @@ class Cylinder(URDFType):
     @property
     def length(self):
         """float : The length of the cylinder in meters.
+
         """
         return self._length
 
@@ -544,7 +560,10 @@ class Cylinder(URDFType):
 
     @property
     def meshes(self):
-        """list of :class:`~trimesh.base.Trimesh` : The triangular meshes
+        """Return list of Trimesh
+
+
+        list of :class:`~trimesh.base.Trimesh` : The triangular meshes
         that represent this object.
         """
         if len(self._meshes) == 0:
@@ -574,6 +593,7 @@ class Sphere(URDFType):
     @property
     def radius(self):
         """float : The radius of the sphere in meters.
+
         """
         return self._radius
 
@@ -584,7 +604,9 @@ class Sphere(URDFType):
 
     @property
     def meshes(self):
-        """list of :class:`~trimesh.base.Trimesh` : The triangular meshes
+        """Return list of Trimesh
+
+        list of :class:`~trimesh.base.Trimesh` : The triangular meshes
         that represent this object.
         """
         if len(self._meshes) == 0:
@@ -625,6 +647,7 @@ class Mesh(URDFType):
     @property
     def filename(self):
         """str : The path to the mesh file for this object.
+
         """
         return self._filename
 
@@ -635,6 +658,7 @@ class Mesh(URDFType):
     @property
     def scale(self):
         """(3,) float : A scaling for the mesh along its local XYZ axes.
+
         """
         return self._scale
 
@@ -646,7 +670,9 @@ class Mesh(URDFType):
 
     @property
     def meshes(self):
-        """list of :class:`~trimesh.base.Trimesh` : The triangular meshes
+        """Return list of Trimesh.
+
+        list of :class:`~trimesh.base.Trimesh` : The triangular meshes
         that represent this object.
         """
         return self._meshes
@@ -740,6 +766,7 @@ class Geometry(URDFType):
     @property
     def box(self):
         """:class:`.Box` : Box geometry.
+
         """
         return self._box
 
@@ -752,6 +779,7 @@ class Geometry(URDFType):
     @property
     def cylinder(self):
         """:class:`.Cylinder` : Cylinder geometry.
+
         """
         return self._cylinder
 
@@ -764,6 +792,7 @@ class Geometry(URDFType):
     @property
     def sphere(self):
         """:class:`.Sphere` : Spherical geometry.
+
         """
         return self._sphere
 
@@ -776,6 +805,7 @@ class Geometry(URDFType):
     @property
     def mesh(self):
         """:class:`.Mesh` : Mesh geometry.
+
         """
         return self._mesh
 
@@ -787,7 +817,9 @@ class Geometry(URDFType):
 
     @property
     def geometry(self):
-        """:class:`.Box`, :class:`.Cylinder`, :class:`.Sphere`, or
+        """Return geometry shape
+
+        :class:`.Box`, :class:`.Cylinder`, :class:`.Sphere`, or
         :class:`.Mesh` : The valid geometry element.
         """
         if self.box is not None:
@@ -802,7 +834,9 @@ class Geometry(URDFType):
 
     @property
     def meshes(self):
-        """list of :class:`~trimesh.base.Trimesh` : The geometry's triangular
+        """Return list of geometry mesh
+
+        list of :class:`~trimesh.base.Trimesh` : The geometry's triangular
         mesh representation(s).
         """
         return self.geometry.meshes
@@ -835,6 +869,7 @@ class Texture(URDFType):
     @property
     def filename(self):
         """str : Path to the image for this texture.
+
         """
         return self._filename
 
@@ -845,6 +880,7 @@ class Texture(URDFType):
     @property
     def image(self):
         """:class:`PIL.Image.Image` : The image for this texture.
+
         """
         return self._image
 
@@ -905,6 +941,7 @@ class Material(URDFType):
     @property
     def name(self):
         """str : The name of the material.
+
         """
         return self._name
 
@@ -915,6 +952,7 @@ class Material(URDFType):
     @property
     def color(self):
         """(4,) float : The RGBA color of the material, in the range [0,1].
+
         """
         return self._color
 
@@ -930,6 +968,7 @@ class Material(URDFType):
     @property
     def texture(self):
         """:class:`.Texture` : The texture for the material.
+
         """
         return self._texture
 
@@ -1004,6 +1043,7 @@ class Collision(URDFType):
     @property
     def geometry(self):
         """:class:`.Geometry` : The geometry of this element.
+
         """
         return self._geometry
 
@@ -1016,6 +1056,7 @@ class Collision(URDFType):
     @property
     def name(self):
         """str : The name of this collision element.
+
         """
         return self._name
 
@@ -1028,6 +1069,7 @@ class Collision(URDFType):
     @property
     def origin(self):
         """(4,4) float : The pose of this element relative to the link frame.
+
         """
         return self._origin
 
@@ -1080,6 +1122,7 @@ class Visual(URDFType):
     @property
     def geometry(self):
         """:class:`.Geometry` : The geometry of this element.
+
         """
         return self._geometry
 
@@ -1092,6 +1135,7 @@ class Visual(URDFType):
     @property
     def name(self):
         """str : The name of this visual element.
+
         """
         return self._name
 
@@ -1104,6 +1148,7 @@ class Visual(URDFType):
     @property
     def origin(self):
         """(4,4) float : The pose of this element relative to the link frame.
+
         """
         return self._origin
 
@@ -1114,6 +1159,7 @@ class Visual(URDFType):
     @property
     def material(self):
         """:class:`.Material` : The material for this element.
+
         """
         return self._material
 
@@ -1159,6 +1205,7 @@ class Inertial(URDFType):
     @property
     def mass(self):
         """float : The mass of the link in kilograms.
+
         """
         return self._mass
 
@@ -1169,6 +1216,7 @@ class Inertial(URDFType):
     @property
     def inertia(self):
         """(3,3) float : The 3x3 symmetric rotational inertia matrix.
+
         """
         return self._inertia
 
@@ -1182,6 +1230,7 @@ class Inertial(URDFType):
     @property
     def origin(self):
         """(4,4) float : The pose of the inertials relative to the link frame.
+
         """
         return self._origin
 
@@ -1253,6 +1302,7 @@ class JointCalibration(URDFType):
     @property
     def rising(self):
         """float : description.
+
         """
         return self._rising
 
@@ -1265,6 +1315,7 @@ class JointCalibration(URDFType):
     @property
     def falling(self):
         """float : description.
+
         """
         return self._falling
 
@@ -1300,6 +1351,7 @@ class JointDynamics(URDFType):
     @property
     def damping(self):
         """float : The damping value of the joint.
+
         """
         return self._damping
 
@@ -1312,6 +1364,7 @@ class JointDynamics(URDFType):
     @property
     def friction(self):
         """float : The static friction value of the joint.
+
         """
         return self._friction
 
@@ -1355,6 +1408,7 @@ class JointLimit(URDFType):
     @property
     def effort(self):
         """float : The maximum joint effort.
+
         """
         return self._effort
 
@@ -1365,6 +1419,7 @@ class JointLimit(URDFType):
     @property
     def velocity(self):
         """float : The maximum joint velocity.
+
         """
         return self._velocity
 
@@ -1375,6 +1430,7 @@ class JointLimit(URDFType):
     @property
     def lower(self):
         """float : The lower joint limit.
+
         """
         return self._lower
 
@@ -1387,6 +1443,7 @@ class JointLimit(URDFType):
     @property
     def upper(self):
         """float : The upper joint limit.
+
         """
         return self._upper
 
@@ -1398,9 +1455,10 @@ class JointLimit(URDFType):
 
 
 class JointMimic(URDFType):
-    """A mimicry tag for a joint, which forces its configuration to mimic
-    another joint's.
+    """A mimicry tag for a joint.
 
+    A mimicry tag for a joint, which forces its configuration to mimic
+    another joint's.
     This joint's configuration value is set equal to
     ``multiplier * other_joint_cfg + offset``.
 
@@ -1428,6 +1486,7 @@ class JointMimic(URDFType):
     @property
     def joint(self):
         """float : The name of the joint to mimic.
+
         """
         return self._joint
 
@@ -1438,6 +1497,7 @@ class JointMimic(URDFType):
     @property
     def multiplier(self):
         """float : The multiplier for the joint configuration.
+
         """
         return self._multiplier
 
@@ -1452,6 +1512,7 @@ class JointMimic(URDFType):
     @property
     def offset(self):
         """float : The offset for the joint configuration
+
         """
         return self._offset
 
@@ -1500,6 +1561,7 @@ class SafetyController(URDFType):
     @property
     def soft_lower_limit(self):
         """float : The soft lower limit where the safety controller kicks in.
+
         """
         return self._soft_lower_limit
 
@@ -1514,6 +1576,7 @@ class SafetyController(URDFType):
     @property
     def soft_upper_limit(self):
         """float : The soft upper limit where the safety controller kicks in.
+
         """
         return self._soft_upper_limit
 
@@ -1528,6 +1591,7 @@ class SafetyController(URDFType):
     @property
     def k_position(self):
         """float : A relation between the position and velocity limits.
+
         """
         return self._k_position
 
@@ -1542,6 +1606,7 @@ class SafetyController(URDFType):
     @property
     def k_velocity(self):
         """float : A relation between the effort and velocity limits.
+
         """
         return self._k_velocity
 
@@ -1581,6 +1646,7 @@ class Actuator(URDFType):
     @property
     def name(self):
         """str : The name of this actuator.
+
         """
         return self._name
 
@@ -1591,6 +1657,7 @@ class Actuator(URDFType):
     @property
     def mechanicalReduction(self):
         """str : A specifier for the type of mechanical reduction.
+
         """
         return self._mechanicalReduction
 
@@ -1603,6 +1670,7 @@ class Actuator(URDFType):
     @property
     def hardwareInterfaces(self):
         """list of str : The supported hardware interfaces.
+
         """
         return self._hardwareInterfaces
 
@@ -1665,6 +1733,7 @@ class TransmissionJoint(URDFType):
     @property
     def name(self):
         """str : The name of this transmission joint.
+
         """
         return self._name
 
@@ -1675,6 +1744,7 @@ class TransmissionJoint(URDFType):
     @property
     def hardwareInterfaces(self):
         """list of str : The supported hardware interfaces.
+
         """
         return self._hardwareInterfaces
 
@@ -1712,8 +1782,9 @@ class TransmissionJoint(URDFType):
 
 
 class Transmission(URDFType):
-    """An element that describes the relationship between an actuator and a
-    joint.
+    """Transmission class
+
+    An element that describes the relationship between an actuator and a joint.
 
     Parameters
     ----------
@@ -1744,6 +1815,7 @@ class Transmission(URDFType):
     @property
     def name(self):
         """str : The name of this transmission.
+
         """
         return self._name
 
@@ -1754,6 +1826,7 @@ class Transmission(URDFType):
     @property
     def trans_type(self):
         """str : The type of this transmission.
+
         """
         return self._trans_type
 
@@ -1763,8 +1836,11 @@ class Transmission(URDFType):
 
     @property
     def joints(self):
-        """:class:`.TransmissionJoint` : The joints the transmission is
+        """Return joint
+
+        :class:`.TransmissionJoint` : The joints the transmission is
         connected to.
+
         """
         return self._joints
 
@@ -1784,6 +1860,7 @@ class Transmission(URDFType):
     @property
     def actuators(self):
         """:class:`.Actuator` : The actuators the transmission is connected to.
+
         """
         return self._actuators
 
@@ -1890,6 +1967,7 @@ class Joint(URDFType):
     @property
     def name(self):
         """str : Name for this joint.
+
         """
         return self._name
 
@@ -1900,6 +1978,7 @@ class Joint(URDFType):
     @property
     def joint_type(self):
         """str : The type of this joint.
+
         """
         return self._joint_type
 
@@ -1913,6 +1992,7 @@ class Joint(URDFType):
     @property
     def parent(self):
         """str : The name of the parent link.
+
         """
         return self._parent
 
@@ -1923,6 +2003,7 @@ class Joint(URDFType):
     @property
     def child(self):
         """str : The name of the child link.
+
         """
         return self._child
 
@@ -1933,6 +2014,7 @@ class Joint(URDFType):
     @property
     def axis(self):
         """(3,) float : The joint axis in the joint frame.
+
         """
         return self._axis
 
@@ -1949,7 +2031,9 @@ class Joint(URDFType):
 
     @property
     def origin(self):
-        """(4,4) float : The pose of child and joint frames relative to the
+        """Return matrix
+
+        (4,4) float : The pose of child and joint frames relative to the
         parent link's frame.
         """
         return self._origin
@@ -1961,6 +2045,7 @@ class Joint(URDFType):
     @property
     def limit(self):
         """:class:`.JointLimit` : The limits for this joint.
+
         """
         return self._limit
 
@@ -1977,6 +2062,7 @@ class Joint(URDFType):
     @property
     def dynamics(self):
         """:class:`.JointDynamics` : The dynamics for this joint.
+
         """
         return self._dynamics
 
@@ -1990,6 +2076,7 @@ class Joint(URDFType):
     @property
     def safety_controller(self):
         """:class:`.SafetyController` : The safety controller for this joint.
+
         """
         return self._safety_controller
 
@@ -2003,6 +2090,7 @@ class Joint(URDFType):
     @property
     def calibration(self):
         """:class:`.JointCalibration` : The calibration for this joint.
+
         """
         return self._calibration
 
@@ -2016,6 +2104,7 @@ class Joint(URDFType):
     @property
     def mimic(self):
         """:class:`.JointMimic` : The mimic for this joint.
+
         """
         return self._mimic
 
@@ -2053,7 +2142,9 @@ class Joint(URDFType):
         return (cfg >= lower and cfg <= upper)
 
     def get_child_pose(self, cfg=None):
-        """Computes the child pose relative to a parent pose for a given
+        """Return child pose
+
+        Computes the child pose relative to a parent pose for a given
         configuration value.
 
         Parameters
@@ -2186,6 +2277,7 @@ class Link(URDFType):
     @property
     def name(self):
         """str : The name of this link.
+
         """
         return self._name
 
@@ -2196,6 +2288,7 @@ class Link(URDFType):
     @property
     def inertial(self):
         """:class:`.Inertial` : Inertial properties of the link.
+
         """
         return self._inertial
 
@@ -2208,6 +2301,7 @@ class Link(URDFType):
     @property
     def visuals(self):
         """list of :class:`.Visual` : The visual properties of this link.
+
         """
         return self._visuals
 
@@ -2225,6 +2319,7 @@ class Link(URDFType):
     @property
     def collisions(self):
         """list of :class:`.Collision` : The collision properties of this link.
+
         """
         return self._collisions
 
@@ -2241,8 +2336,11 @@ class Link(URDFType):
 
     @property
     def collision_mesh(self):
-        """:class:`~trimesh.base.Trimesh` : A single collision mesh for
+        """Return collision mesh
+
+        :class:`~trimesh.base.Trimesh` : A single collision mesh for
         the link, specified in the link frame, or None if there isn't one.
+
         """
         if len(self.collisions) == 0:
             return None
@@ -2381,6 +2479,7 @@ class URDF(URDFType):
     @property
     def name(self):
         """str : The name of the URDF.
+
         """
         return self._name
 
@@ -2471,6 +2570,7 @@ class URDF(URDFType):
     @property
     def other_xml(self):
         """str : Any extra XML that belongs with the URDF.
+
         """
         return self._other_xml
 
@@ -2480,9 +2580,10 @@ class URDF(URDFType):
 
     @property
     def actuated_joints(self):
-        """list of :class:`.Joint` : The joints that are independently
-        actuated.
+        """Return actuated joints
 
+        list of :class:`.Joint` : The joints that are independently
+        actuated.
         This excludes mimic joints and fixed joints.
         """
         return self._actuated_joints
@@ -2505,9 +2606,10 @@ class URDF(URDFType):
 
     @property
     def joint_limit_cfgs(self):
-        """tuple of dict : The lower-bound and upper-bound joint configuration
-        maps.
+        """Return joint limit configuration
 
+        tuple of dict : The lower-bound and upper-bound joint configuration
+        maps.
         The first map is the lower-bound map, which maps limited joints to
         their lower joint limits.
         The second map is the upper-bound map, which maps limited joints to

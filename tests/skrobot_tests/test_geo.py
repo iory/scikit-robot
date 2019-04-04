@@ -1,6 +1,5 @@
 import unittest
 
-from numpy import deg2rad
 from numpy import pi
 from numpy import testing
 
