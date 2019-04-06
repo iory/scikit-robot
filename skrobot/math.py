@@ -681,11 +681,13 @@ def quaternion_distance(q1, q2, absolute=False):
     diff_theta : float
         distance of q1 and q2 in radian.
     """
+    q = quaternion_multiply(
+        quaternion_inverse(q1), q2)
+    w = q[0]
     if absolute is True:
-        diff_theta = 2.0 * np.arccos(
-            np.abs(np.dot(q1, q2)))
-    else:
-        diff_theta = 2.0 * np.arccos(np.dot(q1, q2))
+        w = abs(q[0])
+    diff_theta = 2.0 * np.arctan2(
+        np.linalg.norm(q[1:]), w)
     return diff_theta
 
 

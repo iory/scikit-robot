@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from numpy import testing
 
+from skrobot.coordinates import make_coords
 from skrobot.dual_quaternion import DualQuaternion
 from skrobot.math import normalize_vector
 from skrobot.math import quaternion2matrix
@@ -151,3 +152,23 @@ class TestDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             dq.qr.q,
             [1, 1, 1, 1])
+
+    def test_difference_position(self):
+        dq1 = make_coords(pos=[1.0, 1.0, 1.0]).dual_quaternion
+        dq2 = make_coords(pos=[0.0, 0.0, 0.0]).dual_quaternion
+        testing.assert_almost_equal(
+            dq1.difference_position(dq2),
+            np.sqrt(3.0))
+
+    def test_difference_rotation(self):
+        dq1 = make_coords(pos=[1.0, 1.0, 1.0]).dual_quaternion
+        dq2 = make_coords(pos=[0.0, 0.0, 0.0]).dual_quaternion
+        testing.assert_almost_equal(
+            dq1.difference_rotation(dq2),
+            0.0)
+
+        dq1 = make_coords(rot=[1, 0, 0, 0]).dual_quaternion
+        dq2 = make_coords(rot=[0, 0, 0, 1]).dual_quaternion
+        testing.assert_almost_equal(
+            dq1.difference_rotation(dq2),
+            np.pi)
