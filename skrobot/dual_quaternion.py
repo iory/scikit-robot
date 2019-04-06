@@ -2,6 +2,7 @@ from numbers import Number
 
 import numpy as np
 
+from skrobot.math import quaternion_absolute_distance
 from skrobot.math import quaternion_multiply
 from skrobot.math import quaternion_normalize
 from skrobot.quaternion import Quaternion
@@ -256,6 +257,16 @@ class DualQuaternion(object):
     def __repr__(self):
         return 'DualQuaternion({0},{1})'.format(
             repr(self.qr), repr(self.qd))
+
+    def difference_position(self, other_dq):
+        trans = self.qd * self.qr.conjugate
+        other_trans = other_dq.qd * other_dq.qr.conjugate
+        return 2.0 * np.linalg.norm(trans.xyz - other_trans.xyz, ord=2)
+
+    def difference_rotation(self, other_dq):
+        return quaternion_absolute_distance(
+            self.qr.q,
+            other_dq.qr.q)
 
     def pose(self):
         self.normalize()
