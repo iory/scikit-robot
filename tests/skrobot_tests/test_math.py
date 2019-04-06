@@ -306,6 +306,9 @@ class TestMath(unittest.TestCase):
         q2 = rpy2quaternion([0, 0, 0])
         self.assertEqual(quaternion_distance(q1, q2), np.pi)
 
+        self.assertEqual(quaternion_distance(np.ones(4), np.ones(4)),
+                         0.0)
+
     def test_quaternion_norm(self):
         q = np.array([1, 0, 0, 0])
         self.assertEqual(quaternion_norm(q), 1.0)
