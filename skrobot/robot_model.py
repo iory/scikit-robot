@@ -1900,7 +1900,7 @@ class RobotModel(CascadedLink):
         link_maps = {l.name: l for l in links}
 
         joint_list = []
-        joint_names = []
+        whole_joint_list = []
         for j in self.urdf_robot_model.joints:
             if j.limit is None:
                 j.limit = urdf.JointLimit(0, 0)
@@ -1946,7 +1946,7 @@ class RobotModel(CascadedLink):
 
             if j.joint_type not in ['fixed']:
                 joint_list.append(joint)
-                joint_names.append(joint.name)
+            whole_joint_list.append(joint)
 
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
@@ -1977,7 +1977,7 @@ class RobotModel(CascadedLink):
 
         for link in self.link_list:
             self.__dict__[link.name] = link
-        for joint in joint_list:
+        for joint in whole_joint_list:
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
         self.assoc(self.root_link)
