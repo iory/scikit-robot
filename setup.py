@@ -22,6 +22,7 @@ install_requires = [
     'cached-property',
     'cvxopt',
     'future',
+    'gdown',
     'lxml',
     'networkx==2.2.0',
     'numpy>=1.9.0',
