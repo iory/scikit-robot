@@ -2258,6 +2258,16 @@ class RobotModel(CascadedLink):
         #                 (LA.norm(p_dif_rot - dif_rot), 1e-3))
         # return target_coordss
 
+    def look_at_hand(self, coords):
+        if coords == 'rarm':
+            coords = self.rarm.end_coords
+        elif coords == 'larm':
+            coords = self.larm.end_coords
+        self.inverse_kinematics_loop_for_look_at(
+            self.head_end_coords,
+            coords.worldpos(),
+            self.head.link_list)
+
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     # TODO(current support only 1-dof joint)
