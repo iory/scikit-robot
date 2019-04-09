@@ -31,7 +31,6 @@ def cached_gdown_download(url, target_path=None, md5sum=None):
     if target_path is None:
         target_path = os.path.join(cache_root, urlhash)
     lock_path = target_path + ".lock"
-    print(lock_path)
 
     with filelock.FileLock(lock_path):
         if os.path.exists(target_path):
