@@ -2058,7 +2058,7 @@ class RobotModel(CascadedLink):
     def inverse_kinematics(
             self,
             target_coords,
-            move_target,
+            move_target=None,
             link_list=None,
             **kwargs):
         """Solve inverse kinematics.
@@ -2068,6 +2068,8 @@ class RobotModel(CascadedLink):
         of coords link-list is set by default based on move-target -> root link
         link-list.
         """
+        if move_target is None:
+            move_target = self.end_coords
         if link_list is None:
             if not isinstance(move_target, list):
                 link_list = self.link_lists(move_target.parent)
