@@ -2120,7 +2120,6 @@ class RobotModel(CascadedLink):
             link_list,
             rotation_axis='z',
             translation_axis=False,
-            inverse_kinematics_hook=[],
             rthre=0.001,
             **kwargs):
         """Solve look at inverse kinematics
@@ -2148,7 +2147,8 @@ class RobotModel(CascadedLink):
                                        move_target=move_target,
                                        link_list=link_list,
                                        translation_axis=translation_axis,
-                                       rotation_axis=rotation_axis)
+                                       rotation_axis=rotation_axis,
+                                       **kwargs)
         # target_coordss = []
         # while count < stop and \
         #       (p_dif_rot is None or
