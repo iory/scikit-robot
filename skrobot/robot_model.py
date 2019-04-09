@@ -1258,7 +1258,7 @@ class CascadedLink(CascadedCoords):
         target_coords = list(map(lambda x: x() if callable(x) else x,
                                  target_coords))
         dif_pos = list(map(lambda mv, tc, trans_axis:
-                           mv.difference_position(
+                           1000 * mv.difference_position(
                                tc, translation_axis=trans_axis),
                            move_target, target_coords, translation_axis))
         dif_rot = list(map(lambda mv, tc, rot_axis:
