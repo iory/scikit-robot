@@ -1258,7 +1258,7 @@ class CascadedLink(CascadedCoords):
         target_coords = list(map(lambda x: x() if callable(x) else x,
                                  target_coords))
         dif_pos = list(map(lambda mv, tc, trans_axis:
-                           mv.difference_position(
+                           1000 * mv.difference_position(
                                tc, translation_axis=trans_axis),
                            move_target, target_coords, translation_axis))
         dif_rot = list(map(lambda mv, tc, rot_axis:
@@ -1900,7 +1900,7 @@ class RobotModel(CascadedLink):
         link_maps = {l.name: l for l in links}
 
         joint_list = []
-        joint_names = []
+        whole_joint_list = []
         for j in self.urdf_robot_model.joints:
             if j.limit is None:
                 j.limit = urdf.JointLimit(0, 0)
@@ -1946,7 +1946,7 @@ class RobotModel(CascadedLink):
 
             if j.joint_type not in ['fixed']:
                 joint_list.append(joint)
-                joint_names.append(joint.name)
+            whole_joint_list.append(joint)
 
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
@@ -1977,7 +1977,7 @@ class RobotModel(CascadedLink):
 
         for link in self.link_list:
             self.__dict__[link.name] = link
-        for joint in joint_list:
+        for joint in whole_joint_list:
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
         self.assoc(self.root_link)
@@ -2058,7 +2058,7 @@ class RobotModel(CascadedLink):
     def inverse_kinematics(
             self,
             target_coords,
-            move_target,
+            move_target=None,
             link_list=None,
             **kwargs):
         """Solve inverse kinematics.
@@ -2068,6 +2068,8 @@ class RobotModel(CascadedLink):
         of coords link-list is set by default based on move-target -> root link
         link-list.
         """
+        if move_target is None:
+            move_target = self.end_coords
         if link_list is None:
             if not isinstance(move_target, list):
                 link_list = self.link_lists(move_target.parent)
@@ -2118,7 +2120,6 @@ class RobotModel(CascadedLink):
             link_list,
             rotation_axis='z',
             translation_axis=False,
-            inverse_kinematics_hook=[],
             rthre=0.001,
             **kwargs):
         """Solve look at inverse kinematics
@@ -2146,7 +2147,8 @@ class RobotModel(CascadedLink):
                                        move_target=move_target,
                                        link_list=link_list,
                                        translation_axis=translation_axis,
-                                       rotation_axis=rotation_axis)
+                                       rotation_axis=rotation_axis,
+                                       **kwargs)
         # target_coordss = []
         # while count < stop and \
         #       (p_dif_rot is None or
@@ -2255,6 +2257,16 @@ class RobotModel(CascadedLink):
         #     logger.warn('      diff : {} < {}'.format
         #                 (LA.norm(p_dif_rot - dif_rot), 1e-3))
         # return target_coordss
+
+    def look_at_hand(self, coords):
+        if coords == 'rarm':
+            coords = self.rarm.end_coords
+        elif coords == 'larm':
+            coords = self.larm.end_coords
+        self.inverse_kinematics_loop_for_look_at(
+            self.head_end_coords,
+            coords.worldpos(),
+            self.head.link_list)
 
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
