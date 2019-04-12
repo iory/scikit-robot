@@ -44,3 +44,24 @@ class TestHandyeyeCalibrationUsingDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             result['pose'],
             [0, 0, 0.1, 0, 7.0710678e-01, 0, 7.0710678e-01])
+
+        # calculating base to camera transform
+        base_to_ee_dq_vec = []
+        camera_to_marker_dq_vec = []
+        for i in range(100):
+            av = np.random.uniform(min_angles, max_angles)
+            robot.rarm.angle_vector(av)
+
+            base_to_ee_dq_vec.append(
+                marker_attached_link.copy_worldcoords().
+                dual_quaternion.inverse())
+            camera_to_marker_dq_vec.append(
+                camera.copy_worldcoords().transformation(
+                    robot.marker_coords.copy_worldcoords()).
+                copy_worldcoords().dual_quaternion.inverse())
+
+        result = compute_handeye_calibration_using_dual_quaternion(
+            base_to_ee_dq_vec, camera_to_marker_dq_vec)
+        testing.assert_almost_equal(
+            result['pose'],
+            [0.1, 0.1, 0.1, 0, 0, 0, 1])
