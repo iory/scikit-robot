@@ -35,7 +35,7 @@ class TestHandyeyeCalibrationUsingDualQuaternion(unittest.TestCase):
             base_to_ee_dq_vec.append(
                 marker_attached_link.copy_worldcoords().dual_quaternion)
             camera_to_marker_dq_vec.append(
-                camera.copy_worldcoords().transform(
+                camera.copy_worldcoords().transformation(
                     robot.marker_coords.copy_worldcoords()).
                 copy_worldcoords().dual_quaternion)
 
