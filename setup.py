@@ -29,6 +29,7 @@ install_requires = [
     'ordered_set',
     'pillow',
     'pybullet>=2.1.9',
+    'pycollada',  # required for robot model using collada
     'pyyaml',
     'quadprog',
     'six',
