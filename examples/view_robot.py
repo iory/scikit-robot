@@ -1,4 +1,5 @@
 import argparse
+import warnings
 
 import numpy as np
 import trimesh
@@ -32,7 +33,7 @@ def main():
     )
     parser.add_argument(
         '--robot',
-        choices=['kuka', 'fetch'],
+        choices=['kuka', 'fetch', 'pr2'],
         default='kuka',
         help='robot',
     )
@@ -42,6 +43,8 @@ def main():
         robot = skrobot.robot_models.Kuka()
     elif args.robot == 'fetch':
         robot = skrobot.robot_models.Fetch()
+    elif args.robot == 'pr2':
+        robot = skrobot.robot_models.PR2()
     else:
         raise ValueError('unsupported robot')
 
@@ -70,7 +73,37 @@ def main():
 
             for mesh in visual.geometry.meshes:
                 mesh = mesh.copy()
-                mesh.visual.face_colors = visual.material.color
+
+                # TextureVisuals is usually slow to render
+                if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
+                    mesh.visual = mesh.visual.to_color()
+                    if mesh.visual.vertex_colors.ndim == 1:
+                        mesh.visual.vertex_colors = \
+                            mesh.visual.vertex_colors[None].repeat(
+                                mesh.vertices.shape[0], axis=0
+                            )
+
+                    # default texture color
+                    DEFAULT_TEXTURE_COLOR = (255, 255, 255, 255)
+                    if (mesh.visual.vertex_colors ==
+                            DEFAULT_TEXTURE_COLOR).all():
+                        mesh.visual.vertex_colors = \
+                            trimesh.visual.DEFAULT_COLOR
+
+                # If color or texture is not specified in mesh file,
+                # use information specified in URDF.
+                if (
+                    (mesh.visual.face_colors ==
+                        trimesh.visual.DEFAULT_COLOR).all() and
+                    visual.material
+                ):
+                    if visual.material.texture is not None:
+                        warnings.warn(
+                            'texture specified in URDF is not supported'
+                        )
+                    elif visual.material.color is not None:
+                        mesh.visual.face_colors = visual.material.color
+
                 mesh.apply_transform(transform)
                 scene.add_geometry(mesh)
 
