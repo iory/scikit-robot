@@ -530,7 +530,9 @@ def rotation_distance(mat1, mat2):
     """
     mat1 = _check_valid_rotation(mat1)
     mat2 = _check_valid_rotation(mat2)
-    diff_theta = np.arccos((np.trace(np.matmul(mat1.T, mat2)) - 1.0) / 2.0)
+    q1 = matrix2quaternion(mat1)
+    q2 = matrix2quaternion(mat2)
+    diff_theta = quaternion_distance(q1, q2)
     return diff_theta
 
 
