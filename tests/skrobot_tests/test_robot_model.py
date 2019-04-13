@@ -20,18 +20,36 @@ class TestRobotModel(unittest.TestCase):
         links = fetch.calc_union_link_list([fetch.rarm.link_list,
                                             fetch.rarm.link_list,
                                             fetch.link_list])
-        self.assertEqual([l.name for l in links],
-                         ['shoulder_pan_link',
-                          'shoulder_lift_link',
-                          'upperarm_roll_link',
-                          'elbow_flex_link',
-                          'forearm_roll_link',
-                          'wrist_flex_link',
-                          'wrist_roll_link',
-                          'base_link',
-                          'torso_lift_link',
-                          'head_pan_link',
-                          'head_tilt_link'])
+        self.assertEqual(
+            [l.name for l in links],
+            [
+                'shoulder_pan_link',
+                'shoulder_lift_link',
+                'upperarm_roll_link',
+                'elbow_flex_link',
+                'forearm_roll_link',
+                'wrist_flex_link',
+                'wrist_roll_link',
+                'base_link',
+                'r_wheel_link',
+                'l_wheel_link',
+                'torso_lift_link',
+                'head_pan_link',
+                'head_tilt_link',
+                'gripper_link',
+                'r_gripper_finger_link',
+                'l_gripper_finger_link',
+                'bellows_link2',
+                'estop_link',
+                'laser_link',
+                'torso_fixed_link',
+                'head_camera_link',
+                'head_camera_rgb_frame',
+                'head_camera_rgb_optical_frame',
+                'head_camera_depth_frame',
+                'head_camera_depth_optical_frame',
+            ],
+        )
 
     def test_find_joint_angle_limit_weight_from_union_link_list(self):
         fetch = skrobot.robot_models.Fetch()
