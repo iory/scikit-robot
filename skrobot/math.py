@@ -818,9 +818,8 @@ def random_rotation():
     :obj:`numpy.ndarray` of float
         A random 3x3 rotation matrix.
     """
-    rand_seed = np.random.rand(3, 3)
-    U, S, V = np.linalg.svd(rand_seed)
-    return U
+    rot = quaternion2matrix(random_quaternion())
+    return rot
 
 
 def random_translation():
