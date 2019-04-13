@@ -15,6 +15,36 @@ _EPS = np.finfo(float).eps * 4.0
 
 
 def _wrap_axis(axis):
+    """Convert axis to float vector.
+
+    Parameters
+    ----------
+    axis : list or np.ndarray or str or bool or None
+        rotation axis indicated by number or string.
+
+    Returns
+    -------
+    axis : np.ndarray
+        conveted axis
+
+    Examples
+    --------
+    >>> from skrobot.math import _wrap_axis
+    >>> _wrap_axis('x')
+    array([1, 0, 0])
+    >>> _wrap_axis('y')
+    array([0, 1, 0])
+    >>> _wrap_axis('z')
+    array([0, 0, 1])
+    >>> _wrap_axis('xy')
+    array([1, 1, 0])
+    >>> _wrap_axis([1, 1, 1])
+    array([1, 1, 1])
+    >>> _wrap_axis(True)
+    array([0, 0, 0])
+    >>> _wrap_axis(False)
+    array([1, 1, 1])
+    """
     if isinstance(axis, str):
         if axis in ['x', 'xx']:
             axis = np.array([1, 0, 0])
@@ -102,6 +132,12 @@ def wxyz2xyzw(quat):
     -------
     quaternion : np.ndarray
         quaternion [x, y, z, w]
+
+    Examples
+    --------
+    >>> from skrobot.math import wxyz2xyzw
+    >>> wxyz2xyzw([1, 2, 3, 4])
+    array([2, 3, 4, 1])
     """
     if isinstance(quat, list):
         quat = np.array(quat)
@@ -115,10 +151,17 @@ def xyzw2wxyz(quat):
     ----------
     quat : list or np.ndarray
         quaternion [x, y, z, w]
+
     Returns
     -------
     quaternion : np.ndarray
         quaternion [w, x, y, z]
+
+    Examples
+    --------
+    >>> from skrobot.math import xyzw2wxyz
+    >>> xyzw2wxyz([1, 2, 3, 4])
+    array([4, 1, 2, 3])
     """
     if isinstance(quat, list):
         quat = np.array(quat)
@@ -136,13 +179,27 @@ def triple_product(a, b, c):
 
     Returns
     -------
-    triple product
+    triple product : np.ndarray
+
+    Examples
+    --------
+    >>> from skrobot.math import triple_product
+    >>> triple_product([1, 1, 1], [1, 1, 1], [1, 1, 1])
+    0
+    >>> triple_product([1, 0, 0], [0, 1, 0], [0, 0, 1])
+    1
     """
     return np.dot(a, np.cross(b, c))
 
 
 def sr_inverse(J, k=1.0, weight_vector=None):
-    """returns sr-inverse of given mat."""
+    """Returns sr-inverse of given Jacobian.
+
+    Calculate Singularity-Robust Inverse
+    See: `Inverse Kinematic Solutions With Singularity Robustness \
+          for Robot Manipulator Control`
+
+    """
     r, _ = J.shape
 
     # without weight
@@ -172,7 +229,7 @@ def sr_inverse_org(J, k=1.0):
 
 
 def manipulability(J):
-    """return manipulability of given matrix.
+    """Return manipulability of given matrix.
 
     https://www.jstage.jst.go.jp/article/jrsj1983/2/1/2_1_63/_article/-char/ja/
     """
@@ -180,11 +237,65 @@ def manipulability(J):
 
 
 def midpoint(p, a, b):
+    """Return midpoint
+
+    Parameters
+    ----------
+    p : float
+        ratio of a:b
+    a : np.ndarray
+        vector
+    b : np.ndarray
+        vector
+
+    Returns
+    -------
+    midpoint : np.ndarray
+        midpoint
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import midpoint
+    >>> midpoint(0.5, np.ones(3), np.zeros(3))
+    >>> array([0.5, 0.5, 0.5])
+    """
     return a + (b - a) * p
 
 
 def midrot(p, r1, r2):
-    """Returns mid (or p) rotation matrix of given two matrix r1 and r2."""
+    """Returns mid (or p) rotation matrix of given two matrix r1 and r2.
+
+    Parameters
+    ----------
+    p : float
+        ratio of r1:r2
+    r1 : np.ndarray
+        3x3 rotation matrix
+    r2 : np.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    r : np.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import midrot
+    >>> midrot(0.5,
+            np.eye(3),
+            np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    array([[ 0.70710678,  0.        ,  0.70710678],
+           [ 0.        ,  1.        ,  0.        ],
+           [-0.70710678,  0.        ,  0.70710678]])
+    >>> from skrobot.math import rpy_angle
+    >>> np.rad2deg(rpy_angle(midrot(0.5,
+                   np.eye(3),
+                   np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])))[0])
+    array([ 0., 45.,  0.])
+    """
     r1 = _check_valid_rotation(r1)
     r2 = _check_valid_rotation(r2)
     r = np.matmul(r1.T, r2)
@@ -218,9 +329,27 @@ def rotation_matrix(theta, axis):
     ----------
     theta : float
         radian
-    axis : string or list
+    axis : string or list or np.ndarray
         rotation axis such that 'x', 'y', 'z'
         [0, 0, 1], [0, 1, 0], [1, 0, 0]
+
+    Returns
+    -------
+    rot : np.ndarray
+        rotation matrix about the given axis by theta radians.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import rotation_matrix
+    >>> rotation_matrix(np.pi / 2.0, [1, 0, 0])
+    array([[ 1.00000000e+00,  0.00000000e+00,  0.00000000e+00],
+           [ 0.00000000e+00,  2.22044605e-16, -1.00000000e+00],
+           [ 0.00000000e+00,  1.00000000e+00,  2.22044605e-16]])
+    >>> rotation_matrix(np.pi / 2.0, 'y')
+    array([[ 2.22044605e-16,  0.00000000e+00,  1.00000000e+00],
+           [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
+           [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
     """
     axis = _wrap_axis(axis)
     axis = axis / np.sqrt(np.dot(axis, axis))
@@ -260,6 +389,18 @@ def rpy_matrix(az, ay, ax):
     -------
     r : np.ndarray
         rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import rpy_matrix
+    >>> yaw = np.pi / 2.0
+    >>> pitch = np.pi / 3.0
+    >>> roll = np.pi / 6.0
+    >>> rpy_matrix(yaw, pitch, roll)
+    array([[ 1.11022302e-16, -8.66025404e-01,  5.00000000e-01],
+           [ 5.00000000e-01,  4.33012702e-01,  7.50000000e-01],
+           [-8.66025404e-01,  2.50000000e-01,  4.33012702e-01]])
     """
     r = rotation_matrix(ax, 'x')
     r = rotate_matrix(r, ay, 'y', world=True)
@@ -268,7 +409,7 @@ def rpy_matrix(az, ay, ax):
 
 
 def rpy_angle(matrix):
-    """Decomposing a rotation matrix.
+    """Decomposing a rotation matrix to yaw-pitch-roll.
 
     Parameters
     ----------
@@ -279,6 +420,19 @@ def rpy_angle(matrix):
     -------
     rpy : np.ndarray
         pair of rpy in yaw-pitch-roll order.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import rpy_matrix
+    >>> from skrobot.math import rpy_angle
+    >>> yaw = np.pi / 2.0
+    >>> pitch = np.pi / 3.0
+    >>> roll = np.pi / 6.0
+    >>> rot = rpy_matrix(yaw, pitch, roll)
+    >>> rpy_angle(rot)
+    (array([1.57079633, 1.04719755, 0.52359878]),
+     array([ 4.71238898,  2.0943951 , -2.61799388]))
     """
     a = np.arctan2(matrix[1, 0], matrix[0, 0])
     sa = np.sin(a)
@@ -298,6 +452,29 @@ def rpy_angle(matrix):
 
 
 def normalize_vector(v, ord=2):
+    """Return normalized vector
+
+    Parameters
+    ----------
+    v : list or np.ndarray
+        vector
+    ord : int (optional)
+        ord of np.linalg.norm
+
+    Returns
+    -------
+    v : np.ndarray
+        normalized vector
+
+    Examples
+    --------
+    >>> from skrobot.math import normalize_vector
+    >>> normalize_vector([1, 1, 1])
+    array([0.57735027, 0.57735027, 0.57735027])
+    >>> normalize_vector([0, 0, 0])
+    array([0., 0., 0.])
+    """
+    v = np.array(v, dtype=np.float64)
     if np.allclose(v, 0) is True:
         return v
     return v / np.linalg.norm(v, ord=ord)
@@ -306,11 +483,22 @@ def normalize_vector(v, ord=2):
 def matrix2quaternion(m):
     """Returns quaternion of given rotation matrix.
 
-    Args:
-        m (np.array): 3 x 3 matrix
+    Parameters
+    ----------
+    m : list or np.ndarray
+        3x3 rotation matrix
 
-    Returns:
-        numpy.array: quaternion [w, x, y, z]
+    Returns
+    -------
+    quaternion : np.ndarray
+        quaternion [w, x, y, z] order
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import matrix2quaternion
+    >>> matrix2quaternion(np.eye(3))
+    array([1., 0., 0., 0.])
     """
     m = np.array(m, dtype=np.float64)
     q0_2 = (1 + m[0, 0] + m[1, 1] + m[2, 2]) / 4.0
@@ -344,7 +532,27 @@ def matrix2quaternion(m):
 
 
 def quaternion2matrix(q):
-    """Returns matrix of given quaternion."""
+    """Returns matrix of given quaternion.
+
+    Parameters
+    ----------
+    quaternion : list or np.ndarray
+        quaternion [w, x, y, z] order
+
+    Returns
+    -------
+    rot : np.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import quaternion2matrix
+    >>> quaternion2matrix([1, 0, 0, 0])
+    array([[1., 0., 0.],
+           [0., 1., 0.],
+           [0., 0., 1.]])
+    """
     q0 = q[0]
     q1 = q[1]
     q2 = q[2]
@@ -368,20 +576,63 @@ def quaternion2matrix(q):
 
 
 def matrix_log(m):
-    """returns matrix log of given m, it returns [-pi, pi]"""
-    qq = matrix2quaternion(m)
-    q0 = qq[0]
-    q = qq[1:]
-    th = 2.0 * np.arctan(np.linalg.norm(q) / q0)
-    if th > np.pi:
-        th = th - 2.0 * np.pi
-    elif th < - np.pi:
-        th = th + 2.0 * np.pi
-    return th * normalize_vector(q)
+    """Returns matrix log of given rotation matrix, it returns [-pi, pi]
+
+    Parameters
+    ----------
+    m : list or np.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    matrixlog : np.ndarray
+        vector of shape (3, )
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import matrix_log
+    >>> matrix_log(np.eye(3))
+    array([0., 0., 0.])
+    """
+    # calc logarithm of quaternion
+    q = matrix2quaternion(m)
+    q_w = q[0]
+    q_xyz = q[1:]
+    theta = 2.0 * np.arctan(np.linalg.norm(q_xyz) / q_w)
+    if theta > np.pi:
+        theta = theta - 2.0 * np.pi
+    elif theta < - np.pi:
+        theta = theta + 2.0 * np.pi
+    return theta * normalize_vector(q_xyz)
 
 
 def matrix_exponent(omega, p=1.0):
-    """Returns exponent of given omega."""
+    """Returns exponent of given omega.
+
+    Parameters
+    ----------
+    omega : list or np.ndarray
+        vector of shape (3,)
+
+    Returns
+    -------
+    rot : np.ndarray
+        exponential matrix of given omega
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import matrix_exponent
+    >>> matrix_exponent([1, 1, 1])
+    array([[ 0.22629564, -0.18300792,  0.95671228],
+           [ 0.95671228,  0.22629564, -0.18300792],
+           [-0.18300792,  0.95671228,  0.22629564]])
+    >>> matrix_exponent([1, 0, 0])
+    array([[ 1.        ,  0.        ,  0.        ],
+           [ 0.        ,  0.54030231, -0.84147098],
+           [ 0.        ,  0.84147098,  0.54030231]])
+    """
     w = np.linalg.norm(omega)
     amat = outer_product_matrix(normalize_vector(omega))
     return np.eye(3) + np.sin(w * p) * amat + \
@@ -391,11 +642,28 @@ def matrix_exponent(omega, p=1.0):
 def outer_product_matrix(v):
     """Returns outer product matrix of given v.
 
-    returns outer product matrix of given v
-    matrix(a) v = a * v
-    0 -w2 w1
-    w2 0 -w0
-    -w1 w0 0
+    Returns outer product matrix of given v
+
+    Parameters
+    ----------
+    v : np.ndarray or list
+        [x, y, z]
+
+    Returns
+    -------
+    matrix : np.ndarray
+        3x3 rotation matrix
+        [[  0 -w2  w1]
+         [ w2   0 -w0]
+         [-w1  w0   0]]
+
+    Examples
+    --------
+    >>> from skrobot.math import outer_product_matrix
+    >>> outer_product_matrix([1, 2, 3])
+    array([[ 0, -3,  2],
+           [ 3,  0, -1],
+           [-2,  1,  0]])
     """
     return np.array([[0, -v[2], v[1]],
                      [v[2], 0, -v[0]],
@@ -403,17 +671,26 @@ def outer_product_matrix(v):
 
 
 def quaternion2rpy(q):
-    """Roll-pitch-yaw angles of a quaternion.
+    """Returns Roll-pitch-yaw angles of a given quaternion.
 
     Parameters
     ----------
-    quat : (4,) array
-        Quaternion in `[w x y z]` format.
+    q : np.ndarray or list
+        Quaternion in [w x y z] format.
 
     Returns
     -------
-    rpy : (3,) array
-        Array of yaw-pitch-roll angles, in [rad].
+    rpy : np.ndarray
+        Array of yaw-pitch-roll angles, in radian.
+
+    Examples
+    --------
+    >>> from skrobot.math import quaternion2rpy
+    >>> quaternion2rpy([1, 0, 0, 0])
+    (array([ 0., -0.,  0.]), array([3.14159265, 3.14159265, 3.14159265]))
+    >>> quaternion2rpy([0, 1, 0, 0])
+    (array([ 0.        , -0.        ,  3.14159265]),
+     array([3.14159265, 3.14159265, 0.        ]))
     """
     roll = atan2(
         2 * q[2] * q[3] + 2 * q[0] * q[1],
@@ -428,17 +705,29 @@ def quaternion2rpy(q):
 
 
 def rpy2quaternion(rpy):
-    """Quaternion frmo yaw-pitch-roll angles.
+    """Return Quaternion from yaw-pitch-roll angles.
 
     Parameters
     ----------
-    rpy : (3,) array
-        Vector of yaw-pitch-roll angles in [rad].
+    rpy : np.ndarray or list
+        Vector of yaw-pitch-roll angles in radian.
 
     Returns
     -------
-    quat : (4,) array
-        Quaternion in `[w x y z]` format.
+    quat : np.ndarray
+        Quaternion in [w x y z] format.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import rpy2quaternion
+    >>> rpy2quaternion([0, 0, 0])
+    array([1., 0., 0., 0.])
+    >>> yaw = np.pi / 3.0
+    >>> rpy2quaternion([yaw, 0, 0])
+    array([0.8660254, 0.       , 0.       , 0.5      ])
+    >>> rpy2quaternion([np.pi * 2 - yaw, 0, 0])
+    array([-0.8660254, -0.       ,  0.       ,  0.5      ])
     """
     yaw, pitch, roll = rpy
     cr, cp, cy = cos(roll / 2.), cos(pitch / 2.), cos(yaw / 2.)
@@ -451,13 +740,26 @@ def rpy2quaternion(rpy):
 
 
 def rotation_matrix_from_rpy(rpy):
-    """Rotation matrix from yaw-pitch-roll angles.
+    """Returns Rotation matrix from yaw-pitch-roll angles.
 
-    Args:
-        rpy (np.array or list): [yaw, pitch, roll]
+    Parameters
+    ----------
+    rpy : np.ndarray or list
+        Vector of yaw-pitch-roll angles in radian.
 
-    Returns:
-        numpy.array (3, 3)
+    Returns
+    -------
+    rot : np.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.math import rotation_matrix_from_rpy
+    >>> rotation_matrix_from_rpy([0, np.pi / 3, 0])
+    array([[ 0.5      ,  0.       ,  0.8660254],
+           [ 0.       ,  1.       ,  0.       ],
+           [-0.8660254,  0.       ,  0.5      ]])
     """
     return quaternion2matrix(quat_from_rpy(rpy))
 
@@ -465,13 +767,32 @@ def rotation_matrix_from_rpy(rpy):
 def rodrigues(axis, theta=None):
     """Rodrigues formula.
 
-    Args:
-        axis (np.array or list): [x, y, z]
-        theta: radian or None
+    Parameters
+    ----------
+    axis : np.ndarray or list
+        [x, y, z]
+    theta: float or None (optional)
+        radian. If None is given, calculate theta from axis.
 
-    Returns:
+    Returns
+    -------
+    mat : np.ndarray
         3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import rodrigues
+    >>> rodrigues([1, 0, 0], 0)
+    array([[1., 0., 0.],
+           [0., 1., 0.],
+           [0., 0., 1.]])
+    >>> rodrigues([1, 1, 1], numpy.pi)
+    array([[-0.33333333,  0.66666667,  0.66666667],
+           [ 0.66666667, -0.33333333,  0.66666667],
+           [ 0.66666667,  0.66666667, -0.33333333]])
     """
+    axis = np.array(axis, dtype=np.float64)
     if theta is None:
         theta = np.sqrt(np.sum(axis ** 2))
     a = axis / np.linalg.norm(axis)
@@ -489,6 +810,9 @@ def rodrigues(axis, theta=None):
 def rotation_angle(mat):
     """Inverse Rodrigues formula Convert Rotation-Matirx to Axis-Angle.
 
+    Return theta and axis.
+    If given unit matrix, return None.
+
     Parameters
     ----------
     mat : np.ndarray
@@ -500,6 +824,15 @@ def rotation_angle(mat):
         rotation angle in radian
     axis : np.ndarray
         rotation axis
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import rotation_angle
+    >>> rotation_angle(numpy.eye(3)) is None
+    True
+    >>> rotation_angle(numpy.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    (1.5707963267948966, array([0., 1., 0.]))
     """
     mat = _check_valid_rotation(mat)
     if np.array_equal(mat, np.eye(3)):
@@ -523,10 +856,21 @@ def rotation_distance(mat1, mat2):
     mat2 : list or np.ndarray
         3x3 matrix
 
-    Return
-    ------
+    Returns
+    -------
     diff_theta : float
         distance of rotation matrixes in radian.
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import rotation_distance
+    >>> rotation_distance(numpy.eye(3), numpy.eye(3))
+    0.0
+    >>> rotation_distance(
+            numpy.eye(3),
+            numpy.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    1.5707963267948966
     """
     mat1 = _check_valid_rotation(mat1)
     mat2 = _check_valid_rotation(mat2)
@@ -551,6 +895,8 @@ def quaternion_multiply(quaternion1, quaternion0):
     quaternion : np.ndarray
         [w, x, y, z]
 
+    Examples
+    --------
     >>> q = quaternion_multiply([4, 1, -2, 3], [8, -5, 6, 7])
     >>> numpy.allclose(q, [28, -44, -14, 48])
     True
@@ -577,6 +923,8 @@ def quaternion_conjugate(quaternion):
     conjugate of quaternion : np.ndarray
         [w, x, y, z]
 
+    Examples
+    --------
     >>> q0 = random_quaternion()
     >>> q1 = quaternion_conjugate(q0)
     >>> np.allclose(quaternion_multiply(q0, q1), [1.0, 0, 0, 0])
@@ -600,6 +948,8 @@ def quaternion_inverse(quaternion):
     inverse of quaternion : np.ndarray
         [w, x, y, z]
 
+    Examples
+    --------
     >>> q0 = random_quaternion()
     >>> q1 = quaternion_inverse(q0)
     >>> np.allclose(quaternion_multiply(q0, q1), [1, 0, 0, 0])
@@ -630,6 +980,8 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     quaternion : np.ndarray
         spherical linear interpolated quaternion
 
+    Examples
+    --------
     >>> q0 = random_quaternion()
     >>> q1 = random_quaternion()
     >>> q = quaternion_slerp(q0, q1, 0.0)
@@ -678,10 +1030,23 @@ def quaternion_distance(q1, q2, absolute=False):
     absolute : bool
         if True, return distance accounting for the sign ambiguity.
 
-    Return
-    ------
+    Returns
+    -------
     diff_theta : float
         distance of q1 and q2 in radian.
+
+    Examples
+    --------
+    >>> from skrobot.math import quaternion_distance
+    >>> quaternion_distance([1, 0, 0, 0], [1, 0, 0, 0])
+    0.0
+    >>> quaternion_distance([1, 0, 0, 0], [0, 1, 0, 0])
+    3.141592653589793
+    >>> distance = quaternion_distance(
+            [1, 0, 0, 0],
+            [0.8660254, 0, 0.5, 0])
+    >>> np.rad2deg(distance)
+    60.00000021683236
     """
     q = quaternion_multiply(
         quaternion_inverse(q1), q2)
@@ -702,10 +1067,23 @@ def quaternion_absolute_distance(q1, q2):
     q2 : list or np.ndarray
         [w, x, y, z] order
 
-    Return
-    ------
+    Returns
+    -------
     diff_theta : float
         absolute distance of q1 and q2 in radian.
+
+    Examples
+    --------
+    >>> from skrobot.math import quaternion_absolute_distance
+    >>> quaternion_absolute_distance([1, 0, 0, 0], [1, 0, 0, 0])
+    0.0
+    >>> quaternion_absolute_distance(
+            [1, 0, 0, 0],
+            [0, 0.7071067811865476, 0, 0.7071067811865476])
+    3.141592653589793
+    >>> quaternion_absolute_distance(
+            [-1, 0, 0, 0],
+            [0, 0.7071067811865476, 0, 0.7071067811865476])
     """
     return quaternion_distance(q1, q2, True)
 
@@ -718,10 +1096,20 @@ def quaternion_norm(q):
     q : list or np.ndarray
         [w, x, y, z] order
 
-    Return
-    ------
+    Returns
+    -------
     norm_q : float
         quaternion norm of q
+
+    Examples
+    --------
+    >>> from skrobot.math import quaternion_norm
+    >>> q = [1, 1, 1, 1]
+    >>> quaternion_norm(q)
+    2.0
+    >>> q = [0, 0.7071067811865476, 0, 0.7071067811865476]
+    >>> quaternion_norm(q)
+    1.0
     """
     q = np.array(q)
     norm_q = np.sqrt(np.dot(q.T, q))
@@ -736,10 +1124,18 @@ def quaternion_normalize(q):
     q : list or np.ndarray
         [w, x, y, z] order
 
-    Return
-    ------
-    normalized_q : float
+    Returns
+    -------
+    normalized_q : np.ndarray
         normalized quaternion
+
+    Examples
+    --------
+    >>> from skrobot.math import quaternion_normalize
+    >>> from skrobot.math import quaternion_norm
+    >>> q = quaternion_normalize([1, 1, 1, 1])
+    >>> quaternion_norm(q)
+    1.0
     """
     q = np.array(q)
     normalized_q = q / quaternion_norm(q)
@@ -763,6 +1159,19 @@ def quaternion_from_axis_angle(theta, axis):
     -------
     quaternion : np.ndarray
         [w, x, y, z] order
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import quaternion_from_axis_angle
+    >>> quaternion_from_axis_angle(0.1, [1, 0, 0])
+    array([0.99875026, 0.04997917, 0.        , 0.        ])
+    >>> quaternion_from_axis_angle(numpy.pi, [1, 0, 0])
+    array([6.123234e-17, 1.000000e+00, 0.000000e+00, 0.000000e+00])
+    >>> quaternion_from_axis_angle(0, [1, 0, 0])
+    array([1., 0., 0., 0.])
+    >>> quaternion_from_axis_angle(numpy.pi, [1, 0, 1])
+    array([6.12323400e-17, 7.07106781e-01, 0.00000000e+00, 7.07106781e-01])
     """
     axis = normalize_vector(axis)
     s = sin(theta / 2)
@@ -783,7 +1192,16 @@ def axis_angle_from_quaternion(quat):
 
     Returns
     -------
-    TODO
+    axis_angle : np.ndarray
+        axis-angle representation of vector
+
+    Examples
+    --------
+    >>> from skrobot.math import axis_angle_from_quaternion
+    >>> axis_angle_from_quaternion([1, 0, 0, 0])
+    array([0, 0, 0])
+    >>> axis_angle_from_quaternion([0, 7.07106781e-01, 0, 7.07106781e-01])
+    array([2.22144147, 0.        , 2.22144147])
     """
     quat = np.array(quat, dtype=np.float64)
     x, y, z, w = quat
@@ -804,11 +1222,23 @@ def axis_angle_from_matrix(rotation):
 
     Parameters
     ----------
-    TODO
+    rotation : np.ndarray
+        3x3 rotation matrix
 
     Returns
     -------
-    TODO
+    axis_angle : np.ndarray
+        axis-angle representation of vector
+
+    Examples
+    --------
+    >>> import numpy
+    >>> from skrobot.math import axis_angle_from_matrix
+    >>> axis_angle_from_matrix(numpy.eye(3))
+    array([0, 0, 0])
+    >>> axis_angle_from_matrix(
+        numpy.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    array([0.        , 1.57079633, 0.        ])
     """
     return axis_angle_from_quaternion(quat_from_rotation_matrix(rotation))
 
