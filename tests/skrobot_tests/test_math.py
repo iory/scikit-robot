@@ -20,6 +20,9 @@ from skrobot.math import quaternion_multiply
 from skrobot.math import quaternion_norm
 from skrobot.math import quaternion_normalize
 from skrobot.math import quaternion_slerp
+from skrobot.math import random_quaternion
+from skrobot.math import random_rotation
+from skrobot.math import random_translation
 from skrobot.math import rodrigues
 from skrobot.math import rotate_matrix
 from skrobot.math import rotation_angle
@@ -332,3 +335,16 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             q,
             matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))
+
+    def test_random_rotation(self):
+        testing.assert_almost_equal(
+            np.linalg.det(random_rotation()),
+            1.0)
+
+    def test_random_translation(self):
+        random_translation()
+
+    def test_random_quaternion(self):
+        testing.assert_almost_equal(
+            quaternion_norm(random_quaternion()),
+            1.0)
