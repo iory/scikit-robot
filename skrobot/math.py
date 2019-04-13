@@ -812,11 +812,24 @@ def axis_angle_from_matrix(rotation):
 
 
 def random_rotation():
-    """Generates a random 3x3 rotation matrix with SVD.
+    """Generates a random 3x3 rotation matrix.
 
     Returns
-    :obj:`numpy.ndarray` of float
-        A random 3x3 rotation matrix.
+    -------
+    rot : numpy.ndarray
+        randomly generated 3x3 rotation matrix
+
+    Examples
+    --------
+    >>> from skrobot.math import random_rotation
+    >>> random_rotation()
+    array([[-0.00933428, -0.90465681, -0.42603865],
+          [-0.50305571, -0.36396787,  0.78387648],
+          [-0.86420358,  0.2216381 , -0.4516954 ]])
+    >>> random_rotation()
+    array([[-0.6549113 ,  0.09499001, -0.749712  ],
+          [-0.47962794, -0.81889635,  0.31522342],
+          [-0.58399334,  0.5660262 ,  0.58186434]])
     """
     rot = quaternion2matrix(random_quaternion())
     return rot
@@ -826,8 +839,17 @@ def random_translation():
     """Generates a random translation vector.
 
     Returns
-    :obj:`numpy.ndarray` of float
+    -------
+    translation : numpy.ndarray
         A 3-entry random translation vector.
+
+    Examples
+    --------
+    >>> from skrobot.math import random_translation
+    >>> random_translation()
+    array([0.03299473, 0.81481471, 0.57782565])
+    >>> random_translation()
+    array([0.10835455, 0.46549158, 0.73277675])
     """
     return np.random.rand(3)
 
@@ -840,8 +862,16 @@ def random_quaternion():
     quaternion : np.ndarray
         generated random unit quaternion [w, x, y, z]
 
+    Examples
+    --------
+    >>> from skrobot.math import random_quaternion
+    >>> random_quaternion()
+    array([-0.02156994,  0.5404561 , -0.72781116, -0.42158374])
+    >>> random_quaternion()
+    array([-0.47302116,  0.020306  , -0.37539238,  0.79681818])
+    >>> from skrobot.math import quaternion_norm
     >>> q = random_quaternion()
-    >>> numpy.allclose(1.0, vector_norm(q))
+    >>> numpy.allclose(1.0, quaternion_norm(q))
     True
     >>> q.shape
     (4,)
