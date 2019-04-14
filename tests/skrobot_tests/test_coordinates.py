@@ -14,7 +14,7 @@ class TestCoordinates(unittest.TestCase):
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
-        testing.assert_array_equal(coord.pos,
+        testing.assert_array_equal(coord.translation,
                                    [1, 2, 3])
 
     def test_transform_vector(self):

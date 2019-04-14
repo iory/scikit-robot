@@ -179,7 +179,7 @@ class RotationalJoint(Joint):
         # (send child-link :replace-coords default-coords)
         # (send child-link :rotate (deg2rad joint-angle) axis))
         self.child_link.rotation = self.default_coords.rotation.copy()
-        self.child_link.pos = self.default_coords.pos.copy()
+        self.child_link.translation = self.default_coords.translation.copy()
         self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
         return self._joint_angle
 
@@ -329,7 +329,8 @@ class LinearJoint(Joint):
                 v = self.min_angle
             self._joint_angle = v
             self.child_link.rotation = self.default_coords.rotation.copy()
-            self.child_link.pos = self.default_coords.pos.copy()
+            self.child_link.translation = \
+                self.default_coords.translation.copy()
             self.child_link.translate(self._joint_angle * self.axis)
         return self._joint_angle
 
@@ -2133,7 +2134,7 @@ class RobotModel(CascadedLink):
                                          xyz)
             # TODO(fix automatically update default_coords)
             link_maps[j.child].joint.default_coords = Coordinates(
-                pos=link_maps[j.child].pos,
+                pos=link_maps[j.child].translation,
                 rot=link_maps[j.child].rotation)
 
         # TODO(duplicate of __init__)
