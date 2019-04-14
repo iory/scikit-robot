@@ -126,7 +126,7 @@ class TestRobotModel(unittest.TestCase):
 
         kuka.reset_manip_pose()
         target_coords = kuka.rarm.end_coords.copy_worldcoords().translate([
-            100, -100, 100], 'local')
+            0.100, -0.100, 0.100], 'local')
         kuka.inverse_kinematics(
             target_coords,
             move_target=move_target,
