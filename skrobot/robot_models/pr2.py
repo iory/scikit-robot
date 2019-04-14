@@ -57,19 +57,8 @@ class PR2(RobotModel):
         self.rarm_root_link = self.r_shoulder_pan_link
         self.head_root_link = self.head_pan_link
 
-        self.link_list = [
-            self.base_footprint, self.torso_lift_link,
-            self.l_shoulder_pan_link,
-            self.l_shoulder_lift_link, self.l_upper_arm_roll_link,
-            self.l_elbow_flex_link, self.l_forearm_roll_link,
-            self.l_wrist_flex_link, self.l_wrist_roll_link,
-            self.r_shoulder_pan_link, self.r_shoulder_lift_link,
-            self.r_upper_arm_roll_link, self.r_elbow_flex_link,
-            self.r_forearm_roll_link, self.r_wrist_flex_link,
-            self.r_wrist_roll_link, self.head_pan_link, self.head_tilt_link
-        ]
-
-        self.joint_list = [
+        # custom min_angle and max_angle for joints
+        joint_list = [
             self.torso_lift_joint, self.l_shoulder_pan_joint,
             self.l_shoulder_lift_joint, self.l_upper_arm_roll_joint,
             self.l_elbow_flex_joint, self.l_forearm_roll_joint,
@@ -80,7 +69,7 @@ class PR2(RobotModel):
             self.r_wrist_roll_joint, self.head_pan_joint, self.head_tilt_joint
         ]
         for j, min_angle, max_angle in zip(
-                self.joint_list,
+                joint_list,
                 (11.5, -32.3493, -20.2598, -37.2423, -121.542, -float('inf'),
                  -114.592, -float('inf'), -122.349,
                  -20.2598, -214.859, -121.542,
