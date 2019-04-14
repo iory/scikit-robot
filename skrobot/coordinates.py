@@ -131,10 +131,9 @@ class Coordinates(object):
     def translate(self, vec, wrt='local'):
         """translate this coordinates.
 
-        unit is [mm]
+        unit is [m]
         """
         vec = np.array(vec, dtype=np.float64)
-        vec /= 1000.0
         return self.newcoords(
             self.rotation,
             self.parent_orientation(vec, wrt) + self.translation)
@@ -383,13 +382,10 @@ class Coordinates(object):
         else:
             prefix = self.__class__.__name__
 
-        return '#<%s %.1lf %.1lf %.1lf / %.1lf %.1lf %.1lf>' % (prefix,
-                                                                pos[0] *
-                                                                1000.0,
-                                                                pos[1] *
-                                                                1000.0,
-                                                                pos[2] *
-                                                                1000.0,
+        return '#<%s %.3lf %.3lf %.3lf / %.1lf %.1lf %.1lf>' % (prefix,
+                                                                pos[0],
+                                                                pos[1],
+                                                                pos[2],
                                                                 self.rpy[0],
                                                                 self.rpy[1],
                                                                 self.rpy[2])
