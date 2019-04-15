@@ -4,6 +4,7 @@ from logging import getLogger
 import numpy as np
 import numpy.linalg as LA
 from ordered_set import OrderedSet
+import trimesh
 
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
@@ -430,6 +431,8 @@ class CascadedLink(CascadedCoords):
         self.collision_avoidance_link_list = []
         self.end_coords_list = []
         self.joint_angle_limit_weight_maps = {}
+
+        self._collision_manager = None
 
     def angle_vector(self, av=None, return_av=None):
         """Returns angle vector
@@ -1893,6 +1896,36 @@ class CascadedLink(CascadedCoords):
                    interlocking_joint_pairs))
         vel = np.zeros(len(pairs), 'f')
         return vel
+
+    def self_collision_check(self):
+        """Return collision link pair
+
+        Returns
+        -------
+        is_collision : bool
+            True if a collision occurred between any pair of objects
+            and False otherwise
+        names : set of 2-tuple
+            The set of pairwise collisions. Each tuple
+            contains two names in alphabetical order indicating
+            that the two corresponding objects are in collision.
+        """
+        if self._collision_manager is None:
+            self._collision_manager = trimesh.collision.CollisionManager()
+            for link in self.link_list:
+                transform = link.worldcoords().T()
+                mesh = link.collision_mesh
+                if mesh is not None:
+                    self._collision_manager.add_object(
+                        link.name, mesh, transform=transform)
+        else:
+            for link in self.link_list:
+                mesh = link.collision_mesh
+                if mesh is not None:
+                    transform = link.worldcoords().T()
+                    self._collision_manager.set_transform(
+                        link.name, transform=transform)
+        return self._collision_manager.in_collision_internal(return_names=True)
 
 
 class RobotModel(CascadedLink):
