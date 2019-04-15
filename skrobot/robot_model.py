@@ -360,6 +360,7 @@ class Link(CascadedCoords):
         self._parent_link = None
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
+        self._collision_mesh = None
 
     @property
     def parent_link(self):
@@ -384,6 +385,36 @@ class Link(CascadedCoords):
 
     def del_parent_link(self, parent_link):
         self._parent_link = None
+
+    @property
+    def collision_mesh(self):
+        """Return collision mesh
+
+        Returns
+        -------
+        self._collision_mesh : trimesh.base.Trimesh
+            A single collision mesh for the link.
+            specified in the link frame,
+            or None if there is not one.
+        """
+        return self._collision_mesh
+
+    @collision_mesh.setter
+    def collision_mesh(self, mesh):
+        """Setter of collision mesh
+
+        Parameters
+        ----------
+        mesh : trimesh.base.Trimesh
+            A single collision mesh for the link.
+            specified in the link frame,
+            or None if there is not one.
+        """
+        if mesh is not None and \
+           not isinstance(mesh, trimesh.base.Trimesh):
+            raise TypeError('input mesh is should be trimesh.base.Trimesh, '
+                            'get type {}'.format(type(mesh)))
+        self._collision_mesh = mesh
 
 
 class CascadedLink(CascadedCoords):
@@ -1896,7 +1927,11 @@ class RobotModel(CascadedLink):
         self.urdf_robot_model = URDF.load(str(urdf_path))
         root_link = self.urdf_robot_model.base_link
 
-        links = [Link(name=link.name) for link in self.urdf_robot_model.links]
+        links = []
+        for urdf_link in self.urdf_robot_model.links:
+            link = Link(name=urdf_link.name)
+            link.collision_mesh = urdf_link.collision_mesh
+            links.append(link)
         link_maps = {l.name: l for l in links}
 
         joint_list = []
