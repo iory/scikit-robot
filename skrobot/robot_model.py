@@ -944,8 +944,23 @@ class CascadedLink(CascadedCoords):
         for i in range(len(rotation_axis)):
             union_vels.append(np.zeros(self.calc_target_axis_dimension(
                 rotation_axis[i], translation_axis[i]), 'f'))
+
+        tmp_additional_jacobi = map(
+            lambda aj: aj(link_list) if callable(aj) else aj,
+            additional_jacobi)
+        if cog_null_space is None and target_centroid_pos is not None:
+            additional_jacobi_dimension = self.calc_target_axis_dimension(
+                False, cog_translation_axis)
+        else:
+            additional_jacobi_dimension = 0
+        additional_jacobi_dimension += sum(map(lambda aj: (
+            aj(link_list) if callable(aj) else aj).shape[0],
+                                               tmp_additional_jacobi))
+
         union_vel = np.zeros(self.calc_target_axis_dimension(
-            rotation_axis, translation_axis), 'f')
+            rotation_axis, translation_axis) +
+                             additional_jacobi_dimension, 'f')
+
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
         #   (progn
@@ -972,6 +987,7 @@ class CascadedLink(CascadedCoords):
                 link_list=link_list,
                 translation_axis=translation_axis,
                 rotation_axis=rotation_axis,
+                additional_jacobi_dimension=additional_jacobi_dimension,
                 # method_args
             )
 
@@ -1696,6 +1712,7 @@ class CascadedLink(CascadedCoords):
                                      col_offset=0,
                                      dim=None,
                                      fik=None,
+                                     additional_jacobi_dimension=0,
                                      n_joint_dimension=None,
                                      *args, **kwargs):
         if link_list is None:
@@ -1714,7 +1731,7 @@ class CascadedLink(CascadedCoords):
             transform_coords = move_target
         if dim is None:
             dim = self.calc_target_axis_dimension(
-                rotation_axis, translation_axis)
+                rotation_axis, translation_axis) + additional_jacobi_dimension
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(link_list)
         if fik is None:
