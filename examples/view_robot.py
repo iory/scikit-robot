@@ -1,5 +1,4 @@
 import argparse
-import warnings
 
 import numpy as np
 import trimesh
@@ -60,52 +59,9 @@ def main():
     geom.visual.face_colors = (0.75, 0.75, 0.75)
     scene.add_geometry(geom)
 
-    urdf_model = robot.urdf_robot_model
-    assert len(robot.link_list) == len(urdf_model.links)
-    for link, urdf_link in zip(robot.link_list, urdf_model.links):
-        for visual in urdf_link.visuals:
-            transform = np.dot(link.worldcoords().T(), visual.origin)
-
-            if 0:  # show axis
-                axis = trimesh.creation.axis(0.01)
-                axis.apply_transform(transform)
-                scene.add_geometry(axis)
-
-            for mesh in visual.geometry.meshes:
-                mesh = mesh.copy()
-
-                # TextureVisuals is usually slow to render
-                if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
-                    mesh.visual = mesh.visual.to_color()
-                    if mesh.visual.vertex_colors.ndim == 1:
-                        mesh.visual.vertex_colors = \
-                            mesh.visual.vertex_colors[None].repeat(
-                                mesh.vertices.shape[0], axis=0
-                            )
-
-                    # default texture color
-                    DEFAULT_TEXTURE_COLOR = (255, 255, 255, 255)
-                    if (mesh.visual.vertex_colors ==
-                            DEFAULT_TEXTURE_COLOR).all():
-                        mesh.visual.vertex_colors = \
-                            trimesh.visual.DEFAULT_COLOR
-
-                # If color or texture is not specified in mesh file,
-                # use information specified in URDF.
-                if (
-                    (mesh.visual.face_colors ==
-                        trimesh.visual.DEFAULT_COLOR).all() and
-                    visual.material
-                ):
-                    if visual.material.texture is not None:
-                        warnings.warn(
-                            'texture specified in URDF is not supported'
-                        )
-                    elif visual.material.color is not None:
-                        mesh.visual.face_colors = visual.material.color
-
-                mesh.apply_transform(transform)
-                scene.add_geometry(mesh)
+    for link in robot.link_list:
+        transform = link.worldcoords().T()
+        scene.add_geometry(link.visual_mesh, transform=transform)
 
     show_with_rotation(
         scene,
