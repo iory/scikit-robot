@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 from numpy import testing
+import trimesh
 
 import skrobot
 from skrobot.coordinates import make_coords
@@ -14,6 +15,13 @@ class TestRobotModel(unittest.TestCase):
     def test_init(self):
         fetch = skrobot.robot_models.Fetch()
         fetch.angle_vector()
+
+    def test_visual_mesh(self):
+        fetch = skrobot.robot_models.Fetch()
+        for link in fetch.link_list:
+            assert isinstance(link.visual_mesh, list)
+            assert all(isinstance(m, trimesh.Trimesh)
+                       for m in link.visual_mesh)
 
     def test_calc_union_link_list(self):
         fetch = skrobot.robot_models.Fetch()
