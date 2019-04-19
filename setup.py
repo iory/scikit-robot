@@ -35,7 +35,7 @@ install_requires = [
     'quadprog',
     'six',
     'sympy',
-    'trimesh',
+    'trimesh>=2.37.35',
 ]
 
 setup(

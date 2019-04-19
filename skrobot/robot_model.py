@@ -1,5 +1,7 @@
+import collections
 import itertools
 from logging import getLogger
+import warnings
 
 import numpy as np
 import numpy.linalg as LA
@@ -362,6 +364,7 @@ class Link(CascadedCoords):
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
         self._collision_mesh = None
+        self._visual_mesh = None
 
     @property
     def parent_link(self):
@@ -416,6 +419,36 @@ class Link(CascadedCoords):
             raise TypeError('input mesh is should be trimesh.base.Trimesh, '
                             'get type {}'.format(type(mesh)))
         self._collision_mesh = mesh
+
+    @property
+    def visual_mesh(self):
+        """Return visual mesh
+
+        Returns
+        -------
+        self._visual_mesh : None, trimesh.base.Trimesh, or
+                            sequence of trimesh.Trimesh
+            A set of visual meshes for the link in the link frame.
+        """
+        return self._visual_mesh
+
+    @visual_mesh.setter
+    def visual_mesh(self, mesh):
+        """Setter of visual mesh
+
+        Parameters
+        ----------
+        mesh : None, trimesh.Trimesh or sequence of trimesh.Trimesh
+            A set of visual meshes for the link in the link frame.
+        """
+        if not (mesh is None or
+                isinstance(mesh, trimesh.Trimesh) or
+                (isinstance(mesh, collections.Sequence) and
+                    all(isinstance(m, trimesh.Trimesh) for m in mesh))):
+            raise TypeError(
+                'mesh must be None, trimesh.Trimesh, or sequence of '
+                'trimesh.Trimesh, but got: {}'.format(type(mesh)))
+        self._visual_mesh = mesh
 
 
 class CascadedLink(CascadedCoords):
@@ -1972,6 +2005,55 @@ class RobotModel(CascadedLink):
     def init_pose(self):
         return self.angle_vector(np.zeros_like(self.angle_vector()))
 
+    def _meshes_from_urdf_visuals(self, visuals):
+        meshes = []
+        for visual in visuals:
+            meshes.extend(self._meshes_from_urdf_visual(visual))
+        return meshes
+
+    def _meshes_from_urdf_visual(self, visual):
+        if not isinstance(visual, urdf.Visual):
+            raise TypeError('visual must be urdf.Visual, but got: {}'
+                            .format(type(visual)))
+
+        meshes = []
+        for mesh in visual.geometry.meshes:
+            mesh = mesh.copy()
+
+            # TextureVisuals is usually slow to render
+            if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
+                mesh.visual = mesh.visual.to_color()
+                if mesh.visual.vertex_colors.ndim == 1:
+                    mesh.visual.vertex_colors = \
+                        mesh.visual.vertex_colors[None].repeat(
+                            mesh.vertices.shape[0], axis=0
+                        )
+
+                # default texture color
+                DEFAULT_TEXTURE_COLOR = (255, 255, 255, 255)
+                if (mesh.visual.vertex_colors ==
+                        DEFAULT_TEXTURE_COLOR).all():
+                    mesh.visual.vertex_colors = \
+                        trimesh.visual.DEFAULT_COLOR
+
+            # If color or texture is not specified in mesh file,
+            # use information specified in URDF.
+            if (
+                (mesh.visual.face_colors ==
+                    trimesh.visual.DEFAULT_COLOR).all() and
+                visual.material
+            ):
+                if visual.material.texture is not None:
+                    warnings.warn(
+                        'texture specified in URDF is not supported'
+                    )
+                elif visual.material.color is not None:
+                    mesh.visual.face_colors = visual.material.color
+
+            mesh.apply_transform(visual.origin)
+            meshes.append(mesh)
+        return meshes
+
     def load_urdf(self, urdf_path):
         self.urdf_path = urdf_path
         self.urdf_robot_model = URDF.load(str(urdf_path))
@@ -1981,6 +2063,8 @@ class RobotModel(CascadedLink):
         for urdf_link in self.urdf_robot_model.links:
             link = Link(name=urdf_link.name)
             link.collision_mesh = urdf_link.collision_mesh
+            link.visual_mesh = self._meshes_from_urdf_visuals(
+                urdf_link.visuals)
             links.append(link)
         link_maps = {l.name: l for l in links}
 
