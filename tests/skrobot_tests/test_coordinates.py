@@ -148,6 +148,29 @@ class TestCoordinates(unittest.TestCase):
             c.quaternion,
             [0.8236391, 0.1545085, 0.47552826, 0.26761657])
 
+    def test_difference_position(self):
+        coord1 = make_coords()
+        coord2 = make_coords().translate([1, 2, 3])
+        dif_pos = coord1.difference_position(coord2)
+        testing.assert_almost_equal(dif_pos, [1, 2, 3])
+
+        dif_pos = coord1.difference_position(coord2, translation_axis=False)
+        testing.assert_almost_equal(dif_pos, [0, 0, 0])
+
+        dif_pos = coord1.difference_position(coord2, translation_axis='x')
+        testing.assert_almost_equal(dif_pos, [0, 2, 3])
+        dif_pos = coord1.difference_position(coord2, translation_axis='y')
+        testing.assert_almost_equal(dif_pos, [1, 0, 3])
+        dif_pos = coord1.difference_position(coord2, translation_axis='z')
+        testing.assert_almost_equal(dif_pos, [1, 2, 0])
+
+        dif_pos = coord1.difference_position(coord2, translation_axis='xy')
+        testing.assert_almost_equal(dif_pos, [0, 0, 3])
+        dif_pos = coord1.difference_position(coord2, translation_axis='yz')
+        testing.assert_almost_equal(dif_pos, [1, 0, 0])
+        dif_pos = coord1.difference_position(coord2, translation_axis='zx')
+        testing.assert_almost_equal(dif_pos, [0, 2, 0])
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 
