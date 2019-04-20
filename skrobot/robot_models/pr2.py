@@ -70,12 +70,12 @@ class PR2(RobotModel):
         ]
         for j, min_angle, max_angle in zip(
                 joint_list,
-                (11.5, -32.3493, -20.2598, -37.2423, -121.542, -float('inf'),
+                (0.0115, -32.3493, -20.2598, -37.2423, -121.542, -float('inf'),
                  -114.592, -float('inf'), -122.349,
                  -20.2598, -214.859, -121.542,
                  -float('inf'), -114.592, -float('inf'),
                  -163.694, -21.2682),
-                (325.0, 122.349, 74.2725, 214.859,
+                (0.325, 122.349, 74.2725, 214.859,
                  -8.59437, float('inf'), -5.72958,
                  float('inf'), 32.3493, 74.2725,
                  37.2423, -8.59437, float('inf'),
@@ -130,7 +130,7 @@ class PR2(RobotModel):
         return r
 
     def reset_manip_pose(self):
-        self.torso_lift_joint.joint_angle(300)
+        self.torso_lift_joint.joint_angle(0.3)
         self.l_shoulder_pan_joint.joint_angle(75)
         self.l_shoulder_lift_joint.joint_angle(50)
         self.l_upper_arm_roll_joint.joint_angle(110)
@@ -150,7 +150,7 @@ class PR2(RobotModel):
         return self.angle_vector()
 
     def reset_pose(self):
-        self.torso_lift_joint.joint_angle(50)
+        self.torso_lift_joint.joint_angle(0.05)
         self.l_shoulder_pan_joint.joint_angle(60)
         self.l_shoulder_lift_joint.joint_angle(74)
         self.l_upper_arm_roll_joint.joint_angle(70)
