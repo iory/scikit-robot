@@ -3,6 +3,8 @@ import copy
 import numpy as np
 
 from skrobot.dual_quaternion import DualQuaternion
+from skrobot.math import _check_valid_rotation
+from skrobot.math import _check_valid_translation
 from skrobot.math import _wrap_axis
 from skrobot.math import matrix2quaternion
 from skrobot.math import matrix_log
@@ -77,7 +79,7 @@ class Coordinates(object):
         if type(rotation) in (list, tuple):
             rotation = np.array(rotation).astype(np.float32)
 
-        self._check_valid_rotation(rotation)
+        _check_valid_rotation(rotation)
         self._rotation = rotation * 1.
 
     @property
@@ -90,36 +92,9 @@ class Coordinates(object):
         if type(translation) in (list, tuple) and len(translation) == 3:
             translation = np.array([t for t in translation]).astype(np.float32)
 
-        self._check_valid_translation(translation)
+        _check_valid_translation(translation)
         self._translation = translation.squeeze() * 1.
 
-    def _check_valid_rotation(self, rotation):
-        """Checks that the given rotation matrix is valid."""
-        if not isinstance(rotation, np.ndarray) or \
-           not np.issubdtype(rotation.dtype, np.number):
-            raise ValueError('Rotation must be specified \
-                              as numeric numpy array')
-
-        if len(rotation.shape) != 2 or \
-           rotation.shape[0] != 3 or \
-           rotation.shape[1] != 3:
-            raise ValueError('Rotation must be specified as a 3x3 ndarray')
-
-        if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
-            raise ValueError('Illegal rotation. Must have '
-                             'determinant == 1.0, get {}'.
-                             format(np.linalg.det(rotation)))
-
-    def _check_valid_translation(self, translation):
-        """Checks that the translation vector is valid."""
-        if not isinstance(translation, np.ndarray) or \
-           not np.issubdtype(translation.dtype, np.number):
-            raise ValueError('Translation must be specified \
-                              as numeric numpy array')
-        t = translation.squeeze()
-        if len(t.shape) != 1 or t.shape[0] != 3:
-            raise ValueError('Translation must be specified as a 3-vector, \
-                              3x1 ndarray, or 1x3 ndarray')
 
     @property
     def dimension(self):
