@@ -172,6 +172,36 @@ class TestCoordinates(unittest.TestCase):
         dif_pos = coord1.difference_position(coord2, translation_axis='zx')
         testing.assert_almost_equal(dif_pos, [0, 2, 0])
 
+    def test_difference_rotation(self):
+        coord1 = make_coords()
+        coord2 = make_coords(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
+        dif_rot = coord1.difference_rotation(coord2)
+        testing.assert_almost_equal(dif_rot,
+                                    [-0.32855112, 1.17434985, 1.05738936])
+        dif_rot = coord1.difference_rotation(coord2, False)
+        testing.assert_almost_equal(dif_rot,
+                                    [0, 0, 0])
+
+        dif_rot = coord1.difference_rotation(coord2, 'x')
+        testing.assert_almost_equal(dif_rot,
+                                    [0.0, 1.36034952, 0.78539816])
+        dif_rot = coord1.difference_rotation(coord2, 'y')
+        testing.assert_almost_equal(dif_rot,
+                                    [0.35398131, 0.0, 0.97442695])
+        dif_rot = coord1.difference_rotation(coord2, 'z')
+        testing.assert_almost_equal(dif_rot,
+                                    [-0.88435715, 0.74192175, 0.0])
+
+        dif_rot = coord1.difference_rotation(coord2, 'xx')
+        testing.assert_almost_equal(
+            dif_rot, [0.0, -1.36034952, -0.78539816])
+        dif_rot = coord1.difference_rotation(coord2, 'yy')
+        testing.assert_almost_equal(
+            dif_rot, [0.35398131, 0.0, 0.97442695])
+        dif_rot = coord1.difference_rotation(coord2, 'zz')
+        testing.assert_almost_equal(
+            dif_rot, [-0.88435715, 0.74192175, 0.0])
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 
