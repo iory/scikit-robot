@@ -18,7 +18,6 @@ from skrobot.math import rotation_angle
 from skrobot.math import rotation_matrix
 from skrobot.math import rpy2quaternion
 from skrobot.math import rpy_angle
-from skrobot.math import rpy_matrix
 
 
 def transform_coords(c1, c2):
@@ -29,27 +28,27 @@ def transform_coords(c1, c2):
 
 class Coordinates(object):
 
-    def __init__(self, pos=None,
+    def __init__(self,
+                 pos=[0, 0, 0],
                  rot=np.eye(3),
-                 dimension=3,
-                 euler=None,
-                 rpy=None,
-                 axis=None,
-                 angle=None,
-                 wrt='local',
                  name=None):
+        """Initialization of Coordinates
+
+        Parameters
+        ----------
+        pos : list or np.ndarray
+            shape of (3,) translation vector
+        rot : list or np.ndarray
+            we can take 3x3 rotation matrix or
+            [yaw, pitch, roll] or
+            quaternion [w, x, y, z] order
+        name : string or None
+            name of this coordinates
+        """
         self.rotation = rot
-        if pos is None:
-            pos = np.zeros(3)
-        if rpy is None:
-            rpy = np.zeros(3)
-        else:
-            self.newcoords(rpy_matrix(rpy[0],
-                                      rpy[1],
-                                      rpy[2],
-                                      pos))
         self.translation = pos
-        self.rpy = rpy
+        if name is None:
+            name = ''
         self.name = name
         self.parent = None
 
