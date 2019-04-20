@@ -170,7 +170,7 @@ class Coordinates(object):
 
     @property
     def quaternion(self):
-        return matrix2quaternion(self.rotation)
+        return self._q
 
     @property
     def dual_quaternion(self):
