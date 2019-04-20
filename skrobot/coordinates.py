@@ -570,6 +570,12 @@ class Coordinates(object):
             dif_rot = np.matmul(
                 self.worldrot().T,
                 np.arccos(np.dot(a0, a2)) * normalize_vector(np.cross(a0, a2)))
+        elif rotation_axis in ['xm', 'ym', 'zm']:
+            rot = coords.worldrot()
+            ax = rotation_axis[0]
+            if not need_mirror_for_nearest_axis(self, coords, ax):
+                rot = rotate_matrix(rot, np.pi, ax)
+            dif_rot = matrix_log(np.matmul(self.worldrot().T, rot))
         elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
