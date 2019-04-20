@@ -21,6 +21,44 @@ from skrobot.math import rpy_angle
 
 
 def transform_coords(c1, c2):
+    """Return Coordinates by applying c1 to c2 from the left
+
+    Parameters
+    ----------
+    c1 : skrobot.coordinates.Coordinates
+    c2 : skrobot.coordinates.Coordinates
+        Coordinates
+
+    Returns
+    -------
+    Coordinates(pos=translation, rot=q) : skrobot.coordinates.Coordinates
+        new coordinates
+
+    Examples
+    --------
+    >>> from skrobot.coordinates import Coordinates
+    >>> from skrobot.coordinates import transform_coords
+    >>> from numpy import pi
+    >>> c1 = Coordinates()
+    >>> c2 = Coordinates()
+    >>> c3 = transform_coords(c1, c2)
+    >>> c3.translation
+    array([0., 0., 0.])
+    >>> c3.rotation
+    array([[1., 0., 0.],
+           [0., 1., 0.],
+           [0., 0., 1.]])
+    >>> c1 = Coordinates().translate([0.1, 0.2, 0.3]).rotate(pi / 3.0, 'x')
+    >>> c2 = Coordinates().translate([0.3, -0.3, 0.1]).rotate(pi / 2.0, 'y')
+    >>> c3 = transform_coords(c1, c2)
+    >>> c3.translation
+    array([ 0.4       , -0.03660254,  0.09019238])
+    >>> c3.rotation
+    >>> c3.rotation
+    array([[ 1.94289029e-16,  0.00000000e+00,  1.00000000e+00],
+           [ 8.66025404e-01,  5.00000000e-01, -1.66533454e-16],
+           [-5.00000000e-01,  8.66025404e-01,  2.77555756e-17]])
+    """
     translation = c1.translation + np.dot(c1.rotation, c2.translation)
     q = quaternion_multiply(c1.quaternion, c2.quaternion)
     return Coordinates(pos=translation, rot=q)
@@ -54,10 +92,43 @@ class Coordinates(object):
 
     @property
     def rotation(self):
+        """Return rotation matrix of this coordinates.
+
+        Returns
+        -------
+        self._rotation : np.ndarray
+            3x3 rotation matrix
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.rotation
+        array([[1., 0., 0.],
+               [0., 1., 0.],
+               [0., 0., 1.]])
+        >>> c.rotate(np.pi / 2.0, 'y')
+        >>> c.rotation
+        array([[ 2.22044605e-16,  0.00000000e+00,  1.00000000e+00],
+               [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
+               [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
+        """
         return self._rotation
 
     @rotation.setter
     def rotation(self, rotation):
+        """Set rotation of this coordinate
+
+        This setter checkes the given rotation and set it this coordinate.
+
+        Parameters
+        ----------
+        rotation : list or np.ndarray
+            we can take 3x3 rotation matrix or
+            rpy angle [yaw, pitch, roll] or
+            quaternion [w, x, y, z] order
+        """
         rotation = np.array(rotation)
         # Convert quaternions
         if rotation.shape == (4,):
@@ -83,10 +154,36 @@ class Coordinates(object):
 
     @property
     def translation(self):
+        """Return translation of this coordinates.
+
+        Returns
+        -------
+        self._translation : np.ndarray
+            vector shape of (3, ). unit is [m]
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.translation
+        array([0., 0., 0.])
+        >>> c.translate([0.1, 0.2, 0.3])
+        >>> c.translation
+        array([0.1, 0.2, 0.3])
+        """
         return self._translation
 
     @translation.setter
     def translation(self, translation):
+        """Set translation of this coordinate
+
+        This setter checkes the given translation and set it this coordinate.
+
+        Parameters
+        ----------
+        translation : list or tuple or np.ndarray
+            shape of (3,) translation vector
+        """
         # Convert lists to translation arrays
         if type(translation) in (list, tuple) and len(translation) == 3:
             translation = np.array([t for t in translation]).astype(np.float64)
@@ -94,18 +191,91 @@ class Coordinates(object):
         _check_valid_translation(translation)
         self._translation = translation.squeeze() * 1.
 
+    @property
+    def name(self):
+        """Return this coordinate's name
+
+        Returns
+        -------
+        self._name : string
+            name of this coordinate
+        """
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        """Setter of this coordinate's name
+
+        Parameters
+        ----------
+        name : string
+            name of this coordinate
+        """
+        if not isinstance(name, str):
+            raise TypeError('name should be string, get {}'.
+                            format(type(name)))
+        self._name = name
 
     @property
     def dimension(self):
+        """Return dimension of this coordinate
+
+        Returns
+        -------
+        len(self.translation) : int
+            dimension of this coordinate
+        """
         return len(self.translation)
 
     def changed(self):
+        """Return False
+
+        This is used for CascadedCoords compatibility
+
+        Returns
+        -------
+        False : bool
+            always return False
+        """
         return False
 
     def translate(self, vec, wrt='local'):
-        """translate this coordinates.
+        """Translate this coordinates.
 
-        unit is [m]
+        Note that this function changes this coordinates self.
+        So if you don't want to change this class, use copy_worldcoords()
+
+        Parameters
+        ----------
+        vec : list or np.ndarray
+            shape of (3,) translation vector. unit is [m] order.
+        wrt : string or Coordinates (optional)
+            translate with respect to wrt.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.translation
+        array([0., 0., 0.], dtype=float32)
+        >>> c.translate([0.1, 0.2, 0.3])
+        >>> c.translation
+        array([0.1, 0.2, 0.3], dtype=float32)
+
+        >>> c = Coordinates()
+        >>> c.copy_worldcoords().translate([0.1, 0.2, 0.3])
+        >>> c.translation
+        array([0., 0., 0.], dtype=float32)
+
+        >>> c = Coordinates().rotate(np.pi / 2.0, 'y')
+        >>> c.translate([0.1, 0.2, 0.3])
+        >>> c.translation
+        array([ 0.3,  0.2, -0.1])
+        >>> c = Coordinates().rotate(np.pi / 2.0, 'y')
+        >>> c.translate([0.1, 0.2, 0.3], 'world')
+        >>> c.translation
+        array([0.1, 0.2, 0.3])
         """
         vec = np.array(vec, dtype=np.float64)
         return self.newcoords(
@@ -161,7 +331,34 @@ class Coordinates(object):
         return inv
 
     def T(self):
-        """Return 4x4 transformation matrix."""
+        """Return 4x4 homogeneous transformation matrix.
+
+        Returns
+        -------
+        matrix : np.ndarray
+            homogeneous transformation matrix shape of (4, 4)
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.T()
+        array([[1., 0., 0., 0.],
+               [0., 1., 0., 0.],
+               [0., 0., 1., 0.],
+               [0., 0., 0., 1.]])
+        >>> c.translate([0.1, 0.2, 0.3])
+        >>> c.rotate(pi / 2.0, 'y')
+        array([[ 2.22044605e-16,  0.00000000e+00,  1.00000000e+00,
+                 1.00000000e-01],
+               [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00,
+                 2.00000000e-01],
+               [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16,
+                 3.00000000e-01],
+               [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,
+                 1.00000000e+00]])
+        """
         matrix = np.zeros((4, 4), dtype=np.float64)
         matrix[3, 3] = 1.0
         matrix[:3, :3] = self.rotation
@@ -170,10 +367,37 @@ class Coordinates(object):
 
     @property
     def quaternion(self):
+        """Property of quaternion
+
+        Returns
+        -------
+        self._q : np.ndarray
+            [w, x, y, z] quaternion
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.quaternion
+        array([1., 0., 0., 0.])
+        >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        >>> c.quaternion
+        array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
+        """
         return self._q
 
     @property
     def dual_quaternion(self):
+        """Property of DualQuaternion
+
+        Return DualQuaternion representation of this coordinate.
+
+        Returns
+        -------
+        DualQuaternion : skrobot.dual_quaternion.DualQuaternion
+            DualQuaternion representation of this coordinate
+        """
         qr = normalize_vector(self.quaternion)
         x, y, z = self.translation
         qd = quaternion_multiply(np.array([0, x, y, z]), qr) * 0.5
@@ -186,15 +410,58 @@ class Coordinates(object):
            or wrt == self.parent \
            or wrt == 'world':
             return v
+        if coordinates_p(wrt):
+            return np.matmul(wrt.worldrot(), v)
         raise ValueError('wrt {} not supported'.format(wrt))
 
     def rotate_vector(self, v):
+        """Rotate 3-dimensional vector using rotation of this coordinate
+
+        Parameters
+        ----------
+        v : np.ndarray
+            vector shape of (3,)
+
+        Returns:
+        np.matmul(self.rotation, v) : np.ndarray
+            rotated vector
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> from numpy import pi
+        >>> c = Coordinates().rotate(pi, 'z')
+        >>> c.rotate_vector([1, 2, 3])
+        array([-1., -2.,  3.])
+        """
         return np.matmul(self.rotation, v)
 
     def inverse_rotate_vector(self, v):
         return np.matmul(v, self.rotation)
 
     def transform(self, c, wrt='local'):
+        """Transform this coordinate by coords based on wrt
+
+        Note that this function changes this coordinate's
+        translation and rotation.
+        If you would like not to change this coordinate,
+        Please use copy_worldcoords()
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates
+            coordinate
+        wrt : string or skrobot.coordinates.Coordinates
+            If wrt is 'local' or self.
+
+        Returns
+        -------
+        self : skrobot.coordinates.Coordinates
+            return this coordinate
+
+        Examples
+        --------
+        """
         if wrt == 'local' or wrt == self:
             tmp_coords = transform_coords(self, c)
         elif wrt == 'parent' or wrt == self.parent \
@@ -209,6 +476,22 @@ class Coordinates(object):
         return self.newcoords(tmp_coords)
 
     def rpy_angle(self):
+        """Return a pair of rpy angles of this coordinates.
+
+        Returns
+        -------
+        rpy_angle(self.rotation) : tuple of np.ndarray
+            a pair of rpy angles. See also skrobot.math.rpy_angle
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates().rotate(np.pi / 2.0, 'x').rotate(np.pi / 3.0, 'z')
+        >>> r.rpy_angle()
+        (array([ 3.84592537e-16, -1.04719755e+00,  1.57079633e+00]),
+        array([ 3.14159265, -2.0943951 , -1.57079633]))
+        """
         return rpy_angle(self.rotation)
 
     def axis(self, ax):
@@ -219,6 +502,35 @@ class Coordinates(object):
                             translation_axis=True):
         """Return differences in positoin of given coords.
 
+        Parameters
+        ----------
+        coords : skrobot.coordinates.Coordinates
+            given coordinates
+        translation_axis : str or bool or None (optional)
+            we can take ['x', 'y', 'z', 'xy', 'yz', 'zx']
+
+        Returns
+        -------
+        dif_pos : np.ndarray
+            difference position of self coordinates and coords
+            considering translation_axis.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> from skrobot.coordinates import transform_coords
+        >>> from numpy import pi
+        >>> c1 = Coordinates().translate([0.1, 0.2, 0.3]).rotate(
+        ...          pi / 3.0, 'x')
+        >>> c2 = Coordinates().translate([0.3, -0.3, 0.1]).rotate(
+        ...          pi / 2.0, 'y')
+        >>> c1.difference_position(c2)
+        array([ 0.2       , -0.42320508,  0.3330127 ])
+        >>> c1 = Coordinates().translate([0.1, 0.2, 0.3]).rotate(0, 'x')
+        >>> c2 = Coordinates().translate([0.3, -0.3, 0.1]).rotate(
+        ...          pi / 3.0, 'x')
+        >>> c1.difference_position(c2)
+        array([ 0.2, -0.5, -0.2])
         """
         dif_pos = self.inverse_transform_vector(coords.worldpos())
         translation_axis = _wrap_axis(translation_axis)
@@ -272,6 +584,20 @@ class Coordinates(object):
         return dif_rot
 
     def rotate_with_matrix(self, mat, wrt='local'):
+        """Rotate this coordinate by given rotation matrix.
+
+        This is a subroutine of self.rotate function.
+
+        Parameters
+        ----------
+        mat : np.ndarray
+            rotation matrix shape of (3, 3)
+        wrt : string or skrobot.coordinates.Coordinates
+
+        Returns
+        -------
+        self : skrobot.coordinates.Coordinates
+        """
         if wrt == 'local' or wrt == self:
             rot = np.matmul(self.rotation, mat)
             self.newcoords(rot, self.translation)
@@ -291,6 +617,18 @@ class Coordinates(object):
         return self
 
     def rotate(self, theta, axis=None, wrt='local'):
+        """Rotate this coordinate by given theta and axis.
+
+        Parameters
+        ----------
+        theta : float
+            radian
+        wrt : string or skrobot.coordinates.Coordinates
+
+        Returns
+        -------
+        self : skrobot.coordinates.Coordinates
+        """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
@@ -309,29 +647,51 @@ class Coordinates(object):
         return self.newcoords(self.rotation, self.translation)
 
     def copy(self):
+        """Return a deep copy of the Coordinates."""
         return self.copy_coords()
 
     def copy_coords(self):
-        """Returns a deep copy of the Coordinates."""
+        """Return a deep copy of the Coordinates."""
         return Coordinates(pos=copy.deepcopy(self.worldpos()),
                            rot=copy.deepcopy(self.worldrot()))
 
     def coords(self):
+        """Return a deep copy of the Coordinates."""
         return self.copy_coords()
 
     def worldcoords(self):
+        """Return thisself"""
         return self
 
     def copy_worldcoords(self):
+        """Return a deep copy of the Coordinates."""
         return self.coords()
 
     def update(self):
         pass
 
     def worldrot(self):
+        """Return rotation of this coordinate
+
+        See also skrobot.coordinates.Coordinates.rotation
+
+        Returns
+        -------
+        self.rotation : np.ndarray
+            rotation matrix of this coordinate
+        """
         return self.rotation
 
     def worldpos(self):
+        """Return translation of this coordinate
+
+        See also skrobot.coordinates.Coordinates.translation
+
+        Returns
+        -------
+        self.translation : np.ndarray
+            translation of this coordinate
+        """
         return self.translation
 
     def newcoords(self, c, pos=None):
@@ -540,18 +900,28 @@ class CascadedCoords(Coordinates):
 
 
 def coordinates_p(x):
+    """Return whether an object is an instance of a class or of a subclass"""
     return isinstance(x, Coordinates)
 
 
 def make_coords(*args, **kwargs):
+    """Return Coordinates
+
+    This is a wrapper of Coordinates class
+    """
     return Coordinates(*args, **kwargs)
 
 
 def make_cascoords(*args, **kwargs):
+    """Return CascadedCoords
+
+    This is a wrapper of CascadedCoords
+    """
     return CascadedCoords(*args, **kwargs)
 
 
 def random_coords():
+    """Return Coordinates class has random translation and rotation"""
     return Coordinates(pos=random_translation(),
                        rot=random_rotation())
 
