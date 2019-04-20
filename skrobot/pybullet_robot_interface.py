@@ -104,7 +104,7 @@ class PybulletRobotInterface(object):
             if isinstance(joint, RotationalJoint):
                 angle = np.deg2rad(angle)
             elif isinstance(joint, LinearJoint):
-                angle = 0.001 * angle
+                pass
             else:
                 raise ValueError('{} is not supported'.
                                  format(type(joint)))

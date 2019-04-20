@@ -179,7 +179,7 @@ class RotationalJoint(Joint):
         # (send child-link :replace-coords default-coords)
         # (send child-link :rotate (deg2rad joint-angle) axis))
         self.child_link.rotation = self.default_coords.rotation.copy()
-        self.child_link.pos = self.default_coords.pos.copy()
+        self.child_link.translation = self.default_coords.translation.copy()
         self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
         return self._joint_angle
 
@@ -312,7 +312,7 @@ class LinearJoint(Joint):
     def joint_angle(self, v=None, relative=None):
         """return joint-angle if v is not set, if v is given, set joint angle.
 
-        v is linear value in [mm].
+        v is linear value in [m].
         """
         if v is not None:
             if relative is not None:
@@ -329,7 +329,8 @@ class LinearJoint(Joint):
                 v = self.min_angle
             self._joint_angle = v
             self.child_link.rotation = self.default_coords.rotation.copy()
-            self.child_link.pos = self.default_coords.pos.copy()
+            self.child_link.translation = \
+                self.default_coords.translation.copy()
             self.child_link.translate(self._joint_angle * self.axis)
         return self._joint_angle
 
@@ -342,10 +343,10 @@ class LinearJoint(Joint):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
     def speed_to_angle(self, v):
-        return 1000 * v
+        return v
 
     def angle_to_speed(self, v):
-        return 0.001 * v
+        return v
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_linear(*args, **kwargs)
@@ -551,15 +552,6 @@ class CascadedLink(CascadedCoords):
                 av[ii] = tmp_target_joint_angle
         return av
 
-    def __repr__(self):
-        return self.__str__()
-
-    def __str__(self):
-        s = '['
-        s += ' '.join([j.__str__() for j in self.link_list])
-        s += ']'
-        return s
-
     def move_joints(self, union_vel,
                     union_link_list=None,
                     periodic_time=0.05,
@@ -753,7 +745,7 @@ class CascadedLink(CascadedCoords):
         Parameters
         ----------
         dif_pos : np.ndarray
-            [mm] order
+            [m] order
         translation_axis : str
             see calc_dif_with_axis
 
@@ -763,7 +755,6 @@ class CascadedLink(CascadedCoords):
         """
         if LA.norm(dif_pos) > p_limit:
             dif_pos = p_limit * normalize_vector(dif_pos)
-        dif_pos = 0.001 * dif_pos  # scale [mm] -> [m]
         vel_p = calc_dif_with_axis(dif_pos, translation_axis)
         return vel_p
 
@@ -958,7 +949,7 @@ class CascadedLink(CascadedCoords):
         if translation_axis is None:
             translation_axis = listify(True, n)
         if thre is None:
-            thre = listify(1, n)
+            thre = listify(0.001, n)
         if rthre is None:
             rthre = listify(np.deg2rad(1), n)
         if min_loop is None:
@@ -1307,7 +1298,6 @@ class CascadedLink(CascadedCoords):
                 lambda x: x() if callable(x) else x,
                 target_coords))
             dif_pos = list(map(lambda mv, tc, trans_axis:
-                               1000 *
                                mv.difference_position(
                                    tc, translation_axis=trans_axis),
                                move_target, target_coords, translation_axis))
@@ -1341,8 +1331,8 @@ class CascadedLink(CascadedCoords):
         target_coords = list(map(lambda x: x() if callable(x) else x,
                                  target_coords))
         dif_pos = list(map(lambda mv, tc, trans_axis:
-                           1000 * mv.difference_position(
-                               tc, translation_axis=trans_axis),
+                           mv.difference_position(
+                            tc, translation_axis=trans_axis),
                            move_target, target_coords, translation_axis))
         dif_rot = list(map(lambda mv, tc, rot_axis:
                            mv.difference_rotation(tc, rotation_axis=rot_axis),
@@ -1424,7 +1414,7 @@ class CascadedLink(CascadedCoords):
                                         stop=100,
                                         dt=5e-3,
                                         inverse_kinematics_hook=[],
-                                        thre=1.0,
+                                        thre=0.001,
                                         rthre=np.deg2rad(1.0),
                                         *args, **kwargs):
 
@@ -1473,7 +1463,6 @@ class CascadedLink(CascadedCoords):
                                                  translation_axis=trans_axis)
                 dif_rot = mv.difference_rotation(tc,
                                                  rotation_axis=rot_axis)
-                dif_pos *= 1000.0
 
                 if translation_axis is not None:
                     success = success and (LA.norm(dif_pos) < thre)
@@ -1629,7 +1618,6 @@ class CascadedLink(CascadedCoords):
                                              translation_axis=trans_axis)
             dif_rot = mv.difference_rotation(tc,
                                              rotation_axis=rot_axis)
-            dif_pos *= 1000.0
             vel_pos = self.calc_vel_from_pos(dif_pos, trans_axis)
             vel_rot = self.calc_vel_from_rot(dif_rot, rot_axis)
             union_vel = np.concatenate([vel_pos, vel_rot])
@@ -2108,8 +2096,8 @@ class RobotModel(CascadedLink):
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child],
-                    min_angle=1000 * j.limit.lower,
-                    max_angle=1000 * j.limit.upper,
+                    min_angle=j.limit.lower,
+                    max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
@@ -2133,7 +2121,7 @@ class RobotModel(CascadedLink):
                                          xyz)
             # TODO(fix automatically update default_coords)
             link_maps[j.child].joint.default_coords = Coordinates(
-                pos=link_maps[j.child].pos,
+                pos=link_maps[j.child].translation,
                 rot=link_maps[j.child].rotation)
 
         # TODO(duplicate of __init__)
@@ -2318,114 +2306,6 @@ class RobotModel(CascadedLink):
                                        translation_axis=translation_axis,
                                        rotation_axis=rotation_axis,
                                        **kwargs)
-        # target_coordss = []
-        # while count < stop and \
-        #       (p_dif_rot is None or
-        #        LA.norm(p_dif_rot - dif_rot) > 1e-3):
-        #     count += 1
-        #     # orient target_coords to look at direction
-        #     target_coords = orient_coords_to_axis(
-        #         make_coords(pos=look_at_pos),
-        #         look_at_pos - move_target.worldpos())
-        #     target_coordss.append(target_coords.copy_worldcoords())
-
-        #     J = self.calc_jacobian_from_link_list(move_target=move_target,
-        #                                           link_list=link_list,
-        #                                           translation_axis=translation_axis,
-        #                                           rotation_axis=rotation_axis)
-        #     print(J)
-
-        #     p_dif_rot = dif_rot
-        #     dif_pos = move_target.difference_position(
-        #         target_coords, translation_axis=translation_axis)
-        #     dif_rot = move_target.difference_rotation(
-        #         target_coords, rotation_axis=rotation_axis)
-        #     # head_weight = np.ones(joint_dimension, 'f')
-        #     # head_nspace = np.zeros(joint_dimension, 'f')
-
-        # target_orient = target_coords.worldrot()[:, 2]
-        # move_orient = target_coords.worldrot()[:, 2]
-        # for joint_id, j in enumerate(map(lambda l: l.joint, link_list)):
-        #     axis_orient = j.parent_link.rotate_vector(_wrap_axis(j.axis))
-        #     # direciton of non continuous area
-        #     axis_orient2 = j.parent_link.rotate_vector([-1, 0, 0])
-        #     if (triple_product(axis_orient, move_orient, target_orient)
-        # < 0.0 and
-        #         triple_product(axis_orient, move_orient, axis_orient2)
-        # < 0.0 and
-        #         triple_product(axis_orient, axis_orient2, target_orient
-        # < 0.0)) or \
-        #         (triple_product(axis_orient, move_orient, target_orient)
-        # > 0.0 and
-        #          triple_product(axis_orient, move_orient, axis_orient2)
-        # > 0.0 and
-        #          triple_product(axis_orient, axis_orient2, target_orient
-        # > 0.0)):
-        #         if triple_product(axis_orient, move_orient, target_orient)
-        # > 0.0:
-        #             head_nspace[joint_id] = -1
-        #         else:
-        #             head_nspace[joint_id] = 1
-        #         head_weight = 0.01 * np.ones(joint_dimension, 'f')
-        #         head_weight[joint_id] = 0.0
-        #         break
-        #     print(dif_pos, dif_rot)
-        #     self.inverse_kinematics_loop(
-        #         dif_pos, dif_rot,
-        #         move_target=move_target,
-        #         rotation_axis=rotation_axis,
-        #         translation_axis=translation_axis,
-        #         link_list=link_list,
-        #         loop=count,
-        #         stop=stop,
-        #         target_coords=target_coords)
-
-        #     # vel_pos = self.calc_vel_from_pos(dif_pos, translation_axis)
-        #     # vel_rot = self.calc_vel_from_rot(dif_rot, rotation_axis)
-        #     # print(vel_pos, vel_rot)
-        #     # union_vels = np.array([])
-        #     # union_vel = np.concatenate([vel_pos, vel_rot])
-        #     # union_vels = np.concatenate([union_vels, union_vel])
-        #     # print('union-vel {}'.format(union_vels))
-
-        #     # # success = True
-        #     # # if rotation_axis is not None:
-        #     # #     success = success and (LA.norm(dif_rot) < rthre)
-
-        #     # if inverse_kinematics_hook:
-        #     #     for hook in inverse_kinematics_hook:
-        #     #         hook()
-
-        #     # # if success:
-        #     # #     return self.angle_vector()
-
-        #     # union_link_list = self.calc_union_link_list(link_list)
-        #     # self.move_joints_avoidance(
-        #     #     union_vels,
-        #     #     union_link_list=union_link_list,
-        #     #     link_list=link_list,
-        #     #     rotation_axis=rotation_axis,
-        #     #     translation_axis=translation_axis,
-        #     #     jacobi=J,
-        #     #     # *args, **kwargs
-        #     # )
-
-        # if p_dif_rot is not None and \
-        #    LA.norm(p_dif_rot - dif_rot) <= 1e-3:
-        #     return target_coordss
-        #     return self.angle_vector()
-
-        # # solve failed
-        # logger.warn('look at failed.')
-        # logger.warn('    count : {}'.format(count))
-        # if p_dif_rot is not None:
-        #     logger.warn(' p_dif_rot : {}/({})'.format
-        #                 (p_dif_rot, LA.norm(p_dif_rot)))
-        #     logger.warn('   dif_rot : {}/({})'.format
-        #                 (dif_rot, (LA.norm(dif_rot))))
-        #     logger.warn('      diff : {} < {}'.format
-        #                 (LA.norm(p_dif_rot - dif_rot), 1e-3))
-        # return target_coordss
 
     def look_at_hand(self, coords):
         if coords == 'rarm':
