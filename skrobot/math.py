@@ -100,7 +100,8 @@ def _check_valid_rotation(rotation):
         raise ValueError('Rotation must be specified as a 3x3 ndarray')
 
     if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
-        raise ValueError('Illegal rotation. Must have determinant == 1.0')
+        raise ValueError('Illegal rotation. Must have determinant == 1.0, '
+                         'get {}'.format(np.linalg.deg(rotation)))
     return rotation
 
 

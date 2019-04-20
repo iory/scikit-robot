@@ -14,8 +14,40 @@ class TestCoordinates(unittest.TestCase):
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
-        testing.assert_array_equal(coord.pos,
+        testing.assert_array_equal(coord.translation,
                                    [1, 2, 3])
+
+    def test_translate(self):
+        c = make_coords()
+        testing.assert_almost_equal(
+            c.translation, [0, 0, 0])
+        c.translate([0.1, 0.2, 0.3])
+        testing.assert_almost_equal(
+            c.translation, [0.1, 0.2, 0.3])
+
+        c = make_coords().rotate(pi / 2.0, 'y')
+        c.translate([0.1, 0.2, 0.3], 'local')
+        testing.assert_almost_equal(
+            c.translation, [0.3, 0.2, -0.1])
+
+        c = make_coords().rotate(pi / 2.0, 'y')
+        c.translate([0.1, 0.2, 0.3], 'world')
+        testing.assert_almost_equal(
+            c.translation, [0.1, 0.2, 0.3])
+
+        c = make_coords()
+        c2 = make_coords().translate([0.1, 0.2, 0.3])
+        c.translate([0.1, 0.2, 0.3], c2)
+        testing.assert_almost_equal(
+            c.translation, [0.1, 0.2, 0.3])
+
+        c = make_coords().rotate(pi / 3.0, 'z')
+        c2 = make_coords().rotate(pi / 2.0, 'y')
+        c.translate([0.1, 0.2, 0.3], c2)
+        testing.assert_almost_equal(
+            c.translation, [0.3, 0.2, -0.1])
+        testing.assert_almost_equal(
+            c.rpy_angle()[0], [pi / 3.0, 0, 0])
 
     def test_transform_vector(self):
         pos = [0.13264493, 0.05263172, 0.93042636]
@@ -106,6 +138,15 @@ class TestCoordinates(unittest.TestCase):
             [[0.900969, 0.122239, 0.416308],
              [0.0, 0.959493, -0.281733],
              [-0.433884, 0.253832, 0.864473]])
+
+    def test_quaternion(self):
+        c = make_coords()
+        testing.assert_almost_equal(
+            c.quaternion, [1, 0, 0, 0])
+        c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        testing.assert_almost_equal(
+            c.quaternion,
+            [0.8236391, 0.1545085, 0.47552826, 0.26761657])
 
 
 class TestCascadedCoordinates(unittest.TestCase):
