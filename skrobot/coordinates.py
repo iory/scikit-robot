@@ -541,6 +541,49 @@ class Coordinates(object):
                             rotation_axis=True):
         """Return differences in rotation of given coords.
 
+        Parameters
+        ----------
+        coords : skrobot.coordinates.Coordinates
+            given coordinates
+        rotation_axis : str or bool or None (optional)
+            we can take ['x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm']
+            or True, False(None).
+
+        Returns
+        -------
+        dif_rot : np.ndarray
+            difference rotation of self coordinates and coords
+            considering rotation_axis.
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import Coordinates
+        >>> from skrobot.math import rpy_matrix
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
+        >>> coord1.difference_rotation(coord2)
+        array([-0.32855112,  1.17434985,  1.05738936])
+        >>> coord1.difference_rotation(coord2, rotation_axis=False)
+        array([0, 0, 0])
+        >>> coord1.difference_rotation(coord2, rotation_axis='x')
+        array([0.        , 1.36034952, 0.78539816])
+        >>> coord1.difference_rotation(coord2, rotation_axis='y')
+        array([0.35398131, 0.        , 0.97442695])
+        >>> coord1.difference_rotation(coord2, rotation_axis='z')
+        array([-0.88435715,  0.74192175,  0.        ])
+
+        Using mirror option ['xm', 'ym', 'zm'], you can
+        allow differences of mirror direction.
+
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates().rotate(pi, 'x')
+        >>> coord1.difference_rotation(coord2, 'xm')
+        array([-2.99951957e-32,  0.00000000e+00,  0.00000000e+00])
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates().rotate(pi / 2.0, 'x')
+        >>> coord1.difference_rotation(coord2, 'xm')
+        array([-1.57079633,  0.        ,  0.        ])
         """
         def need_mirror_for_nearest_axis(coords0, coords1, ax):
             a0 = coords0.axis(ax)
@@ -565,14 +608,17 @@ class Coordinates(object):
             ax = rotation_axis[0]
             a0 = self.axis(ax)
             a2 = coords.axis(ax)
-            if need_mirror_for_nearest_axis(self, coords, ax) is False:
+            if not need_mirror_for_nearest_axis(self, coords, ax):
                 a2 = - a2
-            if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
-                dif_rot = np.array([0, 0, 0], 'f')
-            else:
-                dif_rot = np.matmul(self.worldrot().T,
-                                    np.arccos(np.dot(a0, a2)) *
-                                    normalize_vector(np.cross(a0, a2)))
+            dif_rot = np.matmul(
+                self.worldrot().T,
+                np.arccos(np.dot(a0, a2)) * normalize_vector(np.cross(a0, a2)))
+        elif rotation_axis in ['xm', 'ym', 'zm']:
+            rot = coords.worldrot()
+            ax = rotation_axis[0]
+            if not need_mirror_for_nearest_axis(self, coords, ax):
+                rot = rotate_matrix(rot, np.pi, ax)
+            dif_rot = matrix_log(np.matmul(self.worldrot().T, rot))
         elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:

@@ -1390,9 +1390,6 @@ class CascadedLink(CascadedCoords):
         rotation_axis : list of axis
             see _wrap_axis
         """
-        translation_axis = list(map(_wrap_axis, translation_axis))
-        rotation_axis = list(map(_wrap_axis, rotation_axis))
-
         for i in range(len(dif_pos)):
             if LA.norm(dif_pos[i]) > thre[i]:
                 return False
