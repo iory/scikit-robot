@@ -421,9 +421,7 @@ class RobotInterface(object):
                     if isinstance(joint, RotationalJoint):
                         p = deg2rad(p)
                         v = deg2rad(v)
-                    else:
-                        p = 0.001 * p
-                        v = 0.001 * v
+
                     positions[i] = p
                     velocities[i] = v
                 goal_points.append(
