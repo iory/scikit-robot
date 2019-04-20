@@ -202,6 +202,15 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             dif_rot, [-0.88435715, 0.74192175, 0.0])
 
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi, 'x')
+        dif_rot = coord1.difference_rotation(coord2, 'xm')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
+        coord2 = make_coords().rotate(pi / 2.0, 'x')
+        dif_rot = coord1.difference_rotation(coord2, 'xm')
+        testing.assert_almost_equal(dif_rot, [-pi / 2.0, 0, 0])
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 
