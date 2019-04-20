@@ -89,7 +89,7 @@ class Coordinates(object):
     def translation(self, translation):
         # Convert lists to translation arrays
         if type(translation) in (list, tuple) and len(translation) == 3:
-            translation = np.array([t for t in translation]).astype(np.float32)
+            translation = np.array([t for t in translation]).astype(np.float64)
 
         _check_valid_translation(translation)
         self._translation = translation.squeeze() * 1.
