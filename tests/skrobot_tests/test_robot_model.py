@@ -138,19 +138,26 @@ class TestRobotModel(unittest.TestCase):
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
-        kuka.reset_manip_pose()
         target_coords = kuka.rarm.end_coords.copy_worldcoords().\
             rotate(- np.pi / 6.0, 'y', 'local')
-        kuka.inverse_kinematics(
-            target_coords,
-            move_target=move_target,
-            link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True)
-        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
-        dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
-        self.assertLess(np.linalg.norm(dif_pos), 0.001)
-        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+        for rotation_axis in [True,
+                              'x', 'y', 'z',
+                              'xx', 'yy', 'zz',
+                              'xm', 'ym', 'zm']:
+            kuka.reset_manip_pose()
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=move_target,
+                link_list=link_list,
+                translation_axis=True,
+                rotation_axis=rotation_axis)
+            dif_pos = kuka.rarm.end_coords.difference_position(
+                target_coords, True)
+            dif_rot = kuka.rarm.end_coords.difference_rotation(
+                target_coords, rotation_axis)
+            self.assertLess(np.linalg.norm(dif_pos), 0.001)
+            self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
         # ik failed case
         av = kuka.reset_manip_pose()
