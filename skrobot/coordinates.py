@@ -22,7 +22,7 @@ from skrobot.math import rpy_angle
 
 def transform_coords(c1, c2):
     translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    q = quaternion_multiply(c1._q, c2._q)
+    q = quaternion_multiply(c1.quaternion, c2.quaternion)
     return Coordinates(pos=translation, rot=q)
 
 
