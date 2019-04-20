@@ -353,17 +353,20 @@ class Coordinates(object):
         pos = self.worldpos()
         self.rpy = rpy_angle(self.rotation)[0]
         if self.name:
-            prefix = self.__class__.__name__ + ' ' + self.name
+            prefix = self.__class__.__name__ + ':' + self.name
         else:
             prefix = self.__class__.__name__
 
-        return '#<%s %.3lf %.3lf %.3lf / %.1lf %.1lf %.1lf>' % (prefix,
-                                                                pos[0],
-                                                                pos[1],
-                                                                pos[2],
-                                                                self.rpy[0],
-                                                                self.rpy[1],
-                                                                self.rpy[2])
+        return "#<{0} {1} "\
+            "{2:.3f} {3:.3f} {4:.3f} / {5:.1f} {6:.1f} {7:.1f}>".\
+            format(prefix,
+                   hex(id(self)),
+                   pos[0],
+                   pos[1],
+                   pos[2],
+                   self.rpy[0],
+                   self.rpy[1],
+                   self.rpy[2])
 
 
 class CascadedCoords(Coordinates):
