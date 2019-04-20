@@ -552,15 +552,6 @@ class CascadedLink(CascadedCoords):
                 av[ii] = tmp_target_joint_angle
         return av
 
-    def __repr__(self):
-        return self.__str__()
-
-    def __str__(self):
-        s = '['
-        s += ' '.join([j.__str__() for j in self.link_list])
-        s += ']'
-        return s
-
     def move_joints(self, union_vel,
                     union_link_list=None,
                     periodic_time=0.05,
