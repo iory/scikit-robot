@@ -541,6 +541,49 @@ class Coordinates(object):
                             rotation_axis=True):
         """Return differences in rotation of given coords.
 
+        Parameters
+        ----------
+        coords : skrobot.coordinates.Coordinates
+            given coordinates
+        rotation_axis : str or bool or None (optional)
+            we can take ['x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm']
+            or True, False(None).
+
+        Returns
+        -------
+        dif_rot : np.ndarray
+            difference rotation of self coordinates and coords
+            considering rotation_axis.
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import Coordinates
+        >>> from skrobot.math import rpy_matrix
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
+        >>> coord1.difference_rotation(coord2)
+        array([-0.32855112,  1.17434985,  1.05738936])
+        >>> coord1.difference_rotation(coord2, rotation_axis=False)
+        array([0, 0, 0])
+        >>> coord1.difference_rotation(coord2, rotation_axis='x')
+        array([0.        , 1.36034952, 0.78539816])
+        >>> coord1.difference_rotation(coord2, rotation_axis='y')
+        array([0.35398131, 0.        , 0.97442695])
+        >>> coord1.difference_rotation(coord2, rotation_axis='z')
+        array([-0.88435715,  0.74192175,  0.        ])
+
+        Using mirror option ['xm', 'ym', 'zm'], you can
+        allow differences of mirror direction.
+
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates().rotate(pi, 'x')
+        >>> coord1.difference_rotation(coord2, 'xm')
+        array([-2.99951957e-32,  0.00000000e+00,  0.00000000e+00])
+        >>> coord1 = Coordinates()
+        >>> coord2 = Coordinates().rotate(pi / 2.0, 'x')
+        >>> coord1.difference_rotation(coord2, 'xm')
+        array([-1.57079633,  0.        ,  0.        ])
         """
         def need_mirror_for_nearest_axis(coords0, coords1, ax):
             a0 = coords0.axis(ax)
