@@ -269,12 +269,9 @@ def calc_jacobian_linear(fik, row, column,
         paxis, world_default_coords, child_reverse, transform_coords)
     j_rot = np.array([0, 0, 0])
     j_trans = calc_dif_with_axis(j_trans, translation_axis)
-    for j in range(len(j_trans)):
-        fik[j + row, column] = j_trans[j]
-
+    fik[row:row + len(j_trans), column] = j_trans
     j_rot = calc_dif_with_axis(j_rot, rotation_axis)
-    for j in range(len(j_rot)):
-        fik[j + row + len(j_trans), column] = j_rot[j]
+    fik[row + len(j_trans): row + len(j_trans) + len(j_rot), column] = j_rot
     return fik
 
 
