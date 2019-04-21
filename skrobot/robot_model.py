@@ -1210,9 +1210,9 @@ class CascadedLink(CascadedCoords):
 
         if thre is None:
             if isinstance(move_target, list):
-                thre = [1] * len(move_target)
+                thre = [0.001] * len(move_target)
             else:
-                thre = [1]
+                thre = [0.001]
         if rthre is None:
             if isinstance(move_target, list):
                 rthre = [np.deg2rad(1)] * len(move_target)
