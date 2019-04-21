@@ -181,6 +181,22 @@ class TestRobotModel(unittest.TestCase):
         testing.assert_array_equal(
             av, kuka.angle_vector())
 
+        # inverse kinematics with linear joint
+        fetch = self.fetch
+        fetch.reset_manip_pose()
+        target_coords = make_coords(pos=[1.0, 0, 1.5])
+        fetch.inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            link_list=[fetch.torso_lift_link] + fetch.rarm.link_list,
+            stop=200)
+        dif_pos = fetch.rarm.end_coords.difference_position(
+            target_coords, True)
+        dif_rot = fetch.rarm.end_coords.difference_rotation(
+            target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
     def test_calc_target_joint_dimension(self):
         fetch = self.fetch
         joint_dimension = fetch.calc_target_joint_dimension(
