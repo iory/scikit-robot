@@ -12,19 +12,27 @@ from skrobot.robot_model import RotationalJoint
 
 class TestRobotModel(unittest.TestCase):
 
+    fetch = None
+    kuka = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fetch = skrobot.robot_models.Fetch()
+        cls.kuka = skrobot.robot_models.Kuka()
+
     def test_init(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         fetch.angle_vector()
 
     def test_visual_mesh(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         for link in fetch.link_list:
             assert isinstance(link.visual_mesh, list)
             assert all(isinstance(m, trimesh.Trimesh)
                        for m in link.visual_mesh)
 
     def test_calc_union_link_list(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         links = fetch.calc_union_link_list([fetch.rarm.link_list,
                                             fetch.rarm.link_list,
                                             fetch.link_list])
@@ -60,7 +68,7 @@ class TestRobotModel(unittest.TestCase):
         )
 
     def test_find_joint_angle_limit_weight_from_union_link_list(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         links = fetch.calc_union_link_list([fetch.rarm.link_list])
 
         # not set joint_angle_limit case
@@ -81,7 +89,7 @@ class TestRobotModel(unittest.TestCase):
             np.ones(len(names), 'f'))
 
     def test_reset_joint_angle_limit_weight(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         links = fetch.calc_union_link_list([fetch.rarm.link_list])
 
         # not set joint_angle_limit case
@@ -103,7 +111,7 @@ class TestRobotModel(unittest.TestCase):
             False)
 
     def test_find_link_route(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         ret = fetch.find_link_route(fetch.torso_lift_link)
         self.assertEqual(ret,
                          [fetch.torso_lift_link])
@@ -120,7 +128,7 @@ class TestRobotModel(unittest.TestCase):
                           fetch.wrist_roll_link])
 
     def test_inverse_kinematics(self):
-        kuka = skrobot.robot_models.Kuka()
+        kuka = self.kuka
         move_target = kuka.rarm.end_coords
         link_list = kuka.rarm.link_list
 
@@ -173,8 +181,24 @@ class TestRobotModel(unittest.TestCase):
         testing.assert_array_equal(
             av, kuka.angle_vector())
 
+        # inverse kinematics with linear joint
+        fetch = self.fetch
+        fetch.reset_manip_pose()
+        target_coords = make_coords(pos=[1.0, 0, 1.5])
+        fetch.inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            link_list=[fetch.torso_lift_link] + fetch.rarm.link_list,
+            stop=200)
+        dif_pos = fetch.rarm.end_coords.difference_position(
+            target_coords, True)
+        dif_rot = fetch.rarm.end_coords.difference_rotation(
+            target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
     def test_calc_target_joint_dimension(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         joint_dimension = fetch.calc_target_joint_dimension(
             fetch.rarm.link_list)
         self.assertEqual(joint_dimension, 7)
@@ -183,7 +207,7 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(joint_dimension, 7)
 
     def test_calc_target_axis_dimension(self):
-        fetch = skrobot.robot_models.Fetch()
+        fetch = self.fetch
         dimension = fetch.calc_target_axis_dimension(
             False, False)
         self.assertEqual(dimension, 0)
@@ -196,7 +220,7 @@ class TestRobotModel(unittest.TestCase):
                 [True, False], True)
 
     def test_calc_jacobian_for_interlocking_joints(self):
-        r = skrobot.robot_models.Fetch()
+        r = self.fetch
         jacobian = r.calc_jacobian_for_interlocking_joints(
             r.rarm.link_list,
             interlocking_joint_pairs=[

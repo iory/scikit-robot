@@ -242,7 +242,7 @@ class FixedJoint(Joint):
         return calc_jacobian_rotational(*args, **kwargs)
 
 
-def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
+def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords, child_reverse,
                              move_target, transform_coords, rotation_axis,
                              translation_axis):
@@ -252,15 +252,15 @@ def calc_jacobian_rotational(fik, row, column, joint, paxis, child_link,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = np.cross(j_rot, p_diff)
     j_translation = calc_dif_with_axis(j_translation, translation_axis)
-    fik[row:row + len(j_translation), column] = j_translation
+    jacobian[row:row + len(j_translation), column] = j_translation
     j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
-    fik[row + len(j_translation):
-        row + len(j_translation) + len(j_rotation),
-        column] = j_rotation
-    return fik
+    jacobian[row + len(j_translation):
+             row + len(j_translation) + len(j_rotation),
+             column] = j_rotation
+    return jacobian
 
 
-def calc_jacobian_linear(fik, row, column,
+def calc_jacobian_linear(jacobian, row, column,
                          joint, paxis, child_link,
                          world_default_coords, child_reverse,
                          move_target, transform_coords,
@@ -269,13 +269,12 @@ def calc_jacobian_linear(fik, row, column,
         paxis, world_default_coords, child_reverse, transform_coords)
     j_rot = np.array([0, 0, 0])
     j_trans = calc_dif_with_axis(j_trans, translation_axis)
-    for j in range(len(j_trans)):
-        fik[j + row, column] = j_trans[j]
-
+    jacobian[row:row + len(j_trans), column] = j_trans
     j_rot = calc_dif_with_axis(j_rot, rotation_axis)
-    for j in range(len(j_rot)):
-        fik[j + row + len(j_trans), column] = j_rot[j]
-    return fik
+    jacobian[row + len(j_trans):
+             row + len(j_trans) + len(j_rot),
+             column] = j_rot
+    return jacobian
 
 
 def calc_jacobian_default_rotate_vector(
@@ -1168,7 +1167,7 @@ class CascadedLink(CascadedCoords):
         r = self.calc_target_axis_dimension(
             rotation_axis, translation_axis) + additional_jacobi_dimension
 
-        fik = make_matrix(r, c)
+        jacobian = make_matrix(r, c)
         ret = make_matrix(c, r)
 
         union_vels = []
@@ -1177,7 +1176,7 @@ class CascadedLink(CascadedCoords):
                               (self.calc_target_axis_dimension(ra, ta),
                                'f'))
         return dict(dim=r,
-                    fik=fik,
+                    jacobian=jacobian,
                     n_joint_dimension=c,
                     ret=ret,
                     **kwargs)
@@ -1213,9 +1212,9 @@ class CascadedLink(CascadedCoords):
 
         if thre is None:
             if isinstance(move_target, list):
-                thre = [1] * len(move_target)
+                thre = [0.001] * len(move_target)
             else:
-                thre = [1]
+                thre = [0.001]
         if rthre is None:
             if isinstance(move_target, list):
                 rthre = [np.deg2rad(1)] * len(move_target)
@@ -1763,7 +1762,7 @@ class CascadedLink(CascadedCoords):
                                      translation_axis=None,
                                      col_offset=0,
                                      dim=None,
-                                     fik=None,
+                                     jacobian=None,
                                      additional_jacobi_dimension=0,
                                      n_joint_dimension=None,
                                      *args, **kwargs):
@@ -1786,8 +1785,8 @@ class CascadedLink(CascadedCoords):
                 rotation_axis, translation_axis) + additional_jacobi_dimension
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(link_list)
-        if fik is None:
-            fik = np.zeros((dim, n_joint_dimension), dtype=np.float32)
+        if jacobian is None:
+            jacobian = np.zeros((dim, n_joint_dimension), dtype=np.float32)
 
         union_link_list = self.calc_union_link_list(link_list)
         jdim = self.calc_target_joint_dimension(union_link_list)
@@ -1858,8 +1857,8 @@ class CascadedLink(CascadedCoords):
                     world_default_coords = parent_link.copy_worldcoords().\
                         transform(default_coords)
 
-                    fik = joint.calc_jacobian(
-                        fik,
+                    jacobian = joint.calc_jacobian(
+                        jacobian,
                         row,
                         col,
                         joint,
@@ -1875,7 +1874,7 @@ class CascadedLink(CascadedCoords):
                                                        translation_axis)
             col += joint.joint_dof
             i += 1
-        return fik
+        return jacobian
 
     @property
     def interlocking_joint_pairs(self):
