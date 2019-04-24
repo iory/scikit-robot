@@ -1,6 +1,7 @@
 import argparse
 import threading
 import time
+import warnings
 
 import numpy as np
 import pyglet
@@ -15,19 +16,27 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
     def __init__(self, *args, **kwargs):
         if len(args) > 6:
             args = list(args)
-            args[5] = False  # start_loop
+            if args[5] is False:
+                warnings.warn('start_loop must be always True')
+            args[5] = True  # start_loop
             args = tuple(args)
         else:
-            kwargs['start_loop'] = False
-
-        super().__init__(*args, **kwargs)
+            if kwargs['start_loop'] is False:
+                warnings.warn('start_loop must be always True')
+            kwargs['start_loop'] = True
 
         self._redraw = True
         pyglet.clock.schedule_interval(self.on_update, 1 / 30)
 
+        self._args = args
+        self._kwargs = kwargs
+
         self.lock = threading.RLock()
-        self.thread = threading.Thread(target=pyglet.app.run)
+        self.thread = threading.Thread(target=self._init_and_start_app)
         self.thread.start()
+
+    def _init_and_start_app(self):
+        super().__init__(*self._args, **self._kwargs)
 
     def redraw(self):
         self._redraw = True
