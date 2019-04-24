@@ -21,7 +21,7 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
             args[5] = True  # start_loop
             args = tuple(args)
         else:
-            if kwargs['start_loop'] is False:
+            if 'start_loop' in kwargs and kwargs['start_loop'] is False:
                 warnings.warn('start_loop must be always True')
             kwargs['start_loop'] = True
 
