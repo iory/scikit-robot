@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 import pyglet
+from pyglet import gl
 import trimesh
 import trimesh.viewer
 
@@ -25,7 +26,10 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
                 warnings.warn('start_loop must be always True')
             kwargs['start_loop'] = True
 
+        self._links = []
+
         self._redraw = True
+        self._camera_transform = None
         pyglet.clock.schedule_interval(self.on_update, 1 / 30)
 
         self._args = args
@@ -44,13 +48,31 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
     def on_update(self, dt):
         self.on_draw()
 
-    def on_draw(self):
-        self.view['ball']._n_pose = self.scene.camera.transform
+    def reset_view(self, flags):
+        with self.lock:
+            super().reset_view(flags)
 
+    def on_draw(self):
         if not self._redraw:
             return
 
         with self.lock:
+            if self._camera_transform is not None:
+                camera_transform = self._camera_transform
+                self._camera_transform = None
+                self.scene.camera.transform = camera_transform
+                self.view['ball']._n_pose = camera_transform
+
+            # apply latest angle-vector
+            for link in self._links:
+                if isinstance(link, skrobot.robot_model.Link):
+                    link_list = [link]
+                else:
+                    link_list = link.link_list
+                for l in link_list:
+                    transform = l.worldcoords().T()
+                    self.scene.graph.update(l.name, matrix=transform)
+
             super().on_draw()
 
         self._redraw = False
@@ -75,8 +97,11 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
         self._redraw = True
         return super().on_resize(*args, **kwargs)
 
+    def on_close(self):
+        self.thread.exit()
+        return super().on_close()
+
     def _gl_update_perspective(self):
-        from pyglet import gl
         try:
             # for high DPI screens viewport size
             # will be different then the passed size
@@ -100,16 +125,42 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
         )
         gl.glMatrixMode(gl.GL_MODELVIEW)
 
-    def scene_add_geometry(self, *args, **kwargs):
+    def add(self, link):
+        if isinstance(link, skrobot.robot_model.Link):
+            link_list = [link]
+        elif isinstance(link, skrobot.robot_model.CascadedLink):
+            link_list = link.link_list
+        else:
+            raise TypeError('link must be Link or CascadedLink')
+
         with self.lock:
-            self.scene.add_geometry(*args, **kwargs)
+            for l in link_list:
+                transform = l.worldcoords().T()
+                self.scene.add_geometry(
+                    geometry=l.visual_mesh,
+                    node_name=l.name,
+                    geom_name=l.name,
+                    transform=transform,
+                )
+            self._links.append(link)
 
-            self._update_vertex_list()
-            self._gl_update_perspective()
-
-    def scene_set_camera(self, *args, **kwargs):
+    def set_camera(self, *args, **kwargs):
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
+            self._camera_transform = self.scene.camera.transform
+
+
+class Box(skrobot.robot_model.Link):
+
+    def __init__(self, extents, vertex_colors=None, face_colors=None,
+                 *args, **kwargs):
+        super(Box, self).__init__(*args, **kwargs)
+        self._extents = extents
+        self._visual_mesh = trimesh.creation.box(
+            extents=extents,
+            vertex_colors=vertex_colors,
+            face_colors=face_colors,
+        )
 
 
 def main():
@@ -132,30 +183,25 @@ def main():
     geom.visual.face_colors = (0.75, 0.75, 0.75)
     scene.add_geometry(geom)
 
-    # links
-    for link in robot.link_list:
-        transform = link.worldcoords().T()
-        scene.add_geometry(
-            geometry=link.visual_mesh,
-            node_name=link.name,
-            geom_name=link.name,
-            transform=transform,
-        )
-
-    scene.set_camera(angles=[np.deg2rad(45), 0, 0])
-
     viewer = SceneViewerInThread(scene, resolution=(640, 480))
+
+    viewer.add(robot)
+
+    viewer.set_camera(angles=[np.deg2rad(45), 0, 0], distance=4)
+
+    box = Box(extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0))
+    box.translate((0.5, 0, 0.3))
+    viewer.add(box)
 
     if args.interactive:
         print('''\
 >>> # Usage
 
 >>> robot.reset_manip_pose()
->>> with viewer.lock:
->>>     for link in robot.link_list:
->>>         transform = link.worldcoords().T()
->>>         scene.graph.update(link.name, matrix=transform)
->>> viewer.redraw()\n''')
+>>> viewer.redraw()
+>>> robot.init_pose()
+>>> robot.inverse_kinematics(box, rotation_axis='y')
+''')
 
         import IPython
 
@@ -166,15 +212,27 @@ def main():
 
         print('==> Moving to reset_manip_pose')
         robot.reset_manip_pose()
-        with viewer.lock:
-            for link in robot.link_list:
-                transform = link.worldcoords().T()
-                scene.graph.update(link.name, matrix=transform)
+        print(robot.angle_vector())
+        time.sleep(1)
+        viewer.redraw()
 
         print('==> Waiting 3 seconds')
         time.sleep(3)
 
-        print('==> Redrawing')
+        print('==> Moving to init_pose')
+        robot.init_pose()
+        print(robot.angle_vector())
+        time.sleep(1)
+        viewer.redraw()
+
+        print('==> Waiting 3 seconds')
+        time.sleep(3)
+
+        print('==> IK to box')
+        robot.reset_manip_pose()
+        robot.inverse_kinematics(box, rotation_axis='y')
+        print(robot.angle_vector())
+        time.sleep(1)
         viewer.redraw()
 
         print('==> Press [q] to close window')
