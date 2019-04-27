@@ -2004,6 +2004,11 @@ class RobotModel(CascadedLink):
         for mesh in visual.geometry.meshes:
             mesh = mesh.copy()
 
+            # rescale
+            if visual.geometry.mesh is not None:
+                if visual.geometry.mesh.scale is not None:
+                    mesh.vertices = mesh.vertices * visual.geometry.mesh.scale
+
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
                 mesh.visual = mesh.visual.to_color()
