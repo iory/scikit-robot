@@ -37,6 +37,8 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
 
         self.lock = threading.RLock()
         self.thread = threading.Thread(target=self._init_and_start_app)
+        # Terminate this thread when main thread exit.
+        self.thread.daemon = True
         self.thread.start()
 
     def _init_and_start_app(self):
@@ -98,7 +100,6 @@ class SceneViewerInThread(trimesh.viewer.SceneViewer):
         return super().on_resize(*args, **kwargs)
 
     def on_close(self):
-        self.thread.exit()
         return super().on_close()
 
     def _gl_update_perspective(self):
