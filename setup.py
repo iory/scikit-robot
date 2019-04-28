@@ -33,6 +33,7 @@ install_requires = [
     'python-fcl',  # for collision check in trimesh module
     'pyyaml',
     'quadprog',
+    'scipy==1.2.1',
     'six',
     'sympy',
     'trimesh>=2.37.35',
