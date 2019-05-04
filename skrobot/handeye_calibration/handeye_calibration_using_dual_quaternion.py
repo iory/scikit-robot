@@ -28,7 +28,7 @@ def get_aligned_dqs(dq_base_to_ee_vec,
     _check_lengths(dq_base_to_ee_vec, dq_camera_to_marker_vec)
     n = len(dq_base_to_ee_vec)
 
-    dq_marker_to_ee_estimated = dq_ee_to_marker_estimated.inverse()
+    dq_marker_to_ee_estimated = dq_ee_to_marker_estimated.inverse
     dq_marker_to_ee_estimated.normalize()
     dq_marker_to_ee_estimated.enforce_positive_q_rot_w()
 
@@ -134,7 +134,7 @@ def align_dq_at_index(dq_vec, align_index=0, enforce_positive_q_rot_w=True):
 
     """
     base_dq = dq_vec[align_index]
-    inverse_base_dq = base_dq.inverse().copy()
+    inverse_base_dq = base_dq.inverse.copy()
     n = len(dq_vec)
     aligned_dq_vec = [None] * n
     for i in range(0, n):

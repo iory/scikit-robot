@@ -119,6 +119,7 @@ class Quaternion(object):
         new_q = [self.w, -self.x, -self.y, -self.z]
         return Quaternion(q=new_q)
 
+    @property
     def inverse(self):
         return Quaternion(q=quaternion_inverse(self.q))
 
@@ -158,7 +159,7 @@ class Quaternion(object):
 
     def __truediv__(self, cls):
         if isinstance(cls, Quaternion):
-            return self * cls.inverse()
+            return self * cls.inverse
         elif isinstance(cls, Number):
             q = self.q.copy()
             return Quaternion(q=q / cls)
