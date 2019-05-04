@@ -55,6 +55,12 @@ class TestDualQuaternion(unittest.TestCase):
         testing.assert_almost_equal(
             dq.rotation, quaternion2matrix(qr))
 
+    def test_norm(self):
+        dq = DualQuaternion()
+        qr_norm, qd_norm = dq.norm
+        self.assertEqual(qr_norm, 1.0)
+        self.assertEqual(qd_norm, 0.0)
+
     def test_normalize(self):
         qr1 = normalize_vector(np.array([1, 2, 3, 4]))
         x, y, z = np.array([1, 2, 3])
