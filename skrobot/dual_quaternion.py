@@ -11,34 +11,19 @@ from skrobot.quaternion import Quaternion
 class DualQuaternion(object):
     """Class for handling dual quaternions and their interpolations.
 
-    Attributes
+    Parameters
     ----------
-    qr : :obj:`numpy.ndarray` of float
-        A 4-entry quaternion in wxyz format.
-
-    qd : :obj:`numpy.ndarray` of float
-        A 4-entry quaternion in wxyz format.
-        to represent the translation.
-
-    conjugate : :obj:`DualQuaternion`
-        The conjugate of this DualQuaternion.
-
-    norm : :obj:`tuple` of :obj:`numpy.ndarray`
-        The normalized vectors for qr and qd, respectively.
-
-    normalized : :obj:`DualQuaternion`
-        This quaternion with qr normalized.
+    qr : list or np.ndarray
+    qd : list or np.ndarray
+        element of dual quaternion
+    enforce_unit_norm : bool (optional)
+        if True, norm should be 1.0.
     """
 
     def __init__(self,
                  qr=[1, 0, 0, 0],
                  qd=[0, 0, 0, 0],
                  enforce_unit_norm=False):
-        """Initialize a dual quaternion.
-
-        Parameters
-        ----------
-        """
         if (isinstance(qd, list) or isinstance(qd, np.ndarray)) and \
            len(qd) == 3:
             x, y, z = qd
@@ -55,6 +40,23 @@ class DualQuaternion(object):
 
     @property
     def translation(self):
+        """Return translation of this dual quaternion.
+
+        Returns
+        -------
+        q_translation.xyz : np.ndarray
+            vector shape of (3, ). unit is [m]
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.dual_quaternion.translation
+        array([0., 0., 0.])
+        >>> c.translate([0.1, 0.2, 0.3])
+        >>> c.dual_quaternion.translation
+        array([0.1, 0.2, 0.3])
+        """
         dq = self.normalized
         q_rot = dq.qr
         if (q_rot.w < 0.0):
@@ -64,20 +66,79 @@ class DualQuaternion(object):
 
     @property
     def rotation(self):
+        """Return rotation matrix of this dual quaternion
+
+        Returns
+        -------
+        dq.qr.rotation : np.ndarray
+            3x3 rotation matrix
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.dual_quaternion.rotation
+        array([[1., 0., 0.],
+               [0., 1., 0.],
+               [0., 0., 1.]])
+        >>> c.rotate(np.pi / 2.0, 'y')
+        >>> c.dual_quaternion.rotation
+        array([[ 2.22044605e-16,  0.00000000e+00,  1.00000000e+00],
+               [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
+               [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
+        """
         dq = self.normalized
         return dq.qr.rotation
 
     @property
     def quaternion(self):
+        """Return this dual quaternion's qr (rotation)
+
+        Returns
+        -------
+        dq.qr : skrobot.quaternion.Quaternion
+            rotation quaternion
+        """
         dq = self.normalized
         return dq.qr
 
     @property
     def dq(self):
+        """Return flatten vector of this dual quaternion
+
+        Returns
+        -------
+        np.concatenate([self.qr.q, self.qd.q]) : np.ndarray
+            (1x8) vector of this dual quaternion
+
+        Examples
+        --------
+        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> dq = DualQuaternion()
+        >>> dq.dq
+        array([1., 0., 0., 0., 0., 0., 0., 0.])
+        """
         return np.concatenate([self.qr.q, self.qd.q])
 
     @dq.setter
     def dq(self, dq):
+        """Setter of dq
+
+        Parameters
+        ----------
+        dq : np.ndarray
+            (1x8) vector
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> dq = DualQuaternion()
+        >>> dq.dq
+        array([1., 0., 0., 0., 0., 0., 0., 0.])
+        >>> dq.dq = np.array([1., 1., 1., 1., 1., 1., 1., 1.])
+        """
         self.qr = dq[0:4]
         self.qd = dq[4:8]
 
@@ -94,6 +155,13 @@ class DualQuaternion(object):
 
     @qr.setter
     def qr(self, qr_wxyz):
+        """Setter of qr
+
+        Parameters
+        ----------
+        qr_wxyz : list or np.ndarray of skrobot.quaternion.Quatrnion
+            new qr
+        """
         if isinstance(qr_wxyz, Quaternion):
             self._qr = qr_wxyz
         else:
@@ -101,17 +169,24 @@ class DualQuaternion(object):
 
     @property
     def qd(self):
-        """Return translation
+        """Return translation quaternion
 
         Returns
         -------
-        self._qd : np.narray
-            [w, x, y, z] order
+        self._qd : skrobot.quaternion.Quaternion
+            quaternion indicating translation
         """
         return self._qd
 
     @qd.setter
     def qd(self, qd_wxyz):
+        """Setter of qd
+
+        Parameters
+        ----------
+        qd_wxyz : skrobot.quaternion.Quaternion or list or np.ndarray
+            new qd
+        """
         if isinstance(qd_wxyz, Quaternion):
             self._qd = qd_wxyz
         else:
@@ -123,17 +198,47 @@ class DualQuaternion(object):
 
     @property
     def conjugate(self):
+        """Return conjugate of this dual quaternion
+
+        Returns
+        -------
+        DualQuaternion : skrobot.dual_quaternion.DualQuaternion
+            new DualQuaternion class has this dual quaternion's conjugate
+        """
         qr_c = self._qr.conjugate
         qd_c = self._qd.conjugate
         return DualQuaternion(qr_c, qd_c)
 
     @property
     def norm(self):
+        """Return pair of norm of this dual quaternion
+
+        Returns
+        -------
+        (qr_norm, qd_norm) : tuple of float
+            qr and qd's norm
+
+        Examples
+        --------
+        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> dq = DualQuaternion()
+        >>> dq.norm
+        (1.0, 0.0)
+        """
         qr_norm = self.qr.norm
-        qd_norm = np.dot(self.qr, self.qd) / qr_norm
+        qd_norm = np.dot(self.qr.q, self.qd.q) / qr_norm
         return (qr_norm, qd_norm)
 
     def normalize(self):
+        """Normalize this dual quaternion
+
+        Note that this function changes property.
+
+        Returns
+        -------
+        self : skrobot.dual_quaternion.DualQuaternion
+            return self
+        """
         real_norm = self.qr.norm
         self.qr = self.qr / real_norm
         self.qd = self.qd / real_norm
@@ -141,6 +246,13 @@ class DualQuaternion(object):
 
     @property
     def normalized(self):
+        """Return normalized this dual quaternion
+
+        Returns
+        -------
+        DualQuaternion(qr, qd, True) : skrobot.dual_quaternion.DualQuaternion
+            normalized dual quaternion
+        """
         real_norm = self.qr.norm
         qr = self.qr / real_norm
         qd = self.qd / real_norm
@@ -148,7 +260,13 @@ class DualQuaternion(object):
 
     @property
     def scalar(self):
-        """The scalar part of the dual quaternion."""
+        """The scalar part of the dual quaternion.
+
+        Returns
+        -------
+        scalar : float
+            scalar
+        """
         scalar = (self + self.conjugate) * 0.5
         return scalar
 
@@ -164,6 +282,16 @@ class DualQuaternion(object):
 
     @staticmethod
     def interpolate(dq0, dq1, t):
+        """Return interpolated dual quaternion
+
+        Parameters
+        ----------
+        dq0 : skrobot.dual_quaternion.DualQuaternion
+        dq1 : skrobot.dual_quaternion.DualQuaternion
+            dual quaternion
+        t : float
+            ratio of interpolation. Must be 0 <= t <= 1.0.
+        """
         if not 0 <= t <= 1:
             raise ValueError('Interpolation step must be between 0 and 1, '
                              'but gives {}'.format(t))
@@ -179,10 +307,26 @@ class DualQuaternion(object):
 
     @property
     def axis(self):
+        """Return axis of this dual quaternion
+
+        Returns
+        -------
+        self.qr.axis : np.ndarray
+            this dual quaternion's axis.
+            See See skrobot.quaternion.Quaternion.axis.
+        """
         return self.qr.axis
 
     @property
     def angle(self):
+        """Return rotation angle of this dual quaternion
+
+        Returns
+        -------
+        self.qr.angle : float
+            this dual quaternion's rotation angle with respect to self.axis.
+            See skrobot.quaternion.Quaternion.angle.
+        """
         return self.qr.angle
 
     def screw_axis(self):
@@ -191,10 +335,14 @@ class DualQuaternion(object):
         Calculates rotation, translation and screw axis from dual
         quaternion.
 
-        Returns:
-        screw_axis (~numpy.ndarray) : screw axis of this dual quaternion
-        theta (~float) : radian
-        translation (~float) :
+        Returns
+        -------
+        screw_axis : np.ndarray
+            screw axis of this dual quaternion.
+        theta : float
+            rotation angle in radian.
+        translation : float
+            translation
         """
         qr_w = self.qr.w
         theta = 2.0 * np.arccos(qr_w)
@@ -215,6 +363,13 @@ class DualQuaternion(object):
 
     @property
     def inverse(self):
+        """Return inverse of this dual quaternion
+
+        Returns
+        -------
+        dq : skrobot.dual_quaternion.DualQuaternion
+            new DualQuaternion class has inverse of this dual quaternion
+        """
         if self.norm[0] < 1.0e-8:
             return None
         inv_qr = self.qr.inverse
@@ -222,7 +377,37 @@ class DualQuaternion(object):
             inv_qr, - inv_qr * self.qd * inv_qr)
 
     def T(self):
-        """Return 4x4 transformation matrix."""
+        """Return 4x4 homogeneous transformation matrix.
+
+        Returns
+        -------
+        matrix : np.ndarray
+            homogeneous transformation matrix shape of (4, 4)
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import Coordinates
+        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> dq = DualQuaternion()
+        >>> dq.T()
+        array([[1., 0., 0., 0.],
+               [0., 1., 0., 0.],
+               [0., 0., 1., 0.],
+               [0., 0., 0., 1.]])
+        >>> dq = Coordinates().rotate(pi / 2.0, 'y').\
+        ...                    translate((0.1, 0.2, 0.3)).\
+        ...                    dual_quaternion
+        >>> dq.T()
+        array([[ 2.22044605e-16,  0.00000000e+00,  1.00000000e+00,
+                 3.00000000e-01],
+               [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00,
+                 2.00000000e-01],
+               [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16,
+                -1.00000000e-01],
+               [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,
+                 1.00000000e+00]])
+        """
         matrix = np.zeros((4, 4), dtype=np.float64)
         matrix[3, 3] = 1.0
         matrix[:3, :3] = self.rotation
@@ -260,16 +445,47 @@ class DualQuaternion(object):
             repr(self.qr), repr(self.qd))
 
     def difference_position(self, other_dq):
+        """Return difference position
+
+        Parameters
+        ----------
+        other_dq : skrobot.dual_quaternion.DualQuaternion
+            dual quaternion
+
+        Returns
+        -------
+        dif_pos : float
+            difference position's norm
+        """
         trans = self.qd * self.qr.conjugate
         other_trans = other_dq.qd * other_dq.qr.conjugate
         return 2.0 * np.linalg.norm(trans.xyz - other_trans.xyz, ord=2)
 
     def difference_rotation(self, other_dq):
+        """Return difference rotation distance
+
+        Parameters
+        ----------
+        other_dq : skrobot.dual_quaternion.DualQuaternion
+            dual quaternion
+
+        Returns
+        -------
+        dif_rot : float
+            angle distance in radian.
+        """
         return quaternion_absolute_distance(
             self.qr.q,
             other_dq.qr.q)
 
     def pose(self):
+        """Return [x, y, z, wx, wy, wz, wq] elements.
+
+        Returns
+        -------
+        pose : np.ndarray
+            [x, y, z, wx, wy, wz, wq] pose
+        """
         self.normalize()
         dq = self
 
