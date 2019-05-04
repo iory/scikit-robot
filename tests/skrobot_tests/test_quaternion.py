@@ -108,7 +108,7 @@ class TestQuaternion(unittest.TestCase):
     def test_inverse(self):
         q = Quaternion()
         testing.assert_almost_equal(
-            q.inverse().q,
+            q.inverse.q,
             [1.0, 0.0, 0.0, 0.0])
 
     def test_T(self):

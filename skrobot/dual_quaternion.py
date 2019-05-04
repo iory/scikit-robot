@@ -213,10 +213,11 @@ class DualQuaternion(object):
                 screw_axis = np.zeros(3, dtype=np.float64)
         return screw_axis, theta, translation
 
+    @property
     def inverse(self):
         if self.norm[0] < 1.0e-8:
             return None
-        inv_qr = self.qr.inverse()
+        inv_qr = self.qr.inverse
         return DualQuaternion(
             inv_qr, - inv_qr * self.qd * inv_qr)
 
