@@ -288,11 +288,40 @@ class Coordinates(object):
         Vector v given in the local coords is converted to world
         representation.
 
+        Parameters
+        ----------
+        v : numpy.ndarray
+            3d vector.
+            We can take batch of vector like (batch_size, 3)
+        Returns
+        -------
+        transformed_point : numpy.ndarray
+            transformed point
         """
+        v = np.array(v, dtype=np.float64)
+        if v.ndim == 2:
+            return (np.matmul(self.rotation, v.T) +
+                    self.translation.reshape(3, -1)).T
         return np.matmul(self.rotation, v) + self.translation
 
     def inverse_transform_vector(self, vec):
-        """Transform vector in world coordinates to local coordinates"""
+        """Transform vector in world coordinates to local coordinates
+
+        Parameters
+        ----------
+        vec : numpy.ndarray
+            3d vector.
+            We can take batch of vector like (batch_size, 3)
+        Returns
+        -------
+        transformed_point : numpy.ndarray
+            transformed point
+        """
+        vec = np.array(vec, dtype=np.float64)
+        if vec.ndim == 2:
+            return (np.matmul(self.rotation.T, vec.T) -
+                    np.matmul(
+                        self.rotation.T, self.translation).reshape(3, -1)).T
         return np.matmul(self.rotation.T, vec) - \
             np.matmul(self.rotation.T, self.translation)
 

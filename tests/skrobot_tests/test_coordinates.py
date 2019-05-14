@@ -68,6 +68,17 @@ class TestCoordinates(unittest.TestCase):
             coord.transform_vector([-1, -1, -1]),
             [0, 0, 0])
 
+        # batch transform
+        coord = make_coords(pos=[1, 1, 1])
+        coord.rotate(pi, 'z')
+        testing.assert_almost_equal(
+            coord.transform_vector(((0, 1, 2),
+                                    (2, 3, 4),
+                                    (5, 6, 7))),
+            ((1, 0, 3),
+             (-1, -2, 5),
+             (-4, -5, 8)))
+
     def test_inverse_transform_vector(self):
         pos = [0.13264493, 0.05263172, 0.93042636]
         q = [-0.20692513, 0.50841015, 0.82812527, 0.1136206]
@@ -86,6 +97,17 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             coord.inverse_transform_vector([-1, -1, -1]),
             [-2, -2, -2])
+
+        # batch transform
+        coord = make_coords(pos=(1, 1, 1))
+        coord.rotate(pi, 'z')
+        testing.assert_almost_equal(
+            coord.inverse_transform_vector(((0, 1, 2),
+                                            (2, 3, 4),
+                                            (5, 6, 7))),
+            ((1, 0, 1),
+             (-1, -2, 3),
+             (-4, -5, 6)))
 
     def test_transformation(self):
         coord_a = make_coords(pos=[0, 0, 1])
