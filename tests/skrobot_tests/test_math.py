@@ -25,6 +25,7 @@ from skrobot.math import random_rotation
 from skrobot.math import random_translation
 from skrobot.math import rodrigues
 from skrobot.math import rotate_matrix
+from skrobot.math import rotate_vector
 from skrobot.math import rotation_angle
 from skrobot.math import rotation_distance
 from skrobot.math import rotation_matrix
@@ -144,6 +145,17 @@ class TestMath(unittest.TestCase):
         rec_mat = rodrigues(axis)
         testing.assert_array_almost_equal(
             rpy_angle(rec_mat)[0], np.array([0.0, 0.0, -np.pi], 'f'))
+
+    def test_rotate_vector(self):
+        testing.assert_array_almost_equal(
+            rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0]),
+            (1, 0, 0))
+        testing.assert_array_almost_equal(
+            rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0]),
+            (0.8660254, 0, -0.5))
+        testing.assert_array_almost_equal(
+            rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1]),
+            (0.8660254, 0.5, 0))
 
     def test_rotation_angle(self):
         rot = rpy_matrix(-1.220e-08, -5.195e-09, 1.333e-09)
