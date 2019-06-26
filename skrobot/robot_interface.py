@@ -18,6 +18,22 @@ import trajectory_msgs.msg
 logger = getLogger(__name__)
 
 
+def _flatten(xlst):
+    """Flatten list.
+
+    Parameters
+    ----------
+    xlst : list of object
+        [[c1], [c2], ..., [cn]]
+
+    Returns
+    -------
+    flatten list : list of object
+        [c1, c2, ..., cn]
+    """
+    return reduce(lambda x, y: x + y, xlst)
+
+
 class RobotInterface(object):
     """RobotInterface is class for interacting real robot.
 
@@ -98,6 +114,38 @@ class RobotInterface(object):
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
+
+    def _check_time(self, time, fastest_time):
+        """Check and Return send angle vector time
+
+        Parameters
+        ----------
+        time : float or str or None
+            time of send angle vector.
+            If time is 'fast' and 'fastest',
+            set fastest_time.
+        fastest_time : float
+            fastest time
+
+        Returns
+        -------
+        time : float
+            time of send angle vector.
+        """
+        if time in ['fast', 'fastest']:
+            # Fastest time Mode
+            time = fastest_time
+        elif isinstance(time, Number):
+            # Normal Number disgnated Mode
+            if time < fastest_time:
+                time = fastest_time
+        elif time is None:
+            # Safe Mode (Speed will be 5 * fastest_time)
+            time = 5.0 * fastest_time
+        else:
+            raise ValueError(
+                'time is invalid type. {}'.format(time))
+        return time
 
     def wait_until_update_all_joints(self, tgt_tm):
         """TODO"""
@@ -260,30 +308,40 @@ class RobotInterface(object):
                     joint.name for joint in self.robot.joint_list])]
 
     def sub_angle_vector(self, v0, v1):
+        """Return subtraction of angle vector
+
+        Parameters
+        ----------
+        v0 : numpy.ndarray
+            angle vector
+        v1 : numpy.ndarray
+            angle vector
+
+        Returns
+        -------
+        ret : numpy.ndarray
+            Diff of given angle_vector v0 and v1.
+        """
         ret = v0 - v1
         joint_list = self.robot.joint_list
-        i = 0
-        while joint_list:
-            joint = joint_list[0]
-            joint_list = joint_list[1:]
-            if np.isinf(joint.min_angle()) and \
-               np.isinf(joint.max_angle()):
+        for i in range(len(v0)):
+            joint = joint_list[i]
+            if np.isinf(joint.min_angle) and \
+               np.isinf(joint.max_angle):
                 if ret[i] > 180.0:
                     ret[i] = ret[i] - 360.0
                 elif ret[i] < -180.0:
                     ret[i] = ret[i] + 360.0
-            i += 1
         return ret
 
     def angle_vector(self,
-                     av,
+                     av=None,
                      time=None,
                      controller_type=None,
                      start_time=0.0,
                      scale=1.0,
                      min_time=1.0,
-                     end_coords_interpolation=None,
-                     end_coords_interpolation_steps=10):
+                     velocities=None):
         """Send joint angle to robot
 
         Send joint angle to robot. this method retuns immediately, so use
@@ -307,20 +365,15 @@ class RobotInterface(object):
             if time is not specified, it will use 1/scale of the fastest speed.
         min_time : float
             minimum time for time to goal
-        end_coords_interpolation :
-            set True if you want to move robot in cartesian space interpolation
-        end_coords_interpolation_steps : int
-            number of divisions when interpolating end-coords
 
         Returns
         -------
         av : np.ndarray
             angle-vector of real robots
         """
-        if end_coords_interpolation is not None:
-            return self.angle_vector_sequence(
-                [av], [time], controller_type,
-                start_time, scale, min_time, end_coords_interpolation=True)
+        if av is None:
+            self.update_robot_state(wait_until_update=True)
+            return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
         if not (controller_type in self.controller_table):
@@ -336,36 +389,28 @@ class RobotInterface(object):
             scale,
             min_time,
             controller_type)
-        if time in ['fast', 'fastest']:
-            # Fastest time Mode
-            time = fastest_time
-        elif isinstance(time, Number):
-            # Normal Number disgnated Mode
-            if time < fastest_time:
-                time = fastest_time
-        elif time is None:
-            # Safe Mode (Speed will be 5 * fastest_time)
-            time = 5.0 * fastest_time
-        else:
-            raise ValueError(
-                'angle_vector time is invalid args: {}'.format(time))
+        time = self._check_time(time, fastest_time)
 
         # for simulation mode
         if self.is_simulation_mode():
             if av:
                 self.angle_vector_simulation(av, time, controller_type)
         self.robot.angle_vector(av)
-
         cacts = self.controller_table[controller_type]
 
-        for action, controller_param in zip(cacts, self.default_controller()):
+        if velocities is not None:
+            angle_velocities = velocities
+        else:
             angle_velocities = np.zeros_like(av)
-            duration = time / 1000.0
+        duration = time / 1000.0
+        traj_points = [(av, angle_velocities, duration), ]
+        self.traj_points = traj_points
+        for action, controller_param in zip(cacts, self.default_controller()):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
                 start_time,
-                [[av, angle_velocities, duration]])
+                traj_points)
         return av
 
     def potentio_vector(self):
@@ -378,7 +423,7 @@ class RobotInterface(object):
             joint_names,
             start_time,
             traj_points):
-        """TODO.
+        """Send angle vector to ROS controller
 
         Parameters
         ----------
@@ -436,11 +481,9 @@ class RobotInterface(object):
                               avs,
                               times=[3000],
                               controller_type=None,
-                              start_time=0.1,
+                              start_time=0.0,
                               scale=1,
-                              min_time=0.0,
-                              end_coords_interpolation=None,
-                              end_coords_interpolation_steps=10):
+                              min_time=0.0):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -449,9 +492,11 @@ class RobotInterface(object):
 
         Parameters
         ----------
-        avs : list [av0, av1, ..., avn]
-            sequence of joint angles(float-vector) [deg]
-        times : list [list tm0 tm1 ... tmn]
+        avs : list or numpy.ndarray
+            [av0, av1, ..., avn]
+            sequence of joint angles in [deg]
+        times : list of float or float
+            [list tm0 tm1 ... tmn]
             sequence of duration(float) from previous angle-vector
             to next goal [msec].
             if times is atom, then use
@@ -471,20 +516,62 @@ class RobotInterface(object):
             fastest speed
         min_time : float
             minimum time for time to goal
-        end_coords_interpolation : TODO
-            set t if you want to move robot in cartesian space interpolation
-        end_coords_interpolation_steps : int
-            number of divisions when interpolating end-coords
+
+        Returns
+        -------
+        avs : list of numpy.ndarray
+            list of angle vector.
         """
         if controller_type is None:
-            # use default controller-type if ctype is nil
+            # use default self.controller_type if controller_type is None
             controller_type = self.controller_type
 
         if not (controller_type in self.controller_table):
-            # (warn ";; controller-type: ~A not found" ctype)
+            rospy.logwarn('controller_type: {} not found'.
+                          format(controller_type))
             return False
 
-        self.state.potentio_vector()
+        if not isinstance(times, list):
+            times = len(avs) * [times]
+
+        prev_av = self.angle_vector()
+        traj_points = []
+        total_steps = len(avs)
+        next_start_time = start_time
+        for i_step in range(total_steps):
+            av = avs[i_step]
+            fastest_time = 1000 * self.angle_vector_duration(
+                prev_av, av, scale, min_time, controller_type)
+            time = times[i_step]
+            time = self._check_time(time, fastest_time)
+
+            vel = np.zeros_like(prev_av)
+            if i_step != total_steps - 1:
+                next_time = times[i_step + 1]
+                next_av = avs[i_step + 1]
+                fastest_next_tiem = 1000 * self.angle_vector_duration(
+                    av, next_av, scale, min_time, controller_type)
+                next_time = self._check_time(next_time, fastest_next_tiem)
+                if time > 0.0 and next_time > 0.0:
+                    v0 = self.sub_angle_vector(av, prev_av)
+                    v1 = self.sub_angle_vector(next_av, av)
+                    vel = np.zeros_like(prev_av)
+                    indices = v0 * v1 >= 0.0
+                    vel[indices] = 0.5 * ((1000.0 / time) * v0[indices] +
+                                          (1000.0 / next_time) * v1[indices])
+            traj_points.append((av, vel, (time + next_start_time) / 1000.0))
+            next_start_time = time
+            prev_av = av
+        self.traj_points = traj_points
+
+        cacts = self.controller_table[controller_type]
+        for action, controller_param in zip(cacts, self.default_controller()):
+            self.send_ros_controller(
+                action,
+                controller_param['joint_names'],
+                start_time,
+                traj_points)
+        return avs
 
     def wait_interpolation(self, controller_type=None, timeout=0):
         """Wait until last sent motion is finished.
@@ -533,22 +620,8 @@ class RobotInterface(object):
         controller_type : None or string
             type of controller
         """
-
-        def flatten(xlst):
-            """Flatten list.
-
-            Parameters
-            ----------
-            xlst : list ([[c1], [c2], ..., [cn]])
-
-            Returns
-            -------
-            flatten list : list [c1, c2, ..., cn]
-            """
-            return reduce(lambda x, y: x + y, xlst)
-
         unordered_joint_names = set(
-            flatten([c['joint_names'] for c in self.default_controller()]))
+            _flatten([c['joint_names'] for c in self.default_controller()]))
         joint_list = self.robot.joint_list
         diff_avs = end - start
         time_list = []
