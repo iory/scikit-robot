@@ -341,8 +341,6 @@ class RobotInterface(object):
                      start_time=0.0,
                      scale=1.0,
                      min_time=1.0,
-                     end_coords_interpolation=None,
-                     end_coords_interpolation_steps=10,
                      velocities=None):
         """Send joint angle to robot
 
@@ -367,10 +365,6 @@ class RobotInterface(object):
             if time is not specified, it will use 1/scale of the fastest speed.
         min_time : float
             minimum time for time to goal
-        end_coords_interpolation :
-            set True if you want to move robot in cartesian space interpolation
-        end_coords_interpolation_steps : int
-            number of divisions when interpolating end-coords
 
         Returns
         -------
@@ -380,10 +374,6 @@ class RobotInterface(object):
         if av is None:
             self.update_robot_state(wait_until_update=True)
             return self.robot.angle_vector()
-        if end_coords_interpolation is not None:
-            return self.angle_vector_sequence(
-                [av], [time], controller_type,
-                start_time, scale, min_time, end_coords_interpolation=True)
         if controller_type is None:
             controller_type = self.controller_type
         if not (controller_type in self.controller_table):
@@ -493,9 +483,7 @@ class RobotInterface(object):
                               controller_type=None,
                               start_time=0.0,
                               scale=1,
-                              min_time=0.0,
-                              end_coords_interpolation=None,
-                              end_coords_interpolation_steps=10):
+                              min_time=0.0):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -528,10 +516,6 @@ class RobotInterface(object):
             fastest speed
         min_time : float
             minimum time for time to goal
-        end_coords_interpolation : TODO
-            set t if you want to move robot in cartesian space interpolation
-        end_coords_interpolation_steps : int
-            number of divisions when interpolating end-coords
 
         Returns
         -------
