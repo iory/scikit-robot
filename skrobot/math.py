@@ -363,6 +363,41 @@ def rotation_matrix(theta, axis):
                      [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
 
 
+def rotate_vector(vec, theta, axis):
+    """Rotate vector.
+
+    Rotate vec with respect to axis.
+
+    Parameters
+    ----------
+    vec : list or numpy.ndarray
+        target vector
+    theta : float
+        rotation angle
+    axis : list or numpy.ndarray or string.
+        axis of rotation.
+
+    Returns
+    -------
+    rotated_vec : numpy.ndarray
+        rotated vector.
+
+    Examples
+    --------
+    >>> from numpy import pi
+    >>> from skrobot.math import rotate_vector
+    >>> rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0])
+    array([1., 0., 0.])
+    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0])
+    array([ 0.8660254,  0.       , -0.5      ])
+    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1])
+    array([0.8660254, 0.5      , 0.       ])
+    """
+    rot = rotation_matrix(theta, axis)
+    rotated_vec = transform(rot, vec)
+    return rotated_vec
+
+
 def rotate_matrix(matrix, theta, axis, world=None):
     if world is False or world is None:
         return np.dot(matrix, rotation_matrix(theta, axis))
