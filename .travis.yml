@@ -7,10 +7,16 @@ python:
   - '3.6'
   - '2.7'
 
+addons:
+  apt:
+    update: true
+    packages:
+      - freeglut3-dev
+
 install:
   - pip install --upgrade pip setuptools wheel
   - pip install Cython
-  - python setup.py develop
+  - pip install .
 
 script:
   - pip install hacking pytest
