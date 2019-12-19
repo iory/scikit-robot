@@ -16,4 +16,5 @@ from skrobot import quaternion  # NOQA
 from skrobot import robot_model  # NOQA
 from skrobot import robot_models  # NOQA
 from skrobot import symbol_math  # NOQA
+from skrobot import visualization  # NOQA
 from skrobot import utils  # NOQA
