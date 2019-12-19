@@ -29,7 +29,7 @@ install_requires = [
     'ordered_set',
     'pillow',
     'pybullet>=2.1.9',
-    'pycollada',  # required for robot model using collada
+    'pycollada!=0.7',  # required for robot model using collada
     'python-fcl',  # for collision check in trimesh module
     'pyyaml',
     'quadprog',
