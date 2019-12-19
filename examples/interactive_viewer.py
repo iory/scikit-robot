@@ -32,7 +32,7 @@ def main():
     )
     args = parser.parse_args()
 
-    robot = skrobot.robot_models.Kuka()
+    robot = skrobot.models.Kuka()
 
     scene = trimesh.Scene()
 
