@@ -17,8 +17,8 @@ class TestRobotModel(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.fetch = skrobot.robot_models.Fetch()
-        cls.kuka = skrobot.robot_models.Kuka()
+        cls.fetch = skrobot.models.Fetch()
+        cls.kuka = skrobot.models.Kuka()
 
     def test_init(self):
         fetch = self.fetch
