@@ -39,11 +39,11 @@ def main():
     args = parser.parse_args()
 
     if args.robot == 'kuka':
-        robot = skrobot.robot_models.Kuka()
+        robot = skrobot.models.Kuka()
     elif args.robot == 'fetch':
-        robot = skrobot.robot_models.Fetch()
+        robot = skrobot.models.Fetch()
     elif args.robot == 'pr2':
-        robot = skrobot.robot_models.PR2()
+        robot = skrobot.models.PR2()
     else:
         raise ValueError('unsupported robot')
 
