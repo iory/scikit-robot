@@ -11,7 +11,7 @@ from skrobot.utils.download import cached_gdown_download
 
 pr2_description_url = 'https://drive.google.com/uc?id='\
     '1zy4C665o6efPko7eMk4XBdHbvgFfdC-6'
-pr2_description_md5sum = '892958fddcd58147869b17a78e06a172'
+pr2_description_md5sum = 'e4fb915accdb3568a5524c92e9c35c9a'
 
 
 class PR2(RobotModel):
