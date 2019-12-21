@@ -1,5 +1,7 @@
 # flake8: noqa
 
+from skrobot.models.primitives import Box
+
 from skrobot.models.fetch import Fetch
 from skrobot.models.kuka import Kuka
 from skrobot.models.pr2 import PR2
