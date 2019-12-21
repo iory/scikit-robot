@@ -8,19 +8,6 @@ import trimesh.viewer
 import skrobot
 
 
-class Box(skrobot.robot_model.Link):
-
-    def __init__(self, extents, vertex_colors=None, face_colors=None,
-                 *args, **kwargs):
-        super(Box, self).__init__(*args, **kwargs)
-        self._extents = extents
-        self._visual_mesh = trimesh.creation.box(
-            extents=extents,
-            vertex_colors=vertex_colors,
-            face_colors=face_colors,
-        )
-
-
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -49,7 +36,9 @@ def main():
 
     viewer.set_camera(angles=[np.deg2rad(45), 0, 0], distance=4)
 
-    box = Box(extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0))
+    box = skrobot.models.Box(
+        extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0)
+    )
     box.translate((0.5, 0, 0.3))
     viewer.add(box)
 
