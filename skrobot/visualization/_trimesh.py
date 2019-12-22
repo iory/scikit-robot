@@ -1,8 +1,6 @@
 import threading
-import warnings
 
 import pyglet
-from pyglet import gl
 import trimesh.viewer
 
 from .. import robot_model as robot_model_module
