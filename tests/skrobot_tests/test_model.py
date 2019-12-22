@@ -6,8 +6,8 @@ import trimesh
 
 import skrobot
 from skrobot.coordinates import make_coords
-from skrobot.robot_model import joint_angle_limit_weight
-from skrobot.robot_model import RotationalJoint
+from skrobot.model import joint_angle_limit_weight
+from skrobot.model import RotationalJoint
 
 
 class TestRobotModel(unittest.TestCase):
