@@ -4,8 +4,8 @@ import numpy as np
 
 from skrobot.math import matrix2quaternion
 from skrobot.math import quaternion2rpy
-from skrobot.robot_model import LinearJoint
-from skrobot.robot_model import RotationalJoint
+from skrobot.model import LinearJoint
+from skrobot.model import RotationalJoint
 
 
 _available = False

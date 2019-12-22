@@ -3,7 +3,7 @@ import threading
 import pyglet
 import trimesh.viewer
 
-from .. import robot_model as robot_model_module
+from .. import model as model_module
 
 
 class SceneViewer(trimesh.viewer.SceneViewer):
@@ -49,7 +49,7 @@ class SceneViewer(trimesh.viewer.SceneViewer):
 
             # apply latest angle-vector
             for link in self._links:
-                if isinstance(link, robot_model_module.Link):
+                if isinstance(link, model_module.Link):
                     link_list = [link]
                 else:
                     link_list = link.link_list
@@ -82,9 +82,9 @@ class SceneViewer(trimesh.viewer.SceneViewer):
         return super(SceneViewer, self).on_resize(*args, **kwargs)
 
     def add(self, link):
-        if isinstance(link, robot_model_module.Link):
+        if isinstance(link, model_module.Link):
             link_list = [link]
-        elif isinstance(link, robot_model_module.CascadedLink):
+        elif isinstance(link, model_module.CascadedLink):
             link_list = link.link_list
         else:
             raise TypeError('link must be Link or CascadedLink')
