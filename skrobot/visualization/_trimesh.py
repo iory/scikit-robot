@@ -10,35 +10,31 @@ from .. import robot_model as robot_model_module
 
 class SceneViewer(trimesh.viewer.SceneViewer):
 
-    def __init__(self, *args, **kwargs):
-        if len(args) > 6:
-            args = list(args)
-            if args[5] is False:
-                warnings.warn('start_loop must be always True')
-            args[5] = True  # start_loop
-            args = tuple(args)
-        else:
-            if 'start_loop' in kwargs and kwargs['start_loop'] is False:
-                warnings.warn('start_loop must be always True')
-            kwargs['start_loop'] = True
-
+    def __init__(self, resolution=None):
         self._links = []
 
         self._redraw = True
-        self._camera_transform = None
         pyglet.clock.schedule_interval(self.on_update, 1 / 30)
 
-        self._args = args
-        self._kwargs = kwargs
+        self.scene = trimesh.Scene()
+        self._kwargs = dict(
+            scene=self.scene,
+            resolution=resolution,
+            offset_lines=False,
+            start_loop=False,
+        )
 
         self.lock = threading.Lock()
+
+    def run(self):
         self.thread = threading.Thread(target=self._init_and_start_app)
-        # Terminate this thread when main thread exit.
-        self.thread.daemon = True
+        self.thread.daemon = True  # terminate when main thread exit
         self.thread.start()
 
     def _init_and_start_app(self):
-        super(SceneViewer, self).__init__(*self._args, **self._kwargs)
+        with self.lock:
+            super(SceneViewer, self).__init__(**self._kwargs)
+        pyglet.app.run()
 
     def redraw(self):
         self._redraw = True
@@ -46,20 +42,12 @@ class SceneViewer(trimesh.viewer.SceneViewer):
     def on_update(self, dt):
         self.on_draw()
 
-    def reset_view(self, flags=None):
-        with self.lock:
-            super(SceneViewer, self).reset_view(flags=flags)
-
     def on_draw(self):
         if not self._redraw:
             return
 
         with self.lock:
-            if self._camera_transform is not None:
-                camera_transform = self._camera_transform
-                self._camera_transform = None
-                self.scene.camera.transform = camera_transform
-                self.view['ball']._n_pose = camera_transform
+            self._update_vertex_list()
 
             # apply latest angle-vector
             for link in self._links:
@@ -95,33 +83,6 @@ class SceneViewer(trimesh.viewer.SceneViewer):
         self._redraw = True
         return super(SceneViewer, self).on_resize(*args, **kwargs)
 
-    def on_close(self):
-        return super(SceneViewer, self).on_close()
-
-    def _gl_update_perspective(self):
-        try:
-            # for high DPI screens viewport size
-            # will be different then the passed size
-            width, height = self.get_viewport_size()
-        except BaseException:
-            # older versions of pyglet may not have this
-            pass
-
-        # set the new viewport size
-        gl.glViewport(0, 0, width, height)
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glLoadIdentity()
-
-        # get field of view from camera
-        fovY = self.scene.camera.fov[1]
-        gl.gluPerspective(
-            fovY,
-            width / float(height),
-            .01,
-            self.scene.scale * 5.0
-        )
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-
     def add(self, link):
         if isinstance(link, robot_model_module.Link):
             link_list = [link]
@@ -144,4 +105,3 @@ class SceneViewer(trimesh.viewer.SceneViewer):
     def set_camera(self, *args, **kwargs):
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
-            self._camera_transform = self.scene.camera_transform

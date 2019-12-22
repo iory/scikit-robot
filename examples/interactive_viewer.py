@@ -21,20 +21,19 @@ def main():
 
     robot = skrobot.models.Kuka()
 
-    scene = trimesh.Scene()
+    viewer = skrobot.visualization.trimesh.SceneViewer(resolution=(640, 480))
 
     # base plane
-    geom = trimesh.creation.box((2, 2, 0.01))
-    geom.visual.face_colors = (0.75, 0.75, 0.75)
-    scene.add_geometry(geom)
-
-    viewer = skrobot.visualization.trimesh.SceneViewer(
-        scene, resolution=(1280, 960)
+    plane = skrobot.models.Box(
+        extents=(2, 2, 0.01), face_colors=(0.75, 0.75, 0.75)
     )
+    viewer.add(plane)
 
     viewer.add(robot)
 
     viewer.set_camera(angles=[np.deg2rad(45), 0, 0], distance=4)
+
+    viewer.run()
 
     box = skrobot.models.Box(
         extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0)
