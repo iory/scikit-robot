@@ -16,7 +16,7 @@ addons:
 install:
   - pip install --upgrade pip setuptools wheel
   - pip install Cython
-  - pip install .
+  - pip install .[all]
 
 script:
   - pip install hacking pytest
