@@ -2,8 +2,6 @@ import argparse
 import time
 
 import numpy as np
-import trimesh
-import trimesh.viewer
 
 import skrobot
 
