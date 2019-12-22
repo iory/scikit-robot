@@ -13,7 +13,7 @@ from skrobot import interpolator
 from skrobot import math
 from skrobot import optimizer
 from skrobot import optimizers
-from skrobot.pybullet_robot_interface import PybulletRobotInterface
+from skrobot import interfaces
 from skrobot import quaternion
 from skrobot import model
 from skrobot import models

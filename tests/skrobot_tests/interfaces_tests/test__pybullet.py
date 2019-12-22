@@ -1,7 +1,7 @@
 import unittest
 
 import skrobot
-from skrobot.pybullet_robot_interface import PybulletRobotInterface
+from skrobot.interfaces._pybullet import PybulletRobotInterface
 
 
 class TestPybulletRobotInterface(unittest.TestCase):
