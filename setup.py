@@ -28,7 +28,6 @@ install_requires = [
     'numpy>=1.9.0',
     'ordered_set',
     'pillow',
-    'pybullet>=2.1.9',
     'pycollada!=0.7',  # required for robot model using collada
     'pyglet',
     'python-fcl',  # for collision check in trimesh module
@@ -53,4 +52,7 @@ setup(
     zip_safe=False,
     setup_requires=setup_requires,
     install_requires=install_requires,
+    extras_require={
+        'all': ['pybullet>=2.1.9'],
+    },
 )

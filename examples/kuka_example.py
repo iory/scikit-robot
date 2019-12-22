@@ -9,7 +9,7 @@ import skrobot
 def main():
     # initialize robot
     robot = skrobot.models.Kuka()
-    interface = skrobot.pybullet_robot_interface.PybulletRobotInterface(robot)
+    interface = skrobot.interfaces.PybulletRobotInterface(robot)
     pybullet.resetDebugVisualizerCamera(
         cameraDistance=1.5,
         cameraYaw=45,
