@@ -1,7 +1,7 @@
 from cached_property import cached_property
 from skrobot.coordinates import CascadedCoords
 from skrobot.data import fetch_urdfpath
-from skrobot.robot_model import RobotModel
+from skrobot.model import RobotModel
 
 
 class Fetch(RobotModel):

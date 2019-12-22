@@ -5,7 +5,7 @@ from cached_property import cached_property
 import numpy as np
 
 from skrobot.coordinates import CascadedCoords
-from skrobot.robot_model import RobotModel
+from skrobot.model import RobotModel
 from skrobot.utils.download import _default_cache_dir
 from skrobot.utils.download import cached_gdown_download
 

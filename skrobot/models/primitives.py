@@ -3,10 +3,10 @@ import uuid
 import numpy as np
 import trimesh
 
-from skrobot import robot_model as robot_model_module
+from skrobot import model as model_module
 
 
-class Box(robot_model_module.Link):
+class Box(model_module.Link):
 
     def __init__(self, extents, vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
