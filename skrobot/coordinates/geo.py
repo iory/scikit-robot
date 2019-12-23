@@ -1,10 +1,10 @@
 import numpy as np
 
 from skrobot.coordinates import make_coords
-from skrobot.math import _wrap_axis
-from skrobot.math import midpoint
-from skrobot.math import midrot
-from skrobot.math import normalize_vector
+from skrobot.coordinates.math import _wrap_axis
+from skrobot.coordinates.math import midpoint
+from skrobot.coordinates.math import midrot
+from skrobot.coordinates.math import normalize_vector
 
 
 def midcoords(p, c1, c2):
@@ -27,7 +27,7 @@ def midcoords(p, c1, c2):
     Examples
     --------
     >>> from skrobot.coordinates import Coordinates
-    >>> from skrobot.geo import midcoords
+    >>> from skrobot.coordinates.geo import midcoords
     >>> c1 = Coordinates()
     >>> c2 = Coordinates(pos=[0.1, 0, 0])
     >>> c = midcoords(0.5, c1, c2)
@@ -61,7 +61,7 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     --------
     >>> import numpy as np
     >>> from skrobot.coordinates import Coordinates
-    >>> from skrobot.geo import orient_coords_to_axis
+    >>> from skrobot.coordinates.geo import orient_coords_to_axis
     >>> c = Coordinates()
     >>> oriented_coords = orient_coords_to_axis(c, [1, 0, 0])
     >>> oriented_coords.translation

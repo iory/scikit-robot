@@ -29,7 +29,7 @@ def _wrap_axis(axis):
 
     Examples
     --------
-    >>> from skrobot.math import _wrap_axis
+    >>> from skrobot.coordinates.math import _wrap_axis
     >>> _wrap_axis('x')
     array([1, 0, 0])
     >>> _wrap_axis('y')
@@ -136,7 +136,7 @@ def wxyz2xyzw(quat):
 
     Examples
     --------
-    >>> from skrobot.math import wxyz2xyzw
+    >>> from skrobot.coordinates.math import wxyz2xyzw
     >>> wxyz2xyzw([1, 2, 3, 4])
     array([2, 3, 4, 1])
     """
@@ -160,7 +160,7 @@ def xyzw2wxyz(quat):
 
     Examples
     --------
-    >>> from skrobot.math import xyzw2wxyz
+    >>> from skrobot.coordinates.math import xyzw2wxyz
     >>> xyzw2wxyz([1, 2, 3, 4])
     array([4, 1, 2, 3])
     """
@@ -184,7 +184,7 @@ def triple_product(a, b, c):
 
     Examples
     --------
-    >>> from skrobot.math import triple_product
+    >>> from skrobot.coordinates.math import triple_product
     >>> triple_product([1, 1, 1], [1, 1, 1], [1, 1, 1])
     0
     >>> triple_product([1, 0, 0], [0, 1, 0], [0, 0, 1])
@@ -257,7 +257,7 @@ def midpoint(p, a, b):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import midpoint
+    >>> from skrobot.coordinates.math import midpoint
     >>> midpoint(0.5, np.ones(3), np.zeros(3))
     >>> array([0.5, 0.5, 0.5])
     """
@@ -284,14 +284,14 @@ def midrot(p, r1, r2):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import midrot
+    >>> from skrobot.coordinates.math import midrot
     >>> midrot(0.5,
             np.eye(3),
             np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
     array([[ 0.70710678,  0.        ,  0.70710678],
            [ 0.        ,  1.        ,  0.        ],
            [-0.70710678,  0.        ,  0.70710678]])
-    >>> from skrobot.math import rpy_angle
+    >>> from skrobot.coordinates.math import rpy_angle
     >>> np.rad2deg(rpy_angle(midrot(0.5,
                    np.eye(3),
                    np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])))[0])
@@ -342,7 +342,7 @@ def rotation_matrix(theta, axis):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import rotation_matrix
+    >>> from skrobot.coordinates.math import rotation_matrix
     >>> rotation_matrix(np.pi / 2.0, [1, 0, 0])
     array([[ 1.00000000e+00,  0.00000000e+00,  0.00000000e+00],
            [ 0.00000000e+00,  2.22044605e-16, -1.00000000e+00],
@@ -385,7 +385,7 @@ def rotate_vector(vec, theta, axis):
     Examples
     --------
     >>> from numpy import pi
-    >>> from skrobot.math import rotate_vector
+    >>> from skrobot.coordinates.math import rotate_vector
     >>> rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0])
     array([1., 0., 0.])
     >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0])
@@ -429,7 +429,7 @@ def rpy_matrix(az, ay, ax):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import rpy_matrix
+    >>> from skrobot.coordinates.math import rpy_matrix
     >>> yaw = np.pi / 2.0
     >>> pitch = np.pi / 3.0
     >>> roll = np.pi / 6.0
@@ -460,8 +460,8 @@ def rpy_angle(matrix):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import rpy_matrix
-    >>> from skrobot.math import rpy_angle
+    >>> from skrobot.coordinates.math import rpy_matrix
+    >>> from skrobot.coordinates.math import rpy_angle
     >>> yaw = np.pi / 2.0
     >>> pitch = np.pi / 3.0
     >>> roll = np.pi / 6.0
@@ -504,7 +504,7 @@ def normalize_vector(v, ord=2):
 
     Examples
     --------
-    >>> from skrobot.math import normalize_vector
+    >>> from skrobot.coordinates.math import normalize_vector
     >>> normalize_vector([1, 1, 1])
     array([0.57735027, 0.57735027, 0.57735027])
     >>> normalize_vector([0, 0, 0])
@@ -532,7 +532,7 @@ def matrix2quaternion(m):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import matrix2quaternion
+    >>> from skrobot.coordinates.math import matrix2quaternion
     >>> matrix2quaternion(np.eye(3))
     array([1., 0., 0., 0.])
     """
@@ -583,7 +583,7 @@ def quaternion2matrix(q):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import quaternion2matrix
+    >>> from skrobot.coordinates.math import quaternion2matrix
     >>> quaternion2matrix([1, 0, 0, 0])
     array([[1., 0., 0.],
            [0., 1., 0.],
@@ -627,7 +627,7 @@ def matrix_log(m):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import matrix_log
+    >>> from skrobot.coordinates.math import matrix_log
     >>> matrix_log(np.eye(3))
     array([0., 0., 0.])
     """
@@ -659,7 +659,7 @@ def matrix_exponent(omega, p=1.0):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import matrix_exponent
+    >>> from skrobot.coordinates.math import matrix_exponent
     >>> matrix_exponent([1, 1, 1])
     array([[ 0.22629564, -0.18300792,  0.95671228],
            [ 0.95671228,  0.22629564, -0.18300792],
@@ -695,7 +695,7 @@ def outer_product_matrix(v):
 
     Examples
     --------
-    >>> from skrobot.math import outer_product_matrix
+    >>> from skrobot.coordinates.math import outer_product_matrix
     >>> outer_product_matrix([1, 2, 3])
     array([[ 0, -3,  2],
            [ 3,  0, -1],
@@ -721,7 +721,7 @@ def quaternion2rpy(q):
 
     Examples
     --------
-    >>> from skrobot.math import quaternion2rpy
+    >>> from skrobot.coordinates.math import quaternion2rpy
     >>> quaternion2rpy([1, 0, 0, 0])
     (array([ 0., -0.,  0.]), array([3.14159265, 3.14159265, 3.14159265]))
     >>> quaternion2rpy([0, 1, 0, 0])
@@ -756,7 +756,7 @@ def rpy2quaternion(rpy):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import rpy2quaternion
+    >>> from skrobot.coordinates.math import rpy2quaternion
     >>> rpy2quaternion([0, 0, 0])
     array([1., 0., 0., 0.])
     >>> yaw = np.pi / 3.0
@@ -791,7 +791,7 @@ def rotation_matrix_from_rpy(rpy):
     Examples
     --------
     >>> import numpy as np
-    >>> from skrobot.math import rotation_matrix_from_rpy
+    >>> from skrobot.coordinates.math import rotation_matrix_from_rpy
     >>> rotation_matrix_from_rpy([0, np.pi / 3, 0])
     array([[ 0.5      ,  0.       ,  0.8660254],
            [ 0.       ,  1.       ,  0.       ],
@@ -818,7 +818,7 @@ def rodrigues(axis, theta=None):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import rodrigues
+    >>> from skrobot.coordinates.math import rodrigues
     >>> rodrigues([1, 0, 0], 0)
     array([[1., 0., 0.],
            [0., 1., 0.],
@@ -864,7 +864,7 @@ def rotation_angle(mat):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import rotation_angle
+    >>> from skrobot.coordinates.math import rotation_angle
     >>> rotation_angle(numpy.eye(3)) is None
     True
     >>> rotation_angle(numpy.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
@@ -900,7 +900,7 @@ def rotation_distance(mat1, mat2):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import rotation_distance
+    >>> from skrobot.coordinates.math import rotation_distance
     >>> rotation_distance(numpy.eye(3), numpy.eye(3))
     0.0
     >>> rotation_distance(
@@ -1073,7 +1073,7 @@ def quaternion_distance(q1, q2, absolute=False):
 
     Examples
     --------
-    >>> from skrobot.math import quaternion_distance
+    >>> from skrobot.coordinates.math import quaternion_distance
     >>> quaternion_distance([1, 0, 0, 0], [1, 0, 0, 0])
     0.0
     >>> quaternion_distance([1, 0, 0, 0], [0, 1, 0, 0])
@@ -1110,7 +1110,7 @@ def quaternion_absolute_distance(q1, q2):
 
     Examples
     --------
-    >>> from skrobot.math import quaternion_absolute_distance
+    >>> from skrobot.coordinates.math import quaternion_absolute_distance
     >>> quaternion_absolute_distance([1, 0, 0, 0], [1, 0, 0, 0])
     0.0
     >>> quaternion_absolute_distance(
@@ -1139,7 +1139,7 @@ def quaternion_norm(q):
 
     Examples
     --------
-    >>> from skrobot.math import quaternion_norm
+    >>> from skrobot.coordinates.math import quaternion_norm
     >>> q = [1, 1, 1, 1]
     >>> quaternion_norm(q)
     2.0
@@ -1167,8 +1167,8 @@ def quaternion_normalize(q):
 
     Examples
     --------
-    >>> from skrobot.math import quaternion_normalize
-    >>> from skrobot.math import quaternion_norm
+    >>> from skrobot.coordinates.math import quaternion_normalize
+    >>> from skrobot.coordinates.math import quaternion_norm
     >>> q = quaternion_normalize([1, 1, 1, 1])
     >>> quaternion_norm(q)
     1.0
@@ -1199,7 +1199,7 @@ def quaternion_from_axis_angle(theta, axis):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import quaternion_from_axis_angle
+    >>> from skrobot.coordinates.math import quaternion_from_axis_angle
     >>> quaternion_from_axis_angle(0.1, [1, 0, 0])
     array([0.99875026, 0.04997917, 0.        , 0.        ])
     >>> quaternion_from_axis_angle(numpy.pi, [1, 0, 0])
@@ -1233,7 +1233,7 @@ def axis_angle_from_quaternion(quat):
 
     Examples
     --------
-    >>> from skrobot.math import axis_angle_from_quaternion
+    >>> from skrobot.coordinates.math import axis_angle_from_quaternion
     >>> axis_angle_from_quaternion([1, 0, 0, 0])
     array([0, 0, 0])
     >>> axis_angle_from_quaternion([0, 7.07106781e-01, 0, 7.07106781e-01])
@@ -1269,7 +1269,7 @@ def axis_angle_from_matrix(rotation):
     Examples
     --------
     >>> import numpy
-    >>> from skrobot.math import axis_angle_from_matrix
+    >>> from skrobot.coordinates.math import axis_angle_from_matrix
     >>> axis_angle_from_matrix(numpy.eye(3))
     array([0, 0, 0])
     >>> axis_angle_from_matrix(
@@ -1289,7 +1289,7 @@ def random_rotation():
 
     Examples
     --------
-    >>> from skrobot.math import random_rotation
+    >>> from skrobot.coordinates.math import random_rotation
     >>> random_rotation()
     array([[-0.00933428, -0.90465681, -0.42603865],
           [-0.50305571, -0.36396787,  0.78387648],
@@ -1313,7 +1313,7 @@ def random_translation():
 
     Examples
     --------
-    >>> from skrobot.math import random_translation
+    >>> from skrobot.coordinates.math import random_translation
     >>> random_translation()
     array([0.03299473, 0.81481471, 0.57782565])
     >>> random_translation()
@@ -1332,12 +1332,12 @@ def random_quaternion():
 
     Examples
     --------
-    >>> from skrobot.math import random_quaternion
+    >>> from skrobot.coordinates.math import random_quaternion
     >>> random_quaternion()
     array([-0.02156994,  0.5404561 , -0.72781116, -0.42158374])
     >>> random_quaternion()
     array([-0.47302116,  0.020306  , -0.37539238,  0.79681818])
-    >>> from skrobot.math import quaternion_norm
+    >>> from skrobot.coordinates.math import quaternion_norm
     >>> q = random_quaternion()
     >>> numpy.allclose(1.0, quaternion_norm(q))
     True

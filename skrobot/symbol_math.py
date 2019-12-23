@@ -11,7 +11,7 @@ from sympy import S
 from sympy import sqrt
 from sympy import trigsimp
 
-from skrobot.math import axis_angle_from_matrix
+from skrobot.coordinates.math import axis_angle_from_matrix
 
 logger = getLogger(__name__)
 
