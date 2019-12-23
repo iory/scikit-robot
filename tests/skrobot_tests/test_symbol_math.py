@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from sympy import Matrix
 
-from skrobot.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix
 from skrobot.symbol_math import round_matrix
 
 
