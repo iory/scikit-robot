@@ -1,17 +1,11 @@
 import os
-import tarfile
 
 from cached_property import cached_property
+import gdown
 import numpy as np
 
 from skrobot.coordinates import CascadedCoords
 from skrobot.model import RobotModel
-from skrobot.utils.download import _default_cache_dir
-from skrobot.utils.download import cached_gdown_download
-
-pr2_description_url = 'https://drive.google.com/uc?id='\
-    '1zy4C665o6efPko7eMk4XBdHbvgFfdC-6'
-pr2_description_md5sum = 'e4fb915accdb3568a5524c92e9c35c9a'
 
 
 class PR2(RobotModel):
@@ -25,15 +19,17 @@ class PR2(RobotModel):
         RobotModel.__init__(self, *args, **kwargs)
 
         if self.urdf_path is None:
-            self.urdf_path = os.path.join(_default_cache_dir,
-                                          'pr2_description',
-                                          'pr2.urdf')
+            root_dir = os.path.join(
+                os.path.expanduser('~/.skrobot'), 'pr2_description'
+            )
+            self.urdf_path = os.path.join(root_dir, 'pr2.urdf')
             if not os.path.exists(self.urdf_path):
-                download_filepath = cached_gdown_download(
-                    pr2_description_url,
-                    pr2_description_md5sum)
-                extract_file = tarfile.open(download_filepath, 'r:gz')
-                extract_file.extractall(_default_cache_dir)
+                gdown.cached_download(
+                    url='https://drive.google.com/uc?id=1zy4C665o6efPko7eMk4XBdHbvgFfdC-6',  # NOQA
+                    path=root_dir + '.tar.gz',
+                    md5='e4fb915accdb3568a5524c92e9c35c9a',
+                    postprocess=gdown.extractall,
+                )
         self.load_urdf(self.urdf_path)
 
         self.rarm_end_coords = CascadedCoords(
