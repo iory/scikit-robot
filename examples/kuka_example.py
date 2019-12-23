@@ -33,7 +33,7 @@ def main():
     target_coords = skrobot.coordinates.Coordinates(
         pos=[0.5, 0, 0]
     ).rotate(np.pi / 2.0, 'y', 'local')
-    skrobot.pybullet_robot_interface.draw(target_coords)
+    skrobot.interfaces.pybullet.draw(target_coords)
     robot.inverse_kinematics(
         target_coords,
         link_list=robot.rarm.link_list,
