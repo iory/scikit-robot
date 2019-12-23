@@ -2,22 +2,22 @@ import copy
 
 import numpy as np
 
-from skrobot.dual_quaternion import DualQuaternion
-from skrobot.math import _check_valid_rotation
-from skrobot.math import _check_valid_translation
-from skrobot.math import _wrap_axis
-from skrobot.math import matrix2quaternion
-from skrobot.math import matrix_log
-from skrobot.math import normalize_vector
-from skrobot.math import quaternion2matrix
-from skrobot.math import quaternion_multiply
-from skrobot.math import random_rotation
-from skrobot.math import random_translation
-from skrobot.math import rotate_matrix
-from skrobot.math import rotation_angle
-from skrobot.math import rotation_matrix
-from skrobot.math import rpy2quaternion
-from skrobot.math import rpy_angle
+from skrobot.coordinates.dual_quaternion import DualQuaternion
+from skrobot.coordinates.math import _check_valid_rotation
+from skrobot.coordinates.math import _check_valid_translation
+from skrobot.coordinates.math import _wrap_axis
+from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix_log
+from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import quaternion2matrix
+from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import random_rotation
+from skrobot.coordinates.math import random_translation
+from skrobot.coordinates.math import rotate_matrix
+from skrobot.coordinates.math import rotation_angle
+from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rpy2quaternion
+from skrobot.coordinates.math import rpy_angle
 
 
 def transform_coords(c1, c2):
@@ -424,7 +424,7 @@ class Coordinates(object):
 
         Returns
         -------
-        DualQuaternion : skrobot.dual_quaternion.DualQuaternion
+        DualQuaternion : skrobot.coordinates.dual_quaternion.DualQuaternion
             DualQuaternion representation of this coordinate
         """
         qr = normalize_vector(self.quaternion)
@@ -510,7 +510,7 @@ class Coordinates(object):
         Returns
         -------
         rpy_angle(self.rotation) : tuple of np.ndarray
-            a pair of rpy angles. See also skrobot.math.rpy_angle
+            a pair of rpy angles. See also skrobot.coordinates.math.rpy_angle
 
         Examples
         --------
@@ -588,7 +588,7 @@ class Coordinates(object):
         --------
         >>> from numpy import pi
         >>> from skrobot.coordinates import Coordinates
-        >>> from skrobot.math import rpy_matrix
+        >>> from skrobot.coordinates.math import rpy_matrix
         >>> coord1 = Coordinates()
         >>> coord2 = Coordinates(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
         >>> coord1.difference_rotation(coord2)

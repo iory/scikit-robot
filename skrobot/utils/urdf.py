@@ -18,9 +18,9 @@ import PIL
 import six
 import trimesh
 
-from skrobot.math import normalize_vector
-from skrobot.math import rpy_angle
-from skrobot.math import rpy_matrix
+from skrobot.coordinates import normalize_vector
+from skrobot.coordinates import rpy_angle
+from skrobot.coordinates import rpy_matrix
 
 
 def parse_origin(node):

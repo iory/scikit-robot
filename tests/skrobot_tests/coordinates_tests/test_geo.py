@@ -3,10 +3,10 @@ import unittest
 from numpy import pi
 from numpy import testing
 
+from skrobot.coordinates.geo import midcoords
+from skrobot.coordinates.geo import orient_coords_to_axis
 from skrobot.coordinates import make_coords
-from skrobot.geo import midcoords
-from skrobot.geo import orient_coords_to_axis
-from skrobot.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2quaternion
 
 
 class TestGeo(unittest.TestCase):
