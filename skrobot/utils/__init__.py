@@ -1,2 +1,3 @@
-from skrobot.utils import download  # NOQA
-from skrobot.utils.urdf import URDF  # NOQA
+# flake8: noqa
+
+from skrobot.utils.urdf import URDF
