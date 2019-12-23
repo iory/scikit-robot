@@ -14,6 +14,5 @@ from skrobot import optimizers
 from skrobot import interfaces
 from skrobot import model
 from skrobot import models
-from skrobot import symbol_math
 from skrobot import visualization
 from skrobot import utils
