@@ -1,10 +1,8 @@
-import os
-
 from cached_property import cached_property
-import gdown
 import numpy as np
 
 from skrobot.coordinates import CascadedCoords
+from skrobot.data import pr2_urdfpath
 from skrobot.model import RobotModel
 
 
@@ -19,17 +17,7 @@ class PR2(RobotModel):
         RobotModel.__init__(self, *args, **kwargs)
 
         if self.urdf_path is None:
-            root_dir = os.path.join(
-                os.path.expanduser('~/.skrobot'), 'pr2_description'
-            )
-            self.urdf_path = os.path.join(root_dir, 'pr2.urdf')
-            if not os.path.exists(self.urdf_path):
-                gdown.cached_download(
-                    url='https://drive.google.com/uc?id=1zy4C665o6efPko7eMk4XBdHbvgFfdC-6',  # NOQA
-                    path=root_dir + '.tar.gz',
-                    md5='e4fb915accdb3568a5524c92e9c35c9a',
-                    postprocess=gdown.extractall,
-                )
+            self.urdf_path = pr2_urdfpath()
         self.load_urdf(self.urdf_path)
 
         self.rarm_end_coords = CascadedCoords(
