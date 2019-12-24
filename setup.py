@@ -18,26 +18,12 @@ def listup_package_data():
 
 
 setup_requires = []
-install_requires = [
-    'cached-property',
-    'cvxopt',
-    'future',
-    'gdown',
-    'lxml',
-    'networkx==2.2.0',
-    'numpy>=1.9.0',
-    'ordered_set',
-    'pillow',
-    'pycollada!=0.7',  # required for robot model using collada
-    'pyglet',
-    'python-fcl',  # for collision check in trimesh module
-    'pyyaml',
-    'quadprog',
-    'scipy==1.2.1',
-    'six',
-    'sympy',
-    'trimesh>=2.37.35',
-]
+
+with open('requirements.txt') as f:
+    install_requires = []
+    for line in f:
+        req = line.split('#')[0].strip()
+        install_requires.append(req)
 
 setup(
     name='skrobot',
