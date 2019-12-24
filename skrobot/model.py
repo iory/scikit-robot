@@ -2018,13 +2018,6 @@ class RobotModel(CascadedLink):
                             mesh.vertices.shape[0], axis=0
                         )
 
-                # default texture color
-                DEFAULT_TEXTURE_COLOR = (255, 255, 255, 255)
-                if (mesh.visual.vertex_colors ==
-                        DEFAULT_TEXTURE_COLOR).all():
-                    mesh.visual.vertex_colors = \
-                        trimesh.visual.DEFAULT_COLOR
-
             # If color or texture is not specified in mesh file,
             # use information specified in URDF.
             if (
