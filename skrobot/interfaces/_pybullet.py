@@ -2,8 +2,8 @@ import importlib
 
 import numpy as np
 
-from skrobot.math import matrix2quaternion
-from skrobot.math import quaternion2rpy
+from skrobot.coordinates import matrix2quaternion
+from skrobot.coordinates import quaternion2rpy
 from skrobot.model import LinearJoint
 from skrobot.model import RotationalJoint
 

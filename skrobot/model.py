@@ -8,18 +8,18 @@ import numpy.linalg as LA
 from ordered_set import OrderedSet
 import trimesh
 
+from skrobot.coordinates import _wrap_axis
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
-from skrobot.geo import midcoords
-from skrobot.geo import orient_coords_to_axis
-from skrobot.math import _wrap_axis
-from skrobot.math import make_matrix
-from skrobot.math import manipulability
-from skrobot.math import midpoint
-from skrobot.math import normalize_vector
-from skrobot.math import rpy_angle
-from skrobot.math import sr_inverse
+from skrobot.coordinates import make_matrix
+from skrobot.coordinates import manipulability
+from skrobot.coordinates import midcoords
+from skrobot.coordinates import midpoint
+from skrobot.coordinates import normalize_vector
+from skrobot.coordinates import orient_coords_to_axis
+from skrobot.coordinates import rpy_angle
+from skrobot.coordinates import sr_inverse
 from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
