@@ -1,8 +1,9 @@
 *~
 *.egg/
 *.pyc
-build
 \#*\#
 .\#*
-skrobot.egg-info/
-dist/
+/skrobot.egg-info/
+/build/
+/dist/
+/src/
