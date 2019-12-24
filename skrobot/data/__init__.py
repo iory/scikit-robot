@@ -8,7 +8,13 @@ data_dir = osp.abspath(osp.dirname(__file__))
 
 
 def fetch_urdfpath():
-    return osp.join(data_dir, 'fetch_description/fetch.urdf')
+    gdown.cached_download(
+        url='https://drive.google.com/uc?id=1y7Jc3QoVW6J072CrSNupfKpyLp4NNxuH',
+        path=osp.join(download_dir, 'fetch_description.tar.gz'),
+        md5='fbe29ab5f3d029d165a625175b43a265',
+        postprocess=gdown.extractall,
+    )
+    return osp.join(download_dir, 'fetch_description/fetch.urdf')
 
 
 def kuka_urdfpath():
@@ -18,7 +24,7 @@ def kuka_urdfpath():
 def panda_urdfpath():
     gdown.cached_download(
         url='https://drive.google.com/uc?id=1h6ib9jpEUNa1xB2DNrnRQtqpSD2Rj9bz',
-        path=osp.join(download_dir, 'franka_description') + '.tar.gz',
+        path=osp.join(download_dir, 'franka_description.tar.gz'),
         md5='3de5bd15262b519e3beb88f1422032ac',
         postprocess=gdown.extractall,
     )
