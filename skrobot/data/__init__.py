@@ -23,3 +23,13 @@ def panda_urdfpath():
         postprocess=gdown.extractall,
     )
     return osp.join(download_dir, 'franka_description/panda.urdf')
+
+
+def pr2_urdfpath():
+    gdown.cached_download(
+        url='https://drive.google.com/uc?id=1zy4C665o6efPko7eMk4XBdHbvgFfdC-6',
+        path=osp.join(download_dir, 'pr2_description.tar.gz'),
+        md5='e4fb915accdb3568a5524c92e9c35c9a',
+        postprocess=gdown.extractall,
+    )
+    return osp.join(download_dir, 'pr2_description/pr2.urdf')
