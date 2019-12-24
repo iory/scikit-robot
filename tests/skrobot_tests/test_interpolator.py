@@ -3,9 +3,9 @@ import unittest
 import numpy as np
 from numpy import testing
 
+from skrobot.coordinates.math import midpoint
 from skrobot.interpolator import LinearInterpolator
 from skrobot.interpolator import MinjerkInterpolator
-from skrobot.math import midpoint
 
 
 class TestInterpolator(unittest.TestCase):

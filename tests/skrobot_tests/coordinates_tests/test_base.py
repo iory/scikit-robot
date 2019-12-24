@@ -6,8 +6,8 @@ from numpy import testing
 
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
-from skrobot.math import rotation_matrix
-from skrobot.math import rpy_matrix
+from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rpy_matrix
 
 
 class TestCoordinates(unittest.TestCase):

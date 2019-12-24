@@ -2,10 +2,10 @@ from numbers import Number
 
 import numpy as np
 
-from skrobot.math import quaternion_absolute_distance
-from skrobot.math import quaternion_multiply
-from skrobot.math import quaternion_normalize
-from skrobot.quaternion import Quaternion
+from skrobot.coordinates.math import quaternion_absolute_distance
+from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import quaternion_normalize
+from skrobot.coordinates.quaternion import Quaternion
 
 
 class DualQuaternion(object):
@@ -97,7 +97,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        dq.qr : skrobot.quaternion.Quaternion
+        dq.qr : skrobot.coordinates.quaternion.Quaternion
             rotation quaternion
         """
         dq = self.normalized
@@ -114,7 +114,7 @@ class DualQuaternion(object):
 
         Examples
         --------
-        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> from skrobot.coordinates.dual_quaternion import DualQuaternion
         >>> dq = DualQuaternion()
         >>> dq.dq
         array([1., 0., 0., 0., 0., 0., 0., 0.])
@@ -133,7 +133,7 @@ class DualQuaternion(object):
         Examples
         --------
         >>> import numpy as np
-        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> from skrobot.coordinates.dual_quaternion import DualQuaternion
         >>> dq = DualQuaternion()
         >>> dq.dq
         array([1., 0., 0., 0., 0., 0., 0., 0.])
@@ -159,7 +159,8 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        qr_wxyz : list or np.ndarray of skrobot.quaternion.Quatrnion
+        qr_wxyz : list or np.ndarray or
+                  skrobot.coordinates.quaternion.Quaternion
             new qr
         """
         if isinstance(qr_wxyz, Quaternion):
@@ -173,7 +174,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        self._qd : skrobot.quaternion.Quaternion
+        self._qd : skrobot.coordinates.quaternion.Quaternion
             quaternion indicating translation
         """
         return self._qd
@@ -184,7 +185,8 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        qd_wxyz : skrobot.quaternion.Quaternion or list or np.ndarray
+        qr_wxyz : list or np.ndarray or
+                  skrobot.coordinates.quaternion.Quaternion
             new qd
         """
         if isinstance(qd_wxyz, Quaternion):
@@ -202,7 +204,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        DualQuaternion : skrobot.dual_quaternion.DualQuaternion
+        DualQuaternion : skrobot.coordinates.dual_quaternion.DualQuaternion
             new DualQuaternion class has this dual quaternion's conjugate
         """
         qr_c = self._qr.conjugate
@@ -220,7 +222,7 @@ class DualQuaternion(object):
 
         Examples
         --------
-        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> from skrobot.coordinates.dual_quaternion import DualQuaternion
         >>> dq = DualQuaternion()
         >>> dq.norm
         (1.0, 0.0)
@@ -236,7 +238,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        self : skrobot.dual_quaternion.DualQuaternion
+        self : skrobot.coordinates.dual_quaternion.DualQuaternion
             return self
         """
         real_norm = self.qr.norm
@@ -250,7 +252,8 @@ class DualQuaternion(object):
 
         Returns
         -------
-        DualQuaternion(qr, qd, True) : skrobot.dual_quaternion.DualQuaternion
+        DualQuaternion(qr, qd, True) :
+                skrobot.coordinates.dual_quaternion.DualQuaternion
             normalized dual quaternion
         """
         real_norm = self.qr.norm
@@ -286,8 +289,8 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        dq0 : skrobot.dual_quaternion.DualQuaternion
-        dq1 : skrobot.dual_quaternion.DualQuaternion
+        dq0 : skrobot.coordinates.dual_quaternion.DualQuaternion
+        dq1 : skrobot.coordinates.dual_quaternion.DualQuaternion
             dual quaternion
         t : float
             ratio of interpolation. Must be 0 <= t <= 1.0.
@@ -313,7 +316,7 @@ class DualQuaternion(object):
         -------
         self.qr.axis : np.ndarray
             this dual quaternion's axis.
-            See See skrobot.quaternion.Quaternion.axis.
+            See See skrobot.coordinates.quaternion.Quaternion.axis.
         """
         return self.qr.axis
 
@@ -325,7 +328,7 @@ class DualQuaternion(object):
         -------
         self.qr.angle : float
             this dual quaternion's rotation angle with respect to self.axis.
-            See skrobot.quaternion.Quaternion.angle.
+            See skrobot.coordinates.quaternion.Quaternion.angle.
         """
         return self.qr.angle
 
@@ -367,7 +370,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        dq : skrobot.dual_quaternion.DualQuaternion
+        dq : skrobot.coordinates.dual_quaternion.DualQuaternion
             new DualQuaternion class has inverse of this dual quaternion
         """
         if self.norm[0] < 1.0e-8:
@@ -388,7 +391,7 @@ class DualQuaternion(object):
         --------
         >>> from numpy import pi
         >>> from skrobot.coordinates import Coordinates
-        >>> from skrobot.dual_quaternion import DualQuaternion
+        >>> from skrobot.coordinates.dual_quaternion import DualQuaternion
         >>> dq = DualQuaternion()
         >>> dq.T()
         array([[1., 0., 0., 0.],
@@ -449,7 +452,7 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        other_dq : skrobot.dual_quaternion.DualQuaternion
+        other_dq : skrobot.coordinates.dual_quaternion.DualQuaternion
             dual quaternion
 
         Returns
@@ -466,7 +469,7 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        other_dq : skrobot.dual_quaternion.DualQuaternion
+        other_dq : skrobot.coordinates.dual_quaternion.DualQuaternion
             dual quaternion
 
         Returns

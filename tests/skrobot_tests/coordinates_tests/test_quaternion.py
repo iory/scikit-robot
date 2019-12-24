@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from numpy import testing
 
-from skrobot.quaternion import Quaternion
+from skrobot.coordinates.quaternion import Quaternion
 
 
 class TestQuaternion(unittest.TestCase):

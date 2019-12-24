@@ -2,11 +2,11 @@ from numbers import Number
 
 import numpy as np
 
-from skrobot.math import normalize_vector
-from skrobot.math import quaternion2matrix
-from skrobot.math import quaternion_inverse
-from skrobot.math import quaternion_multiply
-from skrobot.math import quaternion_norm
+from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import quaternion2matrix
+from skrobot.coordinates.math import quaternion_inverse
+from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import quaternion_norm
 
 
 class Quaternion(object):
@@ -24,7 +24,7 @@ class Quaternion(object):
 
     Examples
     --------
-    >>> from skrobot.quaternion import Quaternion
+    >>> from skrobot.coordinates.quaternion import Quaternion
     >>> q = Quaternion()
     >>> q
     #<Quaternion 0x1283bde48 w: 1.0 x: 0.0 y: 0.0 z: 0.0>
@@ -67,7 +67,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q.q
         array([1., 0., 0., 0.])
@@ -88,7 +88,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q
         #<Quaternion 0x1267d7198 w: 1.0 x: 0.0 y: 0.0 z: 0.0>
@@ -170,7 +170,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q
         #<Quaternion 0x12f1aa6a0 w: 1.0 x: 0.0 y: 0.0 z: 0.0>
@@ -246,7 +246,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q.norm
         1.0
@@ -265,7 +265,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion([1, 2, 3, 4])
         >>> q.q
         array([1., 2., 3., 4.])
@@ -283,12 +283,12 @@ class Quaternion(object):
 
         Returns
         -------
-        normalized quaternion : skrobot.quaternion.Quaternion
+        normalized quaternion : skrobot.coordinates.quaternion.Quaternion
             return quaternion which is norm == 1.0.
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion([1, 2, 3, 4])
         >>> normalized_q = q.normalized
         >>> normalized_q.q
@@ -307,7 +307,7 @@ class Quaternion(object):
 
         Returns
         -------
-        Quaternion(q=self.q.copy()) : skrobot.quaternion.Quaternion
+        Quaternion(q=self.q.copy()) : skrobot.coordinates.quaternion.Quaternion
             copy of this quaternion
         """
         return Quaternion(q=self.q.copy())
@@ -318,12 +318,12 @@ class Quaternion(object):
 
         Returns
         -------
-        Quaternion : skrobot.quaternion.Quaternion
+        Quaternion : skrobot.coordinates.quaternion.Quaternion
             new Quaternion class has this quaternion's conjugate
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q.conjugate
         #<Quaternion 0x12f2dfb38 w: 1.0 x: -0.0 y: -0.0 z: -0.0>
@@ -340,12 +340,12 @@ class Quaternion(object):
 
         Returns
         -------
-        q : skrobot.quaternion.Quaternion
+        q : skrobot.coordinates.quaternion.Quaternion
             new Quaternion class has inverse of this quaternion
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q
         #<Quaternion 0x127e6da58 w: 1.0 x: 0.0 y: 0.0 z: 0.0>
@@ -367,7 +367,7 @@ class Quaternion(object):
 
         Examples
         --------
-        >>> from skrobot.quaternion import Quaternion
+        >>> from skrobot.coordinates.quaternion import Quaternion
         >>> q = Quaternion()
         >>> q.T()
         array([[1., 0., 0., 0.],
