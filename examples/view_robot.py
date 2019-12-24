@@ -32,7 +32,7 @@ def main():
     )
     parser.add_argument(
         '--robot',
-        choices=['kuka', 'fetch', 'pr2'],
+        choices=['kuka', 'fetch', 'pr2', 'panda'],
         default='kuka',
         help='robot',
     )
@@ -44,6 +44,8 @@ def main():
         robot = skrobot.models.Fetch()
     elif args.robot == 'pr2':
         robot = skrobot.models.PR2()
+    elif args.robot == 'panda':
+        robot = skrobot.models.Panda()
     else:
         raise ValueError('unsupported robot')
 
