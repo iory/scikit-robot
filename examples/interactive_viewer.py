@@ -19,7 +19,7 @@ def main():
 
     robot = skrobot.models.Kuka()
 
-    viewer = skrobot.visualization.trimesh.SceneViewer(resolution=(640, 480))
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 
     # base plane
     plane = skrobot.models.Box(
@@ -31,7 +31,7 @@ def main():
 
     viewer.set_camera(angles=[np.deg2rad(45), 0, 0], distance=4)
 
-    viewer.run()
+    viewer.show()
 
     box = skrobot.models.Box(
         extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0)
