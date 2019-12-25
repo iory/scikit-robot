@@ -6,7 +6,7 @@ import trimesh.viewer
 from .. import model as model_module
 
 
-class SceneViewer(trimesh.viewer.SceneViewer):
+class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def __init__(self, resolution=None):
         self._links = []
@@ -24,14 +24,14 @@ class SceneViewer(trimesh.viewer.SceneViewer):
 
         self.lock = threading.Lock()
 
-    def run(self):
+    def show(self):
         self.thread = threading.Thread(target=self._init_and_start_app)
         self.thread.daemon = True  # terminate when main thread exit
         self.thread.start()
 
     def _init_and_start_app(self):
         with self.lock:
-            super(SceneViewer, self).__init__(**self._kwargs)
+            super(TrimeshSceneViewer, self).__init__(**self._kwargs)
         pyglet.app.run()
 
     def redraw(self):
@@ -57,29 +57,29 @@ class SceneViewer(trimesh.viewer.SceneViewer):
                     transform = l.worldcoords().T()
                     self.scene.graph.update(l.name, matrix=transform)
 
-            super(SceneViewer, self).on_draw()
+            super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
 
     def on_mouse_press(self, *args, **kwargs):
         self._redraw = True
-        return super(SceneViewer, self).on_mouse_press(*args, **kwargs)
+        return super(TrimeshSceneViewer, self).on_mouse_press(*args, **kwargs)
 
     def on_mouse_drag(self, *args, **kwargs):
         self._redraw = True
-        return super(SceneViewer, self).on_mouse_drag(*args, **kwargs)
+        return super(TrimeshSceneViewer, self).on_mouse_drag(*args, **kwargs)
 
     def on_mouse_scroll(self, *args, **kwargs):
         self._redraw = True
-        return super(SceneViewer, self).on_mouse_scroll(*args, **kwargs)
+        return super(TrimeshSceneViewer, self).on_mouse_scroll(*args, **kwargs)
 
     def on_key_press(self, *args, **kwargs):
         self._redraw = True
-        return super(SceneViewer, self).on_key_press(*args, **kwargs)
+        return super(TrimeshSceneViewer, self).on_key_press(*args, **kwargs)
 
     def on_resize(self, *args, **kwargs):
         self._redraw = True
-        return super(SceneViewer, self).on_resize(*args, **kwargs)
+        return super(TrimeshSceneViewer, self).on_resize(*args, **kwargs)
 
     def add(self, link):
         if isinstance(link, model_module.Link):

@@ -14,5 +14,5 @@ from skrobot import optimizers
 from skrobot import interfaces
 from skrobot import model
 from skrobot import models
-from skrobot import visualization
+from skrobot import viewers
 from skrobot import utils
