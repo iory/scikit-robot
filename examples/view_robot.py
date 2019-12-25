@@ -1,76 +1,51 @@
-import argparse
+import time
 
 import numpy as np
-import trimesh
-import trimesh.viewer
 
 import skrobot
 
 
-def show_with_rotation(scene, step=None, init_angles=None, **kwargs):
-    if step is None:
-        step = (0, np.deg2rad(1), 0)
-    if init_angles is None:
-        init_angles = (0, 0, 0)
-
-    step = np.asarray(step, dtype=float)
-    init_angles = np.asarray(init_angles, dtype=float)
-
-    def callback(scene):
-        if hasattr(scene, 'angles'):
-            scene.angles += step
-        else:
-            scene.angles = init_angles
-        scene.set_camera(angles=scene.angles)
-
-    return trimesh.viewer.SceneViewer(scene=scene, callback=callback, **kwargs)
+def _get_tile_shape(num, hw_ratio=1):
+    r_num = int(round(np.sqrt(num / hw_ratio)))  # weighted by wh_ratio
+    c_num = 0
+    while r_num * c_num < num:
+        c_num += 1
+    while (r_num - 1) * c_num >= num:
+        r_num -= 1
+    return r_num, c_num
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        '--robot',
-        choices=['kuka', 'fetch', 'pr2', 'panda'],
-        default='kuka',
-        help='robot',
-    )
-    args = parser.parse_args()
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 
-    if args.robot == 'kuka':
-        robot = skrobot.models.Kuka()
-    elif args.robot == 'fetch':
-        robot = skrobot.models.Fetch()
-    elif args.robot == 'pr2':
-        robot = skrobot.models.PR2()
-    elif args.robot == 'panda':
-        robot = skrobot.models.Panda()
-    else:
-        raise ValueError('unsupported robot')
+    robots = [
+        skrobot.models.Kuka(),
+        skrobot.models.Fetch(),
+        skrobot.models.PR2(),
+        skrobot.models.Panda(),
+    ]
+    nrow, ncol = _get_tile_shape(len(robots))
+    row, col = 2, 2
 
-    print('link_list:')
-    for link in robot.link_list:
-        print('  {}'.format(link))
-    print('joint_list:')
-    for joint in robot.joint_list:
-        print('  {}'.format(joint))
+    for i in range(nrow):
+        for j in range(ncol):
+            try:
+                robot = robots[i * nrow + j]
+            except IndexError:
+                break
+            plane = skrobot.models.Box(extents=(row - 0.01, col - 0.01, 0.01))
+            plane.translate((row * i, col * j, -0.01))
+            viewer.add(plane)
+            robot.translate((row * i, col * j, 0))
+            viewer.add(robot)
 
-    scene = trimesh.Scene()
-    geom = trimesh.creation.box((2, 2, 0.01))
-    geom.visual.face_colors = (0.75, 0.75, 0.75)
-    scene.add_geometry(geom)
+    viewer.set_camera(angles=[np.deg2rad(30), 0, 0])
+    viewer.show()
 
-    for link in robot.link_list:
-        transform = link.worldcoords().T()
-        scene.add_geometry(link.visual_mesh, transform=transform)
-
-    show_with_rotation(
-        scene,
-        init_angles=(np.deg2rad(45), np.deg2rad(0), 0),
-        step=(0, 0, np.deg2rad(1)),
-        resolution=(800, 800),
-    )
+    print('==> Press [q] to close window')
+    while not viewer.has_exit:
+        time.sleep(0.1)
+        viewer.redraw()
 
 
 if __name__ == '__main__':
