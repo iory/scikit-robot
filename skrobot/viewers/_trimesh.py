@@ -55,7 +55,11 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                     link_list = link.link_list
                 for l in link_list:
                     transform = l.worldcoords().T()
-                    self.scene.graph.update(l.name, matrix=transform)
+                    name = '{}/{}'.format(
+                        link.__class__.__name__,
+                        l.name,
+                    )
+                    self.scene.graph.update(name, matrix=transform)
 
             super(TrimeshSceneViewer, self).on_draw()
 
@@ -92,10 +96,14 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         with self.lock:
             for l in link_list:
                 transform = l.worldcoords().T()
+                name = '{}/{}'.format(
+                    link.__class__.__name__,
+                    l.name,
+                )
                 self.scene.add_geometry(
                     geometry=l.visual_mesh,
-                    node_name=l.name,
-                    geom_name=l.name,
+                    node_name=name,
+                    geom_name=name,
                     transform=transform,
                 )
             self._links.append(link)
