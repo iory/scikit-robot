@@ -15,11 +15,11 @@ class Quaternion(object):
 
     Parameters
     ----------
-    w : float or np.ndarray
+    w : float or numpy.ndarray
     x : float
     y : float
     z : float
-    q : None or np.ndarray
+    q : None or numpy.ndarray
         if q is not specified, use w, x, y, z.
 
     Examples
@@ -62,7 +62,7 @@ class Quaternion(object):
 
         Returns
         -------
-        self._q : np.ndarray
+        self._q : numpy.ndarray
             [w, x, y, z] quaternion
 
         Examples
@@ -83,7 +83,7 @@ class Quaternion(object):
 
         Parameters
         ----------
-        quaternion : list or np.ndarray
+        quaternion : list or numpy.ndarray
             [w, x, y, z] quaternion
 
         Examples
@@ -152,7 +152,7 @@ class Quaternion(object):
 
         Returns
         -------
-        self.q[1:] : np.ndarray
+        self.q[1:] : numpy.ndarray
             xyz elements of this quaternion
         """
         return self.q[1:]
@@ -165,7 +165,7 @@ class Quaternion(object):
 
         Returns
         -------
-        quaternion2matrix(self.q) : np.ndarray
+        quaternion2matrix(self.q) : numpy.ndarray
             3x3 rotation matrix
 
         Examples
@@ -203,7 +203,7 @@ class Quaternion(object):
 
         Returns
         -------
-        axis : np.ndarray
+        axis : numpy.ndarray
             normalized axis vector
         """
         if self.w > 1.0:
@@ -362,7 +362,7 @@ class Quaternion(object):
 
         Returns
         -------
-        matrix : np.ndarray
+        matrix : numpy.ndarray
             homogeneous transformation matrix shape of (4, 4)
 
         Examples
