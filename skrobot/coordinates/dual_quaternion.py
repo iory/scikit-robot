@@ -13,8 +13,8 @@ class DualQuaternion(object):
 
     Parameters
     ----------
-    qr : list or np.ndarray
-    qd : list or np.ndarray
+    qr : list or numpy.ndarray
+    qd : list or numpy.ndarray
         element of dual quaternion
     enforce_unit_norm : bool (optional)
         if True, norm should be 1.0.
@@ -44,7 +44,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        q_translation.xyz : np.ndarray
+        q_translation.xyz : numpy.ndarray
             vector shape of (3, ). unit is [m]
 
         Examples
@@ -70,7 +70,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        dq.qr.rotation : np.ndarray
+        dq.qr.rotation : numpy.ndarray
             3x3 rotation matrix
 
         Examples
@@ -109,7 +109,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        np.concatenate([self.qr.q, self.qd.q]) : np.ndarray
+        np.concatenate([self.qr.q, self.qd.q]) : numpy.ndarray
             (1x8) vector of this dual quaternion
 
         Examples
@@ -127,7 +127,7 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        dq : np.ndarray
+        dq : numpy.ndarray
             (1x8) vector
 
         Examples
@@ -159,7 +159,7 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        qr_wxyz : list or np.ndarray or
+        qr_wxyz : list or numpy.ndarray or
                   skrobot.coordinates.quaternion.Quaternion
             new qr
         """
@@ -185,7 +185,7 @@ class DualQuaternion(object):
 
         Parameters
         ----------
-        qr_wxyz : list or np.ndarray or
+        qr_wxyz : list or numpy.ndarray or
                   skrobot.coordinates.quaternion.Quaternion
             new qd
         """
@@ -314,7 +314,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        self.qr.axis : np.ndarray
+        self.qr.axis : numpy.ndarray
             this dual quaternion's axis.
             See See skrobot.coordinates.quaternion.Quaternion.axis.
         """
@@ -340,7 +340,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        screw_axis : np.ndarray
+        screw_axis : numpy.ndarray
             screw axis of this dual quaternion.
         theta : float
             rotation angle in radian.
@@ -384,7 +384,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        matrix : np.ndarray
+        matrix : numpy.ndarray
             homogeneous transformation matrix shape of (4, 4)
 
         Examples
@@ -486,7 +486,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        pose : np.ndarray
+        pose : numpy.ndarray
             [x, y, z, wx, wy, wz, wq] pose
         """
         self.normalize()

@@ -19,12 +19,12 @@ def _wrap_axis(axis):
 
     Parameters
     ----------
-    axis : list or np.ndarray or str or bool or None
+    axis : list or numpy.ndarray or str or bool or None
         rotation axis indicated by number or string.
 
     Returns
     -------
-    axis : np.ndarray
+    axis : numpy.ndarray
         conveted axis
 
     Examples
@@ -127,11 +127,11 @@ def wxyz2xyzw(quat):
 
     Parameters
     ----------
-    quat : list or np.ndarray
+    quat : list or numpy.ndarray
         quaternion [w, x, y, z]
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         quaternion [x, y, z, w]
 
     Examples
@@ -150,12 +150,12 @@ def xyzw2wxyz(quat):
 
     Parameters
     ----------
-    quat : list or np.ndarray
+    quat : list or numpy.ndarray
         quaternion [x, y, z, w]
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         quaternion [w, x, y, z]
 
     Examples
@@ -170,21 +170,34 @@ def xyzw2wxyz(quat):
 
 
 def triple_product(a, b, c):
-    """Returns Triple Product https://en.wikipedia.org/wiki/Triple_product.
+    """Returns Triple Product
+
+    See https://en.wikipedia.org/wiki/Triple_product.
+
+    Geometrically, the scalar triple product
+
+    :math:`a\\cdot(b \\times c)`
+
+    is the (signed) volume of the parallelepiped defined
+    by the three vectors given.
 
     Parameters
     ----------
     a : numpy.ndarray
+        vector a
     b : numpy.ndarray
+        vector b
     c : numpy.ndarray
+        vector c
 
     Returns
     -------
-    triple product : np.ndarray
+    triple product : float
+        calculated triple product
 
     Examples
     --------
-    >>> from skrobot.coordinates.math import triple_product
+    >>> from skrobot.math import triple_product
     >>> triple_product([1, 1, 1], [1, 1, 1], [1, 1, 1])
     0
     >>> triple_product([1, 0, 0], [0, 1, 0], [0, 0, 1])
@@ -194,12 +207,25 @@ def triple_product(a, b, c):
 
 
 def sr_inverse(J, k=1.0, weight_vector=None):
-    """Returns sr-inverse of given Jacobian.
+    """Returns SR-inverse of given Jacobian.
 
     Calculate Singularity-Robust Inverse
     See: `Inverse Kinematic Solutions With Singularity Robustness \
           for Robot Manipulator Control`
 
+    Parameters
+    ----------
+    J : numpy.ndarray
+        jacobian
+    k : float
+        coefficients
+    weight_vector : None or numpy.ndarray
+        weight vector
+
+    Returns
+    -------
+    ret : numpy.ndarray
+        result of SR-inverse
     """
     r, _ = J.shape
 
@@ -223,7 +249,24 @@ def sr_inverse(J, k=1.0, weight_vector=None):
 
 
 def sr_inverse_org(J, k=1.0):
-    """J^T (JJ^T + kI_m)^(-1)"""
+    """Return SR-inverse of given J
+
+    Definition of SR-inverse is following.
+
+    :math:`J^* = J^T(JJ^T + kI_m)^{-1}`
+
+    Parameters
+    ----------
+    J : numpy.ndarray
+        jacobian
+    k : float
+        coefficients
+
+    Returns
+    -------
+    sr_inverse : numpy.ndarray
+        calculated SR-inverse
+    """
     r, _ = J.shape
     return np.matmul(J.T,
                      np.linalg.inv(np.matmul(J, J.T) + k * np.eye(r)))
@@ -232,7 +275,19 @@ def sr_inverse_org(J, k=1.0):
 def manipulability(J):
     """Return manipulability of given matrix.
 
-    https://www.jstage.jst.go.jp/article/jrsj1983/2/1/2_1_63/_article/-char/ja/
+    Definition of manipulability is following.
+
+    :math:`w = \\sqrt{\\det J(\\theta)J^T(\\theta)}`
+
+    Parameters
+    ----------
+    J : numpy.ndarray
+        jacobian
+
+    Returns
+    -------
+    w : float
+        manipulability
     """
     return np.sqrt(max(0.0, np.linalg.det(np.matmul(J, J.T))))
 
@@ -244,14 +299,14 @@ def midpoint(p, a, b):
     ----------
     p : float
         ratio of a:b
-    a : np.ndarray
+    a : numpy.ndarray
         vector
-    b : np.ndarray
+    b : numpy.ndarray
         vector
 
     Returns
     -------
-    midpoint : np.ndarray
+    midpoint : numpy.ndarray
         midpoint
 
     Examples
@@ -271,14 +326,14 @@ def midrot(p, r1, r2):
     ----------
     p : float
         ratio of r1:r2
-    r1 : np.ndarray
+    r1 : numpy.ndarray
         3x3 rotation matrix
-    r2 : np.ndarray
+    r2 : numpy.ndarray
         3x3 rotation matrix
 
     Returns
     -------
-    r : np.ndarray
+    r : numpy.ndarray
         3x3 rotation matrix
 
     Examples
@@ -309,8 +364,8 @@ def transform(m, v):
     """Return transform m v
 
     Args:
-        m (np.array): 3 x 3 matrix
-        v (np.array or list): vector
+        m (numpy.ndarray): 3 x 3 matrix
+        v (numpy.ndarray or list): vector
 
     Returns:
         numpy.array vector
@@ -330,13 +385,13 @@ def rotation_matrix(theta, axis):
     ----------
     theta : float
         radian
-    axis : string or list or np.ndarray
+    axis : string or list or numpy.ndarray
         rotation axis such that 'x', 'y', 'z'
         [0, 0, 1], [0, 1, 0], [1, 0, 0]
 
     Returns
     -------
-    rot : np.ndarray
+    rot : numpy.ndarray
         rotation matrix about the given axis by theta radians.
 
     Examples
@@ -423,7 +478,7 @@ def rpy_matrix(az, ay, ax):
 
     Returns
     -------
-    r : np.ndarray
+    r : numpy.ndarray
         rotation matrix
 
     Examples
@@ -449,12 +504,12 @@ def rpy_angle(matrix):
 
     Parameters
     ----------
-    matrix : list or np.ndarray
+    matrix : list or numpy.ndarray
         3x3 rotation matrix
 
     Returns
     -------
-    rpy : np.ndarray
+    rpy : numpy.ndarray
         pair of rpy in yaw-pitch-roll order.
 
     Examples
@@ -492,14 +547,14 @@ def normalize_vector(v, ord=2):
 
     Parameters
     ----------
-    v : list or np.ndarray
+    v : list or numpy.ndarray
         vector
     ord : int (optional)
         ord of np.linalg.norm
 
     Returns
     -------
-    v : np.ndarray
+    v : numpy.ndarray
         normalized vector
 
     Examples
@@ -521,12 +576,12 @@ def matrix2quaternion(m):
 
     Parameters
     ----------
-    m : list or np.ndarray
+    m : list or numpy.ndarray
         3x3 rotation matrix
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         quaternion [w, x, y, z] order
 
     Examples
@@ -572,12 +627,12 @@ def quaternion2matrix(q):
 
     Parameters
     ----------
-    quaternion : list or np.ndarray
+    quaternion : list or numpy.ndarray
         quaternion [w, x, y, z] order
 
     Returns
     -------
-    rot : np.ndarray
+    rot : numpy.ndarray
         3x3 rotation matrix
 
     Examples
@@ -616,12 +671,12 @@ def matrix_log(m):
 
     Parameters
     ----------
-    m : list or np.ndarray
+    m : list or numpy.ndarray
         3x3 rotation matrix
 
     Returns
     -------
-    matrixlog : np.ndarray
+    matrixlog : numpy.ndarray
         vector of shape (3, )
 
     Examples
@@ -648,12 +703,12 @@ def matrix_exponent(omega, p=1.0):
 
     Parameters
     ----------
-    omega : list or np.ndarray
+    omega : list or numpy.ndarray
         vector of shape (3,)
 
     Returns
     -------
-    rot : np.ndarray
+    rot : numpy.ndarray
         exponential matrix of given omega
 
     Examples
@@ -682,12 +737,12 @@ def outer_product_matrix(v):
 
     Parameters
     ----------
-    v : np.ndarray or list
+    v : numpy.ndarray or list
         [x, y, z]
 
     Returns
     -------
-    matrix : np.ndarray
+    matrix : numpy.ndarray
         3x3 rotation matrix
         [[  0 -w2  w1]
          [ w2   0 -w0]
@@ -711,12 +766,12 @@ def quaternion2rpy(q):
 
     Parameters
     ----------
-    q : np.ndarray or list
+    q : numpy.ndarray or list
         Quaternion in [w x y z] format.
 
     Returns
     -------
-    rpy : np.ndarray
+    rpy : numpy.ndarray
         Array of yaw-pitch-roll angles, in radian.
 
     Examples
@@ -745,12 +800,12 @@ def rpy2quaternion(rpy):
 
     Parameters
     ----------
-    rpy : np.ndarray or list
+    rpy : numpy.ndarray or list
         Vector of yaw-pitch-roll angles in radian.
 
     Returns
     -------
-    quat : np.ndarray
+    quat : numpy.ndarray
         Quaternion in [w x y z] format.
 
     Examples
@@ -780,12 +835,12 @@ def rotation_matrix_from_rpy(rpy):
 
     Parameters
     ----------
-    rpy : np.ndarray or list
+    rpy : numpy.ndarray or list
         Vector of yaw-pitch-roll angles in radian.
 
     Returns
     -------
-    rot : np.ndarray
+    rot : numpy.ndarray
         3x3 rotation matrix
 
     Examples
@@ -805,14 +860,14 @@ def rodrigues(axis, theta=None):
 
     Parameters
     ----------
-    axis : np.ndarray or list
+    axis : numpy.ndarray or list
         [x, y, z]
     theta: float or None (optional)
         radian. If None is given, calculate theta from axis.
 
     Returns
     -------
-    mat : np.ndarray
+    mat : numpy.ndarray
         3x3 rotation matrix
 
     Examples
@@ -851,14 +906,14 @@ def rotation_angle(mat):
 
     Parameters
     ----------
-    mat : np.ndarray
+    mat : numpy.ndarray
         rotation matrix, shape (3, 3)
 
     Returns
     -------
     theta : float
         rotation angle in radian
-    axis : np.ndarray
+    axis : numpy.ndarray
         rotation axis
 
     Examples
@@ -888,8 +943,8 @@ def rotation_distance(mat1, mat2):
 
     Parameters
     ----------
-    mat1 : list or np.ndarray
-    mat2 : list or np.ndarray
+    mat1 : list or numpy.ndarray
+    mat2 : list or numpy.ndarray
         3x3 matrix
 
     Returns
@@ -921,14 +976,14 @@ def quaternion_multiply(quaternion1, quaternion0):
 
     Parameters
     ----------
-    quaternion0 : list or np.ndarray
+    quaternion0 : list or numpy.ndarray
         [w, x, y, z]
-    quaternion1 : list or np.ndarray
+    quaternion1 : list or numpy.ndarray
         [w, x, y, z]
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         [w, x, y, z]
 
     Examples
@@ -951,12 +1006,12 @@ def quaternion_conjugate(quaternion):
 
     Parameters
     ----------
-    quaternion : list or np.ndarray
+    quaternion : list or numpy.ndarray
         quaternion [w, x, y, z]
 
     Returns
     -------
-    conjugate of quaternion : np.ndarray
+    conjugate of quaternion : numpy.ndarray
         [w, x, y, z]
 
     Examples
@@ -976,12 +1031,12 @@ def quaternion_inverse(quaternion):
 
     Parameters
     ----------
-    quaternion : list or np.ndarray
+    quaternion : list or numpy.ndarray
         [w, x, y, z]
 
     Returns
     -------
-    inverse of quaternion : np.ndarray
+    inverse of quaternion : numpy.ndarray
         [w, x, y, z]
 
     Examples
@@ -1000,9 +1055,9 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
 
     Parameters
     ----------
-    q0 : list or np.ndarray
+    q0 : list or numpy.ndarray
         start quaternion
-    q1 : list or np.ndarray
+    q1 : list or numpy.ndarray
         end quaternion
     fraction : float
         ratio
@@ -1013,7 +1068,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         spherical linear interpolated quaternion
 
     Examples
@@ -1060,8 +1115,8 @@ def quaternion_distance(q1, q2, absolute=False):
 
     Parameters
     ----------
-    q1 : list or np.ndarray
-    q2 : list or np.ndarray
+    q1 : list or numpy.ndarray
+    q2 : list or numpy.ndarray
         [w, x, y, z] order
     absolute : bool
         if True, return distance accounting for the sign ambiguity.
@@ -1099,8 +1154,8 @@ def quaternion_absolute_distance(q1, q2):
 
     Parameters
     ----------
-    q1 : list or np.ndarray
-    q2 : list or np.ndarray
+    q1 : list or numpy.ndarray
+    q2 : list or numpy.ndarray
         [w, x, y, z] order
 
     Returns
@@ -1129,7 +1184,7 @@ def quaternion_norm(q):
 
     Parameters
     ----------
-    q : list or np.ndarray
+    q : list or numpy.ndarray
         [w, x, y, z] order
 
     Returns
@@ -1157,12 +1212,12 @@ def quaternion_normalize(q):
 
     Parameters
     ----------
-    q : list or np.ndarray
+    q : list or numpy.ndarray
         [w, x, y, z] order
 
     Returns
     -------
-    normalized_q : np.ndarray
+    normalized_q : numpy.ndarray
         normalized quaternion
 
     Examples
@@ -1188,12 +1243,12 @@ def quaternion_from_axis_angle(theta, axis):
     ----------
     theta : float
         radian
-    axis : list or np.ndarray
+    axis : list or numpy.ndarray
         length is 3. Automatically normalize in this function
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         [w, x, y, z] order
 
     Examples
@@ -1223,12 +1278,12 @@ def axis_angle_from_quaternion(quat):
 
     Parameters
     ----------
-    quat : np.ndarray
+    quat : numpy.ndarray
         quaternion [w, x, y, z]
 
     Returns
     -------
-    axis_angle : np.ndarray
+    axis_angle : numpy.ndarray
         axis-angle representation of vector
 
     Examples
@@ -1258,12 +1313,12 @@ def axis_angle_from_matrix(rotation):
 
     Parameters
     ----------
-    rotation : np.ndarray
+    rotation : numpy.ndarray
         3x3 rotation matrix
 
     Returns
     -------
-    axis_angle : np.ndarray
+    axis_angle : numpy.ndarray
         axis-angle representation of vector
 
     Examples
@@ -1327,7 +1382,7 @@ def random_quaternion():
 
     Returns
     -------
-    quaternion : np.ndarray
+    quaternion : numpy.ndarray
         generated random unit quaternion [w, x, y, z]
 
     Examples
@@ -1358,7 +1413,20 @@ def random_quaternion():
 
 
 def make_matrix(r, c):
-    """Wrapper of numpy array."""
+    """Wrapper of numpy array.
+
+    Parameters
+    ----------
+    r : int
+        row of matrix
+    c : int
+        column of matrix
+
+    Returns
+    -------
+    np.zeros((r, c), 'f') : numpy.ndarray
+        matrix
+    """
     return np.zeros((r, c), 'f')
 
 

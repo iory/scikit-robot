@@ -46,9 +46,9 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     Parameters
     ----------
     target_coords : skrobot.coordinates.Coordinates
-    v : list or np.ndarray
+    v : list or numpy.ndarray
         position of target [x, y, z]
-    axis : list or string or np.ndarray
+    axis : list or string or numpy.ndarray
         see _wrap_axis function
     eps : float (optional)
         eps
