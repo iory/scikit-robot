@@ -733,7 +733,16 @@ def matrix_exponent(omega, p=1.0):
 def outer_product_matrix(v):
     """Returns outer product matrix of given v.
 
-    Returns outer product matrix of given v
+    Returns following outer product matrix.
+
+    .. math::
+        \\left(
+            \\begin{array}{ccc}
+              0 & -v_2 & v_1 \\\\
+              v_2 & 0 & -v_0 \\\\
+              -v_1 & v_0 & 0
+            \\end{array}
+        \\right)
 
     Parameters
     ----------
@@ -743,10 +752,7 @@ def outer_product_matrix(v):
     Returns
     -------
     matrix : numpy.ndarray
-        3x3 rotation matrix
-        [[  0 -w2  w1]
-         [ w2   0 -w0]
-         [-w1  w0   0]]
+        3x3 rotation matrix.
 
     Examples
     --------
