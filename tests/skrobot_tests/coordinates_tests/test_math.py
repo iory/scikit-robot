@@ -5,6 +5,7 @@ import numpy as np
 from numpy import pi
 from numpy import testing
 
+from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_exponent
 from skrobot.coordinates.math import matrix_log
@@ -39,6 +40,16 @@ from skrobot.coordinates.math import xyzw2wxyz
 
 
 class TestMath(unittest.TestCase):
+
+    def test__check_valid_rotation(self):
+        valid_rotation = np.eye(3)
+        testing.assert_equal(
+            _check_valid_rotation(valid_rotation),
+            valid_rotation)
+
+        invalid_rotation = np.arange(9).reshape(3, 3)
+        with self.assertRaises(ValueError):
+            _check_valid_rotation(invalid_rotation)
 
     def test_xyzw2wxyz(self):
         xyzw = np.array([0, 0, 0, 1])
