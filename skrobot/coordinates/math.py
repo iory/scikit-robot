@@ -101,7 +101,7 @@ def _check_valid_rotation(rotation):
 
     if np.abs(np.linalg.det(rotation) - 1.0) > 1e-3:
         raise ValueError('Illegal rotation. Must have determinant == 1.0, '
-                         'get {}'.format(np.linalg.deg(rotation)))
+                         'get {}'.format(np.linalg.det(rotation)))
     return rotation
 
 
