@@ -108,6 +108,8 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 )
             self._links.append(link)
 
+        self._redraw = True
+
     def set_camera(self, *args, **kwargs):
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
