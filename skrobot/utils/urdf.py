@@ -22,6 +22,12 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
 
+try:
+    import rospkg
+    rospack = rospkg.RosPack()
+except ImportError:
+    rospack = None
+
 
 def parse_origin(node):
     """Find the ``origin`` subelement of an XML node and convert it
@@ -82,6 +88,14 @@ def unparse_origin(matrix):
 
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
+
+    if rospack is not None and parsed_url.scheme == 'package':
+        ros_package = parsed_url.netloc
+        package_path = rospack.get_path(ros_package)
+        resolve_filepath = package_path + parsed_url.path
+        if os.path.exists(resolve_filepath):
+            return resolve_filepath
+
     dirname = base_path
     file_path = parsed_url.netloc + parsed_url.path
     while not dirname == '/':
@@ -89,7 +103,6 @@ def resolve_filepath(base_path, file_path):
         if os.path.exists(resolved_filepath):
             return resolved_filepath
         dirname = os.path.dirname(dirname)
-    return False
 
 
 def get_filename(base_path, file_path, makedirs=False):
@@ -112,7 +125,7 @@ def get_filename(base_path, file_path, makedirs=False):
         absolute path, otherwise that path joined to ``base_path``.
     """
     resolved_file_path = resolve_filepath(base_path, file_path)
-    if resolved_file_path is False:
+    if resolved_file_path is None:
         raise OSError('could not find {}'.format(file_path))
     if not os.path.isabs(resolved_file_path):
         resolved_file_path = os.path.join(base_path, resolved_file_path)
