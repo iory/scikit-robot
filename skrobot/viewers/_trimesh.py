@@ -42,6 +42,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def on_draw(self):
         if not self._redraw:
+            super(TrimeshSceneViewer, self).on_draw()
             return
 
         with self.lock:
@@ -60,8 +61,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                         l.name,
                     )
                     self.scene.graph.update(name, matrix=transform)
-
-            super(TrimeshSceneViewer, self).on_draw()
+        super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
 
