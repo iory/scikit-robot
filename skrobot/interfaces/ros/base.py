@@ -341,7 +341,6 @@ class ROSRobotInterfaceBase(object):
                      controller_type=None,
                      start_time=0.0,
                      scale=1.0,
-                     min_time=1.0,
                      velocities=None):
         """Send joint angle to robot
 
@@ -364,8 +363,6 @@ class ROSRobotInterfaceBase(object):
             time to start moving
         scale : float
             if time is not specified, it will use 1/scale of the fastest speed.
-        min_time : float
-            minimum time for time to goal
 
         Returns
         -------
@@ -387,7 +384,6 @@ class ROSRobotInterfaceBase(object):
             self.angle_vector(),
             av,
             scale,
-            min_time,
             controller_type)
         time = self._check_time(time, fastest_time)
 
@@ -470,8 +466,7 @@ class ROSRobotInterfaceBase(object):
                               times=[3.0],
                               controller_type=None,
                               start_time=0.0,
-                              scale=1,
-                              min_time=0.0):
+                              scale=1):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -502,8 +497,6 @@ class ROSRobotInterfaceBase(object):
         scale : float
             if times is not specified, it will use 1 / scale of the
             fastest speed
-        min_time : float
-            minimum time for time to goal
 
         Returns
         -------
@@ -529,7 +522,7 @@ class ROSRobotInterfaceBase(object):
         for i_step in range(total_steps):
             av = avs[i_step]
             fastest_time = self.angle_vector_duration(
-                prev_av, av, scale, min_time, controller_type)
+                prev_av, av, scale, controller_type)
             time = times[i_step]
             time = self._check_time(time, fastest_time)
 
@@ -538,7 +531,7 @@ class ROSRobotInterfaceBase(object):
                 next_time = times[i_step + 1]
                 next_av = avs[i_step + 1]
                 fastest_next_tiem = self.angle_vector_duration(
-                    av, next_av, scale, min_time, controller_type)
+                    av, next_av, scale, controller_type)
                 next_time = self._check_time(next_time, fastest_next_tiem)
                 if time > 0.0 and next_time > 0.0:
                     v0 = self.sub_angle_vector(av, prev_av)
@@ -587,8 +580,7 @@ class ROSRobotInterfaceBase(object):
 
     def angle_vector_duration(
             self, start_av, end_av,
-            scale=1.0, min_time=1.0,
-            controller_type=None):
+            scale=1.0, controller_type=None):
         """Calculate maximum time to reach goal for all joint.
 
         Parameters
@@ -599,8 +591,6 @@ class ROSRobotInterfaceBase(object):
             end angle-vector (target position)
         scale : float
             time scale.
-        min_time : float
-            minimum time.
         controller_type : None or string
             type of controller
 
@@ -621,7 +611,7 @@ class ROSRobotInterfaceBase(object):
             else:
                 time = 0
             time_list.append(time)
-        return max(max(time_list), min_time)
+        return max(time_list)
 
 
 class ControllerActionClient(actionlib.SimpleActionClient):
