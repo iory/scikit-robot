@@ -5,7 +5,6 @@ from numbers import Number
 import sys
 
 import numpy as np
-from numpy import deg2rad
 
 import actionlib
 import control_msgs.msg
@@ -197,7 +196,7 @@ class RobotInterface(object):
             if not hasattr(self.robot, jn):
                 continue
             joint = getattr(self.robot, jn)
-            joint.joint_angle(deg2rad(position))
+            joint.joint_angle(position)
             joint.joint_velocity = velocity
             joint.joint_torque = effort
 
@@ -350,7 +349,7 @@ class RobotInterface(object):
         Parameters
         ----------
         av : list or numpy.ndarray
-            joint angle vector [deg]
+            joint angle vector [rad]
         time : None or float or string
             time to goal in [msec]
             if designated time is faster than fastest speed, use fastest speed
@@ -463,10 +462,6 @@ class RobotInterface(object):
                     p = all_positions[idx]
                     v = all_velocities[idx]
 
-                    if isinstance(joint, RotationalJoint):
-                        p = deg2rad(p)
-                        v = deg2rad(v)
-
                     positions[i] = p
                     velocities[i] = v
                 goal_points.append(
@@ -494,7 +489,7 @@ class RobotInterface(object):
         ----------
         avs : list or numpy.ndarray
             [av0, av1, ..., avn]
-            sequence of joint angles in [deg]
+            sequence of joint angles in [rad]
         times : list of float or float
             [list tm0 tm1 ... tmn]
             sequence of duration(float) from previous angle-vector
@@ -628,10 +623,10 @@ class RobotInterface(object):
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
                 if isinstance(joint, LinearJoint):
-                    time = scale * (0.001 * abs(diff_angle)) / \
+                    time = scale * abs(diff_angle) / \
                         joint.max_joint_velocity
                 else:
-                    time = scale * deg2rad(abs(diff_angle)) / \
+                    time = scale * abs(diff_angle) / \
                         joint.max_joint_velocity
             else:
                 time = 0
