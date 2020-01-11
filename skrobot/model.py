@@ -75,8 +75,8 @@ class Joint(object):
 
     def __init__(self, name=None, child_link=None,
                  parent_link=None,
-                 min_angle=-90,
-                 max_angle=90,
+                 min_angle=-np.pi / 2.0,
+                 max_angle=np.pi,
                  max_joint_velocity=None,
                  max_joint_torque=None,
                  joint_min_max_table=None,
@@ -115,7 +115,7 @@ class Joint(object):
 class RotationalJoint(Joint):
 
     def __init__(self, axis='z',
-                 max_joint_velocity=5,
+                 max_joint_velocity=np.deg2rad(5),
                  max_joint_torque=100,
                  *args, **kwargs):
         super(RotationalJoint, self).__init__(
@@ -143,9 +143,9 @@ class RotationalJoint(Joint):
         self._joint_angle = 0.0
 
         if self.min_angle is None:
-            self.min_angle = -90.0
+            self.min_angle = - np.pi / 2.0
         if self.max_angle is None:
-            self.max_angle = 180.0 + self.min_angle
+            self.max_angle = np.pi + self.min_angle
 
         self.joint_velocity = 0.0  # [rad/s]
         self.joint_acceleration = 0.0  # [rad/s^2]
@@ -180,7 +180,7 @@ class RotationalJoint(Joint):
         # (send child-link :rotate (deg2rad joint-angle) axis))
         self.child_link.rotation = self.default_coords.rotation.copy()
         self.child_link.translation = self.default_coords.translation.copy()
-        self.child_link.rotate(np.deg2rad(self._joint_angle), self.axis)
+        self.child_link.rotate(self._joint_angle, self.axis)
         return self._joint_angle
 
     @property
@@ -192,10 +192,10 @@ class RotationalJoint(Joint):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
     def speed_to_angle(self, v):
-        return np.rad2deg(v)
+        return v
 
     def angle_to_speed(self, v):
-        return np.deg2rad(v)
+        return v
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
@@ -233,10 +233,10 @@ class FixedJoint(Joint):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
     def speed_to_angle(self, v):
-        return np.rad2deg(v)
+        return v
 
     def angle_to_speed(self, v):
-        return np.deg2rad(v)
+        return v
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
@@ -301,9 +301,9 @@ class LinearJoint(Joint):
             max_joint_torque=max_joint_torque,
             *args, **kwargs)
         if self.min_angle is None:
-            self.min_angle = -90.0
+            self.min_angle = - np.pi / 2.0
         if self.max_angle is None:
-            self.max_angle = 90.0
+            self.max_angle = np.pi / 2.0
         self.joint_velocity = 0.0  # [m/s]
         self.joint_acceleration = 0.0  # [m/s^2]
         self.joint_torque = 0.0  # [N]
@@ -2068,8 +2068,8 @@ class RobotModel(CascadedLink):
                     name=j.name,
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child],
-                    min_angle=np.rad2deg(j.limit.lower),
-                    max_angle=np.rad2deg(j.limit.upper),
+                    min_angle=j.limit.lower,
+                    max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
             elif j.joint_type == 'continuous':

@@ -1,4 +1,5 @@
 from cached_property import cached_property
+import numpy as np
 from skrobot.coordinates import CascadedCoords
 from skrobot.data import fetch_urdfpath
 from skrobot.model import RobotModel
@@ -25,12 +26,12 @@ class Fetch(RobotModel):
 
     def reset_pose(self):
         self.torso_lift_joint.joint_angle(0)
-        self.shoulder_pan_joint.joint_angle(75.6304)
-        self.shoulder_lift_joint.joint_angle(80.2141)
-        self.upperarm_roll_joint.joint_angle(-11.4592)
-        self.elbow_flex_joint.joint_angle(98.5487)
+        self.shoulder_pan_joint.joint_angle(np.deg2rad(75.6304))
+        self.shoulder_lift_joint.joint_angle(np.deg2rad(80.2141))
+        self.upperarm_roll_joint.joint_angle(np.deg2rad(-11.4592))
+        self.elbow_flex_joint.joint_angle(np.deg2rad(98.5487))
         self.forearm_roll_joint.joint_angle(0.0)
-        self.wrist_flex_joint.joint_angle(95.111)
+        self.wrist_flex_joint.joint_angle(np.deg2rad(95.111))
         self.wrist_roll_joint.joint_angle(0.0)
         self.head_pan_joint.joint_angle(0.0)
         self.head_tilt_joint.joint_angle(0.0)
@@ -41,12 +42,12 @@ class Fetch(RobotModel):
         self.shoulder_pan_joint.joint_angle(0)
         self.shoulder_lift_joint.joint_angle(0)
         self.upperarm_roll_joint.joint_angle(0)
-        self.elbow_flex_joint.joint_angle(90)
-        self.forearm_roll_joint.joint_angle(0.0)
-        self.wrist_flex_joint.joint_angle(-90)
+        self.elbow_flex_joint.joint_angle(np.pi / 2.0)
+        self.forearm_roll_joint.joint_angle(0)
+        self.wrist_flex_joint.joint_angle(- np.pi / 2.0)
         self.wrist_roll_joint.joint_angle(0)
-        self.head_pan_joint.joint_angle(0.0)
-        self.head_tilt_joint.joint_angle(0.0)
+        self.head_pan_joint.joint_angle(0)
+        self.head_tilt_joint.joint_angle(0)
         return self.angle_vector()
 
     @cached_property

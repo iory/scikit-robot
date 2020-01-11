@@ -4,8 +4,6 @@ import numpy as np
 
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
-from skrobot.model import LinearJoint
-from skrobot.model import RotationalJoint
 
 
 _available = False
@@ -101,13 +99,7 @@ class PybulletRobotInterface(object):
             idx = self.joint_name_to_joint_id[joint.name]
 
             joint = self.robot.joint_list[i]
-            if isinstance(joint, RotationalJoint):
-                angle = np.deg2rad(angle)
-            elif isinstance(joint, LinearJoint):
-                pass
-            else:
-                raise ValueError('{} is not supported'.
-                                 format(type(joint)))
+
             if self.realtime_simulation is False:
                 p.resetJointState(self.robot_id, idx, angle)
 
@@ -147,7 +139,7 @@ class PybulletRobotInterface(object):
                 continue
             joint_state = p.getJointState(self.robot_id,
                                           idx)
-            joint.joint_angle(np.rad2deg(joint_state[0]))
+            joint.joint_angle(joint_state[0])
         pos, orientation = p.getBasePositionAndOrientation(self.robot_id)
         rpy, _ = quaternion2rpy([orientation[3], orientation[0],
                                  orientation[1], orientation[2]])
