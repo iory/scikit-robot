@@ -328,6 +328,7 @@ class ROSRobotInterfaceBase(object):
             joint = joint_list[i]
             if np.isinf(joint.min_angle) and \
                np.isinf(joint.max_angle):
+                ret[i] = ret[i] % (2 * np.pi)
                 if ret[i] > np.pi:
                     ret[i] = ret[i] - 2 * np.pi
                 elif ret[i] < - np.pi:
