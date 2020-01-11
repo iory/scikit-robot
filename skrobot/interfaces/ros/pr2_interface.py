@@ -1,34 +1,43 @@
 import control_msgs.msg
 import rospy
+import pr2_controllers_msgs.msg
+import actionlib
 
-from skrobot.interfaces._ros_robot_interface import RobotInterface
+from skrobot.interfaces._ros_robot_interface import ROSRobotInterface
 from skrobot.model import RotationalJoint
 
 
-class PR2Interface(RobotInterface):
+class PR2Interface(ROSRobotInterface):
     """pr2 robot interface."""
 
     def __init__(self, *args, **kwargs):
-        RobotInterface.__init__(
+        ROSRobotInterface.__init__(
             self, *args, **kwargs)
 
-        # add controllers
-        for ctype, name in [(self.larm_controller,
-                             'l_arm_controller/follow_joint_trajectory'),
-                            (self.rarm_controller,
-                             'r_arm_controller/follow_joint_trajectory'),
-                            (self.head_controller,
-                             'head_traj_controller/follow_joint_trajectory'),
-                            (self.torso_controller,
-                             'torso_controller/follow_joint_trajectory')]:
-            pass
+        self.gripper_states = dict(larm=None, rarm=None)
+        rospy.Subscriber('/r_gripper_controller/state',
+                         pr2_controllers_msgs.msg.JointControllerState,
+                         lambda msg: self.pr2_gripper_state_callback(
+                             'rarm', msg))
+        rospy.Subscriber('/l_gripper_controller/state',
+                         pr2_controllers_msgs.msg.JointControllerState,
+                         lambda msg: self.pr2_gripper_state_callback(
+                             'larm', msg))
 
-        # rospy.Subscriber('/r_gripper_controller/state',
-        #                  pr2_controllers_msgs.msg.JointControllerState,
-        #                  lambda msg: self.pr2_fingertip_callback('rarm'))
-        # rospy.Subscriber('/l_gripper_controller/state',
-        #                  pr2_controllers_msgs.msg.JointControllerState,
-        #                  lambda msg: self.pr2_fingertip_callback('larm'))
+        self.l_gripper_action = actionlib.SimpleActionClient(
+            "/l_gripper_controller/gripper_action",
+            pr2_controllers_msgs.msg.Pr2GripperCommandAction)
+        self.r_gripper_action = actionlib.SimpleActionClient(
+            "/r_gripper_controller/gripper_action",
+            pr2_controllers_msgs.msg.Pr2GripperCommandAction)
+        for action in [self.l_gripper_action, self.r_gripper_action]:
+            if not (self.joint_action_enable and action.wait_for_server(
+                    rospy.Duration(3))):
+                self.joint_action_enable = False
+                rospy.logwarn('{} is not respond, PR2Interface is disabled')
+                break
+
+        self.ignore_joint_list = ['laser_tilt_mount_joint', ]
 
     def wait_interpolation(self, controller_type=None, timeout=0):
         """Overwrite wait_interpolation
@@ -49,13 +58,11 @@ class PR2Interface(RobotInterface):
             if all interpolation has stopped, return True.
 
         """
-        if self.is_simulation_mode():
-            return super(PR2Interface, self).wait_interpolation(
-                controller_type, timeout)
         super(PR2Interface, self).wait_interpolation(controller_type, timeout)
         while not rospy.is_shutdown():
             self.update_robot_state(wait_until_update=True)
-            if all(map(lambda j: abs(j.joint_velocity) < 0.05
+            if all(map(lambda j: j.name in self.ignore_joint_list or
+                       abs(j.joint_velocity) < 0.05
                        if isinstance(j, RotationalJoint) else
                        abs(j.joint_velocity) < 0.001,
                        self.robot.joint_list)):
@@ -106,6 +113,49 @@ class PR2Interface(RobotInterface):
             controller_state='torso_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=['torso_lift_joint'])
+
+    def move_gripper(self, arm, pos, effort=25,
+                     wait=True,
+                     ignore_stall=False):
+        """Move gripper function
+
+        Parameters
+        ----------
+        arm : str
+            can take 'larm', 'rarm', 'arms'
+        pos : float
+            position of gripper.
+            if pos is 0.0, gripper closed.
+        effort : float
+            effort of grasp.
+        wait : bool
+            if wait is True, wait until gripper action ends.
+        """
+        if arm == 'larm':
+            action_clients = [self.l_gripper_action]
+        elif arm == 'rarm':
+            action_clients = [self.r_gripper_action]
+        elif arm == 'arms':
+            action_clients = [self.l_gripper_action,
+                              self.r_gripper_action]
+        else:
+            return
+        for action_client in action_clients:
+            goal = pr2_controllers_msgs.msg.Pr2GripperCommandActionGoal()
+            goal.goal.command.position = pos
+            goal.goal.command.max_effort = effort
+            action_client.send_goal(goal.goal)
+        results = []
+        if wait:
+            for action_client in action_clients:
+                results.append(action_client.wait_for_result())
+        else:
+            for action_client in action_clients:
+                results.append(action_client.wait_for_result())
+        return results
+
+    def pr2_gripper_state_callback(self, arm, msg):
+        self.gripper_states[arm] = msg
 
     def default_controller(self):
         """Overriding default_controller.
