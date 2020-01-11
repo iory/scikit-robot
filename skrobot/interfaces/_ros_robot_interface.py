@@ -7,12 +7,13 @@ import sys
 import numpy as np
 
 import actionlib
+import actionlib_msgs.msg
 import control_msgs.msg
 import rospy
 from sensor_msgs.msg import JointState
-from skrobot.model import LinearJoint
-from skrobot.model import RotationalJoint
+import std_srvs.srv
 import trajectory_msgs.msg
+
 
 logger = getLogger(__name__)
 
@@ -33,8 +34,8 @@ def _flatten(xlst):
     return reduce(lambda x, y: x + y, xlst)
 
 
-class RobotInterface(object):
-    """RobotInterface is class for interacting real robot.
+class ROSRobotInterface(object):
+    """ROSRobotInterface is class for interacting real robot.
 
     RobotInterface is class for interacting real robot thorugh
     JointTrajectoryAction servers and JointState topics.
@@ -66,7 +67,9 @@ class RobotInterface(object):
 
         """
         if rospy.rostime._rostime_initialized is False:
-            rospy.init_node('default_robot_interface')
+            rospy.init_node('default_robot_interface',
+                            anonymous=True,
+                            disable_signals=True)
 
         wait_seconds = 180
         start_time = datetime.datetime.now()
@@ -102,10 +105,13 @@ class RobotInterface(object):
         if self.namespace:
             rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
-                JointState)
+                             JointState,
+                             callback=self.joint_state_callback,
+                             queue_size=joint_states_queue_size)
         else:
             rospy.Subscriber(joint_states_topic, JointState,
-                             self.joint_state_callback, queue_size=1)
+                             callback=self.joint_state_callback,
+                             queue_size=joint_states_queue_size)
 
         if default_controller is None:
             default_controller = 'default_controller'
@@ -156,9 +162,6 @@ class RobotInterface(object):
             if all(map(lambda ts: ts.to_nsec() > initial_time,
                        self.robot_state['stamp_list'])):
                 return
-            if self.is_simulation_mode():
-                # to update robot_state
-                self.robot_interface_simulation_callback()
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
@@ -349,9 +352,9 @@ class RobotInterface(object):
         Parameters
         ----------
         av : list or numpy.ndarray
-            joint angle vector [rad]
+            joint angle vector
         time : None or float or string
-            time to goal in [msec]
+            time to goal in [sec]
             if designated time is faster than fastest speed, use fastest speed
             if not specified(None), it will use 1 / scale of the fastest speed.
             if 'fastest' is specefied use fastest speed calcurated from
@@ -381,19 +384,14 @@ class RobotInterface(object):
             return False
 
         # check and decide time
-        fastest_time = 1000 * self.angle_vector_duration(
-            # self.state.potentio_vector,
-            self.potentio_vector(),
+        fastest_time = self.angle_vector_duration(
+            self.angle_vector(),
             av,
             scale,
             min_time,
             controller_type)
         time = self._check_time(time, fastest_time)
 
-        # for simulation mode
-        if self.is_simulation_mode():
-            if av:
-                self.angle_vector_simulation(av, time, controller_type)
         self.robot.angle_vector(av)
         cacts = self.controller_table[controller_type]
 
@@ -401,7 +399,7 @@ class RobotInterface(object):
             angle_velocities = velocities
         else:
             angle_velocities = np.zeros_like(av)
-        duration = time / 1000.0
+        duration = time
         traj_points = [(av, angle_velocities, duration), ]
         self.traj_points = traj_points
         for action, controller_param in zip(cacts, self.default_controller()):
@@ -432,9 +430,6 @@ class RobotInterface(object):
         -------
         TODO
         """
-        if self.is_simulation_mode():
-            return False
-
         goal = action.action_client.ActionGoal()
         goal_points = []
         if isinstance(start_time, Number):
@@ -461,7 +456,6 @@ class RobotInterface(object):
                     idx = self.robot.joint_list.index(joint)
                     p = all_positions[idx]
                     v = all_velocities[idx]
-
                     positions[i] = p
                     velocities[i] = v
                 goal_points.append(
@@ -474,7 +468,7 @@ class RobotInterface(object):
 
     def angle_vector_sequence(self,
                               avs,
-                              times=[3000],
+                              times=[3.0],
                               controller_type=None,
                               start_time=0.0,
                               scale=1,
@@ -489,11 +483,11 @@ class RobotInterface(object):
         ----------
         avs : list or numpy.ndarray
             [av0, av1, ..., avn]
-            sequence of joint angles in [rad]
+            sequence of joint angles
         times : list of float or float
             [list tm0 tm1 ... tmn]
             sequence of duration(float) from previous angle-vector
-            to next goal [msec].
+            to next goal [sec].
             if times is atom, then use
                 (list (make-list (length avs) :initial-element times)))
                 for times
@@ -535,7 +529,7 @@ class RobotInterface(object):
         next_start_time = start_time
         for i_step in range(total_steps):
             av = avs[i_step]
-            fastest_time = 1000 * self.angle_vector_duration(
+            fastest_time = self.angle_vector_duration(
                 prev_av, av, scale, min_time, controller_type)
             time = times[i_step]
             time = self._check_time(time, fastest_time)
@@ -544,18 +538,17 @@ class RobotInterface(object):
             if i_step != total_steps - 1:
                 next_time = times[i_step + 1]
                 next_av = avs[i_step + 1]
-                fastest_next_tiem = 1000 * self.angle_vector_duration(
+                fastest_next_tiem = self.angle_vector_duration(
                     av, next_av, scale, min_time, controller_type)
                 next_time = self._check_time(next_time, fastest_next_tiem)
                 if time > 0.0 and next_time > 0.0:
                     v0 = self.sub_angle_vector(av, prev_av)
                     v1 = self.sub_angle_vector(next_av, av)
-                    vel = np.zeros_like(prev_av)
                     indices = v0 * v1 >= 0.0
-                    vel[indices] = 0.5 * ((1000.0 / time) * v0[indices] +
-                                          (1000.0 / next_time) * v1[indices])
-            traj_points.append((av, vel, (time + next_start_time) / 1000.0))
-            next_start_time = time
+                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices] +
+                                          (1.0 / next_time) * v1[indices])
+            traj_points.append((av, vel, time + next_start_time))
+            next_start_time += time
             prev_av = av
         self.traj_points = traj_points
 
@@ -583,65 +576,53 @@ class RobotInterface(object):
             return values are a list of is_interpolating for all controllers.
             if all interpolation has stopped, return True.
         """
-        if self.is_simulation_mode():
-            while self.interpolating():
-                self.robot_interface_simulation_callback()
+        if controller_type:
+            controller_actions = self.controller_table[controller_type]
         else:
-            if controller_type:
-                controller_actions = self.controller_table[controller_type]
-            else:
-                controller_actions = self.controller_actions
-            for action in controller_actions:
-                action.wait_for_result(timeout=rospy.Duration(timeout))
+            controller_actions = self.controller_actions
+        for action in controller_actions:
+            # TODO(simultaneously wait_for_result)
+            action.wait_for_result(timeout=rospy.Duration(timeout))
         # TODO(Fix return value)
         return True
 
     def angle_vector_duration(
-            self, start, end,
+            self, start_av, end_av,
             scale=1.0, min_time=1.0,
             controller_type=None):
         """Calculate maximum time to reach goal for all joint.
 
         Parameters
         ----------
-        start : list or np.ndarray
+        start_av : list or np.ndarray
             start angle-vector
-        end : list or np.ndarray
+        end_av : list or np.ndarray
             end angle-vector (target position)
         scale : float
-            TODO
+            time scale.
         min_time : float
-            TODO
+            minimum time.
         controller_type : None or string
             type of controller
+
+        Returns
+        -------
+        av_duration : float
+            time of angle vector.
         """
         unordered_joint_names = set(
-            _flatten([c['joint_names'] for c in self.default_controller()]))
+            _flatten([c['joint_names']
+                      for c in self.default_controller()]))
         joint_list = self.robot.joint_list
-        diff_avs = end - start
+        diff_avs = end_av - start_av
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                if isinstance(joint, LinearJoint):
-                    time = scale * abs(diff_angle) / \
-                        joint.max_joint_velocity
-                else:
-                    time = scale * abs(diff_angle) / \
-                        joint.max_joint_velocity
+                time = scale * abs(diff_angle) / joint.max_joint_velocity
             else:
                 time = 0
             time_list.append(time)
         return max(max(time_list), min_time)
-
-    def is_simulation_mode(self):
-        """Check if simulation mode.
-
-        Returns
-        -------
-        not joint_action_enable : bool
-            if joint_action is enabled, not simulation mode.
-        """
-        return not self.joint_action_enable
 
 
 class ControllerActionClient(actionlib.SimpleActionClient):
