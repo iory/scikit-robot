@@ -15,6 +15,6 @@ quadprog
 scipy==1.2.1
 six
 sympy
-trimesh>=2.37.35
+trimesh>=3.5.14
 sphinx==1.8.2
 sphinx_rtd_theme

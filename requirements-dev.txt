@@ -1,2 +1,0 @@
--r requirements.txt
--e git+https://github.com/wkentaro/trimesh.git@fix_scene_add_geometry#egg=trimesh
