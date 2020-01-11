@@ -10,8 +10,8 @@ import actionlib
 import control_msgs.msg
 import rospy
 from sensor_msgs.msg import JointState
-from skrobot.robot_model import LinearJoint
-from skrobot.robot_model import RotationalJoint
+from skrobot.model import LinearJoint
+from skrobot.model import RotationalJoint
 import trajectory_msgs.msg
 
 logger = getLogger(__name__)
