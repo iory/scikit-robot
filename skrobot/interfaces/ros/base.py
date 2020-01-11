@@ -119,7 +119,7 @@ class ROSRobotInterfaceBase(object):
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
 
-    def _check_time(self, time, fastest_time):
+    def _check_time(self, time, fastest_time, time_scale):
         """Check and Return send angle vector time
 
         Parameters
@@ -128,6 +128,8 @@ class ROSRobotInterfaceBase(object):
             time of send angle vector.
         fastest_time : float
             fastest time
+        time_scale: float
+            time scale
 
         Returns
         -------
@@ -139,8 +141,7 @@ class ROSRobotInterfaceBase(object):
             if time < fastest_time:
                 time = fastest_time
         elif time is None:
-            # Safe Mode (Speed will be 5 * fastest_time)
-            time = 5.0 * fastest_time
+            time = time_scale * fastest_time
         else:
             raise ValueError(
                 'time is invalid type. {}'.format(time))
@@ -324,10 +325,10 @@ class ROSRobotInterfaceBase(object):
             joint = joint_list[i]
             if np.isinf(joint.min_angle) and \
                np.isinf(joint.max_angle):
-                if ret[i] > 180.0:
-                    ret[i] = ret[i] - 360.0
-                elif ret[i] < -180.0:
-                    ret[i] = ret[i] + 360.0
+                if ret[i] > np.pi:
+                    ret[i] = ret[i] - 2 * np.pi
+                elif ret[i] < - np.pi:
+                    ret[i] = ret[i] + 2 * np.pi
         return ret
 
     def angle_vector(self,
@@ -335,7 +336,7 @@ class ROSRobotInterfaceBase(object):
                      time=None,
                      controller_type=None,
                      start_time=0.0,
-                     scale=1.0,
+                     time_scale=0.2,
                      velocities=None):
         """Send joint angle to robot
 
@@ -349,13 +350,15 @@ class ROSRobotInterfaceBase(object):
         time : None or float
             time to goal in [sec]
             if designated time is faster than fastest speed, use fastest speed
-            if not specified(None), it will use 1 / scale of the fastest speed.
+            if not specified(None),
+            it will use 1 / time_scale of the fastest speed.
         controller_type : string
             controller method name
         start_time : float
             time to start moving
-        scale : float
-            if time is not specified, it will use 1/scale of the fastest speed.
+        time_scale : float
+            if time is not specified,
+            it will use 1/time_scale of the fastest speed.
 
         Returns
         -------
@@ -376,9 +379,8 @@ class ROSRobotInterfaceBase(object):
         fastest_time = self.angle_vector_duration(
             self.angle_vector(),
             av,
-            scale,
             controller_type)
-        time = self._check_time(time, fastest_time)
+        time = self._check_time(time, fastest_time, time_scale=time_scale)
 
         self.robot.angle_vector(av)
         cacts = self.controller_table[controller_type]
@@ -389,7 +391,6 @@ class ROSRobotInterfaceBase(object):
             angle_velocities = np.zeros_like(av)
         duration = time
         traj_points = [(av, angle_velocities, duration), ]
-        self.traj_points = traj_points
         for action, controller_param in zip(cacts, self.default_controller()):
             self.send_ros_controller(
                 action,
@@ -456,10 +457,10 @@ class ROSRobotInterfaceBase(object):
 
     def angle_vector_sequence(self,
                               avs,
-                              times=[3.0],
+                              times=None,
                               controller_type=None,
                               start_time=0.0,
-                              scale=1):
+                              time_scale=0.2):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -480,13 +481,13 @@ class ROSRobotInterfaceBase(object):
                 for times
             if designated each tmn is faster than fastest speed,
                 use fastest speed
-            if tmn is nil, then it will use 1/scale of the fastest speed .
+            if tmn is nil, then it will use 1/time_scale of the fastest speed.
         ctype : string
             controller method name
         start_time : float
             time to start moving
-        scale : float
-            if times is not specified, it will use 1 / scale of the
+        time_scale : float
+            if times is not specified, it will use 1 / time_scale of the
             fastest speed
 
         Returns
@@ -513,17 +514,18 @@ class ROSRobotInterfaceBase(object):
         for i_step in range(total_steps):
             av = avs[i_step]
             fastest_time = self.angle_vector_duration(
-                prev_av, av, scale, controller_type)
+                prev_av, av, controller_type)
             time = times[i_step]
-            time = self._check_time(time, fastest_time)
+            time = self._check_time(time, fastest_time, time_scale=time_scale)
 
             vel = np.zeros_like(prev_av)
             if i_step != total_steps - 1:
                 next_time = times[i_step + 1]
                 next_av = avs[i_step + 1]
-                fastest_next_tiem = self.angle_vector_duration(
-                    av, next_av, scale, controller_type)
-                next_time = self._check_time(next_time, fastest_next_tiem)
+                fastest_next_time = self.angle_vector_duration(
+                    av, next_av, controller_type)
+                next_time = self._check_time(
+                    next_time, fastest_next_time, time_scale=time_scale)
                 if time > 0.0 and next_time > 0.0:
                     v0 = self.sub_angle_vector(av, prev_av)
                     v1 = self.sub_angle_vector(next_av, av)
@@ -533,7 +535,6 @@ class ROSRobotInterfaceBase(object):
             traj_points.append((av, vel, time + next_start_time))
             next_start_time += time
             prev_av = av
-        self.traj_points = traj_points
 
         cacts = self.controller_table[controller_type]
         for action, controller_param in zip(cacts, self.default_controller()):
@@ -569,9 +570,7 @@ class ROSRobotInterfaceBase(object):
         # TODO(Fix return value)
         return True
 
-    def angle_vector_duration(
-            self, start_av, end_av,
-            scale=1.0, controller_type=None):
+    def angle_vector_duration(self, start_av, end_av, controller_type=None):
         """Calculate maximum time to reach goal for all joint.
 
         Parameters
@@ -580,8 +579,6 @@ class ROSRobotInterfaceBase(object):
             start angle-vector
         end_av : list or np.ndarray
             end angle-vector (target position)
-        scale : float
-            time scale.
         controller_type : None or string
             type of controller
 
@@ -598,7 +595,7 @@ class ROSRobotInterfaceBase(object):
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                time = scale * abs(diff_angle) / joint.max_joint_velocity
+                time = 1. * abs(diff_angle) / joint.max_joint_velocity
             else:
                 time = 0
             time_list.append(time)
