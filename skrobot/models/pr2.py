@@ -54,16 +54,21 @@ class PR2(RobotModel):
         ]
         for j, min_angle, max_angle in zip(
                 joint_list,
-                (0.0115, -32.3493, -20.2598, -37.2423, -121.542, -float('inf'),
-                 -114.592, -float('inf'), -122.349,
-                 -20.2598, -214.859, -121.542,
-                 -float('inf'), -114.592, -float('inf'),
-                 -163.694, -21.2682),
-                (0.325, 122.349, 74.2725, 214.859,
-                 -8.59437, float('inf'), -5.72958,
-                 float('inf'), 32.3493, 74.2725,
-                 37.2423, -8.59437, float('inf'),
-                 -5.72958, float('inf'), 163.694, 74.2702)):
+                (0.0115, np.deg2rad(-32.3493),
+                 np.deg2rad(-20.2598), np.deg2rad(-37.2423),
+                 np.deg2rad(-121.542), -float('inf'),
+                 np.deg2rad(-114.592), -float('inf'), np.deg2rad(-122.349),
+                 np.deg2rad(-20.2598), np.deg2rad(-214.859),
+                 np.deg2rad(-121.542), -float('inf'),
+                 np.deg2rad(-114.592), -float('inf'),
+                 np.deg2rad(-163.694), np.deg2rad(-21.2682)),
+                (0.325, np.deg2rad(122.349), np.deg2rad(74.2725),
+                 np.deg2rad(214.859), np.deg2rad(-8.59437),
+                 float('inf'), np.deg2rad(-5.72958),
+                 float('inf'), np.deg2rad(32.3493), np.deg2rad(74.2725),
+                 np.deg2rad(37.2423), np.deg2rad(-8.59437), float('inf'),
+                 np.deg2rad(-5.72958), float('inf'), np.deg2rad(163.694),
+                 np.deg2rad(74.2702))):
             j.min_angle = min_angle
             j.max_angle = max_angle
 
@@ -115,40 +120,40 @@ class PR2(RobotModel):
 
     def reset_manip_pose(self):
         self.torso_lift_joint.joint_angle(0.3)
-        self.l_shoulder_pan_joint.joint_angle(75)
-        self.l_shoulder_lift_joint.joint_angle(50)
-        self.l_upper_arm_roll_joint.joint_angle(110)
-        self.l_elbow_flex_joint.joint_angle(-110)
-        self.l_forearm_roll_joint.joint_angle(-20)
-        self.l_wrist_flex_joint.joint_angle(-10)
-        self.l_wrist_roll_joint.joint_angle(-10)
-        self.r_shoulder_pan_joint.joint_angle(-75)
-        self.r_shoulder_lift_joint.joint_angle(50)
-        self.r_upper_arm_roll_joint.joint_angle(-110)
-        self.r_elbow_flex_joint.joint_angle(-110)
-        self.r_forearm_roll_joint.joint_angle(20)
-        self.r_wrist_flex_joint.joint_angle(-10)
-        self.r_wrist_roll_joint.joint_angle(-10)
+        self.l_shoulder_pan_joint.joint_angle(np.deg2rad(75))
+        self.l_shoulder_lift_joint.joint_angle(np.deg2rad(50))
+        self.l_upper_arm_roll_joint.joint_angle(np.deg2rad(110))
+        self.l_elbow_flex_joint.joint_angle(np.deg2rad(-110))
+        self.l_forearm_roll_joint.joint_angle(np.deg2rad(-20))
+        self.l_wrist_flex_joint.joint_angle(np.deg2rad(-10))
+        self.l_wrist_roll_joint.joint_angle(np.deg2rad(-10))
+        self.r_shoulder_pan_joint.joint_angle(np.deg2rad(-75))
+        self.r_shoulder_lift_joint.joint_angle(np.deg2rad(50))
+        self.r_upper_arm_roll_joint.joint_angle(np.deg2rad(-110))
+        self.r_elbow_flex_joint.joint_angle(np.deg2rad(-110))
+        self.r_forearm_roll_joint.joint_angle(np.deg2rad(20))
+        self.r_wrist_flex_joint.joint_angle(np.deg2rad(-10))
+        self.r_wrist_roll_joint.joint_angle(np.deg2rad(-10))
         self.head_pan_joint.joint_angle(0)
-        self.head_tilt_joint.joint_angle(50)
+        self.head_tilt_joint.joint_angle(np.deg2rad(50))
         return self.angle_vector()
 
     def reset_pose(self):
         self.torso_lift_joint.joint_angle(0.05)
-        self.l_shoulder_pan_joint.joint_angle(60)
-        self.l_shoulder_lift_joint.joint_angle(74)
-        self.l_upper_arm_roll_joint.joint_angle(70)
-        self.l_elbow_flex_joint.joint_angle(-120)
-        self.l_forearm_roll_joint.joint_angle(20)
-        self.l_wrist_flex_joint.joint_angle(-30)
-        self.l_wrist_roll_joint.joint_angle(180)
-        self.r_shoulder_pan_joint.joint_angle(-60)
-        self.r_shoulder_lift_joint.joint_angle(74)
-        self.r_upper_arm_roll_joint.joint_angle(-70)
-        self.r_elbow_flex_joint.joint_angle(-120)
-        self.r_forearm_roll_joint.joint_angle(-20)
-        self.r_wrist_flex_joint.joint_angle(-30)
-        self.r_wrist_roll_joint.joint_angle(180)
+        self.l_shoulder_pan_joint.joint_angle(np.deg2rad(60))
+        self.l_shoulder_lift_joint.joint_angle(np.deg2rad(74))
+        self.l_upper_arm_roll_joint.joint_angle(np.deg2rad(70))
+        self.l_elbow_flex_joint.joint_angle(np.deg2rad(-120))
+        self.l_forearm_roll_joint.joint_angle(np.deg2rad(20))
+        self.l_wrist_flex_joint.joint_angle(np.deg2rad(-30))
+        self.l_wrist_roll_joint.joint_angle(np.deg2rad(180))
+        self.r_shoulder_pan_joint.joint_angle(np.deg2rad(-60))
+        self.r_shoulder_lift_joint.joint_angle(np.deg2rad(74))
+        self.r_upper_arm_roll_joint.joint_angle(np.deg2rad(-70))
+        self.r_elbow_flex_joint.joint_angle(np.deg2rad(-120))
+        self.r_forearm_roll_joint.joint_angle(np.deg2rad(-20))
+        self.r_wrist_flex_joint.joint_angle(np.deg2rad(-30))
+        self.r_wrist_roll_joint.joint_angle(np.deg2rad(180))
         self.head_pan_joint.joint_angle(0)
         self.head_tilt_joint.joint_angle(0)
         return self.angle_vector()
