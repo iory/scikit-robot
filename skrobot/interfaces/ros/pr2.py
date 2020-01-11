@@ -1,10 +1,10 @@
-import control_msgs.msg
-import rospy
-import pr2_controllers_msgs.msg
 import actionlib
+import control_msgs.msg
+import pr2_controllers_msgs.msg
+import rospy
 
-from .base import ROSRobotInterfaceBase
 from ...model import RotationalJoint
+from .base import ROSRobotInterfaceBase
 
 
 class PR2ROSRobotInterface(ROSRobotInterfaceBase):
