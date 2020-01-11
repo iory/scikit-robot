@@ -26,7 +26,8 @@ class Kuka(RobotModel):
         self.end_coords = [self.rarm_end_coords]
 
     def reset_manip_pose(self):
-        return self.angle_vector([0, 10, 0, -90, 0, 90,
+        return self.angle_vector([0, np.deg2rad(10), 0,
+                                  np.deg2rad(-90), 0, np.deg2rad(90),
                                   0, 0, 0, 0, 0, 0])
 
     @cached_property
@@ -54,7 +55,7 @@ class Kuka(RobotModel):
         av[-4] = 0
         return self.angle_vector(av)
 
-    def open_hand(self, default_angle=10, av=None):
+    def open_hand(self, default_angle=np.deg2rad(10), av=None):
         if av is None:
             av = self.angle_vector()
         av[-2] = default_angle
