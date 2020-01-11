@@ -124,10 +124,8 @@ class ROSRobotInterfaceBase(object):
 
         Parameters
         ----------
-        time : float or str or None
+        time : float or None
             time of send angle vector.
-            If time is 'fast' and 'fastest',
-            set fastest_time.
         fastest_time : float
             fastest time
 
@@ -136,10 +134,7 @@ class ROSRobotInterfaceBase(object):
         time : float
             time of send angle vector.
         """
-        if time in ['fast', 'fastest']:
-            # Fastest time Mode
-            time = fastest_time
-        elif isinstance(time, Number):
+        if isinstance(time, Number):
             # Normal Number disgnated Mode
             if time < fastest_time:
                 time = fastest_time
@@ -351,12 +346,10 @@ class ROSRobotInterfaceBase(object):
         ----------
         av : list or numpy.ndarray
             joint angle vector
-        time : None or float or string
+        time : None or float
             time to goal in [sec]
             if designated time is faster than fastest speed, use fastest speed
             if not specified(None), it will use 1 / scale of the fastest speed.
-            if 'fastest' is specefied use fastest speed calcurated from
-            max speed
         controller_type : string
             controller method name
         start_time : float
@@ -488,8 +481,6 @@ class ROSRobotInterfaceBase(object):
             if designated each tmn is faster than fastest speed,
                 use fastest speed
             if tmn is nil, then it will use 1/scale of the fastest speed .
-            if :fastest is specefied, use fastest speed calcurated
-                from max speed
         ctype : string
             controller method name
         start_time : float
