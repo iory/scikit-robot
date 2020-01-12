@@ -191,12 +191,6 @@ class RotationalJoint(Joint):
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
-
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
 
@@ -230,13 +224,7 @@ class FixedJoint(Joint):
         return 0
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
-        return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
-
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
+        return 1.0
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
@@ -340,12 +328,6 @@ class LinearJoint(Joint):
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
-
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_linear(*args, **kwargs)
@@ -574,9 +556,9 @@ class CascadedLink(CascadedCoords):
         while link_index < len(union_link_list):
             joint = union_link_list[link_index].joint
             if joint.joint_dof == 1:
-                dtheta = joint.speed_to_angle(dav[i])
+                dtheta = dav[i]
             else:
-                dtheta = joint.speed_to_angle(dav[i:i + joint.joint_dof])
+                dtheta = dav[i:i + joint.joint_dof]
             union_link_list[link_index].joint.joint_angle(
                 dtheta, relative=True)
             i += joint.joint_dof
@@ -2318,9 +2300,9 @@ def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     # 1-dof joint such as rotational_joint and linear_joint
     if jamm is None:
         jamm = np.zeros(3, 'f')
-    jamm[0] = j.angle_to_speed(j.joint_angle())
-    jamm[1] = j.angle_to_speed(j.max_angle)
-    jamm[2] = j.angle_to_speed(j.min_angle)
+    jamm[0] = j.joint_angle()
+    jamm[1] = j.max_angle
+    jamm[2] = j.min_angle
     return jamm
 
 
