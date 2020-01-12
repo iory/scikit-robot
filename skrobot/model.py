@@ -106,6 +106,21 @@ def calc_target_joint_dimension_from_link_list(link_list):
 
 
 def calc_dif_with_axis(dif, axis):
+    """Return diff with respect to axis.
+
+    Parameters
+    ----------
+    dif : list[float] or numpy.ndarray
+        difference vector
+    axis : str or bool or None
+        if axis is False or None, return numpy.array([]).
+        if axis is True, return dif.
+
+    Returns
+    -------
+    ret : numpy.ndarray
+        difference with respect to axis.
+    """
     if axis in ['x', 'xx']:
         ret = np.array([dif[1], dif[2]])
     elif axis in ['y', 'yy']:
@@ -125,7 +140,7 @@ def calc_dif_with_axis(dif, axis):
     elif axis is True:
         ret = dif
     else:
-        raise ValueError('axis {} is not supported'.fomrat(axis))
+        raise ValueError('axis {} is not supported'.format(axis))
     return ret
 
 

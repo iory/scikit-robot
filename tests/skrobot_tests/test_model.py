@@ -6,6 +6,7 @@ import trimesh
 
 import skrobot
 from skrobot.coordinates import make_coords
+from skrobot.model import calc_dif_with_axis
 from skrobot.model import joint_angle_limit_weight
 from skrobot.model import RotationalJoint
 
@@ -23,6 +24,26 @@ class TestRobotModel(unittest.TestCase):
     def test_init(self):
         fetch = self.fetch
         fetch.angle_vector()
+
+    def test_calc_dif_with_axis(self):
+        dif = np.array([1, 2, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'x'), [2, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'xx'), [2, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'y'), [1, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'yy'), [1, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'z'), [1, 2])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'zz'), [1, 2])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'xy'), [3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'yx'), [3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'yz'), [1])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'zy'), [1])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'xz'), [2])
+        testing.assert_array_equal(calc_dif_with_axis(dif, 'zx'), [2])
+        testing.assert_array_equal(calc_dif_with_axis(dif, True), [1, 2, 3])
+        testing.assert_array_equal(calc_dif_with_axis(dif, False), [])
+        testing.assert_array_equal(calc_dif_with_axis(dif, None), [])
+        with self.assertRaises(ValueError):
+            testing.assert_array_equal(calc_dif_with_axis(dif, [1, 2, 3]))
 
     def test_visual_mesh(self):
         fetch = self.fetch
