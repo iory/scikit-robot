@@ -33,6 +33,17 @@ _default_max_joint_torque = 1.0
 
 
 def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
+    """Calculate angle speed gain
+
+    Parameters
+    ----------
+    joint_list : list[skrobot.model.Joint]
+
+    Returns
+    -------
+    n : int
+        total Degrees of Freedom
+    """
     if dav[i] == 0 or periodic_time == 0:
         dav_gain = 1.0
     else:
@@ -40,14 +51,76 @@ def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
     return min(dav_gain, 1.0)
 
 
+def calc_angle_speed_gain_vector(joint, dav, i, periodic_time):
+    """Calculate angle speed gain for multiple Degrees of Freedom
+
+    """
+    if periodic_time == 0:
+        return 1.0
+    dav_gain = 1.0
+    for joint_dof_index in range(joint.joint_dof):
+        if dav[i + joint_dof_index] == 0:
+            dav_gain = min(dav_gain, 1.0)
+        else:
+            tmp_gain = abs(joint.max_joint_velocity[joint_dof_index] /
+                           (dav[i + joint_dof_index] / periodic_time))
+            dav_gain = min(tmp_gain, dav_gain)
+    return dav_gain
+
+
 def calc_target_joint_dimension(joint_list):
+    """Calculate Total Degrees of Freedom from joint list
+
+    Parameters
+    ----------
+    joint_list : list[skrobot.model.Joint]
+
+    Returns
+    -------
+    n : int
+        total Degrees of Freedom
+    """
     n = 0
     for j in joint_list:
         n += j.joint_dof
     return n
 
 
+def calc_target_joint_dimension_from_link_list(link_list):
+    """Calculate Total Degrees of Freedom from link list
+
+    Parameters
+    ----------
+    link_list : list[skrobot.model.Link]
+
+    Returns
+    -------
+    n : int
+        total Degrees of Freedom
+    """
+    n = 0
+    for link in link_list:
+        if hasattr(link, 'joint'):
+            n += link.joint.joint_dof
+    return n
+
+
 def calc_dif_with_axis(dif, axis):
+    """Return diff with respect to axis.
+
+    Parameters
+    ----------
+    dif : list[float] or numpy.ndarray
+        difference vector
+    axis : str or bool or None
+        if axis is False or None, return numpy.array([]).
+        if axis is True, return dif.
+
+    Returns
+    -------
+    ret : numpy.ndarray
+        difference with respect to axis.
+    """
     if axis in ['x', 'xx']:
         ret = np.array([dif[1], dif[2]])
     elif axis in ['y', 'yy']:
@@ -67,7 +140,7 @@ def calc_dif_with_axis(dif, axis):
     elif axis is True:
         ret = dif
     else:
-        raise ValueError('axis {} is not supported'.fomrat(axis))
+        raise ValueError('axis {} is not supported'.format(axis))
     return ret
 
 
@@ -191,12 +264,6 @@ class RotationalJoint(Joint):
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
-
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
 
@@ -230,13 +297,7 @@ class FixedJoint(Joint):
         return 0
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
-        return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
-
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
+        return 1.0
 
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
@@ -341,14 +402,87 @@ class LinearJoint(Joint):
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
 
-    def speed_to_angle(self, v):
-        return v
-
-    def angle_to_speed(self, v):
-        return v
-
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_linear(*args, **kwargs)
+
+
+class OmniWheelJoint(Joint):
+
+    def __init__(self,
+                 max_joint_velocity=(1.6, 1.6, np.pi / 4),
+                 max_joint_torque=(100, 100, 100),
+                 min_angle=np.array([-np.inf] * 3),
+                 max_angle=np.array([np.inf] * 3),
+                 *args, **kwargs):
+        self.axis = ((1, 0, 0),
+                     (0, 1, 0),
+                     (0, 0, 1))
+        self._joint_angle = np.zeros(3, dtype=np.float64)
+        super(OmniWheelJoint, self).__init__(
+            max_joint_velocity=max_joint_velocity,
+            max_joint_torque=max_joint_torque,
+            min_angle=min_angle,
+            max_angle=max_angle,
+            *args, **kwargs)
+        self.joint_velocity = (0, 0, 0)
+        self.joint_acceleration = (0, 0, 0)
+        self.joint_torque = (0, 0, 0)
+
+    def joint_angle(self, v=None, relative=None):
+        """Return joint-angle if v is not set, if v is given, set joint angle.
+
+        """
+        if v is not None:
+            v = np.array(v, dtype=np.float64)
+            # translation
+            if relative is not None:
+                self._joint_angle = v + self._joint_angle
+            else:
+                self._joint_angle = v
+
+            # min max check
+            self._joint_angle = np.minimum(
+                np.maximum(self._joint_angle, self.min_angle), self.max_angle)
+
+            # update child_link
+            self.child_link.rotation = self.default_coords.rotation.copy()
+            self.child_link.translation = \
+                self.default_coords.translation.copy()
+            self.child_link.translate(
+                (self._joint_angle[0], self._joint_angle[1], 0))
+            self.child_link.rotate(self._joint_angle[2], 'z')
+        return self._joint_angle
+
+    @property
+    def joint_dof(self):
+        """Returns DOF of rotational joint, 3."""
+        return 3
+
+    def calc_angle_speed_gain(self, dav, i, periodic_time):
+        return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
+
+    def calc_jacobian(self,
+                      jacobian, row, column,
+                      joint, paxis, child_link,
+                      world_default_coords, child_reverse,
+                      move_target, transform_coords,
+                      rotation_axis, translation_axis):
+        calc_jacobian_linear(jacobian, row, column + 0,
+                             joint, [1, 0, 0], child_link,
+                             world_default_coords, child_reverse,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_linear(jacobian, row, column + 1,
+                             joint, [0, 1, 0], child_link,
+                             world_default_coords, child_reverse,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_rotational(jacobian, row, column + 2,
+                                 joint, [0, 0, 1], child_link,
+                                 world_default_coords, child_reverse,
+                                 move_target, transform_coords,
+                                 rotation_axis, translation_axis)
+        return jacobian
 
 
 class Link(CascadedCoords):
@@ -373,7 +507,7 @@ class Link(CascadedCoords):
     def add_joint(self, j):
         self.joint = j
 
-    def delete_joint(self, j):
+    def delete_joint(self):
         self.joint = None
 
     def add_child_links(self, child_link):
@@ -381,13 +515,13 @@ class Link(CascadedCoords):
         if child_link is not None and child_link not in self._child_links:
             self._child_links.append(child_link)
 
-    def del_child_link(self):
-        self._child_links = []
+    def del_child_link(self, link):
+        self._child_links.remove(link)
 
     def add_parent_link(self, parent_link):
         self._parent_link = parent_link
 
-    def del_parent_link(self, parent_link):
+    def del_parent_link(self):
         self._parent_link = None
 
     @property
@@ -574,9 +708,9 @@ class CascadedLink(CascadedCoords):
         while link_index < len(union_link_list):
             joint = union_link_list[link_index].joint
             if joint.joint_dof == 1:
-                dtheta = joint.speed_to_angle(dav[i])
+                dtheta = dav[i]
             else:
-                dtheta = joint.speed_to_angle(dav[i:i + joint.joint_dof])
+                dtheta = dav[i:i + joint.joint_dof]
             union_link_list[link_index].joint.joint_angle(
                 dtheta, relative=True)
             i += joint.joint_dof
@@ -609,7 +743,7 @@ class CascadedLink(CascadedCoords):
                               centroid_offset_func=None,
                               cog_translation_axis='z',
                               cog_null_space=False,
-                              additional_weight_list=None,
+                              additional_weight_list=[],
                               additional_nspace_list=None,
                               jacobi=None,
                               obstacles=None,
@@ -892,7 +1026,20 @@ class CascadedLink(CascadedCoords):
         if weight is None:
             weight = np.ones(n_joint_dimension, 'f')
 
-        # TODO(support additional_weight_list)
+        for link, additional_weight in additional_weight_list:
+            if link in union_link_list:
+                link_index = union_link_list.index(link)
+                index = calc_target_joint_dimension_from_link_list(
+                    union_link_list[0:link_index])
+                if callable(additional_weight):
+                    w = additional_weight()
+                else:
+                    w = additional_weight
+                if link.joint.joint_dof > 1:
+                    for joint_dof_index in range(link.joint.joint_dof):
+                        weight[index + joint_dof_index] *= w[joint_dof_index]
+                else:
+                    weight[index] *= w
 
         tmp_weight = self.calc_weight_from_joint_limit(
             avoid_weight_gain,
@@ -1850,7 +1997,10 @@ class CascadedLink(CascadedCoords):
                     else:
                         child_reverse = False
 
-                    paxis = _wrap_axis(joint.axis)
+                    if joint.joint_dof <= 1:
+                        paxis = _wrap_axis(joint.axis)
+                    else:
+                        paxis = joint.axis
                     child_link = joint.child_link
                     parent_link = joint.parent_link
                     default_coords = joint.default_coords
@@ -2313,14 +2463,16 @@ class RobotModel(CascadedLink):
 
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
-    # TODO(current support only 1-dof joint)
-    # fix unit system ;; [mm] -> [m], [deg] -> [rad]
-    # 1-dof joint such as rotational_joint and linear_joint
     if jamm is None:
         jamm = np.zeros(3, 'f')
-    jamm[0] = j.angle_to_speed(j.joint_angle())
-    jamm[1] = j.angle_to_speed(j.max_angle)
-    jamm[2] = j.angle_to_speed(j.min_angle)
+    if j.joint_dof > 1:
+        jamm[0] = j.joint_angle()[kk]
+        jamm[1] = j.max_angle[kk]
+        jamm[2] = j.min_angle[kk]
+    else:
+        jamm[0] = j.joint_angle()
+        jamm[1] = j.max_angle
+        jamm[2] = j.min_angle
     return jamm
 
 
@@ -2336,6 +2488,16 @@ def joint_angle_limit_weight(joint_list):
     scheme for avoiding joint limits for redundant manipulators",
     in IEEE Trans. On Robotics and Automation,
     11((2):286-292, April 1995.
+
+    Parameters
+    ----------
+    joint_list : list[skrobot.model.Joint]
+        joint list
+
+    Returns
+    -------
+    res : numpy.ndarray
+        joint angle limit
     """
     dims = calc_target_joint_dimension(joint_list)
     res = np.zeros(dims, 'f')
@@ -2347,7 +2509,13 @@ def joint_angle_limit_weight(joint_list):
         calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm)
         joint_angle, joint_max, joint_min = jamm
         e = np.deg2rad(1)
-        k += 1
+        if j.joint_dof > 1:
+            kk += 1
+            if kk >= j.joint_dof:
+                kk = 0
+                k += 1
+        else:
+            k += 1
 
         # limitation
         if np.isclose(joint_angle, joint_max, e) and \
@@ -2378,16 +2546,41 @@ def joint_angle_limit_nspace(
         n_joint_dimension=None):
     """Calculate nspace weight for avoiding joint angle limit.
 
-    dH/dq = (((t_max + t_min)/2 - t) / ((t_max - t_min)/2)) ^2
+    .. math::
+        \\frac{dH}{dq} = (\\frac{\\frac{t_{max} + t_{min}}{2} - t}
+                          {\\frac{t_{max} - t_{min}}{2}})^2
+
+
+    Parameters
+    ----------
+    joint_list : list[skrobot.model.Joint]
+        joint list
+    n_joint_dimension : int or None
+        if this value is None, set n_joint_dimension by
+        skrobot.model.calc_target_joint_dimension
+
+    Returns
+    -------
+    nspace : numpy.ndarray
+        null space shape of (n_joint_dimensoin, )
     """
     if n_joint_dimension is None:
         n_joint_dimension = calc_target_joint_dimension(joint_list)
     nspace = np.zeros(n_joint_dimension, 'f')
+    k = 0
+    kk = 0
     for i in range(n_joint_dimension):
-        joint = joint_list[i]
+        joint = joint_list[k]
         joint_angle, joint_max, joint_min = \
-            calc_joint_angle_min_max_for_limit_calculation(joint, i)
+            calc_joint_angle_min_max_for_limit_calculation(joint, kk)
 
+        if joint.joint_dof > 1:
+            kk += 1
+            if kk >= joint.joint_dof:
+                kk = 0
+                k += 1
+        else:
+            k += 1
         # calculate weight
         if (joint_max - joint_min == 0.0) or \
            np.isinf(joint_max) or np.isinf(joint_min):
