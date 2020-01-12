@@ -13,6 +13,9 @@ import rospy
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
 
+from skrobot.model import LinearJoint
+from skrobot.model import RotationalJoint
+
 
 logger = getLogger(__name__)
 
@@ -325,6 +328,7 @@ class ROSRobotInterfaceBase(object):
             joint = joint_list[i]
             if np.isinf(joint.min_angle) and \
                np.isinf(joint.max_angle):
+                ret[i] = ret[i] % (2 * np.pi)
                 if ret[i] > np.pi:
                     ret[i] = ret[i] - 2 * np.pi
                 elif ret[i] < - np.pi:
@@ -591,11 +595,17 @@ class ROSRobotInterfaceBase(object):
             _flatten([c['joint_names']
                       for c in self.default_controller()]))
         joint_list = self.robot.joint_list
-        diff_avs = end_av - start_av
+        diff_avs = self.sub_angle_vector(end_av, start_av)
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                time = 1. * abs(diff_angle) / joint.max_joint_velocity
+                if (isinstance(joint, RotationalJoint) and
+                    abs(diff_angle) < 0.0017453292519943296) or \
+                    (isinstance(joint, LinearJoint) and
+                     abs(diff_angle) < 0.01):
+                    time = 0
+                else:
+                    time = 1. * abs(diff_angle) / joint.max_joint_velocity
             else:
                 time = 0
             time_list.append(time)
