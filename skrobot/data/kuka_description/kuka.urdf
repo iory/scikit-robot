@@ -120,13 +120,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_0_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_0.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_0.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_0_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_0.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_0.stl" scale="1 1 1"/>
       </geometry>
       <material name="Black" />
     </visual>
@@ -140,13 +140,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_1_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_1.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_1.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_1_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_1.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_1.stl" scale="1 1 1"/>
       </geometry>
       <material name="Blue" />
     </visual>
@@ -160,13 +160,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_2_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_2.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_2.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_2_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_2.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_2.stl" scale="1 1 1"/>
       </geometry>
       <material name="Blue"/>
     </visual>
@@ -180,13 +180,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_3_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_3.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_3.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_3_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_3.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_3.stl" scale="1 1 1"/>
       </geometry>
       <material name="Blue"/>
     </visual>
@@ -200,13 +200,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_4_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_4.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_4.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_4_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_4.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_4.stl" scale="1 1 1"/>
       </geometry>
       <material name="Orange"/>
     </visual>
@@ -220,13 +220,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_5_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_5.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_5.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_5_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_5.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_5.stl" scale="1 1 1"/>
       </geometry>
       <material name="Blue" />
     </visual>
@@ -240,13 +240,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_6_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_6.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_6.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_6_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_6.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_6.stl" scale="1 1 1"/>
       </geometry>
       <material name="Orange"/>
     </visual>
@@ -260,13 +260,13 @@
     <collision name="lbr_iiwa_with_wsg50__lbr_iiwa_link_7_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_7.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_7.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__lbr_iiwa_link_7_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/link_7.stl" scale="1 1 1"/>
+        <mesh filename="meshes/link_7.stl" scale="1 1 1"/>
       </geometry>
       <material name="Grey" />
     </visual>
@@ -320,13 +320,13 @@
     <collision name="lbr_iiwa_with_wsg50__left_finger_base_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_base_left.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_base_left.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__left_finger_base_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_base_left.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_base_left.stl" scale="1 1 1"/>
       </geometry>
       <material name="Grey" />
     </visual>
@@ -340,13 +340,13 @@
     <collision name="lbr_iiwa_with_wsg50__left_finger_tip_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_tip_left.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_tip_left.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__left_finger_tip_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_tip_left.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_tip_left.stl" scale="1 1 1"/>
       </geometry>
       <material name="Grey" />
     </visual>
@@ -380,13 +380,13 @@
     <collision name="lbr_iiwa_with_wsg50__right_finger_base_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_base_right.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_base_right.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__right_finger_base_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_base_right.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_base_right.stl" scale="1 1 1"/>
       </geometry>
       <material name="Grey" />
     </visual>
@@ -400,13 +400,13 @@
     <collision name="lbr_iiwa_with_wsg50__right_finger_tip_collision">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_tip_right.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_tip_right.stl" scale="1 1 1"/>
       </geometry>
     </collision>
     <visual name="lbr_iiwa_with_wsg50__right_finger_visual">
       <origin rpy="0  0  0" xyz="0  0  0"/>
       <geometry>
-        <mesh filename="package://meshes/finger_tip_right.stl" scale="1 1 1"/>
+        <mesh filename="meshes/finger_tip_right.stl" scale="1 1 1"/>
       </geometry>
       <material name="Grey" />
     </visual>
