@@ -5,20 +5,19 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import pr2_urdfpath
 from skrobot.model import RobotModel
 
+from .urdf import RobotModelFromURDF
 
-class PR2(RobotModel):
+
+class PR2(RobotModelFromURDF):
 
     """PR2 Robot Model.
 
     """
 
-    def __init__(self, *args, **kwargs):
-        self.urdf_path = kwargs.pop('urdf_path', None)
-        RobotModel.__init__(self, *args, **kwargs)
+    default_urdf_path = pr2_urdfpath()
 
-        if self.urdf_path is None:
-            self.urdf_path = pr2_urdfpath()
-        self.load_urdf(self.urdf_path)
+    def __init__(self, *args, **kwargs):
+        super(PR2, self).__init__(*args, **kwargs)
 
         self.rarm_end_coords = CascadedCoords(
             parent=self.r_gripper_tool_frame,
