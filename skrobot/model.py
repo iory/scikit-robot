@@ -2128,7 +2128,6 @@ class RobotModel(CascadedLink):
             self.__dict__[link.name] = link
         for joint in joint_list:
             self.__dict__[joint.name] = joint
-        self.urdf_path = None
 
     def reset_pose(self):
         raise NotImplementedError()
@@ -2187,7 +2186,6 @@ class RobotModel(CascadedLink):
         return meshes
 
     def load_urdf(self, urdf_path):
-        self.urdf_path = urdf_path
         self.urdf_robot_model = URDF.load(str(urdf_path))
         root_link = self.urdf_robot_model.base_link
 

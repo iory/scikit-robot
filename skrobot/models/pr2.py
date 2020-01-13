@@ -13,12 +13,12 @@ class PR2(RobotModel):
     """
 
     def __init__(self, *args, **kwargs):
-        self.urdf_path = kwargs.pop('urdf_path', None)
+        urdf_path = kwargs.pop('urdf_path', None)
         RobotModel.__init__(self, *args, **kwargs)
 
-        if self.urdf_path is None:
-            self.urdf_path = pr2_urdfpath()
-        self.load_urdf(self.urdf_path)
+        if urdf_path is None:
+            urdf_path = pr2_urdfpath()
+        self.load_urdf(urdf_path)
 
         self.rarm_end_coords = CascadedCoords(
             parent=self.r_gripper_tool_frame,

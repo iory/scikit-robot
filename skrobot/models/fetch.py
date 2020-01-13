@@ -15,7 +15,6 @@ class Fetch(RobotModel):
         super(Fetch, self).__init__(*args, **kwargs)
         if urdf_path is None:
             urdf_path = fetch_urdfpath()
-        self.urdf_path = urdf_path
         self.load_urdf(urdf_path)
 
         self.rarm_end_coords = CascadedCoords(parent=self.gripper_link,
