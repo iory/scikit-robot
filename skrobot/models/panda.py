@@ -2,22 +2,20 @@ from cached_property import cached_property
 
 from ..data import panda_urdfpath
 from ..model import RobotModel
+from .urdf import RobotModelFromURDF
 
 
-class Panda(RobotModel):
+class Panda(RobotModelFromURDF):
 
     """Panda Robot Model.
 
     https://frankaemika.github.io/docs/control_parameters.html
     """
 
-    def __init__(self, urdf_path=None, *args, **kwargs):
-        super(Panda, self).__init__(*args, **kwargs)
-        if urdf_path is None:
-            urdf_path = panda_urdfpath()
-        self.urdf_path = urdf_path
-        self.load_urdf(urdf_path)
+    default_urdf_path = panda_urdfpath()
 
+    def __init__(self, *args, **kwargs):
+        super(Panda, self).__init__(*args, **kwargs)
         self.reset_pose()
 
     def reset_pose(self):

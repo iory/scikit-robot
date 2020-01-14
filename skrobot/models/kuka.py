@@ -5,17 +5,16 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import kuka_urdfpath
 from skrobot.model import RobotModel
 
+from .urdf import RobotModelFromURDF
 
-class Kuka(RobotModel):
+
+class Kuka(RobotModelFromURDF):
     """Kuka Robot Model."""
 
-    def __init__(self, urdf_path=None, *args, **kwargs):
-        super(Kuka, self).__init__(*args, **kwargs)
-        if urdf_path is None:
-            urdf_path = kuka_urdfpath()
-        self.urdf_path = urdf_path
-        self.load_urdf(urdf_path)
+    default_urdf_path = kuka_urdfpath()
 
+    def __init__(self, *args, **kwargs):
+        super(Kuka, self).__init__(*args, **kwargs)
         self.rarm_end_coords = CascadedCoords(
             parent=self.lbr_iiwa_with_wsg50__lbr_iiwa_link_7,
             name='rarm_end_coords')

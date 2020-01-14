@@ -1,4 +1,5 @@
 import collections
+import io
 import itertools
 from logging import getLogger
 import warnings
@@ -6,6 +7,7 @@ import warnings
 import numpy as np
 import numpy.linalg as LA
 from ordered_set import OrderedSet
+import six
 import trimesh
 
 from skrobot.coordinates import _wrap_axis
@@ -2186,9 +2188,18 @@ class RobotModel(CascadedLink):
             meshes.append(mesh)
         return meshes
 
-    def load_urdf(self, urdf_path):
-        self.urdf_path = urdf_path
-        self.urdf_robot_model = URDF.load(str(urdf_path))
+    def load_urdf(self, urdf):
+        f = io.StringIO()
+        f.write(urdf)
+        f.seek(0)
+        self.load_urdf_file(file_obj=f)
+
+    def load_urdf_file(self, file_obj):
+        if isinstance(file_obj, six.string_types):
+            self.urdf_path = file_obj
+        else:
+            self.urdf_path = getattr(file_obj, 'name', None)
+        self.urdf_robot_model = URDF.load(file_obj=file_obj)
         root_link = self.urdf_robot_model.base_link
 
         links = []

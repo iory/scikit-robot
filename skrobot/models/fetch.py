@@ -4,20 +4,19 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import fetch_urdfpath
 from skrobot.model import RobotModel
 
+from .urdf import RobotModelFromURDF
 
-class Fetch(RobotModel):
+
+class Fetch(RobotModelFromURDF):
     """Fetch Robot Model.
 
     http://docs.fetchrobotics.com/robot_hardware.html
     """
 
-    def __init__(self, urdf_path=None, *args, **kwargs):
-        super(Fetch, self).__init__(*args, **kwargs)
-        if urdf_path is None:
-            urdf_path = fetch_urdfpath()
-        self.urdf_path = urdf_path
-        self.load_urdf(urdf_path)
+    default_urdf_path = fetch_urdfpath()
 
+    def __init__(self, *args, **kwargs):
+        super(Fetch, self).__init__(*args, **kwargs)
         self.rarm_end_coords = CascadedCoords(parent=self.gripper_link,
                                               name='rarm_end_coords')
         self.rarm_end_coords.translate([0, 0, 0])
