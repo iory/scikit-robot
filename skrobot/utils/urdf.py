@@ -24,9 +24,8 @@ from skrobot.coordinates import rpy_matrix
 
 try:
     import rospkg
-    rospack = rospkg.RosPack()
 except ImportError:
-    rospack = None
+    rospkg = None
 
 
 def parse_origin(node):
@@ -89,12 +88,16 @@ def unparse_origin(matrix):
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
 
-    if rospack is not None and parsed_url.scheme == 'package':
-        ros_package = parsed_url.netloc
-        package_path = rospack.get_path(ros_package)
-        resolve_filepath = package_path + parsed_url.path
-        if os.path.exists(resolve_filepath):
-            return resolve_filepath
+    if rospkg and parsed_url.scheme == 'package':
+        try:
+            rospack = rospkg.RosPack()
+            ros_package = parsed_url.netloc
+            package_path = rospack.get_path(ros_package)
+            resolve_filepath = package_path + parsed_url.path
+            if os.path.exists(resolve_filepath):
+                return resolve_filepath
+        except rospkg.common.ResourceNotFound:
+            pass
 
     dirname = base_path
     file_path = parsed_url.netloc + parsed_url.path
