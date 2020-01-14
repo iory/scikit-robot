@@ -5,5 +5,5 @@
 ## Installation
 
 ```bash
-pip install git+https://github.com/iory/scikit-robot.git
+pip install skrobot
 ```
