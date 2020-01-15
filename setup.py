@@ -1,9 +1,36 @@
-#!/usr/bin/env python
+from __future__ import print_function
 
+import distutils.spawn
 import os
+import shlex
+import subprocess
+import sys
 
 from setuptools import find_packages
 from setuptools import setup
+
+
+version = '0.0.1'
+
+
+if sys.argv[-1] == 'release':
+    if not distutils.spawn.find_executable('twine'):
+        print(
+            'Please install twine:\n\n\tpip install twine\n',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    commands = [
+        'git tag v{:s}'.format(version),
+        'git push origin master --tag',
+        'python setup.py sdist',
+        'twine upload dist/skrobot-{:s}.tar.gz'.format(version),
+    ]
+    for cmd in commands:
+        print('+ {}'.format(cmd))
+        subprocess.check_call(shlex.split(cmd))
+    sys.exit(0)
 
 
 def listup_package_data():
@@ -27,7 +54,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='skrobot',
-    version='0.0.1',
+    version=version,
     description='A Flexible Framework for Robot Control in Python',
     author='iory',
     author_email='ab.ioryz@gmail.com',
