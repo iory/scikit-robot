@@ -25,7 +25,7 @@ if sys.argv[-1] == 'release':
         'git tag v{:s}'.format(version),
         'git push origin master --tag',
         'python setup.py sdist',
-        'twine upload dist/skrobot-{:s}.tar.gz'.format(version),
+        'twine upload dist/scikit-robot-{:s}.tar.gz'.format(version),
     ]
     for cmd in commands:
         print('+ {}'.format(cmd))
@@ -53,7 +53,7 @@ with open('requirements.txt') as f:
         install_requires.append(req)
 
 setup(
-    name='skrobot',
+    name='scikit-robot',
     version=version,
     description='A Flexible Framework for Robot Control in Python',
     author='iory',

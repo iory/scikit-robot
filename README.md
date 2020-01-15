@@ -8,5 +8,5 @@ URDF files and robot specifications.
 ## Installation
 
 ```bash
-pip install skrobot
+pip install scikit-robot
 ```
