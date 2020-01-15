@@ -2,6 +2,14 @@
 
 [![Build Status](https://travis-ci.com/iory/scikit-robot.svg?token=zM5rExyvuRoJThsnqHAF&branch=master)](https://travis-ci.com/iory/scikit-robot)
 
+<h4>
+    <a href="https://scikit-robot.readthedocs.io/en/latest/">Documentation</a> |
+    <a href="https://scikit-robot.readthedocs.io/en/latest/install/index.html">Installation</a> |
+    <a href="https://scikit-robot.readthedocs.io/en/latest/examples/index.html">Quick Start</a> |
+    <a href="https://scikit-robot.readthedocs.io/en/latest/reference/index.html">Python API</a> |
+    <a href="https://scikit-robot.readthedocs.io/en/latest/development/index.html">Contribute</a>
+</h4>
+
 Scikit-Robot is a lightweight pure-Python library for robotic kinematics,
 motion planning, visualization and control.
 

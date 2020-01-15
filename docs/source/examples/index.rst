@@ -14,8 +14,7 @@ You can load a URDF from any ``.urdf`` file, as long as you fix the links
 to be relative or absolute links rather than ROS resource URLs.
 
 >>> import skrobot
->>> robot_model = skrobot.model.RobotModel()
->>> robot_model.load_urdf(skrobot.data.pr2_urdfpath())
+>>> robot_model = skrobot.models.urdf.RobotModelFromURDF(urdf_file=skrobot.data.pr2_urdfpath())
 
 
 Visualization
