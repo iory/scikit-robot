@@ -10,7 +10,7 @@ following command:
 
 .. code-block:: bash
 
-   pip install skrobot
+   pip install scikit-robot
 
 Installing in Development Mode
 ------------------------------

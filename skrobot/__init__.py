@@ -3,7 +3,7 @@
 import pkg_resources
 
 
-__version__ = pkg_resources.get_distribution('skrobot').version
+__version__ = pkg_resources.get_distribution('scikit-robot').version
 
 
 from skrobot import coordinates
