@@ -3,7 +3,7 @@
 *.pyc
 \#*\#
 .\#*
-/skrobot.egg-info/
+/scikit_robot.egg-info/
 /build/
 /dist/
 /src/
