@@ -4,10 +4,10 @@ import pr2_controllers_msgs.msg
 import rospy
 
 from ...model import RotationalJoint
-from .base import ROSRobotInterfaceBase
+from .move_base import ROSRobotMoveBaseInterface
 
 
-class PR2ROSRobotInterface(ROSRobotInterfaceBase):
+class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
 
     """pr2 robot interface."""
 
