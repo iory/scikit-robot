@@ -17,6 +17,11 @@ class TestCoordinates(unittest.TestCase):
         coord.transform(make_coords(pos=[1, 2, 3]))
         testing.assert_array_equal(coord.translation,
                                    [1, 2, 3])
+        original_id = hex(id(coord))
+        coord.transform(make_coords(pos=[1, 2, 3]),
+                        coord)
+        self.assertEqual(original_id,
+                         hex(id(coord)))
 
     def test_translate(self):
         c = make_coords()
@@ -317,3 +322,16 @@ class TestCascadedCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             b.worldpos(),
             [0.1, 0, 0.2])
+
+    def test_worldcoords(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0],
+                           name='a')
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2],
+                           name='b',
+                           parent=a)
+        original_id = hex(id(b.worldcoords()))
+        a.rotate(pi / 2.0, 'z')
+        self.assertEqual(original_id,
+                         hex(id(b.worldcoords())))
