@@ -960,8 +960,8 @@ class CascadedCoords(Coordinates):
             raise NotImplementedError
         return self.newcoords(self.rotation, self.translation)
 
-    def update(self):
-        if not self._changed:
+    def update(self, force=False):
+        if not force and not self._changed:
             return
         with self.disable_hook():
             if self.parent:
