@@ -52,17 +52,8 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
             # apply latest angle-vector
             for link in self._links:
-                if isinstance(link, model_module.Link):
-                    link_list = [link]
-                else:
-                    link_list = link.link_list
-                for l in link_list:
-                    transform = l.worldcoords().T()
-                    name = '{}/{}'.format(
-                        link.__class__.__name__,
-                        l.name,
-                    )
-                    self.scene.graph.update(name, matrix=transform)
+                transform = link.worldcoords().T()
+                self.scene.graph.update(str(id(link)), matrix=transform)
         super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
@@ -87,28 +78,35 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._redraw = True
         return super(TrimeshSceneViewer, self).on_resize(*args, **kwargs)
 
-    def add(self, link):
-        if isinstance(link, model_module.Link):
-            link_list = [link]
-        elif isinstance(link, model_module.CascadedLink):
-            link_list = link.link_list
-        else:
-            raise TypeError('link must be Link or CascadedLink')
+    def _add_link(self, link):
+        assert isinstance(link, model_module.Link)
 
         with self.lock:
-            for l in link_list:
-                transform = l.worldcoords().T()
-                name = '{}/{}'.format(
-                    link.__class__.__name__,
-                    l.name,
-                )
-                self.scene.add_geometry(
-                    geometry=l.visual_mesh,
-                    node_name=name,
-                    geom_name=name,
-                    transform=transform,
-                )
+            if link in self._links:
+                return
+
+            transform = link.worldcoords().T()
+            self.scene.add_geometry(
+                geometry=link.visual_mesh,
+                node_name=str(id(link)),
+                geom_name=str(id(link)),
+                transform=transform,
+            )
             self._links.append(link)
+
+        for child_link in link._child_links:
+            self._add_link(child_link)
+
+    def add(self, geometry):
+        if isinstance(geometry, model_module.Link):
+            links = [geometry]
+        elif isinstance(geometry, model_module.CascadedLink):
+            links = geometry.link_list
+        else:
+            raise TypeError('geometry must be Link or CascadedLink')
+
+        for link in links:
+            self._add_link(link)
 
         self._redraw = True
 

@@ -506,6 +506,10 @@ class Link(CascadedCoords):
     def parent_link(self):
         return self._parent_link
 
+    @property
+    def child_links(self):
+        return self._child_links
+
     def add_joint(self, j):
         self.joint = j
 
@@ -2260,6 +2264,7 @@ class RobotModel(CascadedLink):
                 joint_list.append(joint)
             whole_joint_list.append(joint)
 
+            # TODO(make clear the difference between assoc and add_child_link)
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
             link_maps[j.child].add_parent_link(link_maps[j.parent])
