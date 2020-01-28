@@ -351,17 +351,16 @@ class Coordinates(object):
         c1 = self.worldcoords()
         inv = c1.inverse_transformation()
         if wrt == 'local' or wrt == self:
-            inv = transform_coords(inv, c2)
+            transform_coords(inv, c2, inv)
         elif wrt == 'parent' or \
                 wrt == self.parent or \
                 wrt == 'world':
-            inv = transform_coords(c2, inv)
+            transform_coords(c2, inv, inv)
         elif isinstance(wrt, Coordinates):
             xw = wrt.worldcoords()
-            inv = transform_coords(c2, inv)
-            inv = transform_coords(xw.inverse_transformation(),
-                                   inv)
-            inv = transform_coords(inv, xw)
+            transform_coords(c2, inv, inv)
+            transform_coords(xw.inverse_transformation(), inv, inv)
+            transform_coords(inv, xw, inv)
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
         return inv
@@ -499,14 +498,17 @@ class Coordinates(object):
         --------
         """
         if wrt == 'local' or wrt == self:
-            tmp_coords = transform_coords(self, c)
+            tmp_coords = transform_coords(self, c, self)
         elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
-            tmp_coords = transform_coords(c, self)
+            tmp_coords = transform_coords(c, self, self)
         elif isinstance(wrt, Coordinates):
-            tmp_coords = transform_coords(wrt.inverse_transformation, self)
-            tmp_coords = transform_coords(c, tmp_coords)
-            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
+            tmp_coords = transform_coords(wrt.inverse_transformation, self,
+                                          self)
+            tmp_coords = transform_coords(c, tmp_coords,
+                                          self)
+            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords,
+                                          self)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
         return self.newcoords(tmp_coords)
@@ -818,11 +820,11 @@ class CascadedCoords(Coordinates):
         self._changed = True
         self._descendants = []
 
+        self._worldcoords = Coordinates(pos=self.translation,
+                                        rot=self.rotation)
         self.parent = parent
         if parent is not None:
             self.parent.assoc(self)
-        self._worldcoords = Coordinates(pos=self.translation,
-                                        rot=self.rotation)
 
     @property
     def descendants(self):
@@ -939,9 +941,7 @@ class CascadedCoords(Coordinates):
         if isinstance(wrt, Coordinates):
             raise NotImplementedError
         elif wrt == 'local' or wrt == self:  # multiply c from the left
-            tmp_coords = transform_coords(self, c)
-            self.rotation = tmp_coords.rotation
-            self.translation = tmp_coords.translation
+            transform_coords(self, c, self)
         else:
             raise NotImplementedError
         return self.newcoords(self.rotation, self.translation)
@@ -950,9 +950,10 @@ class CascadedCoords(Coordinates):
         """Calculate rotation and position in the world."""
         if self._changed:
             if self.parent:
-                self._worldcoords = transform_coords(
+                transform_coords(
                     self.parent.worldcoords(),
-                    self)
+                    self,
+                    self._worldcoords)
             else:
                 self._worldcoords.rotation = self.rotation
                 self._worldcoords.translation = self.translation
