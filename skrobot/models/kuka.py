@@ -11,8 +11,6 @@ from .urdf import RobotModelFromURDF
 class Kuka(RobotModelFromURDF):
     """Kuka Robot Model."""
 
-    default_urdf_path = kuka_urdfpath()
-
     def __init__(self, *args, **kwargs):
         super(Kuka, self).__init__(*args, **kwargs)
         self.rarm_end_coords = CascadedCoords(
@@ -23,6 +21,10 @@ class Kuka(RobotModelFromURDF):
         self.rarm_end_coords.rotate(- np.pi / 2.0, axis='y')
         self.rarm_end_coords.rotate(- np.pi / 2.0, axis='x')
         self.end_coords = [self.rarm_end_coords]
+
+    @cached_property
+    def default_urdf_path(self):
+        return kuka_urdfpath()
 
     def reset_manip_pose(self):
         return self.angle_vector([0, np.deg2rad(10), 0,

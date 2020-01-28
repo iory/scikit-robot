@@ -3,8 +3,6 @@ from ..model import RobotModel
 
 class RobotModelFromURDF(RobotModel):
 
-    default_urdf_path = None
-
     def __init__(self, urdf=None, urdf_file=None):
         super(RobotModelFromURDF, self).__init__()
 
@@ -18,3 +16,7 @@ class RobotModelFromURDF(RobotModel):
             self.load_urdf_file(file_obj=urdf_file)
         else:
             self.load_urdf_file(file_obj=self.default_urdf_path)
+
+    @property
+    def default_urdf_path(self):
+        raise NotImplementedError
