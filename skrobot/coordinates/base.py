@@ -20,7 +20,7 @@ from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
 
 
-def transform_coords(c1, c2):
+def transform_coords(c1, c2, out=None):
     """Return Coordinates by applying c1 to c2 from the left
 
     Parameters
@@ -28,6 +28,9 @@ def transform_coords(c1, c2):
     c1 : skrobot.coordinates.Coordinates
     c2 : skrobot.coordinates.Coordinates
         Coordinates
+    c3 : skrobot.coordinates.Coordinates or None
+        Output argument. If this value is specified, the results will be
+        in-placed.
 
     Returns
     -------
@@ -59,9 +62,13 @@ def transform_coords(c1, c2):
            [ 8.66025404e-01,  5.00000000e-01, -1.66533454e-16],
            [-5.00000000e-01,  8.66025404e-01,  2.77555756e-17]])
     """
-    translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    q = quaternion_multiply(c1.quaternion, c2.quaternion)
-    return Coordinates(pos=translation, rot=q)
+    if out is None:
+        out = Coordinates()
+    elif not isinstance(out, Coordinates):
+        raise TypeError("Input type should be skrobot.coordinates.Coordinates")
+    out.translation = c1.translation + np.dot(c1.rotation, c2.translation)
+    out.rotation = quaternion_multiply(c1.quaternion, c2.quaternion)
+    return out
 
 
 class Coordinates(object):
