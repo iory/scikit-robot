@@ -12,11 +12,13 @@ class Panda(RobotModelFromURDF):
     https://frankaemika.github.io/docs/control_parameters.html
     """
 
-    default_urdf_path = panda_urdfpath()
-
     def __init__(self, *args, **kwargs):
         super(Panda, self).__init__(*args, **kwargs)
         self.reset_pose()
+
+    @cached_property
+    def default_urdf_path(self):
+        return panda_urdfpath()
 
     def reset_pose(self):
         angle_vector = [

@@ -14,8 +14,6 @@ class PR2(RobotModelFromURDF):
 
     """
 
-    default_urdf_path = pr2_urdfpath()
-
     def __init__(self, *args, **kwargs):
         super(PR2, self).__init__(*args, **kwargs)
 
@@ -70,6 +68,10 @@ class PR2(RobotModelFromURDF):
                  np.deg2rad(74.2702))):
             j.min_angle = min_angle
             j.max_angle = max_angle
+
+    @cached_property
+    def default_urdf_path(self):
+        return pr2_urdfpath()
 
     @cached_property
     def rarm(self):
