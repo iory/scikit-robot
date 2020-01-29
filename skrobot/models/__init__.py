@@ -1,5 +1,6 @@
 # flake8: noqa
 
+from skrobot.models.primitives import Annulus
 from skrobot.models.primitives import Axis
 from skrobot.models.primitives import Box
 from skrobot.models.primitives import Cylinder

@@ -86,3 +86,21 @@ class Sphere(model_module.Link):
             subdivisions=subdivisions,
             color=color,
             )
+
+
+class Annulus(model_module.Link):
+
+    def __init__(self, r_min, r_max, height,
+                 vertex_colors=None, face_colors=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+        if name is None:
+            name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+
+        super(Annulus, self).__init__(pos=pos, rot=rot, name=name)
+        self._visual_mesh = trimesh.creation.annulus(
+            r_min=r_min,
+            r_max=r_max,
+            height=height,
+            vertex_colors=vertex_colors,
+            face_colors=face_colors
+            )
