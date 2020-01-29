@@ -118,6 +118,7 @@ class ROSRobotInterfaceBase(object):
                              queue_size=joint_states_queue_size)
 
         self.controller_table = {}
+        self.controller_param_table = {}
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
@@ -251,6 +252,8 @@ class ROSRobotInterfaceBase(object):
         """
         tmp_actions = []
         tmp_actions_name = []
+        controller_type_actions = {}
+        controller_type_params = {}
         if create_actions:
             for controller in self.default_controller():
                 controller_action = controller['controller_action']
@@ -263,6 +266,11 @@ class ROSRobotInterfaceBase(object):
                                                 controller['action_type'])
                 tmp_actions.append(action)
                 tmp_actions_name.append(controller_action)
+                if 'controller_type' in controller:
+                    controller_type_actions[
+                        controller['controller_type']] = [action]
+                    controller_type_params[
+                        controller['controller_type']] = [controller]
             for action, action_name in zip(tmp_actions, tmp_actions_name):
                 if self.controller_timeout is None:
                     rospy.logwarn(
@@ -296,10 +304,15 @@ class ROSRobotInterfaceBase(object):
         else:  # not creating actions, just search
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
+        self.controller_param_table[controller_type] \
+            = self.default_controller()
+        self.controller_table.update(controller_type_actions)
+        self.controller_param_table.update(controller_type_params)
         return self.controller_table[controller_type]
 
     def default_controller(self):
         return [dict(
+            controller_type='fullbody_controller',
             controller_action='fullbody_controller/'
             'follow_joint_trajectory_action',
             controller_state='fullbody_controller/state',
@@ -395,7 +408,8 @@ class ROSRobotInterfaceBase(object):
             angle_velocities = np.zeros_like(av)
         duration = time
         traj_points = [(av, angle_velocities, duration), ]
-        for action, controller_param in zip(cacts, self.default_controller()):
+        controller_params = self.controller_param_table[controller_type]
+        for action, controller_param in zip(cacts, controller_params):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
@@ -541,7 +555,8 @@ class ROSRobotInterfaceBase(object):
             prev_av = av
 
         cacts = self.controller_table[controller_type]
-        for action, controller_param in zip(cacts, self.default_controller()):
+        controller_params = self.controller_param_table[controller_type]
+        for action, controller_param in zip(cacts, controller_params):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
@@ -567,7 +582,7 @@ class ROSRobotInterfaceBase(object):
         if controller_type:
             controller_actions = self.controller_table[controller_type]
         else:
-            controller_actions = self.controller_actions
+            controller_actions = self.controller_table[self.controller_type]
         for action in controller_actions:
             # TODO(simultaneously wait_for_result)
             action.wait_for_result(timeout=rospy.Duration(timeout))
@@ -591,9 +606,11 @@ class ROSRobotInterfaceBase(object):
         av_duration : float
             time of angle vector.
         """
+        if controller_type is None:
+            controller_type = self.controller_type
         unordered_joint_names = set(
             _flatten([c['joint_names']
-                      for c in self.default_controller()]))
+                      for c in self.controller_param_table[controller_type]]))
         joint_list = self.robot.joint_list
         diff_avs = self.sub_angle_vector(end_av, start_av)
         time_list = []
