@@ -22,6 +22,23 @@ class Axis(model_module.Link):
             axis_length=axis_length,
         )
 
+    @classmethod
+    def from_coords(cls, coords, **kwargs):
+        assert isinstance(coords, model_module.Coordinates)
+        link = cls(**kwargs)
+        link.parent = coords
+        return link
+
+    @classmethod
+    def from_cascoords(cls, cascoords, **kwargs):
+        assert isinstance(cascoords, model_module.CascadedCoords)
+        link = cls(**kwargs)
+        link.parent = cascoords.worldcoords()
+        for cc in cascoords.descendants:
+            child_link = cls.from_cascoords(cc)
+            link.add_child_link(child_link)
+        return link
+
 
 class Box(model_module.Link):
 

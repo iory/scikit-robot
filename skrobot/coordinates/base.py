@@ -1,3 +1,4 @@
+import contextlib
 import copy
 
 import numpy as np
@@ -76,7 +77,8 @@ class Coordinates(object):
     def __init__(self,
                  pos=[0, 0, 0],
                  rot=np.eye(3),
-                 name=None):
+                 name=None,
+                 hook=None):
         """Initialization of Coordinates
 
         Parameters
@@ -96,6 +98,16 @@ class Coordinates(object):
             name = ''
         self.name = name
         self.parent = None
+        self._hook = hook if hook else lambda: None
+
+    @contextlib.contextmanager
+    def disable_hook(self):
+        hook = self._hook
+        self._hook = lambda: None
+        try:
+            yield
+        finally:
+            self._hook = hook
 
     @property
     def rotation(self):
@@ -121,6 +133,7 @@ class Coordinates(object):
                [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
                [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
         """
+        self._hook()
         return self._rotation
 
     @rotation.setter
@@ -178,6 +191,7 @@ class Coordinates(object):
         >>> c.translation
         array([0.1, 0.2, 0.3])
         """
+        self._hook()
         return self._translation
 
     @translation.setter
@@ -745,14 +759,12 @@ class Coordinates(object):
 
     def worldcoords(self):
         """Return thisself"""
+        self._hook()
         return self
 
     def copy_worldcoords(self):
         """Return a deep copy of the Coordinates."""
         return self.coords()
-
-    def update(self):
-        pass
 
     def worldrot(self):
         """Return rotation of this coordinate
@@ -821,7 +833,9 @@ class CascadedCoords(Coordinates):
         self._descendants = []
 
         self._worldcoords = Coordinates(pos=self.translation,
-                                        rot=self.rotation)
+                                        rot=self.rotation,
+                                        hook=self.update)
+
         self.parent = parent
         if parent is not None:
             self.parent.assoc(self)
@@ -946,9 +960,10 @@ class CascadedCoords(Coordinates):
             raise NotImplementedError
         return self.newcoords(self.rotation, self.translation)
 
-    def worldcoords(self):
-        """Calculate rotation and position in the world."""
-        if self._changed:
+    def update(self, force=False):
+        if not force and not self._changed:
+            return
+        with self.disable_hook():
             if self.parent:
                 transform_coords(
                     self.parent.worldcoords(),
@@ -957,8 +972,11 @@ class CascadedCoords(Coordinates):
             else:
                 self._worldcoords.rotation = self.rotation
                 self._worldcoords.translation = self.translation
-            self.update()
-            self._changed = False
+        self._changed = False
+
+    def worldcoords(self):
+        """Calculate rotation and position in the world."""
+        self.update()
         return self._worldcoords
 
     def worldrot(self):
@@ -977,9 +995,6 @@ class CascadedCoords(Coordinates):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
         self._parent = c
-
-    def update(self):
-        pass
 
 
 def coordinates_p(x):

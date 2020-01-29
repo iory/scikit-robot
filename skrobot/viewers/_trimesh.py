@@ -52,6 +52,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
             # apply latest angle-vector
             for link in self._links:
+                link.update(force=True)
                 transform = link.worldcoords().T()
                 self.scene.graph.update(str(id(link)), matrix=transform)
         super(TrimeshSceneViewer, self).on_draw()

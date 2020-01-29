@@ -516,7 +516,7 @@ class Link(CascadedCoords):
     def delete_joint(self):
         self.joint = None
 
-    def add_child_links(self, child_link):
+    def add_child_link(self, child_link):
         """Add child link."""
         if child_link is not None and child_link not in self._child_links:
             self._child_links.append(child_link)
@@ -2128,7 +2128,7 @@ class RobotModel(CascadedLink):
         for joint in self.joint_list:
             self.joint_names.append(joint.name)
             joint.child_link.add_parent_link(joint.parent_link)
-            joint.parent_link.add_child_links(joint.child_link)
+            joint.parent_link.add_child_link(joint.child_link)
 
         for link in self.link_list:
             self.__dict__[link.name] = link
@@ -2268,7 +2268,7 @@ class RobotModel(CascadedLink):
             link_maps[j.parent].assoc(link_maps[j.child])
             link_maps[j.child].add_joint(joint)
             link_maps[j.child].add_parent_link(link_maps[j.parent])
-            link_maps[j.parent].add_child_links(link_maps[j.child])
+            link_maps[j.parent].add_child_link(link_maps[j.child])
 
         for j in self.urdf_robot_model.joints:
             if j.origin is None:
