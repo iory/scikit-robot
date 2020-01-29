@@ -267,8 +267,10 @@ class ROSRobotInterfaceBase(object):
                 tmp_actions.append(action)
                 tmp_actions_name.append(controller_action)
                 if 'controller_type' in controller:
-                    controller_type_actions[controller['controller_type']] = [action]
-                    controller_type_params[controller['controller_type']] = [controller]
+                    controller_type_actions[
+                        controller['controller_type']] = [action]
+                    controller_type_params[
+                        controller['controller_type']] = [controller]
             for action, action_name in zip(tmp_actions, tmp_actions_name):
                 if self.controller_timeout is None:
                     rospy.logwarn(
@@ -302,7 +304,8 @@ class ROSRobotInterfaceBase(object):
         else:  # not creating actions, just search
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
-        self.controller_param_table[controller_type] = self.default_controller()
+        self.controller_param_table[controller_type] \
+            = self.default_controller()
         self.controller_table.update(controller_type_actions)
         self.controller_param_table.update(controller_type_params)
         return self.controller_table[controller_type]
@@ -553,7 +556,7 @@ class ROSRobotInterfaceBase(object):
 
         cacts = self.controller_table[controller_type]
         controller_params = self.controller_param_table[controller_type]
-        for action, controller_param in zip(cacts, self.default_controller()):
+        for action, controller_param in zip(cacts, controller_params):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
