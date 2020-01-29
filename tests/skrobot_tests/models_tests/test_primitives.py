@@ -33,3 +33,9 @@ class TestSphere(unittest.TestCase):
 
     def test_init(self):
         skrobot.models.Sphere(radius=1)
+
+
+class TestAnnulus(unittest.TestCase):
+
+    def test_init(self):
+        skrobot.models.Annulus(r_min=0.2, r_max=0.5, height=1)
