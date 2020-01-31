@@ -501,7 +501,9 @@ class Coordinates(object):
         c : skrobot.coordinates.Coordinates
             coordinate
         wrt : string or skrobot.coordinates.Coordinates
-            If wrt is 'local' or self.
+            If wrt is 'local' or self, multiply c from left.
+            If wrt is 'world', transform c with respect to worldcoord.
+            If wrt is Coordinates, transform c with respect to c.
 
         Returns
         -------
@@ -512,20 +514,17 @@ class Coordinates(object):
         --------
         """
         if wrt == 'local' or wrt == self:
-            tmp_coords = transform_coords(self, c, self)
+            transform_coords(self, c, self)
         elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
-            tmp_coords = transform_coords(c, self, self)
+            transform_coords(c, self, self)
         elif isinstance(wrt, Coordinates):
-            tmp_coords = transform_coords(wrt.inverse_transformation, self,
-                                          self)
-            tmp_coords = transform_coords(c, tmp_coords,
-                                          self)
-            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords,
-                                          self)
+            transform_coords(wrt.inverse_transformation(), self, self)
+            transform_coords(c, self, self)
+            transform_coords(wrt.worldcoords(), self, self)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
-        return self.newcoords(tmp_coords)
+        return self
 
     def rpy_angle(self):
         """Return a pair of rpy angles of this coordinates.
@@ -952,12 +951,38 @@ class CascadedCoords(Coordinates):
         return self.worldcoords().inverse_rotate_vector(v)
 
     def transform(self, c, wrt='local'):
+        """Transform this coordinates
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates
+            coordinates
+        wrt : str or skrobot.coordinates.Coordinates
+            transform this coordinates with respect to wrt.
+
+        Returns
+        -------
+        self : skrobot.coordinates.CascadedCoords
+            return self
+        """
         if isinstance(wrt, Coordinates):
-            raise NotImplementedError
+            transform_coords(self.parentcoords(), self, self)
+            transform_coords(wrt.inverse_transformation(), self, self)
+            transform_coords(c, self, self)
+            transform_coords(wrt.worldcoords(), self, self)
+            transform_coords(self.parentcoords().inverse_transformation(),
+                             self, self)
         elif wrt == 'local' or wrt == self:  # multiply c from the left
             transform_coords(self, c, self)
+        elif wrt == 'parent' or wrt == self.parent:
+            transform_coords(c, self, self)
+        elif wrt == 'world':
+            transform_coords(self.parentcoords, self, self)
+            transform_coords(c, self, self)
+            transform_coords(self.parentcoords.inverse_transformation(),
+                             self, self)
         else:
-            raise NotImplementedError
+            raise ValueError('transform wrt {} is not supported'.format(wrt))
         return self.newcoords(self.rotation, self.translation)
 
     def update(self, force=False):
