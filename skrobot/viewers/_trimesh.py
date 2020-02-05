@@ -44,7 +44,9 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def on_draw(self):
         if not self._redraw:
-            super(TrimeshSceneViewer, self).on_draw()
+            with self.lock:
+                self._update_vertex_list()
+                super(TrimeshSceneViewer, self).on_draw()
             return
 
         with self.lock:
@@ -55,7 +57,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 link.update(force=True)
                 transform = link.worldcoords().T()
                 self.scene.graph.update(str(id(link)), matrix=transform)
-        super(TrimeshSceneViewer, self).on_draw()
+            super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
 
