@@ -1,12 +1,17 @@
 from __future__ import division
 
 import collections
+import logging
 import threading
 
 import pyglet
 import trimesh.viewer
 
 from .. import model as model_module
+
+
+logger = logging.getLogger('trimesh')
+logger.setLevel(logging.ERROR)
 
 
 class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
