@@ -13,6 +13,7 @@ def fetch_urdfpath():
         path=osp.join(download_dir, 'fetch_description.tar.gz'),
         md5='fbe29ab5f3d029d165a625175b43a265',
         postprocess=gdown.extractall,
+        quiet=True,
     )
     return osp.join(download_dir, 'fetch_description/fetch.urdf')
 
@@ -27,6 +28,7 @@ def panda_urdfpath():
         path=osp.join(download_dir, 'franka_description.tar.gz'),
         md5='3de5bd15262b519e3beb88f1422032ac',
         postprocess=gdown.extractall,
+        quiet=True,
     )
     return osp.join(download_dir, 'franka_description/panda.urdf')
 
@@ -37,5 +39,6 @@ def pr2_urdfpath():
         path=osp.join(download_dir, 'pr2_description.tar.gz'),
         md5='e4fb915accdb3568a5524c92e9c35c9a',
         postprocess=gdown.extractall,
+        quiet=True,
     )
     return osp.join(download_dir, 'pr2_description/pr2.urdf')
