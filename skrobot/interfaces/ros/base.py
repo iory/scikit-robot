@@ -132,14 +132,18 @@ class ROSRobotInterfaceBase(object):
             time of send angle vector.
         fastest_time : float
             fastest time
-        time_scale: float
-            time scale
+        time_scale : float
+            Time will use 1/time_scale of the fastest speed.
+            time_scale must be >=1.
 
         Returns
         -------
         time : float
             time of send angle vector.
         """
+        if time_scale < 1:
+            raise ValueError(
+                'time_scale must be >=1, but given: {}'.format(time_scale))
         if isinstance(time, Number):
             # Normal Number disgnated Mode
             if time < fastest_time:
@@ -353,7 +357,7 @@ class ROSRobotInterfaceBase(object):
                      time=None,
                      controller_type=None,
                      start_time=0.0,
-                     time_scale=0.2,
+                     time_scale=5.0,
                      velocities=None):
         """Send joint angle to robot
 
@@ -376,6 +380,7 @@ class ROSRobotInterfaceBase(object):
         time_scale : float
             if time is not specified,
             it will use 1/time_scale of the fastest speed.
+            time_scale must be >=1. (default: 5.0)
 
         Returns
         -------
@@ -478,7 +483,7 @@ class ROSRobotInterfaceBase(object):
                               times=None,
                               controller_type=None,
                               start_time=0.0,
-                              time_scale=0.2):
+                              time_scale=5.0):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -505,8 +510,9 @@ class ROSRobotInterfaceBase(object):
         start_time : float
             time to start moving
         time_scale : float
-            if times is not specified, it will use 1 / time_scale of the
-            fastest speed
+            if time is not specified,
+            it will use 1/time_scale of the fastest speed.
+            time_scale must be >=1. (default: 5.0)
 
         Returns
         -------
