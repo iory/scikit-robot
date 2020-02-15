@@ -12,6 +12,9 @@ from .. import model as model_module
 class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def __init__(self, resolution=None):
+        if resolution is None:
+            resolution = (640, 480)
+
         self._links = collections.OrderedDict()
 
         self._redraw = True
