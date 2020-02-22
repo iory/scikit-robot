@@ -525,7 +525,10 @@ def rpy_angle(matrix):
     (array([1.57079633, 1.04719755, 0.52359878]),
      array([ 4.71238898,  2.0943951 , -2.61799388]))
     """
-    a = np.arctan2(matrix[1, 0], matrix[0, 0])
+    if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
+        a = 0.0
+    else:
+        a = np.arctan2(matrix[1, 0], matrix[0, 0])
     sa = np.sin(a)
     ca = np.cos(a)
     b = np.arctan2(-matrix[2, 0], ca * matrix[0, 0] + sa * matrix[1, 0])
