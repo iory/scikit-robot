@@ -108,6 +108,13 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             b, np.array([3.66519143, 2.51327412, -2.0943951]))
 
+        rot = np.array([[0, 0, 1],
+                        [0, -1, 0],
+                        [1, 0, 0]])
+        testing.assert_almost_equal(
+            rpy_angle(rot)[0],
+            np.array([0, - pi / 2.0, pi]))
+
     def test_rotation_matrix(self):
         testing.assert_almost_equal(
             rotation_matrix(pi, [1, 1, 1]),
