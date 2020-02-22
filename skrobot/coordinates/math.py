@@ -622,13 +622,15 @@ def matrix2quaternion(m):
     return np.array([q0, q1, q2, q3])
 
 
-def quaternion2matrix(q):
+def quaternion2matrix(q, normalize=False):
     """Returns matrix of given quaternion.
 
     Parameters
     ----------
     quaternion : list or numpy.ndarray
         quaternion [w, x, y, z] order
+    normalize : bool
+        if normalize is True, input quaternion is normalized.
 
     Returns
     -------
@@ -644,13 +646,17 @@ def quaternion2matrix(q):
            [0., 1., 0.],
            [0., 0., 1.]])
     """
+    if normalize:
+        q = quaternion_normalize(q)
+    else:
+        norm = np.linalg.norm(q)
+        if not np.isclose(norm, 1.0):
+            raise ValueError("quaternion q's norm is not 1")
     q0 = q[0]
     q1 = q[1]
     q2 = q[2]
     q3 = q[3]
-    norm = np.linalg.norm(q)
-    if not np.isclose(norm, 1.0):
-        raise ValueError("quaternion q's norm is not 1")
+
     m = np.zeros((3, 3))
     m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
     m[0, 1] = 2 * (q1 * q2 - q0 * q3)
