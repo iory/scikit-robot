@@ -594,12 +594,12 @@ class Link(CascadedCoords):
 class CascadedLink(CascadedCoords):
 
     def __init__(self,
-                 link_list=[],
-                 joint_list=[],
+                 link_list=None,
+                 joint_list=None,
                  *args, **kwargs):
         super(CascadedLink, self).__init__(*args, **kwargs)
-        self.link_list = link_list
-        self.joint_list = joint_list
+        self.link_list = link_list or []
+        self.joint_list = joint_list or []
         self.bodies = []
         self.collision_avoidance_link_list = []
         self.end_coords_list = []
@@ -728,7 +728,7 @@ class CascadedLink(CascadedCoords):
 
     def collision_avoidance_link_pair_from_link_list(self,
                                                      link_list,
-                                                     obstacles=[]):
+                                                     obstacles=None):
         return []
 
     def move_joints_avoidance(self,
@@ -749,11 +749,12 @@ class CascadedLink(CascadedCoords):
                               centroid_offset_func=None,
                               cog_translation_axis='z',
                               cog_null_space=False,
-                              additional_weight_list=[],
+                              additional_weight_list=None,
                               additional_nspace_list=None,
                               jacobi=None,
                               obstacles=None,
                               *args, **kwargs):
+        additional_weight_list = additional_weight_list or []
         angle_speed_collision_blending = 0.0
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(
@@ -927,8 +928,9 @@ class CascadedLink(CascadedCoords):
             union_link_list=None,
             n_joint_dimension=None,
             null_space=None,
-            additional_nspace_list=[],
+            additional_nspace_list=None,
             weight=None):
+        additional_nspace_list = additional_nspace_list or []
         if union_link_list is None:
             union_link_list = self.calc_union_link_list(link_list)
         if n_joint_dimension is None:
@@ -1083,7 +1085,7 @@ class CascadedLink(CascadedCoords):
             cog_null_space=None,
             cog_gain=1.0,
             min_loop=None,
-            inverse_kinematics_hook=[],
+            inverse_kinematics_hook=None,
             **kwargs):
         """inverse-kinematics-loop is one loop calculation.
 
@@ -1091,6 +1093,7 @@ class CascadedLink(CascadedCoords):
         difference (dif_pos, dif_rot) are calculated and joint angles
         are updated.
         """
+        inverse_kinematics_hook = inverse_kinematics_hook or []
         if move_target is None:
             raise NotImplementedError
         move_target = listify(move_target)
@@ -1354,9 +1357,11 @@ class CascadedLink(CascadedCoords):
             cog_null_space=False,
             periodic_time=0.5,
             check_collision=None,
-            additional_jacobi=[],
-            additional_vel=[],
+            additional_jacobi=None,
+            additional_vel=None,
             **kwargs):
+        additional_jacobi = additional_jacobi or []
+        additional_vel = additional_vel or []
         target_coords = listify(target_coords)
         if callable(union_link_list):
             union_link_list = union_link_list(link_list)
@@ -2120,8 +2125,10 @@ class CascadedLink(CascadedCoords):
 
 class RobotModel(CascadedLink):
 
-    def __init__(self, link_list=[], joint_list=[],
+    def __init__(self, link_list=None, joint_list=None,
                  root_link=None):
+        link_list = link_list or []
+        joint_list = joint_list or []
         super(RobotModel, self).__init__(link_list, joint_list)
 
         self.joint_names = []
