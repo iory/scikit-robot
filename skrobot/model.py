@@ -155,7 +155,9 @@ class Joint(object):
                  max_joint_velocity=None,
                  max_joint_torque=None,
                  joint_min_max_table=None,
-                 joint_min_max_target=None):
+                 joint_min_max_target=None,
+                 hooks=None):
+        hooks = hooks or []
         self.name = name
         self.parent_link = parent_link
         self.child_link = child_link
@@ -169,9 +171,13 @@ class Joint(object):
         self.joint_min_max_table = joint_min_max_table
         self.joint_min_max_target = joint_min_max_target
         self.default_coords = self.child_link.copy_coords()
+        self._hooks = hooks
 
     @property
     def joint_dof(self):
+        raise NotImplementedError
+
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
         raise NotImplementedError
 
     def __repr__(self):
@@ -185,6 +191,14 @@ class Joint(object):
             prefix = self.__class__.__name__ + ' ' + hex(id(self))
 
         return '#<%s>' % prefix
+
+    def register_hook(self, hook):
+        self._hooks.append(hook)
+
+    def register_mimic_joint(self, joint, multiplier, offset):
+        self.register_hook(
+            lambda: joint.joint_angle(
+                self.joint_angle() * multiplier + offset))
 
 
 class RotationalJoint(Joint):
@@ -226,7 +240,7 @@ class RotationalJoint(Joint):
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
 
-    def joint_angle(self, v=None, relative=None):
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Joint angle method
 
         Return joint-angle if v is not set, if v is given, set joint
@@ -256,6 +270,9 @@ class RotationalJoint(Joint):
         self.child_link.rotation = self.default_coords.rotation.copy()
         self.child_link.translation = self.default_coords.translation.copy()
         self.child_link.rotate(self._joint_angle, self.axis)
+        if enable_hook:
+            for hook in self._hooks:
+                hook()
         return self._joint_angle
 
     @property
@@ -286,7 +303,7 @@ class FixedJoint(Joint):
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
 
-    def joint_angle(self, v=None, relative=None):
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Joint angle method.
 
         Return joint_angle
@@ -371,7 +388,7 @@ class LinearJoint(Joint):
         self.joint_acceleration = 0.0  # [m/s^2]
         self.joint_torque = 0.0  # [N]
 
-    def joint_angle(self, v=None, relative=None):
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
         """return joint-angle if v is not set, if v is given, set joint angle.
 
         v is linear value in [m].
@@ -394,6 +411,10 @@ class LinearJoint(Joint):
             self.child_link.translation = \
                 self.default_coords.translation.copy()
             self.child_link.translate(self._joint_angle * self.axis)
+
+            if enable_hook:
+                for hook in self._hooks:
+                    hook()
         return self._joint_angle
 
     @property
@@ -430,7 +451,7 @@ class OmniWheelJoint(Joint):
         self.joint_acceleration = (0, 0, 0)
         self.joint_torque = (0, 0, 0)
 
-    def joint_angle(self, v=None, relative=None):
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint-angle if v is not set, if v is given, set joint angle.
 
         """
@@ -453,6 +474,9 @@ class OmniWheelJoint(Joint):
             self.child_link.translate(
                 (self._joint_angle[0], self._joint_angle[1], 0))
             self.child_link.rotate(self._joint_angle[2], 'z')
+            if enable_hook:
+                for hook in self._hooks:
+                    hook()
         return self._joint_angle
 
     @property
@@ -2305,6 +2329,16 @@ class RobotModel(CascadedLink):
             self.__dict__[joint.name] = joint
         self.root_link = self.__dict__[root_link.name]
         self.assoc(self.root_link)
+
+        # Add hook of mimic joint.
+        for j in self.urdf_robot_model.joints:
+            if j.mimic is None:
+                continue
+            joint_a = self.__dict__[j.mimic.joint]
+            joint_b = self.__dict__[j.name]
+            multiplier = j.mimic.multiplier
+            offset = j.mimic.offset
+            joint_a.register_mimic_joint(joint_b, multiplier, offset)
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
