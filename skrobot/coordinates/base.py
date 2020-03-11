@@ -526,6 +526,25 @@ class Coordinates(object):
             raise ValueError('transform wrt {} is not supported'.format(wrt))
         return self
 
+    def move_coords(self, target_coords, local_coords):
+        """Transform this coordinate so that local_coords to target_coords.
+
+        Parameters
+        ----------
+        target_coords : skrobot.coordinates.Coordinates
+            target coords.
+        local_coords : skrobot.coordinates.Coordinates
+            local coords to be aligned.
+
+        Returns
+        -------
+        self.worldcoords() : skrobot.coordinates.Coordinates
+            world coordinates.
+        """
+        self.transform(
+            local_coords.transformation(target_coords), local_coords)
+        return self.worldcoords()
+
     def rpy_angle(self):
         """Return a pair of rpy angles of this coordinates.
 
@@ -884,6 +903,7 @@ class CascadedCoords(Coordinates):
     def parentcoords(self):
         if self.parent:
             return self.parent.worldcoords()
+        return worldcoords
 
     def transform_vector(self, v):
         return self.worldcoords().transform_vector(v)
