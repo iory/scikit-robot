@@ -34,6 +34,19 @@ class TestCoordinates(unittest.TestCase):
         coord.transform(make_coords(pos=[1, 2, 3]), wrt)
         testing.assert_almost_equal(coord.translation, [3.0, 2.0, -1.0])
 
+    def test_move_coords(self):
+        coord = make_coords()
+        target_coord = make_coords(
+            pos=(1, 2, 3), rot=(0, 0, 1, 0))
+        local_coord = make_coords(
+            pos=(-2, -2, -1))
+        coord.move_coords(target_coord, local_coord)
+        result = coord.copy_worldcoords().transform(local_coord)
+        testing.assert_almost_equal(
+            result.translation, (1, 2, 3))
+        testing.assert_almost_equal(
+            result.quaternion, (0, 0, 1, 0))
+
     def test_translate(self):
         c = make_coords()
         testing.assert_almost_equal(
