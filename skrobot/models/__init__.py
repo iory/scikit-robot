@@ -3,6 +3,7 @@
 from skrobot.models.primitives import Annulus
 from skrobot.models.primitives import Axis
 from skrobot.models.primitives import Box
+from skrobot.models.primitives import CameraMarker
 from skrobot.models.primitives import Cylinder
 from skrobot.models.primitives import Sphere
 
