@@ -56,6 +56,27 @@ class Box(model_module.Link):
         )
 
 
+class CameraMarker(model_module.Link):
+
+    def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
+                 marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3), name=None):
+        if name is None:
+            name = 'camera_marker_{}'.format(
+                str(uuid.uuid1()).replace('-', '_'))
+
+        super(CameraMarker, self).__init__(
+            pos=pos, rot=rot, name=name)
+        camera = trimesh.scene.Camera(name=name,
+                                      focal=focal,
+                                      fov=fov,
+                                      z_near=z_near,
+                                      z_far=z_far)
+
+        self._visual_mesh = trimesh.creation.camera_marker(
+            camera,
+            marker_height=marker_height)
+
+
 class Cylinder(model_module.Link):
 
     def __init__(self, radius, height,
