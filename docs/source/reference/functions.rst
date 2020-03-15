@@ -32,6 +32,7 @@ Utilities functions
    skrobot.coordinates.math.matrix_exponent
    skrobot.coordinates.math.outer_product_matrix
    skrobot.coordinates.math.rotation_matrix_from_rpy
+   skrobot.coordinates.math.rotation_matrix_from_axis
    skrobot.coordinates.math.rodrigues
    skrobot.coordinates.math.rotation_angle
    skrobot.coordinates.math.rotation_distance
