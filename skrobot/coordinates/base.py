@@ -12,6 +12,7 @@ from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import quaternion_normalize
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
@@ -68,7 +69,8 @@ def transform_coords(c1, c2, out=None):
     elif not isinstance(out, Coordinates):
         raise TypeError("Input type should be skrobot.coordinates.Coordinates")
     out.translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    out.rotation = quaternion_multiply(c1.quaternion, c2.quaternion)
+    out.rotation = quaternion_normalize(
+        quaternion_multiply(c1.quaternion, c2.quaternion))
     return out
 
 

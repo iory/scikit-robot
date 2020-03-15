@@ -303,6 +303,13 @@ class TestMath(unittest.TestCase):
         testing.assert_array_equal(
             q, [1, 0, 0, 0])
 
+        # batch
+        q0 = [[1, 0, 0, 0], [0, 1, 0, 0]]
+        q1 = quaternion_conjugate(q0)
+        q = quaternion_multiply(q0, q1)
+        testing.assert_array_equal(
+            q, [[1, 0, 0, 0], [1, 0, 0, 0]])
+
     def test_quaternion_inverse(self):
         q0 = [1, 0, 0, 0]
         q1 = quaternion_inverse(q0)
@@ -315,6 +322,13 @@ class TestMath(unittest.TestCase):
         q = quaternion_multiply(q0, q1)
         testing.assert_almost_equal(
             q, [1, 0, 0, 0])
+
+        # batch
+        q0 = [[1, 0, 0, 0], [1, 2, 3, 4]]
+        q1 = quaternion_inverse(q0)
+        q = quaternion_multiply(q0, q1)
+        testing.assert_almost_equal(
+            q, [[1, 0, 0, 0], [1, 0, 0, 0]])
 
     def test_quaternion_slerp(self):
         q0 = [-0.84289035, -0.14618244, -0.12038416, 0.50366081]
