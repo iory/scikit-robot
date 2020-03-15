@@ -30,6 +30,7 @@ from skrobot.coordinates.math import rotate_vector
 from skrobot.coordinates.math import rotation_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
@@ -236,6 +237,15 @@ class TestMath(unittest.TestCase):
                         np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
             decimal=5)
 
+    def test_normalize_vector(self):
+        testing.assert_almost_equal(
+            normalize_vector([5, 0, 0]),
+            np.array([1, 0, 0]))
+
+        testing.assert_almost_equal(
+            np.linalg.norm(normalize_vector([1, 1, 1])),
+            1.0)
+
     def test_matrix2quaternion(self):
         testing.assert_almost_equal(matrix2quaternion(np.eye(3)),
                                     np.array([1, 0, 0, 0]))
@@ -273,6 +283,28 @@ class TestMath(unittest.TestCase):
             y = np.random.random()
             testing.assert_almost_equal(rpy_matrix(y, p, r),
                                         rotation_matrix_from_rpy([y, p, r]))
+
+    def test_rotation_matrix_from_axis(self):
+        x_axis = (1, 0, 0)
+        y_axis = (0, 1, 0)
+        rot = rotation_matrix_from_axis(x_axis, y_axis)
+        testing.assert_array_almost_equal(rot, np.eye(3))
+
+        x_axis = (1, 1, 1)
+        y_axis = (0, 0, 1)
+        rot = rotation_matrix_from_axis(x_axis, y_axis)
+        testing.assert_array_almost_equal(
+            rot, [[0.57735027, -0.40824829, 0.70710678],
+                  [0.57735027, -0.40824829, -0.70710678],
+                  [0.57735027, 0.81649658, 0.0]])
+
+        x_axis = (1, 1, 1)
+        y_axis = (0, 0, -1)
+        rot = rotation_matrix_from_axis(x_axis, y_axis)
+        testing.assert_array_almost_equal(
+            rot, [[0.57735027, 0.40824829, -0.70710678],
+                  [0.57735027, 0.40824829, 0.70710678],
+                  [0.57735027, -0.81649658, 0.0]])
 
     def test_rotation_distance(self):
         mat1 = np.eye(3)

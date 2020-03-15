@@ -888,6 +888,41 @@ def rotation_matrix_from_rpy(rpy):
     return quaternion2matrix(quat_from_rpy(rpy))
 
 
+def rotation_matrix_from_axis(x_axis, y_axis=(0, 1, 0)):
+    """Return rotation matrix orienting x_axis
+
+    Parameters
+    ----------
+    x_axis : list or tuple or numpy.ndarray
+        x_axis
+    y_axis : list or tuple or numpy.ndarray
+        y_axis. This input axis is normalized using Gram-Schmidt.
+
+    Returns
+    -------
+    rotation_matrix : numpy.ndarray
+        Rotation matrix
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import rotation_matrix_from_axis
+    >>> rotation_matrix_from_axis((1, 0, 0), (0, 1, 0))
+    array([[1., 0., 0.],
+           [0., 1., 0.],
+           [0., 0., 1.]])
+    >>> rotation_matrix_from_axis((1, 1, 1), (0, 1, 0))
+    array([[ 0.57735027, -0.40824829, -0.70710678],
+           [ 0.57735027,  0.81649658,  0.        ],
+           [ 0.57735027, -0.40824829,  0.70710678]])
+    """
+    e1 = normalize_vector(x_axis)
+    e2 = normalize_vector(y_axis - np.dot(y_axis, e1) * e1)
+    z_axis = np.cross(e1, e2)
+    e3 = normalize_vector(
+        z_axis - np.dot(z_axis, e1) * e1 - np.dot(z_axis, e2) * e2)
+    return np.vstack([e1, e2, e3]).T
+
+
 def rodrigues(axis, theta=None):
     """Rodrigues formula.
 
