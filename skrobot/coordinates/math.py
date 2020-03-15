@@ -649,29 +649,47 @@ def quaternion2matrix(q, normalize=False):
            [0., 1., 0.],
            [0., 0., 1.]])
     """
+    q = np.array(q)
     if normalize:
         q = quaternion_normalize(q)
     else:
-        norm = np.linalg.norm(q)
-        if not np.isclose(norm, 1.0):
+        norm = quaternion_norm(q)
+        if not np.allclose(norm, 1.0):
             raise ValueError("quaternion q's norm is not 1")
-    q0 = q[0]
-    q1 = q[1]
-    q2 = q[2]
-    q3 = q[3]
+    if q.ndim == 1:
+        q0 = q[0]
+        q1 = q[1]
+        q2 = q[2]
+        q3 = q[3]
 
-    m = np.zeros((3, 3))
-    m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
-    m[0, 1] = 2 * (q1 * q2 - q0 * q3)
-    m[0, 2] = 2 * (q1 * q3 + q0 * q2)
+        m = np.zeros((3, 3))
+        m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
+        m[0, 1] = 2 * (q1 * q2 - q0 * q3)
+        m[0, 2] = 2 * (q1 * q3 + q0 * q2)
 
-    m[1, 0] = 2 * (q1 * q2 + q0 * q3)
-    m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
-    m[1, 2] = 2 * (q2 * q3 - q0 * q1)
+        m[1, 0] = 2 * (q1 * q2 + q0 * q3)
+        m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
+        m[1, 2] = 2 * (q2 * q3 - q0 * q1)
 
-    m[2, 0] = 2 * (q1 * q3 - q0 * q2)
-    m[2, 1] = 2 * (q2 * q3 + q0 * q1)
-    m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+        m[2, 0] = 2 * (q1 * q3 - q0 * q2)
+        m[2, 1] = 2 * (q2 * q3 + q0 * q1)
+        m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+    elif q.ndim == 2:
+        m = np.zeros((q.shape[0], 3, 3), dtype=np.float64)
+        m[:, 0, 0] = q[:, 0] * q[:, 0] + \
+            q[:, 1] * q[:, 1] - q[:, 2] * q[:, 2] - q[:, 3] * q[:, 3]
+        m[:, 0, 1] = 2 * (q[:, 1] * q[:, 2] - q[:, 0] * q[:, 3])
+        m[:, 0, 2] = 2 * (q[:, 1] * q[:, 3] + q[:, 0] * q[:, 2])
+
+        m[:, 1, 0] = 2 * (q[:, 1] * q[:, 2] + q[:, 0] * q[:, 3])
+        m[:, 1, 1] = q[:, 0] * q[:, 0] - \
+            q[:, 1] * q[:, 1] + q[:, 2] * q[:, 2] - q[:, 3] * q[:, 3]
+        m[:, 1, 2] = 2 * (q[:, 2] * q[:, 3] - q[:, 0] * q[:, 1])
+
+        m[:, 2, 0] = 2 * (q[:, 1] * q[:, 3] - q[:, 0] * q[:, 2])
+        m[:, 2, 1] = 2 * (q[:, 2] * q[:, 3] + q[:, 0] * q[:, 1])
+        m[:, 2, 2] = q[:, 0] * q[:, 0] - \
+            q[:, 1] * q[:, 1] - q[:, 2] * q[:, 2] + q[:, 3] * q[:, 3]
     return m
 
 
@@ -1007,13 +1025,26 @@ def quaternion_multiply(quaternion1, quaternion0):
     >>> numpy.allclose(q, [28, -44, -14, 48])
     True
     """
-    w0, x0, y0, z0 = quaternion0
-    w1, x1, y1, z1 = quaternion1
-    return np.array((
-        -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
-        x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
-        -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
-        x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+    quaternion1 = np.array(quaternion1)
+    if quaternion1.ndim == 1:
+        w0, x0, y0, z0 = quaternion0
+        w1, x1, y1, z1 = quaternion1
+        return np.array((
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+    elif quaternion1.ndim == 2:
+        w0, x0, y0, z0 = np.split(quaternion0, 4, 1)
+        w1, x1, y1, z1 = np.split(quaternion1, 4, 1)
+        result = np.array((
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+        return np.transpose(np.squeeze(result))
+    else:
+        raise ValueError
 
 
 def quaternion_conjugate(quaternion):
@@ -1036,9 +1067,15 @@ def quaternion_conjugate(quaternion):
     >>> np.allclose(quaternion_multiply(q0, q1), [1.0, 0, 0, 0])
     True
     """
-    return np.array((quaternion[0], -quaternion[1],
-                     -quaternion[2], -quaternion[3]),
-                    dtype=np.float64)
+    quaternion = np.array(quaternion, dtype=np.float64)
+    if quaternion.ndim == 1:
+        return np.array((quaternion[0], -quaternion[1],
+                         -quaternion[2], -quaternion[3]),
+                        dtype=np.float64)
+    elif quaternion.ndim == 2:
+        return quaternion * np.array([[1, -1, -1, -1]])
+    else:
+        raise ValueError
 
 
 def quaternion_inverse(quaternion):
@@ -1062,7 +1099,8 @@ def quaternion_inverse(quaternion):
     True
     """
     q = np.array(quaternion, dtype=np.float64)
-    return quaternion_conjugate(q) / np.dot(q, q)
+    return quaternion_conjugate(q) / np.sum(
+        q * q, axis=q.ndim - 1, keepdims=True)
 
 
 def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
@@ -1218,7 +1256,12 @@ def quaternion_norm(q):
     1.0
     """
     q = np.array(q)
-    norm_q = np.sqrt(np.dot(q.T, q))
+    if q.ndim == 1:
+        norm_q = np.sqrt(np.dot(q.T, q))
+    elif q.ndim == 2:
+        norm_q = np.sqrt(np.sum(q * q, axis=1, keepdims=True))
+    else:
+        raise ValueError
     return norm_q
 
 
