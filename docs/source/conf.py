@@ -160,7 +160,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'skrobot.tex', u'skrobot Documentation',
-     u'Matthew Matl', 'manual'),
+     author, 'manual'),
 ]
 
 
