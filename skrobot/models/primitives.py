@@ -80,6 +80,7 @@ class CameraMarker(model_module.Link):
 class Cylinder(model_module.Link):
 
     def __init__(self, radius, height,
+                 sections=32,
                  vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
         if name is None:
@@ -89,6 +90,7 @@ class Cylinder(model_module.Link):
         self._visual_mesh = trimesh.creation.cylinder(
             radius=radius,
             height=height,
+            sections=sections,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
             )
