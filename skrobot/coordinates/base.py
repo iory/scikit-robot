@@ -841,6 +841,47 @@ class Coordinates(object):
             self.translation = copy.deepcopy(c.translation)
         return self
 
+    def __mul__(self, other_c):
+        """Return Transformed Coordinates.
+
+        Note that this function creates new Coordinates and
+        does not change translation and rotation, unlike transform function.
+
+        Parameters
+        ----------
+        other_c : skrobot.coordinates.Coordinates
+            input coordinates.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            transformed coordinates multiplied other_c from the right.
+            T = T_{self} T_{other_c}.
+        """
+        return transform_coords(self, other_c)
+
+    def __pow__(self, exponent):
+        """Return exponential homogeneous matrix.
+
+        If exponent equals -1, return inverse transformation of this coords.
+
+        Parameters
+        ----------
+        exponent : numbers.Number
+            exponent value.
+            If exponent equals -1, return inverse transformation of this
+            coords.
+            In current, support only -1 case.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            output.
+        """
+        if np.isclose(exponent, -1):
+            return self.inverse_transformation()
+        raise NotImplementedError
+
     def __repr__(self):
         return self.__str__()
 
