@@ -77,6 +77,25 @@ class CameraMarker(model_module.Link):
             marker_height=marker_height)
 
 
+class Cone(model_module.Link):
+
+    def __init__(self, radius, height,
+                 sections=32,
+                 vertex_colors=None, face_colors=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+        if name is None:
+            name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+
+        super(Cone, self).__init__(pos=pos, rot=rot, name=name)
+        self._visual_mesh = trimesh.creation.cone(
+            radius=radius,
+            height=height,
+            sections=sections,
+            vertex_colors=vertex_colors,
+            face_colors=face_colors,
+            )
+
+
 class Cylinder(model_module.Link):
 
     def __init__(self, radius, height,

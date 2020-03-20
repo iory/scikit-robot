@@ -23,6 +23,12 @@ class TestBox(unittest.TestCase):
         skrobot.models.Box(extents=(1, 1, 1))
 
 
+class TestCone(unittest.TestCase):
+
+    def test_init(self):
+        skrobot.models.Cone(radius=0.5, height=1)
+
+
 class TestCylinder(unittest.TestCase):
 
     def test_init(self):
