@@ -354,6 +354,24 @@ class Coordinates(object):
         Create a new coordinate with inverse transformation of this
         coordinate system.
 
+        .. math::
+            \\left(
+                \\begin{array}{ccc}
+                  R^{-1} & - R^{-1} p  \\\\
+                  0 & 1
+                \\end{array}
+            \\right)
+
+        Parameters
+        ----------
+        dest : None or skrobot.coordinates.Coordinates
+            If dest is given, the result of transformation
+            is in-placed to dest.
+
+        Returns
+        -------
+        dest : skrobot.coordinates.Coordinates
+            result of inverse transformation.
         """
         if dest is None:
             dest = Coordinates()
