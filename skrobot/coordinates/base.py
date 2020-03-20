@@ -503,8 +503,9 @@ class Coordinates(object):
         c : skrobot.coordinates.Coordinates
             coordinate
         wrt : string or skrobot.coordinates.Coordinates
-            If wrt is 'local' or self, multiply c from left.
-            If wrt is 'world', transform c with respect to worldcoord.
+            If wrt is 'local' or self, multiply c from the right.
+            If wrt is 'world' or 'parent' or self.parent,
+            transform c with respect to worldcoord.
             If wrt is Coordinates, transform c with respect to c.
 
         Returns
@@ -516,9 +517,11 @@ class Coordinates(object):
         --------
         """
         if wrt == 'local' or wrt == self:
+            # multiply c from the right
             transform_coords(self, c, self)
         elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
+            # multiply c from the left
             transform_coords(c, self, self)
         elif isinstance(wrt, Coordinates):
             transform_coords(wrt.inverse_transformation(), self, self)
@@ -981,6 +984,10 @@ class CascadedCoords(Coordinates):
             coordinates
         wrt : str or skrobot.coordinates.Coordinates
             transform this coordinates with respect to wrt.
+            If wrt is 'local' or self, multiply c from the right.
+            If wrt is 'parent' or self.parent, transform c
+            with respect to parentcoords. (multiply c from the left.)
+            If wrt is Coordinates, transform c with respect to c.
 
         Returns
         -------
@@ -994,9 +1001,11 @@ class CascadedCoords(Coordinates):
             transform_coords(wrt.worldcoords(), self, self)
             transform_coords(self.parentcoords().inverse_transformation(),
                              self, self)
-        elif wrt == 'local' or wrt == self:  # multiply c from the left
+        elif wrt == 'local' or wrt == self:
+            # multiply c from the right.
             transform_coords(self, c, self)
         elif wrt == 'parent' or wrt == self.parent:
+            # multiply c from the left.
             transform_coords(c, self, self)
         elif wrt == 'world':
             transform_coords(self.parentcoords, self, self)
