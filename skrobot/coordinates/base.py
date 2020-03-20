@@ -354,6 +354,24 @@ class Coordinates(object):
         Create a new coordinate with inverse transformation of this
         coordinate system.
 
+        .. math::
+            \\left(
+                \\begin{array}{ccc}
+                  R^{-1} & - R^{-1} p  \\\\
+                  0 & 1
+                \\end{array}
+            \\right)
+
+        Parameters
+        ----------
+        dest : None or skrobot.coordinates.Coordinates
+            If dest is given, the result of transformation
+            is in-placed to dest.
+
+        Returns
+        -------
+        dest : skrobot.coordinates.Coordinates
+            result of inverse transformation.
         """
         if dest is None:
             dest = Coordinates()
@@ -822,6 +840,47 @@ class Coordinates(object):
             self.rotation = copy.deepcopy(c.rotation)
             self.translation = copy.deepcopy(c.translation)
         return self
+
+    def __mul__(self, other_c):
+        """Return Transformed Coordinates.
+
+        Note that this function creates new Coordinates and
+        does not change translation and rotation, unlike transform function.
+
+        Parameters
+        ----------
+        other_c : skrobot.coordinates.Coordinates
+            input coordinates.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            transformed coordinates multiplied other_c from the right.
+            T = T_{self} T_{other_c}.
+        """
+        return transform_coords(self, other_c)
+
+    def __pow__(self, exponent):
+        """Return exponential homogeneous matrix.
+
+        If exponent equals -1, return inverse transformation of this coords.
+
+        Parameters
+        ----------
+        exponent : numbers.Number
+            exponent value.
+            If exponent equals -1, return inverse transformation of this
+            coords.
+            In current, support only -1 case.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            output.
+        """
+        if np.isclose(exponent, -1):
+            return self.inverse_transformation()
+        raise NotImplementedError
 
     def __repr__(self):
         return self.__str__()
