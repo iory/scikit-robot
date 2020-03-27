@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import os.path as osp
 
 import skrobot
 from skrobot.models.urdf import RobotModelFromURDF
@@ -12,7 +13,7 @@ def main():
     args = parser.parse_args()
 
     viewer = skrobot.viewers.TrimeshSceneViewer()
-    model = RobotModelFromURDF(urdf_file=args.input_urdfpath)
+    model = RobotModelFromURDF(urdf_file=osp.abspath(args.input_urdfpath))
     viewer.add(model)
     viewer._init_and_start_app()
 
