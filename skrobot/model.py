@@ -1169,7 +1169,7 @@ class CascadedLink(CascadedCoords):
                 len(dif_rot)):
             logger.error(
                 'list length differ : translation-axis {} rotation-axis {} '
-                'move-target {} link-list {} dif-pos {} dif-rot'. format(
+                'move-target {} link-list {} dif-pos {} dif-rot {}'.format(
                     len(translation_axis),
                     len(rotation_axis),
                     len(move_target),
@@ -1192,11 +1192,11 @@ class CascadedLink(CascadedCoords):
             additional_jacobi_dimension = 0
         additional_jacobi_dimension += sum(map(lambda aj: (
             aj(link_list) if callable(aj) else aj).shape[0],
-                                               tmp_additional_jacobi))
+            tmp_additional_jacobi))
 
         union_vel = np.zeros(self.calc_target_axis_dimension(
             rotation_axis, translation_axis) +
-                             additional_jacobi_dimension, 'f')
+            additional_jacobi_dimension, 'f')
 
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
@@ -1459,7 +1459,7 @@ class CascadedLink(CascadedCoords):
             additional_jacobi_dimension = 0
         additional_jacobi_dimension += sum(map(lambda aj: (
             aj(link_list) if callable(aj) else aj).shape[0],
-                                               tmp_additional_jacobi))
+            tmp_additional_jacobi))
         ik_args = self.inverse_kinematics_args(
             union_link_list=union_link_list,
             translation_axis=translation_axis,
@@ -1513,7 +1513,7 @@ class CascadedLink(CascadedCoords):
                                  target_coords))
         dif_pos = list(map(lambda mv, tc, trans_axis:
                            mv.difference_position(
-                            tc, translation_axis=trans_axis),
+                               tc, translation_axis=trans_axis),
                            move_target, target_coords, translation_axis))
         dif_rot = list(map(lambda mv, tc, rot_axis:
                            mv.difference_rotation(tc, rotation_axis=rot_axis),

@@ -93,7 +93,7 @@ class Cone(model_module.Link):
             sections=sections,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
-            )
+        )
 
 
 class Cylinder(model_module.Link):
@@ -112,7 +112,7 @@ class Cylinder(model_module.Link):
             sections=sections,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
-            )
+        )
 
 
 class Sphere(model_module.Link):
@@ -127,7 +127,7 @@ class Sphere(model_module.Link):
             radius=radius,
             subdivisions=subdivisions,
             color=color,
-            )
+        )
 
 
 class Annulus(model_module.Link):
@@ -145,4 +145,4 @@ class Annulus(model_module.Link):
             height=height,
             vertex_colors=vertex_colors,
             face_colors=face_colors
-            )
+        )

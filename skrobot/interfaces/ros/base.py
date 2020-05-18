@@ -77,14 +77,14 @@ class ROSRobotInterfaceBase(object):
         wait_seconds = 180
         start_time = datetime.datetime.now()
         ros_current_time = rospy.Time.now()
-        if rospy.get_param('use_sim_time', False) and \
-           ros_current_time.to_sec() == 0 and \
-           ros_current_time.to_nsec() == 0:
+        if rospy.get_param('use_sim_time', False) \
+                and ros_current_time.to_sec() == 0 \
+                and ros_current_time.to_nsec() == 0:
             rospy.logdebug(
                 '[{}] /use_sim_time is TRUE, check if /clock is published'.
                 format(rospy.get_name()))
-            while (ros_current_time.to_sec() == 0 and
-                   ros_current_time.to_nsec() == 0):
+            while (ros_current_time.to_sec() == 0
+                   and ros_current_time.to_nsec() == 0):
                 diff_time = datetime.datetime.now() - start_time
                 if diff_time.seconds > wait_seconds:
                     rospy.logfatal(
@@ -109,9 +109,9 @@ class ROSRobotInterfaceBase(object):
         if self.namespace:
             rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
-                             JointState,
-                             callback=self.joint_state_callback,
-                             queue_size=joint_states_queue_size)
+                JointState,
+                callback=self.joint_state_callback,
+                queue_size=joint_states_queue_size)
         else:
             rospy.Subscriber(joint_states_topic, JointState,
                              callback=self.joint_state_callback,
@@ -322,7 +322,7 @@ class ROSRobotInterfaceBase(object):
             controller_state='fullbody_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=[
-                    joint.name for joint in self.robot.joint_list])]
+                joint.name for joint in self.robot.joint_list])]
 
     def sub_angle_vector(self, v0, v1):
         """Return subtraction of angle vector
