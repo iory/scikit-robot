@@ -63,8 +63,8 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             controller_type, timeout)
         while not rospy.is_shutdown():
             self.update_robot_state(wait_until_update=True)
-            if all(map(lambda j: j.name in self.ignore_joint_list or
-                       abs(j.joint_velocity) < 0.05
+            if all(map(lambda j: j.name in self.ignore_joint_list
+                       or abs(j.joint_velocity) < 0.05
                        if isinstance(j, RotationalJoint) else
                        abs(j.joint_velocity) < 0.001,
                        self.robot.joint_list)):

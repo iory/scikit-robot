@@ -1000,9 +1000,10 @@ def rotation_angle(mat):
     if abs(theta) < _EPS:
         raise ValueError('Rotation Angle is too small. \nvalue : {}'.
                          format(theta))
-    axis = 1.0 / (2 * np.sin(theta)) * \
-        np.array([mat[2, 1] - mat[1, 2], mat[0, 2] -
-                  mat[2, 0], mat[1, 0] - mat[0, 1]])
+    axis = 1.0 / (2 * np.sin(theta)) \
+        * np.array([mat[2, 1] - mat[1, 2],
+                    mat[0, 2] - mat[2, 0],
+                    mat[1, 0] - mat[0, 1]])
     return theta, axis
 
 
@@ -1193,8 +1194,8 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     if abs(angle) < _EPS:
         return q0
     isin = 1.0 / sin(angle)
-    q = (sin((1.0 - fraction) * angle) * q0 +
-         sin(fraction * angle) * q1) * isin
+    q = (sin((1.0 - fraction) * angle) * q0
+         + sin(fraction * angle) * q1) * isin
     return q
 
 

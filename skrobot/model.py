@@ -64,8 +64,8 @@ def calc_angle_speed_gain_vector(joint, dav, i, periodic_time):
         if dav[i + joint_dof_index] == 0:
             dav_gain = min(dav_gain, 1.0)
         else:
-            tmp_gain = abs(joint.max_joint_velocity[joint_dof_index] /
-                           (dav[i + joint_dof_index] / periodic_time))
+            tmp_gain = abs(joint.max_joint_velocity[joint_dof_index]
+                           / (dav[i + joint_dof_index] / periodic_time))
             dav_gain = min(tmp_gain, dav_gain)
     return dav_gain
 
@@ -605,10 +605,10 @@ class Link(CascadedCoords):
         mesh : None, trimesh.Trimesh or sequence of trimesh.Trimesh
             A set of visual meshes for the link in the link frame.
         """
-        if not (mesh is None or
-                isinstance(mesh, trimesh.Trimesh) or
-                (isinstance(mesh, collections.Sequence) and
-                    all(isinstance(m, trimesh.Trimesh) for m in mesh))):
+        if not (mesh is None
+                or isinstance(mesh, trimesh.Trimesh)
+                or (isinstance(mesh, collections.Sequence)
+                    and all(isinstance(m, trimesh.Trimesh) for m in mesh))):
             raise TypeError(
                 'mesh must be None, trimesh.Trimesh, or sequence of '
                 'trimesh.Trimesh, but got: {}'.format(type(mesh)))
@@ -644,8 +644,8 @@ class CascadedLink(CascadedCoords):
         for index, j in enumerate(self.joint_list):
             if av is not None:
                 av = np.array(av)
-                if not (j.joint_min_max_table is None or
-                        j.joint_mix_max_target is None):
+                if not (j.joint_min_max_table is None
+                        or j.joint_mix_max_target is None):
                     av = self.calc_joint_angle_from_min_max_table(index, j, av)
                 else:
                     if j.joint_dof == 1:
@@ -697,18 +697,19 @@ class CascadedLink(CascadedCoords):
                     tmp_target_joint_max_angle = \
                         j.joint_min_max_table_max_angle(tmp_joint_angle)
                     if tmp_joint_angle < tmp_joint_min_angle:
-                        tmp_joint_angle += (tmp_joint_min_angle -
-                                            tmp_joint_angle) * i
+                        tmp_joint_angle += (tmp_joint_min_angle
+                                            - tmp_joint_angle) * i
                     if tmp_joint_angle > tmp_joint_max_angle:
-                        tmp_joint_angle += (tmp_joint_max_angle -
-                                            tmp_joint_angle) * i
+                        tmp_joint_angle += (tmp_joint_max_angle
+                                            - tmp_joint_angle) * i
                     if tmp_target_joint_angle < tmp_target_joint_min_angle:
-                        tmp_target_joint_angle += (tmp_target_joint_min_angle -
-                                                   tmp_target_joint_angle) * i
+                        tmp_target_joint_angle += \
+                            (tmp_target_joint_min_angle
+                             - tmp_target_joint_angle) * i
                     if tmp_target_joint_angle > tmp_target_joint_max_angle:
                         tmp_target_joint_angle += \
-                            (tmp_target_joint_max_angle -
-                             tmp_target_joint_angle) * i
+                            (tmp_target_joint_max_angle
+                             - tmp_target_joint_angle) * i
                 j.joint_angle = tmp_joint_angle
                 jj.joint_angle = tmp_target_joint_angle
                 av[index] = tmp_joint_angle
@@ -838,8 +839,8 @@ class CascadedLink(CascadedCoords):
         angle_speed_collision_avoidance = None
         if collision_avoidance_link_pair is not None \
            and avoid_collision_distance > 0.0 \
-           and (avoid_collision_joint_gain > 0.0 or
-                avoid_collision_null_gain > 0.0):
+           and (avoid_collision_joint_gain > 0.0
+                or avoid_collision_null_gain > 0.0):
             angle_speed_collision_avoidance = self.collision_avoidance(
                 avoid_collision_distance=avoid_collision_distance,
                 avoid_collision_null_gain=avoid_collision_null_gain,
@@ -1016,8 +1017,8 @@ class CascadedLink(CascadedCoords):
             current_joint_angle_limit_weight = avoid_weight_gain * \
                 joint_angle_limit_weight(joint_list)
             for i in range(n_joint_dimension):
-                if (current_joint_angle_limit_weight[i] -
-                        previous_joint_angle_limit_weight[i]) >= 0.0:
+                if (current_joint_angle_limit_weight[i]
+                        - previous_joint_angle_limit_weight[i]) >= 0.0:
                     new_weight[i] = 1.0 / \
                         (1.0 + current_joint_angle_limit_weight[i])
                 else:
@@ -1047,8 +1048,8 @@ class CascadedLink(CascadedCoords):
             weight=None,
             additional_weight_list=[]):
         """Calculate all weight from link list."""
-        if not (isinstance(link_list[0], tuple) or
-                isinstance(link_list[0], list)):
+        if not (isinstance(link_list[0], tuple)
+                or isinstance(link_list[0], list)):
             link_list = [link_list]
         if union_link_list is None:
             union_link_list = self.calc_union_link_list(link_list)
@@ -1161,12 +1162,12 @@ class CascadedLink(CascadedCoords):
         rthre = listify(rthre)
 
         # argument check
-        if not (len(translation_axis) ==
-                len(rotation_axis) ==
-                len(move_target) ==
-                len(link_list) ==
-                len(dif_pos) ==
-                len(dif_rot)):
+        if not (len(translation_axis)
+                == len(rotation_axis)
+                == len(move_target)
+                == len(link_list)
+                == len(dif_pos)
+                == len(dif_rot)):
             logger.error(
                 'list length differ : translation-axis {} rotation-axis {} '
                 'move-target {} link-list {} dif-pos {} dif-rot {}'.format(
@@ -1195,8 +1196,8 @@ class CascadedLink(CascadedCoords):
             tmp_additional_jacobi))
 
         union_vel = np.zeros(self.calc_target_axis_dimension(
-            rotation_axis, translation_axis) +
-            additional_jacobi_dimension, 'f')
+            rotation_axis, translation_axis)
+            + additional_jacobi_dimension, 'f')
 
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
@@ -1429,11 +1430,11 @@ class CascadedLink(CascadedCoords):
         thre = listify(thre)
         rthre = listify(rthre)
 
-        if not (len(translation_axis) ==
-                len(rotation_axis) ==
-                len(move_target) ==
-                len(link_list) ==
-                len(target_coords)):
+        if not (len(translation_axis)
+                == len(rotation_axis)
+                == len(move_target)
+                == len(link_list)
+                == len(target_coords)):
             logger.error('list length differ : translation_axis {}'
                          ', rotation_axis {}, move_target {} '
                          'link_list {}, target_coords {}'.format(
@@ -1442,8 +1443,8 @@ class CascadedLink(CascadedCoords):
                              len(target_coords)))
             return False
 
-        if not(len(additional_jacobi) ==
-               len(additional_vel)):
+        if not(len(additional_jacobi)
+               == len(additional_vel)):
             logger.error('list length differ : additional_jacobi {}, '
                          'additional_vel {}'.format(
                              len(additional_jacobi), len(additional_vel)))
@@ -1604,10 +1605,10 @@ class CascadedLink(CascadedCoords):
             rotation_axis = [rotation_axis]
         if not isinstance(translation_axis, list):
             translation_axis = [translation_axis]
-        if not (len(move_target) ==
-                len(rotation_axis) ==
-                len(translation_axis) ==
-                len(target_coords)):
+        if not (len(move_target)
+                == len(rotation_axis)
+                == len(translation_axis)
+                == len(target_coords)):
             logger.error(
                 'list length differ : target_coords {} translation_axis {} \
             rotation_axis {} move_target {}'. format(
@@ -2021,13 +2022,13 @@ class CascadedLink(CascadedCoords):
 
                     if not isinstance(joint.child_link, Link):
                         child_reverse = False
-                    elif ((ll + 1 < length) and
-                          not joint.child_link ==
-                          find_parent(link_list[ll + 1].parent_link,
-                                      link_list)) or \
-                         ((ll + 1 == length) and
-                          (not joint.child_link ==
-                           find_parent(move_target.parent, link_list))):
+                    elif ((ll + 1 < length)
+                          and not joint.child_link == find_parent(
+                              link_list[ll + 1].parent_link, link_list)):
+                        child_reverse = True
+                    elif ((ll + 1 == length)
+                          and (not joint.child_link == find_parent(
+                              move_target.parent, link_list))):
                         child_reverse = True
                     else:
                         child_reverse = False
@@ -2079,8 +2080,8 @@ class CascadedLink(CascadedCoords):
                                  [l.joint for l in union_link_list]))
         pairs = list(
             filter(lambda pair:
-                   not ((pair[0] not in joint_list) and
-                        (pair[1] not in joint_list)),
+                   not ((pair[0] not in joint_list)
+                        and (pair[1] not in joint_list)),
                    interlocking_joint_pairs))
         jacobi = np.zeros((len(pairs),
                            self.calc_target_joint_dimension(union_link_list)),
@@ -2110,8 +2111,8 @@ class CascadedLink(CascadedCoords):
                                  [l.joint for l in union_link_list]))
         pairs = list(
             filter(lambda pair:
-                   not ((pair[0] not in joint_list) and
-                        (pair[1] not in joint_list)),
+                   not ((pair[0] not in joint_list)
+                        and (pair[1] not in joint_list)),
                    interlocking_joint_pairs))
         vel = np.zeros(len(pairs), 'f')
         return vel
@@ -2208,9 +2209,9 @@ class RobotModel(CascadedLink):
             # If color or texture is not specified in mesh file,
             # use information specified in URDF.
             if (
-                (mesh.visual.face_colors ==
-                    trimesh.visual.DEFAULT_COLOR).all() and
-                visual.material
+                (mesh.visual.face_colors
+                 == trimesh.visual.DEFAULT_COLOR).all()
+                and visual.material
             ):
                 if visual.material.texture is not None:
                     warnings.warn(
@@ -2590,10 +2591,10 @@ def joint_angle_limit_weight(joint_list):
             if np.isinf(joint_min) or np.isinf(joint_max):
                 r = 0.0
             else:
-                r = abs(((joint_max - joint_min) ** 2) *
-                        (2.0 * joint_angle - joint_max - joint_min) /
-                        (4.0 * ((joint_max - joint_angle) ** 2) *
-                         ((joint_angle - joint_min) ** 2)))
+                r = abs(((joint_max - joint_min) ** 2)
+                        * (2.0 * joint_angle - joint_max - joint_min)
+                        / (4.0 * ((joint_max - joint_angle) ** 2)
+                        * ((joint_angle - joint_min) ** 2)))
             res[i] = r
     return res
 

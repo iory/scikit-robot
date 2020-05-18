@@ -323,8 +323,8 @@ class Coordinates(object):
         """
         v = np.array(v, dtype=np.float64)
         if v.ndim == 2:
-            return (np.matmul(self.rotation, v.T) +
-                    self.translation.reshape(3, -1)).T
+            return (np.matmul(self.rotation, v.T)
+                    + self.translation.reshape(3, -1)).T
         return np.matmul(self.rotation, v) + self.translation
 
     def inverse_transform_vector(self, vec):
@@ -342,8 +342,8 @@ class Coordinates(object):
         """
         vec = np.array(vec, dtype=np.float64)
         if vec.ndim == 2:
-            return (np.matmul(self.rotation.T, vec.T) -
-                    np.matmul(
+            return (np.matmul(self.rotation.T, vec.T)
+                    - np.matmul(
                         self.rotation.T, self.translation).reshape(3, -1)).T
         return np.matmul(self.rotation.T, vec) - \
             np.matmul(self.rotation.T, self.translation)
@@ -695,8 +695,8 @@ class Coordinates(object):
                 dif_rot = np.array([0, 0, 0], 'f')
             else:
                 dif_rot = np.matmul(self.worldrot().T,
-                                    np.arccos(np.dot(a0, a1)) *
-                                    normalize_vector(np.cross(a0, a1)))
+                                    np.arccos(np.dot(a0, a1))
+                                    * normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
             a0 = self.axis(ax)

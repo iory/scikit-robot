@@ -554,8 +554,8 @@ class ROSRobotInterfaceBase(object):
                     v0 = self.sub_angle_vector(av, prev_av)
                     v1 = self.sub_angle_vector(next_av, av)
                     indices = v0 * v1 >= 0.0
-                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices] +
-                                          (1.0 / next_time) * v1[indices])
+                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices]
+                                          + (1.0 / next_time) * v1[indices])
             traj_points.append((av, vel, time + next_start_time))
             next_start_time += time
             prev_av = av
@@ -622,10 +622,10 @@ class ROSRobotInterfaceBase(object):
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                if (isinstance(joint, RotationalJoint) and
-                    abs(diff_angle) < 0.0017453292519943296) or \
-                    (isinstance(joint, LinearJoint) and
-                     abs(diff_angle) < 0.01):
+                if (isinstance(joint, RotationalJoint)
+                    and abs(diff_angle) < 0.0017453292519943296) \
+                    or (isinstance(joint, LinearJoint)
+                        and abs(diff_angle) < 0.01):
                     time = 0
                 else:
                     time = 1. * abs(diff_angle) / joint.max_joint_velocity
