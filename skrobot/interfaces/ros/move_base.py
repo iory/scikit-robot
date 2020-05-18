@@ -363,8 +363,8 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             odom = self.odom
             odom_pos = odom.translation
             odom_angle = odom.rpy_angle()[0][0]
-            diff_position = goal_position - (odom_pos +
-                                             np.array((0, 0, odom_angle)))
+            diff_position = goal_position - (
+                odom_pos + np.array((0, 0, odom_angle)))
             v = rotate_vector(
                 np.array((diff_position[0], diff_position[1], 0.0)),
                 -odom_angle, 'z') - np.array((0, 0, odom_angle))

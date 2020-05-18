@@ -379,7 +379,7 @@ class TestCascadedCoordinates(unittest.TestCase):
 
         c = make_coords(pos=(-0.2, -0.3, -0.4)).rotate(pi / 2, 'y')
         b.transform(
-                make_cascoords(pos=(-0.1, -0.2, -0.3)), c)
+            make_cascoords(pos=(-0.1, -0.2, -0.3)), c)
         testing.assert_almost_equal(
             b.translation, (-0.3, 0.15980762113533148, 0.32320508075688775))
         testing.assert_almost_equal(

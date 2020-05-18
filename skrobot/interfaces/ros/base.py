@@ -77,14 +77,14 @@ class ROSRobotInterfaceBase(object):
         wait_seconds = 180
         start_time = datetime.datetime.now()
         ros_current_time = rospy.Time.now()
-        if rospy.get_param('use_sim_time', False) and \
-           ros_current_time.to_sec() == 0 and \
-           ros_current_time.to_nsec() == 0:
+        if rospy.get_param('use_sim_time', False) \
+                and ros_current_time.to_sec() == 0 \
+                and ros_current_time.to_nsec() == 0:
             rospy.logdebug(
                 '[{}] /use_sim_time is TRUE, check if /clock is published'.
                 format(rospy.get_name()))
-            while (ros_current_time.to_sec() == 0 and
-                   ros_current_time.to_nsec() == 0):
+            while (ros_current_time.to_sec() == 0
+                   and ros_current_time.to_nsec() == 0):
                 diff_time = datetime.datetime.now() - start_time
                 if diff_time.seconds > wait_seconds:
                     rospy.logfatal(
@@ -109,9 +109,9 @@ class ROSRobotInterfaceBase(object):
         if self.namespace:
             rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
-                             JointState,
-                             callback=self.joint_state_callback,
-                             queue_size=joint_states_queue_size)
+                JointState,
+                callback=self.joint_state_callback,
+                queue_size=joint_states_queue_size)
         else:
             rospy.Subscriber(joint_states_topic, JointState,
                              callback=self.joint_state_callback,
@@ -322,7 +322,7 @@ class ROSRobotInterfaceBase(object):
             controller_state='fullbody_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=[
-                    joint.name for joint in self.robot.joint_list])]
+                joint.name for joint in self.robot.joint_list])]
 
     def sub_angle_vector(self, v0, v1):
         """Return subtraction of angle vector
@@ -554,8 +554,8 @@ class ROSRobotInterfaceBase(object):
                     v0 = self.sub_angle_vector(av, prev_av)
                     v1 = self.sub_angle_vector(next_av, av)
                     indices = v0 * v1 >= 0.0
-                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices] +
-                                          (1.0 / next_time) * v1[indices])
+                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices]
+                                          + (1.0 / next_time) * v1[indices])
             traj_points.append((av, vel, time + next_start_time))
             next_start_time += time
             prev_av = av
@@ -622,10 +622,10 @@ class ROSRobotInterfaceBase(object):
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                if (isinstance(joint, RotationalJoint) and
-                    abs(diff_angle) < 0.0017453292519943296) or \
-                    (isinstance(joint, LinearJoint) and
-                     abs(diff_angle) < 0.01):
+                if (isinstance(joint, RotationalJoint)
+                    and abs(diff_angle) < 0.0017453292519943296) \
+                    or (isinstance(joint, LinearJoint)
+                        and abs(diff_angle) < 0.01):
                     time = 0
                 else:
                     time = 1. * abs(diff_angle) / joint.max_joint_velocity
