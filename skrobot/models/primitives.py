@@ -146,3 +146,15 @@ class Annulus(model_module.Link):
             vertex_colors=vertex_colors,
             face_colors=face_colors
         )
+
+
+class MeshLink(model_module.Link):
+
+    def __init__(self,
+                 visual_mesh=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+        if name is None:
+            name = 'meshlink_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+
+        super(MeshLink, self).__init__(pos=pos, rot=rot, name=name)
+        self.visual_mesh = visual_mesh

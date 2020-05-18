@@ -1,6 +1,8 @@
+import os.path as osp
 import unittest
 
 import skrobot
+import trimesh
 
 
 class TestAxis(unittest.TestCase):
@@ -45,3 +47,15 @@ class TestAnnulus(unittest.TestCase):
 
     def test_init(self):
         skrobot.models.Annulus(r_min=0.2, r_max=0.5, height=1)
+
+
+class TestMeshLink(unittest.TestCase):
+
+    def test_init(self):
+        cylinder = trimesh.creation.cylinder(radius=1.0, height=1.0)
+        skrobot.models.MeshLink(cylinder)
+        skrobot.models.MeshLink([cylinder, cylinder])
+
+        base_obj_path = osp.join(osp.dirname(skrobot.data.pr2_urdfpath()),
+                                 'meshes', 'base_v0', 'base.obj')
+        skrobot.models.MeshLink(base_obj_path)

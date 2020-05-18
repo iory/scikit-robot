@@ -515,6 +515,8 @@ class Link(CascadedCoords):
 
     def __init__(self, centroid=None,
                  inertia_tensor=None,
+                 collision_mesh=None,
+                 visual_mesh=None,
                  *args, **kwargs):
         super(Link, self).__init__(*args, **kwargs)
         self.centroid = centroid
@@ -523,8 +525,8 @@ class Link(CascadedCoords):
         self._parent_link = None
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
-        self._collision_mesh = None
-        self._visual_mesh = None
+        self._collision_mesh = collision_mesh
+        self._visual_mesh = visual_mesh
 
     @property
     def parent_link(self):
@@ -602,16 +604,20 @@ class Link(CascadedCoords):
 
         Parameters
         ----------
-        mesh : None, trimesh.Trimesh or sequence of trimesh.Trimesh
+        mesh : None, trimesh.Trimesh, sequence of trimesh.Trimesh, or str
             A set of visual meshes for the link in the link frame.
         """
         if not (mesh is None
                 or isinstance(mesh, trimesh.Trimesh)
                 or (isinstance(mesh, collections.Sequence)
-                    and all(isinstance(m, trimesh.Trimesh) for m in mesh))):
+                    and all(isinstance(m, trimesh.Trimesh) for m in mesh))
+                or isinstance(mesh, str)):
             raise TypeError(
-                'mesh must be None, trimesh.Trimesh, or sequence of '
-                'trimesh.Trimesh, but got: {}'.format(type(mesh)))
+                'mesh must be None, trimesh.Trimesh, sequence of '
+                'trimesh.Trimesh, or path of mesh file, but got: {}'.format(
+                    type(mesh)))
+        if isinstance(mesh, str):
+            mesh = trimesh.load(mesh)
         self._visual_mesh = mesh
 
 
