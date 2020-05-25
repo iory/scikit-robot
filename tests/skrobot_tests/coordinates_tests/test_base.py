@@ -262,6 +262,12 @@ class TestCoordinates(unittest.TestCase):
         dif_rot = coord1.difference_rotation(coord2, 'xm')
         testing.assert_almost_equal(dif_rot, [-pi / 2.0, 0, 0])
 
+        # corner case
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(0.2564565431501872, 'y')
+        dif_rot = coord1.difference_rotation(coord2, 'zy')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
         # norm == 0 case
         coord1 = make_coords()
         coord2 = make_coords()
