@@ -684,10 +684,10 @@ class Coordinates(object):
             a0 = coords0.axis(ax)
             a1 = coords1.axis(ax)
             a1_mirror = - a1
-            dr1 = np.arccos(np.dot(a0, a1)) * \
-                normalize_vector(np.cross(a0, a1))
-            dr1m = np.arccos(np.dot(a0, a1_mirror)) * \
-                normalize_vector(np.cross(a0, a1_mirror))
+            dr1 = angle_between_vectors(a0, a1, normalize=False) \
+                * normalize_vector(np.cross(a0, a1))
+            dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) \
+                * normalize_vector(np.cross(a0, a1_mirror))
             return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
 
         if rotation_axis in ['x', 'y', 'z']:
