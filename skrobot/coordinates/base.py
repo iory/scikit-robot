@@ -600,11 +600,12 @@ class Coordinates(object):
         coords : skrobot.coordinates.Coordinates
             given coordinates
         translation_axis : str or bool or None (optional)
-            we can take ['x', 'y', 'z', 'xy', 'yz', 'zx']
+            we can take 'x', 'y', 'z', 'xy', 'yz', 'zx', 'xx', 'yy', 'zz',
+            True or False(None).
 
         Returns
         -------
-        dif_pos : np.ndarray
+        dif_pos : numpy.ndarray
             difference position of self coordinates and coords
             considering translation_axis.
 
@@ -644,7 +645,7 @@ class Coordinates(object):
 
         Returns
         -------
-        dif_rot : np.ndarray
+        dif_rot : numpy.ndarray
             difference rotation of self coordinates and coords
             considering rotation_axis.
 
