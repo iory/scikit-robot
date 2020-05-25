@@ -1428,6 +1428,29 @@ def axis_angle_from_matrix(rotation):
     return axis_angle_from_quaternion(quat_from_rotation_matrix(rotation))
 
 
+def angle_between_vectors(v1, v2, normalize=True):
+    """Returns the smallest angle in radians between two vectors.
+
+    Parameters
+    ----------
+    v1 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    v2 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    normalize : bool
+        If normalize is True, normalize v1 and v2.
+
+    Returns
+    -------
+    theta : float
+        smallest angle between v1 and v2.
+    """
+    if normalize:
+        v1 = normalize_vector(v1)
+        v2 = normalize_vector(v2)
+    return np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
+
+
 def random_rotation():
     """Generates a random 3x3 rotation matrix.
 
