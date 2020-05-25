@@ -6,6 +6,7 @@ from numpy import pi
 from numpy import testing
 
 from skrobot.coordinates.math import _check_valid_rotation
+from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_exponent
 from skrobot.coordinates.math import matrix_log
@@ -411,6 +412,15 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             q,
             matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))
+
+    def test_angle_between_vectors(self):
+        v = (1., 1., 1.)
+        theta = angle_between_vectors(v, v)
+        testing.assert_almost_equal(theta, 0.0)
+
+        unit_v = normalize_vector(v)
+        theta = angle_between_vectors(unit_v, unit_v, normalize=False)
+        testing.assert_almost_equal(theta, 0.0)
 
     def test_random_rotation(self):
         testing.assert_almost_equal(

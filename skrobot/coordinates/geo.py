@@ -93,7 +93,7 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     axis = _wrap_axis(axis)
     ax = target_coords.rotate_vector(axis)
     rot_axis = np.cross(ax, nv)
-    rot_angle_cos = np.dot(nv, ax)
+    rot_angle_cos = np.clip(np.dot(nv, ax), -1.0, 1.0)
     if np.isclose(rot_angle_cos, 1.0, atol=eps):
         return target_coords
     elif np.isclose(rot_angle_cos, -1.0, atol=eps):

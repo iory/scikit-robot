@@ -262,6 +262,39 @@ class TestCoordinates(unittest.TestCase):
         dif_rot = coord1.difference_rotation(coord2, 'xm')
         testing.assert_almost_equal(dif_rot, [-pi / 2.0, 0, 0])
 
+        # corner case
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(0.2564565431501872, 'y')
+        dif_rot = coord1.difference_rotation(coord2, 'zy')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
+        # norm == 0 case
+        coord1 = make_coords()
+        coord2 = make_coords()
+        dif_rot = coord1.difference_rotation(coord2, 'xy')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'x').rotate(pi / 2, 'y')
+        dif_rot = coord1.difference_rotation(coord2, 'xy')
+        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
+        dif_rot = coord1.difference_rotation(coord2, 'yx')
+        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'y').rotate(pi / 2, 'z')
+        dif_rot = coord1.difference_rotation(coord2, 'yz')
+        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
+        dif_rot = coord1.difference_rotation(coord2, 'zy')
+        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'z').rotate(pi / 2, 'x')
+        dif_rot = coord1.difference_rotation(coord2, 'zx')
+        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
+        dif_rot = coord1.difference_rotation(coord2, 'xz')
+        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 

@@ -37,6 +37,7 @@ Utilities functions
    skrobot.coordinates.math.rotation_angle
    skrobot.coordinates.math.rotation_distance
    skrobot.coordinates.math.axis_angle_from_matrix
+   skrobot.coordinates.math.angle_between_vectors
 
 
 Jacobian Functions
