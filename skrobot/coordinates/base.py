@@ -640,8 +640,8 @@ class Coordinates(object):
         coords : skrobot.coordinates.Coordinates
             given coordinates
         rotation_axis : str or bool or None (optional)
-            we can take ['x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm']
-            or True, False(None).
+            we can take 'x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm',
+            'xy', 'yx', 'yz', 'zy', 'zx', 'xz', True or False(None).
 
         Returns
         -------
@@ -707,6 +707,31 @@ class Coordinates(object):
             dif_rot = np.matmul(
                 self.worldrot().T,
                 np.arccos(np.dot(a0, a2)) * normalize_vector(np.cross(a0, a2)))
+        elif rotation_axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
+            if rotation_axis in ['xy', 'yx']:
+                ax1 = 'z'
+                ax2 = 'x'
+            elif rotation_axis in ['yz', 'zy']:
+                ax1 = 'x'
+                ax2 = 'y'
+            else:
+                ax1 = 'y'
+                ax2 = 'z'
+            a0 = self.axis(ax1)
+            a1 = coords.axis(ax1)
+            dif_rot = np.matmul(
+                self.worldrot().T,
+                np.arccos(np.dot(a0, a1)) * normalize_vector(np.cross(a0, a1)))
+            norm = np.linalg.norm(dif_rot)
+            if np.isclose(norm, 0.0):
+                self_coords = self.copy_worldcoords()
+            else:
+                self_coords = self.copy_worldcoords().rotate(norm, dif_rot)
+            a0 = self_coords.axis(ax2)
+            a1 = coords.axis(ax2)
+            dif_rot = np.matmul(
+                self_coords.worldrot().T,
+                np.arccos(np.dot(a0, a1)) * normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xm', 'ym', 'zm']:
             rot = coords.worldrot()
             ax = rotation_axis[0]
