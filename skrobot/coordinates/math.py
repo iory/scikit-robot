@@ -926,10 +926,17 @@ def rotation_matrix_from_axis(x_axis, y_axis=(0, 1, 0)):
 def rodrigues(axis, theta=None):
     """Rodrigues formula.
 
+    See: `Rodrigues' rotation formula - Wikipedia
+    <https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula>`_.
+
+    See: `Axis–angle representation - Wikipedia
+    <https://en.wikipedia.org/wiki/Axis%E2%80%93angle_representation>`_.
+
     Parameters
     ----------
     axis : numpy.ndarray or list
-        [x, y, z]
+        [x, y, z] vector.
+        You can give axis-angle representation to `axis` if `theta` is None.
     theta: float or None (optional)
         radian. If None is given, calculate theta from axis.
 
