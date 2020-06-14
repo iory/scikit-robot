@@ -12,6 +12,24 @@ from skrobot.coordinates.math import rpy_matrix
 
 class TestCoordinates(unittest.TestCase):
 
+    def test___init__(self):
+        coord = make_coords(pos=[1, 1, 1])
+        testing.assert_array_equal(coord.translation, [1, 1, 1])
+
+        coord = make_coords(pos=[1, 0, 1], rot=[pi, 0, 0])
+        testing.assert_array_equal(coord.translation, [1, 0, 1])
+        testing.assert_almost_equal(coord.rotation,
+                                    [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
+        coord = make_coords([[-1, 0, 0, 1],
+                             [0, -1, 0, 0],
+                             [0, 0, 1, -1],
+                             [0, 0, 0, 1]],
+                            rot=[pi, 0, 0])
+        testing.assert_array_equal(coord.translation, [1, 0, -1])
+        testing.assert_almost_equal(coord.rotation,
+                                    [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
