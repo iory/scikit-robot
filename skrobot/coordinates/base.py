@@ -77,24 +77,33 @@ def transform_coords(c1, c2, out=None):
 
 class Coordinates(object):
 
+    """Coordinates class to manipulate rotation and translation.
+
+    Parameters
+    ----------
+    pos : list or numpy.ndarray
+        shape of (3,) translation vector. or
+        4x4 homogeneous transformation matrix.
+        If the homogeneous transformation matrix is given,
+        `rot` will be overwritten.
+    rot : list or numpy.ndarray
+        we can take 3x3 rotation matrix or
+        [yaw, pitch, roll] or
+        quaternion [w, x, y, z] order
+    name : string or None
+        name of this coordinates
+    """
+
     def __init__(self,
                  pos=[0, 0, 0],
                  rot=np.eye(3),
                  name=None,
                  hook=None):
-        """Initialization of Coordinates
-
-        Parameters
-        ----------
-        pos : list or np.ndarray
-            shape of (3,) translation vector
-        rot : list or np.ndarray
-            we can take 3x3 rotation matrix or
-            [yaw, pitch, roll] or
-            quaternion [w, x, y, z] order
-        name : string or None
-            name of this coordinates
-        """
+        if (isinstance(pos, list) or isinstance(pos, np.ndarray)):
+            T = np.array(pos, dtype=np.float64)
+            if T.shape == (4, 4):
+                pos = T[:3, 3]
+                rot = T[:3, :3]
         self.rotation = rot
         self.translation = pos
         if name is None:
