@@ -2,6 +2,9 @@ import importlib
 
 import numpy as np
 
+from skrobot.coordinates import Coordinates
+from skrobot.coordinates.math import wxyz2xyzw
+from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
 
@@ -30,7 +33,7 @@ def _check_available():
                           '  $ pip install pybullet\n')
 
 
-class PybulletRobotInterface(object):
+class PybulletRobotInterface(Coordinates):
 
     """Pybullet Interface Class
 
@@ -80,7 +83,8 @@ class PybulletRobotInterface(object):
                 p.connect(connect)
             except Exception as e:
                 print(e)
-        self.robot_id = p.loadURDF(urdf_path, [0, 0, 0],
+        self.robot_id = p.loadURDF(urdf_path, self.translation,
+                                   wxyz2xyzw(self.quaternion),
                                    useFixedBase=use_fixed_base)
 
         self.load_bullet()
@@ -97,6 +101,97 @@ class PybulletRobotInterface(object):
         """
         _check_available()
         return _available
+
+    @property
+    def pose(self):
+        """Getter of Pose in pybullet phsyics simulator.
+
+        Wrapper of pybullet.getBasePositionAndOrientation.
+
+        Returns
+        -------
+        pose : skrobot.coordinates.Coordinates
+            pose of this robot in the phsyics simulator.
+        """
+        pos, q_xyzw = p.getBasePositionAndOrientation(
+            self.robot_id)
+        q_wxyz = xyzw2wxyz(q_xyzw)
+        return Coordinates(pos=pos, rot=q_wxyz)
+
+    def _reset_position_and_orientation(self):
+        """Reset base position and orientation.
+
+        This function is wrapper of pybullet.resetBasePositionAndOrientation.
+        """
+        p.resetBasePositionAndOrientation(self.robot_id, self.translation,
+                                          wxyz2xyzw(self.quaternion))
+
+    def translate(self, vec, wrt='local'):
+        """Translate robot in simulator.
+
+        For more detail,
+        please see docs of skrobot.coordinates.Coordinates.translate.
+        The difference between the translate, this function internally
+        call pybullet.resetBasePositionAndOrientation.
+
+        Parameters
+        ----------
+        vec : list or np.ndarray
+            shape of (3,) translation vector. unit is [m] order.
+        wrt : string or Coordinates (optional)
+            translate with respect to wrt.
+        """
+        super(PybulletRobotInterface, self).translate(vec, wrt)
+        self._reset_position_and_orientation()
+        return self
+
+    def rotate(self, theta, axis=None, wrt='local'):
+        """Rotate this robot by given theta and axis.
+
+        For more detail,
+        please see docs of skrobot.coordinates.Coordinates.rotate.
+        The difference between the rotate, this function internally
+        call pybullet.resetBasePositionAndOrientation.
+
+        Parameters
+        ----------
+        theta : float
+            radian
+        wrt : string or skrobot.coordinates.Coordinates
+        """
+        super(PybulletRobotInterface, self).rotate(theta, axis, wrt)
+        self._reset_position_and_orientation()
+        return self
+
+    def transform(self, c, wrt='local'):
+        """Transform this coordinate by coords based on wrt
+
+        For more detail,
+        please see docs of skrobot.coordinates.Coordinates.transform.
+        The difference between the transform, this function internally
+        call pybullet.resetBasePositionAndOrientation.
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates
+            coordinate
+        wrt : string or skrobot.coordinates.Coordinates
+            If wrt is 'local' or self, multiply c from the right.
+            If wrt is 'world' or 'parent' or self.parent,
+            transform c with respect to worldcoord.
+            If wrt is Coordinates, transform c with respect to c.
+        """
+        super(PybulletRobotInterface, self).transform(c, wrt)
+        self._reset_position_and_orientation()
+        return self
+
+    def newcoords(self, c, pos=None):
+        """Update of position and orientation.
+
+        """
+        super(PybulletRobotInterface, self).newcoords(c, pos)
+        self._reset_position_and_orientation()
+        return self
 
     def load_bullet(self):
         """Load bullet configurations.
