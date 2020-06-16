@@ -11,3 +11,4 @@ API Reference
    coordinates
    models
    functions
+   interfaces
