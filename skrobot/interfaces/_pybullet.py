@@ -32,6 +32,37 @@ def _check_available():
 
 class PybulletRobotInterface(object):
 
+    """Pybullet Interface Class
+
+    Parameters
+    ----------
+    robot : skrobot.model.RobotModel
+        robot model
+    urdf_path : None or str
+        urdf path. If this value is `None`,
+        get `urdf_path` from `robot.urdf_path`.
+    use_fixed_base : bool
+        If this value is `True`, robot in pybullet simulator will be fixed.
+    connect : int
+        pybullet's connection mode. If you have already connected
+        to pybullet physics server, specify the server id.
+        The default value is 1 (pybullet.GUI).
+
+    Examples
+    --------
+    >>> from skrobot.models import PR2
+    >>> from skrobot.interfaces import PybulletRobotInterface
+    >>> robot_model = PR2()
+    >>> interface = PybulletRobotInterface(robot_model)
+
+    If you have already connected to pybullet physics server
+
+    >>> import pybullet
+    >>> client_id = pybullet.connect(pybullet.GUI)
+    >>> robot_model = PR2()
+    >>> interface = PybulletRobotInterface(robot_model, connect=client_id)
+    """
+
     def __init__(self, robot, urdf_path=None, use_fixed_base=False,
                  connect=1, *args, **kwargs):
         _check_available()
@@ -57,10 +88,21 @@ class PybulletRobotInterface(object):
 
     @staticmethod
     def available():
+        """Check Pybullet is available.
+
+        Returns
+        -------
+        _available : bool
+            If `False`, pybullet is not available.
+        """
         _check_available()
         return _available
 
     def load_bullet(self):
+        """Load bullet configurations.
+
+        This function internally called.
+        """
         joint_num = p.getNumJoints(self.robot_id)
         joint_ids = [None] * joint_num
         joint_name_to_joint_id = {}
@@ -85,6 +127,21 @@ class PybulletRobotInterface(object):
         self.velocity_gain = 0.1
 
     def angle_vector(self, angle_vector=None, realtime_simulation=None):
+        """Send a angle vector to pybullet's phsyics engine.
+
+        Parameters
+        ----------
+        angle_vector : None or numpy.ndarray
+            angle vector. If `None`, send self.robot.angle_vector()
+        realtime_simulation : None or bool
+            If this value is `True`, send angle_vector
+            by pybullet.setJointMotorControl2.
+
+        Returns
+        -------
+        angle_vector : numpy.ndarray
+            return sent angle vector.
+        """
         if realtime_simulation is not None and isinstance(
                 realtime_simulation, bool):
             self.realtime_simulation = realtime_simulation
@@ -116,6 +173,17 @@ class PybulletRobotInterface(object):
         return angle_vector
 
     def wait_interpolation(self, thresh=0.05):
+        """Wait robot movement.
+
+        This function usually called after self.angle_vector.
+        Wait while the robot joints are moving.
+        This function called internally pybullet.stepSimulation().
+
+        Parameters
+        ----------
+        thresh : float
+            velocity threshold for detecting movement stop.
+        """
         while True:
             p.stepSimulation()
             wait = False
@@ -131,6 +199,9 @@ class PybulletRobotInterface(object):
         return True
 
     def sync(self):
+        """Synchronize pybullet pose to robot_model.
+
+        """
         if self.robot_id is None:
             return self.angle_vector()
 
