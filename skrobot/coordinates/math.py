@@ -929,7 +929,7 @@ def rodrigues(axis, theta=None):
     See: `Rodrigues' rotation formula - Wikipedia
     <https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula>`_.
 
-    See: `Axis–angle representation - Wikipedia
+    See: `Axis-angle representation - Wikipedia
     <https://en.wikipedia.org/wiki/Axis%E2%80%93angle_representation>`_.
 
     Parameters
