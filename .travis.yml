@@ -17,6 +17,8 @@ install:
   - pip install --upgrade pip setuptools wheel
   - pip install Cython
   - pip install .[all]
+  - |
+    grep -rlIP '[^\x00-\x7F]' skrobot | grep '\.pyx\?' | sort > unicode.out; grep -rlI '# -\*- coding: \(utf-8\|latin-1\) -\*-' skrobot | grep '\.pyx\?' | sort > coding.out; comm -23 unicode.out coding.out > test_code.out; cat test_code.out;  test \! -s test_code.out
 
 script:
   - pip install hacking pytest
