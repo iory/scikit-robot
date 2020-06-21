@@ -128,7 +128,11 @@ class PybulletRobotInterface(object):
                                                     idx)
                 if abs(velocity) > thresh:
                     wait = True
-            if wait is False or time.time() - start > timeout:
+
+                if time.time() - start > timeout:
+                    wait = False
+
+            if wait is False:
                 break
             time.sleep(1)
         return True
