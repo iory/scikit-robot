@@ -5,6 +5,7 @@ import numpy as np
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
 
+import time
 
 _available = False
 _import_checked = False
@@ -115,7 +116,8 @@ class PybulletRobotInterface(object):
 
         return angle_vector
 
-    def wait_interpolation(self, thresh=0.05):
+    def wait_interpolation(self, thresh=0.05, timeout=60):
+        start = time.time()
         while True:
             p.stepSimulation()
             wait = False
@@ -126,8 +128,9 @@ class PybulletRobotInterface(object):
                                                     idx)
                 if abs(velocity) > thresh:
                     wait = True
-            if wait is False:
+            if wait is False or time.time() - start > timeout:
                 break
+            time.sleep(1)
         return True
 
     def sync(self):
