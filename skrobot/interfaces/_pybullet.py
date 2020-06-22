@@ -1,4 +1,5 @@
 import importlib
+import time
 
 import numpy as np
 
@@ -267,18 +268,21 @@ class PybulletRobotInterface(Coordinates):
 
         return angle_vector
 
-    def wait_interpolation(self, thresh=0.05):
+    def wait_interpolation(self, thresh=0.05, timeout=60.0):
         """Wait robot movement.
 
         This function usually called after self.angle_vector.
-        Wait while the robot joints are moving.
+        Wait while the robot joints are moving or until time of timeout.
         This function called internally pybullet.stepSimulation().
 
         Parameters
         ----------
         thresh : float
             velocity threshold for detecting movement stop.
+        timeout : float
+            maximum time of timeout.
         """
+        start = time.time()
         while True:
             p.stepSimulation()
             wait = False
@@ -291,6 +295,8 @@ class PybulletRobotInterface(Coordinates):
                     wait = True
             if wait is False:
                 break
+            if time.time() - start > timeout:
+                return False
         return True
 
     def sync(self):
