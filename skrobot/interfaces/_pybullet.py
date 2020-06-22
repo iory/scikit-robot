@@ -1,5 +1,5 @@
-import time
 import importlib
+import time
 
 import numpy as np
 
