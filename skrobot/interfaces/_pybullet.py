@@ -297,7 +297,6 @@ class PybulletRobotInterface(Coordinates):
                 break
             if time.time() - start > timeout:
                 return False
-            time.sleep(1)
         return True
 
     def sync(self):
