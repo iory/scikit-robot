@@ -1,3 +1,4 @@
+import time
 import importlib
 
 import numpy as np
@@ -7,8 +8,6 @@ from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
-
-import time
 
 
 _available = False
@@ -38,6 +37,7 @@ def _check_available():
 class PybulletRobotInterface(Coordinates):
 
     """Pybullet Interface Class
+
     Parameters
     ----------
     robot : skrobot.model.RobotModel
@@ -51,13 +51,16 @@ class PybulletRobotInterface(Coordinates):
         pybullet's connection mode. If you have already connected
         to pybullet physics server, specify the server id.
         The default value is 1 (pybullet.GUI).
+
     Examples
     --------
     >>> from skrobot.models import PR2
     >>> from skrobot.interfaces import PybulletRobotInterface
     >>> robot_model = PR2()
     >>> interface = PybulletRobotInterface(robot_model)
+
     If you have already connected to pybullet physics server
+
     >>> import pybullet
     >>> client_id = pybullet.connect(pybullet.GUI)
     >>> robot_model = PR2()
@@ -91,6 +94,7 @@ class PybulletRobotInterface(Coordinates):
     @staticmethod
     def available():
         """Check Pybullet is available.
+
         Returns
         -------
         _available : bool
@@ -102,7 +106,9 @@ class PybulletRobotInterface(Coordinates):
     @property
     def pose(self):
         """Getter of Pose in pybullet phsyics simulator.
+
         Wrapper of pybullet.getBasePositionAndOrientation.
+
         Returns
         -------
         pose : skrobot.coordinates.Coordinates
@@ -115,6 +121,7 @@ class PybulletRobotInterface(Coordinates):
 
     def _reset_position_and_orientation(self):
         """Reset base position and orientation.
+
         This function is wrapper of pybullet.resetBasePositionAndOrientation.
         """
         p.resetBasePositionAndOrientation(self.robot_id, self.translation,
@@ -122,10 +129,12 @@ class PybulletRobotInterface(Coordinates):
 
     def translate(self, vec, wrt='local'):
         """Translate robot in simulator.
+
         For more detail,
         please see docs of skrobot.coordinates.Coordinates.translate.
         The difference between the translate, this function internally
         call pybullet.resetBasePositionAndOrientation.
+
         Parameters
         ----------
         vec : list or np.ndarray
@@ -139,10 +148,12 @@ class PybulletRobotInterface(Coordinates):
 
     def rotate(self, theta, axis=None, wrt='local'):
         """Rotate this robot by given theta and axis.
+
         For more detail,
         please see docs of skrobot.coordinates.Coordinates.rotate.
         The difference between the rotate, this function internally
         call pybullet.resetBasePositionAndOrientation.
+
         Parameters
         ----------
         theta : float
@@ -155,10 +166,12 @@ class PybulletRobotInterface(Coordinates):
 
     def transform(self, c, wrt='local'):
         """Transform this coordinate by coords based on wrt
+
         For more detail,
         please see docs of skrobot.coordinates.Coordinates.transform.
         The difference between the transform, this function internally
         call pybullet.resetBasePositionAndOrientation.
+
         Parameters
         ----------
         c : skrobot.coordinates.Coordinates
@@ -175,6 +188,7 @@ class PybulletRobotInterface(Coordinates):
 
     def newcoords(self, c, pos=None):
         """Update of position and orientation.
+
         """
         super(PybulletRobotInterface, self).newcoords(c, pos)
         self._reset_position_and_orientation()
@@ -182,6 +196,7 @@ class PybulletRobotInterface(Coordinates):
 
     def load_bullet(self):
         """Load bullet configurations.
+
         This function internally called.
         """
         joint_num = p.getNumJoints(self.robot_id)
@@ -209,6 +224,7 @@ class PybulletRobotInterface(Coordinates):
 
     def angle_vector(self, angle_vector=None, realtime_simulation=None):
         """Send a angle vector to pybullet's phsyics engine.
+
         Parameters
         ----------
         angle_vector : None or numpy.ndarray
@@ -216,6 +232,7 @@ class PybulletRobotInterface(Coordinates):
         realtime_simulation : None or bool
             If this value is `True`, send angle_vector
             by pybullet.setJointMotorControl2.
+
         Returns
         -------
         angle_vector : numpy.ndarray
@@ -251,16 +268,19 @@ class PybulletRobotInterface(Coordinates):
 
         return angle_vector
 
-    def wait_interpolation(self, thresh=0.05, timeout=60):
+    def wait_interpolation(self, thresh=0.05, timeout=60.0):
         """Wait robot movement.
+
         This function usually called after self.angle_vector.
-        Wait while the robot joints are moving or until timeout.
+        Wait while the robot joints are moving or until time of timeout.
         This function called internally pybullet.stepSimulation().
+
         Parameters
         ----------
         thresh : float
             velocity threshold for detecting movement stop.
-        timeout : int or float
+        timeout : float
+            maximum time of timeout.
         """
         start = time.time()
         while True:
@@ -273,15 +293,16 @@ class PybulletRobotInterface(Coordinates):
                                                     idx)
                 if abs(velocity) > thresh:
                     wait = True
-                if time.time() - start > timeout:
-                    wait = False
             if wait is False:
                 break
+            if time.time() - start > timeout:
+                return False
             time.sleep(1)
         return True
 
     def sync(self):
         """Synchronize pybullet pose to robot_model.
+
         """
         if self.robot_id is None:
             return self.angle_vector()
@@ -365,8 +386,10 @@ def create_pose_marker(position=np.array([0, 0, 0]),
                        parentObjectUniqueId=-1,
                        parentLinkIndex=-1):
     """Create a pose marker
+
     Create a pose marker that identifies a position and orientation in space
     with 3 colored lines.
+
     """
     global remove_user_item_indices
     _check_available()
