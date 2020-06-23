@@ -106,6 +106,7 @@ class ROSRobotInterfaceBase(object):
         self.controller_timeout = controller_timeout
         self.joint_action_enable = True
         self.namespace = namespace
+        self._joint_state_msg = None
         if self.namespace:
             rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
@@ -207,6 +208,7 @@ class ROSRobotInterfaceBase(object):
             joint.joint_torque = effort
 
     def joint_state_callback(self, msg):
+        self._joint_state_msg = msg
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
