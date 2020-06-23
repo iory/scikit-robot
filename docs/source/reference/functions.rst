@@ -80,3 +80,15 @@ Quaternion Functions
    skrobot.coordinates.math.rotation_matrix_from_quat
    skrobot.coordinates.math.quaternion_from_axis_angle
    skrobot.coordinates.math.axis_angle_from_quaternion
+
+
+.. module:: skrobot.coordinates.geo
+
+Geometry functions
+------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   skrobot.coordinates.geo.rotate_points

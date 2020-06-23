@@ -2,6 +2,7 @@ import numpy as np
 
 from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import _wrap_axis
+from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import midpoint
 from skrobot.coordinates.math import midrot
 from skrobot.coordinates.math import normalize_vector
@@ -105,3 +106,42 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     target_coords.rotate(
         np.arccos(rot_angle_cos), rot_axis, 'world')
     return target_coords
+
+
+def rotate_points(points, a, b):
+    """Rotate given points based on a starting and ending vector.
+
+    Axis vector k is calculated from the any two nonzero vectors a and b.
+    Rotated points are calculated from following Rodrigues rotation formula.
+
+    .. math::
+
+        `P_{rot} = P \\cos \\theta +
+        (k \\times P) \\sin \\theta + k (k \\cdot P) (1 - \\cos \\theta)`
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        Input points. The shape should be (3, ) or (N, 3).
+    a : numpy.ndarray
+        nonzero vector.
+    b : numpy.ndarray
+        nonzero vector.
+
+    Returns
+    -------
+    points_rot : numpy.ndarray
+        rotated points.
+    """
+    if points.ndim == 1:
+        points = points[None, :]
+
+    a = normalize_vector(a)
+    b = normalize_vector(b)
+    k = normalize_vector(np.cross(a, b))
+    theta = angle_between_vectors(a, b, normalize=False)
+
+    points_rot = points * np.cos(theta) \
+        + np.cross(k, points) * np.sin(theta) \
+        + k * np.dot(k, points.T).reshape(-1, 1) * (1 - np.cos(theta))
+    return points_rot
