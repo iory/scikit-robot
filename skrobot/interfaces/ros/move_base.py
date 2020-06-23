@@ -50,11 +50,13 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             'move_base_simple_name',
             'move_base_simple')
         self.odom_topic = kwargs.pop('odom_topic', '/base_odometry/odom')
+        self.use_tf2 = kwargs.pop('use_tf2', False)
+
         super(ROSRobotMoveBaseInterface, self).__init__(
             *args, **kwargs)
 
         self.tf_listener = TransformListener(
-            use_tf2=kwargs.pop('use_tf2', False))
+            use_tf2=self.use_tf2)
 
         self.move_base_action = actionlib.SimpleActionClient(
             self.move_base_action_name,
