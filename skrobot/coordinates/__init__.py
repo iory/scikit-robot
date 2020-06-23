@@ -9,6 +9,7 @@ from .geo import _wrap_axis
 from .geo import midcoords
 from .geo import midpoint
 from .geo import orient_coords_to_axis
+from .geo import rotate_points
 
 from .math import matrix2quaternion
 from .math import quaternion2rpy

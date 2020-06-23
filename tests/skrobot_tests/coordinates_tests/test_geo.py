@@ -1,10 +1,12 @@
 import unittest
 
+import numpy as np
 from numpy import pi
 from numpy import testing
 
 from skrobot.coordinates.geo import midcoords
 from skrobot.coordinates.geo import orient_coords_to_axis
+from skrobot.coordinates.geo import rotate_points
 from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import matrix2quaternion
 
@@ -49,3 +51,16 @@ class TestGeo(unittest.TestCase):
         testing.assert_array_almost_equal(
             target_coords.rpy_angle()[0],
             [0, 0, pi])
+
+    def test_rotate_points(self):
+        points = np.array([1, 0, 0])
+        rot_points = rotate_points(points, [1, 0, 0], [0, 0, 1])
+        testing.assert_almost_equal(rot_points, [[0, 0, 1]])
+
+        points = np.array([[1, 0, 0]])
+        rot_points = rotate_points(points, [1, 0, 0], [0, 0, 1])
+        testing.assert_almost_equal(rot_points, [[0, 0, 1]])
+
+        points = np.array([[1, 0, 0]])
+        rot_points = rotate_points(points, [0, 0, 1], [0, 0, 1])
+        testing.assert_almost_equal(rot_points, [[1, 0, 0]])
