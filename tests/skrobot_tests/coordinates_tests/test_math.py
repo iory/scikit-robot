@@ -289,6 +289,7 @@ class TestMath(unittest.TestCase):
         x_axis = (1, 0, 0)
         y_axis = (0, 1, 0)
         rot = rotation_matrix_from_axis(x_axis, y_axis)
+        _check_valid_rotation(rot)
         testing.assert_array_almost_equal(rot, np.eye(3))
 
         x_axis = (1, 1, 1)
@@ -302,10 +303,14 @@ class TestMath(unittest.TestCase):
         x_axis = (1, 1, 1)
         y_axis = (0, 0, -1)
         rot = rotation_matrix_from_axis(x_axis, y_axis)
+        _check_valid_rotation(rot)
         testing.assert_array_almost_equal(
             rot, [[0.57735027, 0.40824829, -0.70710678],
                   [0.57735027, 0.40824829, 0.70710678],
                   [0.57735027, -0.81649658, 0.0]])
+
+        rot = rotation_matrix_from_axis(y_axis, x_axis, axes='yx')
+        _check_valid_rotation(rot)
 
     def test_rotation_distance(self):
         mat1 = np.eye(3)
