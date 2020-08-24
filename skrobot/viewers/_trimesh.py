@@ -1,3 +1,7 @@
+from __future__ import division
+
+import collections
+import logging
 import threading
 
 import pyglet
@@ -6,10 +10,17 @@ import trimesh.viewer
 from .. import model as model_module
 
 
+logger = logging.getLogger('trimesh')
+logger.setLevel(logging.ERROR)
+
+
 class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def __init__(self, resolution=None):
-        self._links = []
+        if resolution is None:
+            resolution = (640, 480)
+
+        self._links = collections.OrderedDict()
 
         self._redraw = True
         pyglet.clock.schedule_interval(self.on_update, 1 / 30)
@@ -42,26 +53,20 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def on_draw(self):
         if not self._redraw:
-            super(TrimeshSceneViewer, self).on_draw()
+            with self.lock:
+                self._update_vertex_list()
+                super(TrimeshSceneViewer, self).on_draw()
             return
 
         with self.lock:
             self._update_vertex_list()
 
             # apply latest angle-vector
-            for link in self._links:
-                if isinstance(link, model_module.Link):
-                    link_list = [link]
-                else:
-                    link_list = link.link_list
-                for l in link_list:
-                    transform = l.worldcoords().T()
-                    name = '{}/{}'.format(
-                        link.__class__.__name__,
-                        l.name,
-                    )
-                    self.scene.graph.update(name, matrix=transform)
-        super(TrimeshSceneViewer, self).on_draw()
+            for link_id, link in self._links.items():
+                link.update(force=True)
+                transform = link.worldcoords().T()
+                self.scene.graph.update(link_id, matrix=transform)
+            super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
 
@@ -85,28 +90,54 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._redraw = True
         return super(TrimeshSceneViewer, self).on_resize(*args, **kwargs)
 
-    def add(self, link):
-        if isinstance(link, model_module.Link):
-            link_list = [link]
-        elif isinstance(link, model_module.CascadedLink):
-            link_list = link.link_list
-        else:
-            raise TypeError('link must be Link or CascadedLink')
+    def _add_link(self, link):
+        assert isinstance(link, model_module.Link)
 
         with self.lock:
-            for l in link_list:
-                transform = l.worldcoords().T()
-                name = '{}/{}'.format(
-                    link.__class__.__name__,
-                    l.name,
-                )
-                self.scene.add_geometry(
-                    geometry=l.visual_mesh,
-                    node_name=name,
-                    geom_name=name,
-                    transform=transform,
-                )
-            self._links.append(link)
+            link_id = str(id(link))
+            if link_id in self._links:
+                return
+            transform = link.worldcoords().T()
+            self.scene.add_geometry(
+                geometry=link.visual_mesh,
+                node_name=link_id,
+                geom_name=link_id,
+                transform=transform,
+            )
+            self._links[link_id] = link
+
+        for child_link in link._child_links:
+            self._add_link(child_link)
+
+    def add(self, geometry):
+        if isinstance(geometry, model_module.Link):
+            links = [geometry]
+        elif isinstance(geometry, model_module.CascadedLink):
+            links = geometry.link_list
+        else:
+            raise TypeError('geometry must be Link or CascadedLink')
+
+        for link in links:
+            self._add_link(link)
+
+        self._redraw = True
+
+    def delete(self, geometry):
+        if isinstance(geometry, model_module.Link):
+            links = [geometry]
+        elif isinstance(geometry, model_module.CascadedLink):
+            links = geometry.link_list
+        else:
+            raise TypeError('geometry must be Link or CascadedLink')
+
+        with self.lock:
+            for link in links:
+                link_id = str(id(link))
+                if link_id not in self._links:
+                    continue
+                self.scene.delete_geometry(link_id)
+                self._links.pop(link_id)
+            self.cleanup_geometries()
 
         self._redraw = True
 

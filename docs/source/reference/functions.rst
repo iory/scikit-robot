@@ -32,10 +32,12 @@ Utilities functions
    skrobot.coordinates.math.matrix_exponent
    skrobot.coordinates.math.outer_product_matrix
    skrobot.coordinates.math.rotation_matrix_from_rpy
+   skrobot.coordinates.math.rotation_matrix_from_axis
    skrobot.coordinates.math.rodrigues
    skrobot.coordinates.math.rotation_angle
    skrobot.coordinates.math.rotation_distance
    skrobot.coordinates.math.axis_angle_from_matrix
+   skrobot.coordinates.math.angle_between_vectors
 
 
 Jacobian Functions
@@ -78,3 +80,15 @@ Quaternion Functions
    skrobot.coordinates.math.rotation_matrix_from_quat
    skrobot.coordinates.math.quaternion_from_axis_angle
    skrobot.coordinates.math.axis_angle_from_quaternion
+
+
+.. module:: skrobot.coordinates.geo
+
+Geometry functions
+------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   skrobot.coordinates.geo.rotate_points

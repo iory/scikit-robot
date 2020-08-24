@@ -1,3 +1,4 @@
+import contextlib
 import copy
 
 import numpy as np
@@ -6,11 +7,13 @@ from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import _check_valid_translation
 from skrobot.coordinates.math import _wrap_axis
+from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import quaternion_normalize
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
@@ -20,7 +23,7 @@ from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
 
 
-def transform_coords(c1, c2):
+def transform_coords(c1, c2, out=None):
     """Return Coordinates by applying c1 to c2 from the left
 
     Parameters
@@ -28,6 +31,9 @@ def transform_coords(c1, c2):
     c1 : skrobot.coordinates.Coordinates
     c2 : skrobot.coordinates.Coordinates
         Coordinates
+    c3 : skrobot.coordinates.Coordinates or None
+        Output argument. If this value is specified, the results will be
+        in-placed.
 
     Returns
     -------
@@ -59,36 +65,61 @@ def transform_coords(c1, c2):
            [ 8.66025404e-01,  5.00000000e-01, -1.66533454e-16],
            [-5.00000000e-01,  8.66025404e-01,  2.77555756e-17]])
     """
-    translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    q = quaternion_multiply(c1.quaternion, c2.quaternion)
-    return Coordinates(pos=translation, rot=q)
+    if out is None:
+        out = Coordinates()
+    elif not isinstance(out, Coordinates):
+        raise TypeError("Input type should be skrobot.coordinates.Coordinates")
+    out.translation = c1.translation + np.dot(c1.rotation, c2.translation)
+    out.rotation = quaternion_normalize(
+        quaternion_multiply(c1.quaternion, c2.quaternion))
+    return out
 
 
 class Coordinates(object):
 
+    """Coordinates class to manipulate rotation and translation.
+
+    Parameters
+    ----------
+    pos : list or numpy.ndarray
+        shape of (3,) translation vector. or
+        4x4 homogeneous transformation matrix.
+        If the homogeneous transformation matrix is given,
+        `rot` will be overwritten.
+    rot : list or numpy.ndarray
+        we can take 3x3 rotation matrix or
+        [yaw, pitch, roll] or
+        quaternion [w, x, y, z] order
+    name : string or None
+        name of this coordinates
+    """
+
     def __init__(self,
                  pos=[0, 0, 0],
                  rot=np.eye(3),
-                 name=None):
-        """Initialization of Coordinates
-
-        Parameters
-        ----------
-        pos : list or np.ndarray
-            shape of (3,) translation vector
-        rot : list or np.ndarray
-            we can take 3x3 rotation matrix or
-            [yaw, pitch, roll] or
-            quaternion [w, x, y, z] order
-        name : string or None
-            name of this coordinates
-        """
+                 name=None,
+                 hook=None):
+        if (isinstance(pos, list) or isinstance(pos, np.ndarray)):
+            T = np.array(pos, dtype=np.float64)
+            if T.shape == (4, 4):
+                pos = T[:3, 3]
+                rot = T[:3, :3]
         self.rotation = rot
         self.translation = pos
         if name is None:
             name = ''
         self.name = name
         self.parent = None
+        self._hook = hook if hook else lambda: None
+
+    @contextlib.contextmanager
+    def disable_hook(self):
+        hook = self._hook
+        self._hook = lambda: None
+        try:
+            yield
+        finally:
+            self._hook = hook
 
     @property
     def rotation(self):
@@ -114,6 +145,7 @@ class Coordinates(object):
                [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
                [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
         """
+        self._hook()
         return self._rotation
 
     @rotation.setter
@@ -171,6 +203,7 @@ class Coordinates(object):
         >>> c.translation
         array([0.1, 0.2, 0.3])
         """
+        self._hook()
         return self._translation
 
     @translation.setter
@@ -300,8 +333,8 @@ class Coordinates(object):
         """
         v = np.array(v, dtype=np.float64)
         if v.ndim == 2:
-            return (np.matmul(self.rotation, v.T) +
-                    self.translation.reshape(3, -1)).T
+            return (np.matmul(self.rotation, v.T)
+                    + self.translation.reshape(3, -1)).T
         return np.matmul(self.rotation, v) + self.translation
 
     def inverse_transform_vector(self, vec):
@@ -319,8 +352,8 @@ class Coordinates(object):
         """
         vec = np.array(vec, dtype=np.float64)
         if vec.ndim == 2:
-            return (np.matmul(self.rotation.T, vec.T) -
-                    np.matmul(
+            return (np.matmul(self.rotation.T, vec.T)
+                    - np.matmul(
                         self.rotation.T, self.translation).reshape(3, -1)).T
         return np.matmul(self.rotation.T, vec) - \
             np.matmul(self.rotation.T, self.translation)
@@ -331,6 +364,24 @@ class Coordinates(object):
         Create a new coordinate with inverse transformation of this
         coordinate system.
 
+        .. math::
+            \\left(
+                \\begin{array}{ccc}
+                  R^{-1} & - R^{-1} p  \\\\
+                  0 & 1
+                \\end{array}
+            \\right)
+
+        Parameters
+        ----------
+        dest : None or skrobot.coordinates.Coordinates
+            If dest is given, the result of transformation
+            is in-placed to dest.
+
+        Returns
+        -------
+        dest : skrobot.coordinates.Coordinates
+            result of inverse transformation.
         """
         if dest is None:
             dest = Coordinates()
@@ -344,17 +395,16 @@ class Coordinates(object):
         c1 = self.worldcoords()
         inv = c1.inverse_transformation()
         if wrt == 'local' or wrt == self:
-            inv = transform_coords(inv, c2)
+            transform_coords(inv, c2, inv)
         elif wrt == 'parent' or \
                 wrt == self.parent or \
                 wrt == 'world':
-            inv = transform_coords(c2, inv)
+            transform_coords(c2, inv, inv)
         elif isinstance(wrt, Coordinates):
             xw = wrt.worldcoords()
-            inv = transform_coords(c2, inv)
-            inv = transform_coords(xw.inverse_transformation(),
-                                   inv)
-            inv = transform_coords(inv, xw)
+            transform_coords(c2, inv, inv)
+            transform_coords(xw.inverse_transformation(), inv, inv)
+            transform_coords(inv, xw, inv)
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
         return inv
@@ -481,7 +531,10 @@ class Coordinates(object):
         c : skrobot.coordinates.Coordinates
             coordinate
         wrt : string or skrobot.coordinates.Coordinates
-            If wrt is 'local' or self.
+            If wrt is 'local' or self, multiply c from the right.
+            If wrt is 'world' or 'parent' or self.parent,
+            transform c with respect to worldcoord.
+            If wrt is Coordinates, transform c with respect to c.
 
         Returns
         -------
@@ -492,17 +545,38 @@ class Coordinates(object):
         --------
         """
         if wrt == 'local' or wrt == self:
-            tmp_coords = transform_coords(self, c)
+            # multiply c from the right
+            transform_coords(self, c, self)
         elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
-            tmp_coords = transform_coords(c, self)
+            # multiply c from the left
+            transform_coords(c, self, self)
         elif isinstance(wrt, Coordinates):
-            tmp_coords = transform_coords(wrt.inverse_transformation, self)
-            tmp_coords = transform_coords(c, tmp_coords)
-            tmp_coords = transform_coords(wrt.worldcoords(), tmp_coords)
+            transform_coords(wrt.inverse_transformation(), self, self)
+            transform_coords(c, self, self)
+            transform_coords(wrt.worldcoords(), self, self)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
-        return self.newcoords(tmp_coords)
+        return self
+
+    def move_coords(self, target_coords, local_coords):
+        """Transform this coordinate so that local_coords to target_coords.
+
+        Parameters
+        ----------
+        target_coords : skrobot.coordinates.Coordinates
+            target coords.
+        local_coords : skrobot.coordinates.Coordinates
+            local coords to be aligned.
+
+        Returns
+        -------
+        self.worldcoords() : skrobot.coordinates.Coordinates
+            world coordinates.
+        """
+        self.transform(
+            local_coords.transformation(target_coords), local_coords)
+        return self.worldcoords()
 
     def rpy_angle(self):
         """Return a pair of rpy angles of this coordinates.
@@ -536,11 +610,12 @@ class Coordinates(object):
         coords : skrobot.coordinates.Coordinates
             given coordinates
         translation_axis : str or bool or None (optional)
-            we can take ['x', 'y', 'z', 'xy', 'yz', 'zx']
+            we can take 'x', 'y', 'z', 'xy', 'yz', 'zx', 'xx', 'yy', 'zz',
+            True or False(None).
 
         Returns
         -------
-        dif_pos : np.ndarray
+        dif_pos : numpy.ndarray
             difference position of self coordinates and coords
             considering translation_axis.
 
@@ -575,12 +650,12 @@ class Coordinates(object):
         coords : skrobot.coordinates.Coordinates
             given coordinates
         rotation_axis : str or bool or None (optional)
-            we can take ['x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm']
-            or True, False(None).
+            we can take 'x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm',
+            'xy', 'yx', 'yz', 'zy', 'zx', 'xz', True or False(None).
 
         Returns
         -------
-        dif_rot : np.ndarray
+        dif_rot : numpy.ndarray
             difference rotation of self coordinates and coords
             considering rotation_axis.
 
@@ -618,10 +693,10 @@ class Coordinates(object):
             a0 = coords0.axis(ax)
             a1 = coords1.axis(ax)
             a1_mirror = - a1
-            dr1 = np.arccos(np.dot(a0, a1)) * \
-                normalize_vector(np.cross(a0, a1))
-            dr1m = np.arccos(np.dot(a0, a1_mirror)) * \
-                normalize_vector(np.cross(a0, a1_mirror))
+            dr1 = angle_between_vectors(a0, a1, normalize=False) \
+                * normalize_vector(np.cross(a0, a1))
+            dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) \
+                * normalize_vector(np.cross(a0, a1_mirror))
             return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
 
         if rotation_axis in ['x', 'y', 'z']:
@@ -630,9 +705,10 @@ class Coordinates(object):
             if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
                 dif_rot = np.array([0, 0, 0], 'f')
             else:
-                dif_rot = np.matmul(self.worldrot().T,
-                                    np.arccos(np.dot(a0, a1)) *
-                                    normalize_vector(np.cross(a0, a1)))
+                dif_rot = np.matmul(
+                    self.worldrot().T,
+                    angle_between_vectors(a0, a1, normalize=False)
+                    * normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
             a0 = self.axis(ax)
@@ -641,7 +717,35 @@ class Coordinates(object):
                 a2 = - a2
             dif_rot = np.matmul(
                 self.worldrot().T,
-                np.arccos(np.dot(a0, a2)) * normalize_vector(np.cross(a0, a2)))
+                angle_between_vectors(a0, a2, normalize=False)
+                * normalize_vector(np.cross(a0, a2)))
+        elif rotation_axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
+            if rotation_axis in ['xy', 'yx']:
+                ax1 = 'z'
+                ax2 = 'x'
+            elif rotation_axis in ['yz', 'zy']:
+                ax1 = 'x'
+                ax2 = 'y'
+            else:
+                ax1 = 'y'
+                ax2 = 'z'
+            a0 = self.axis(ax1)
+            a1 = coords.axis(ax1)
+            dif_rot = np.matmul(
+                self.worldrot().T,
+                angle_between_vectors(a0, a1, normalize=False)
+                * normalize_vector(np.cross(a0, a1)))
+            norm = np.linalg.norm(dif_rot)
+            if np.isclose(norm, 0.0):
+                self_coords = self.copy_worldcoords()
+            else:
+                self_coords = self.copy_worldcoords().rotate(norm, dif_rot)
+            a0 = self_coords.axis(ax2)
+            a1 = coords.axis(ax2)
+            dif_rot = np.matmul(
+                self_coords.worldrot().T,
+                angle_between_vectors(a0, a1, normalize=False)
+                * normalize_vector(np.cross(a0, a1)))
         elif rotation_axis in ['xm', 'ym', 'zm']:
             rot = coords.worldrot()
             ax = rotation_axis[0]
@@ -736,14 +840,12 @@ class Coordinates(object):
 
     def worldcoords(self):
         """Return thisself"""
+        self._hook()
         return self
 
     def copy_worldcoords(self):
         """Return a deep copy of the Coordinates."""
         return self.coords()
-
-    def update(self):
-        pass
 
     def worldrot(self):
         """Return rotation of this coordinate
@@ -779,6 +881,47 @@ class Coordinates(object):
             self.translation = copy.deepcopy(c.translation)
         return self
 
+    def __mul__(self, other_c):
+        """Return Transformed Coordinates.
+
+        Note that this function creates new Coordinates and
+        does not change translation and rotation, unlike transform function.
+
+        Parameters
+        ----------
+        other_c : skrobot.coordinates.Coordinates
+            input coordinates.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            transformed coordinates multiplied other_c from the right.
+            T = T_{self} T_{other_c}.
+        """
+        return transform_coords(self, other_c)
+
+    def __pow__(self, exponent):
+        """Return exponential homogeneous matrix.
+
+        If exponent equals -1, return inverse transformation of this coords.
+
+        Parameters
+        ----------
+        exponent : numbers.Number
+            exponent value.
+            If exponent equals -1, return inverse transformation of this
+            coords.
+            In current, support only -1 case.
+
+        Returns
+        -------
+        out : skrobot.coordinates.Coordinates
+            output.
+        """
+        if np.isclose(exponent, -1):
+            return self.inverse_transformation()
+        raise NotImplementedError
+
     def __repr__(self):
         return self.__str__()
 
@@ -811,11 +954,13 @@ class CascadedCoords(Coordinates):
         self._changed = True
         self._descendants = []
 
+        self._worldcoords = Coordinates(pos=self.translation,
+                                        rot=self.rotation,
+                                        hook=self.update)
+
         self.parent = parent
         if parent is not None:
             self.parent.assoc(self)
-        self._worldcoords = Coordinates(pos=self.translation,
-                                        rot=self.rotation)
 
     @property
     def descendants(self):
@@ -862,6 +1007,7 @@ class CascadedCoords(Coordinates):
     def parentcoords(self):
         if self.parent:
             return self.parent.worldcoords()
+        return worldcoords
 
     def transform_vector(self, v):
         return self.worldcoords().transform_vector(v)
@@ -929,28 +1075,63 @@ class CascadedCoords(Coordinates):
         return self.worldcoords().inverse_rotate_vector(v)
 
     def transform(self, c, wrt='local'):
+        """Transform this coordinates
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates
+            coordinates
+        wrt : str or skrobot.coordinates.Coordinates
+            transform this coordinates with respect to wrt.
+            If wrt is 'local' or self, multiply c from the right.
+            If wrt is 'parent' or self.parent, transform c
+            with respect to parentcoords. (multiply c from the left.)
+            If wrt is Coordinates, transform c with respect to c.
+
+        Returns
+        -------
+        self : skrobot.coordinates.CascadedCoords
+            return self
+        """
         if isinstance(wrt, Coordinates):
-            raise NotImplementedError
-        elif wrt == 'local' or wrt == self:  # multiply c from the left
-            tmp_coords = transform_coords(self, c)
-            self.rotation = tmp_coords.rotation
-            self.translation = tmp_coords.translation
+            transform_coords(self.parentcoords(), self, self)
+            transform_coords(wrt.inverse_transformation(), self, self)
+            transform_coords(c, self, self)
+            transform_coords(wrt.worldcoords(), self, self)
+            transform_coords(self.parentcoords().inverse_transformation(),
+                             self, self)
+        elif wrt == 'local' or wrt == self:
+            # multiply c from the right.
+            transform_coords(self, c, self)
+        elif wrt == 'parent' or wrt == self.parent:
+            # multiply c from the left.
+            transform_coords(c, self, self)
+        elif wrt == 'world':
+            transform_coords(self.parentcoords, self, self)
+            transform_coords(c, self, self)
+            transform_coords(self.parentcoords.inverse_transformation(),
+                             self, self)
         else:
-            raise NotImplementedError
+            raise ValueError('transform wrt {} is not supported'.format(wrt))
         return self.newcoords(self.rotation, self.translation)
 
-    def worldcoords(self):
-        """Calculate rotation and position in the world."""
-        if self._changed:
+    def update(self, force=False):
+        if not force and not self._changed:
+            return
+        with self.disable_hook():
             if self.parent:
-                self._worldcoords = transform_coords(
+                transform_coords(
                     self.parent.worldcoords(),
-                    self)
+                    self,
+                    self._worldcoords)
             else:
                 self._worldcoords.rotation = self.rotation
                 self._worldcoords.translation = self.translation
-            self.update()
-            self._changed = False
+        self._changed = False
+
+    def worldcoords(self):
+        """Calculate rotation and position in the world."""
+        self.update()
         return self._worldcoords
 
     def worldrot(self):
@@ -969,9 +1150,6 @@ class CascadedCoords(Coordinates):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
         self._parent = c
-
-    def update(self):
-        pass
 
 
 def coordinates_p(x):

@@ -13,8 +13,6 @@ class Fetch(RobotModelFromURDF):
     http://docs.fetchrobotics.com/robot_hardware.html
     """
 
-    default_urdf_path = fetch_urdfpath()
-
     def __init__(self, *args, **kwargs):
         super(Fetch, self).__init__(*args, **kwargs)
         self.rarm_end_coords = CascadedCoords(parent=self.gripper_link,
@@ -22,6 +20,10 @@ class Fetch(RobotModelFromURDF):
         self.rarm_end_coords.translate([0, 0, 0])
         self.rarm_end_coords.rotate(0, axis='z')
         self.end_coords = [self.rarm_end_coords]
+
+    @cached_property
+    def default_urdf_path(self):
+        return fetch_urdfpath()
 
     def reset_pose(self):
         self.torso_lift_joint.joint_angle(0)

@@ -2,6 +2,7 @@ import unittest
 
 from numpy import deg2rad
 from numpy import pi
+from numpy import sign
 from numpy import testing
 
 from skrobot.coordinates import make_cascoords
@@ -12,11 +13,58 @@ from skrobot.coordinates.math import rpy_matrix
 
 class TestCoordinates(unittest.TestCase):
 
+    def test___init__(self):
+        coord = make_coords(pos=[1, 1, 1])
+        testing.assert_array_equal(coord.translation, [1, 1, 1])
+
+        coord = make_coords(pos=[1, 0, 1], rot=[pi, 0, 0])
+        testing.assert_array_equal(coord.translation, [1, 0, 1])
+        testing.assert_almost_equal(coord.rotation,
+                                    [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
+        coord = make_coords([[-1, 0, 0, 1],
+                             [0, -1, 0, 0],
+                             [0, 0, 1, -1],
+                             [0, 0, 0, 1]],
+                            rot=[pi, 0, 0])
+        testing.assert_array_equal(coord.translation, [1, 0, -1])
+        testing.assert_almost_equal(coord.rotation,
+                                    [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
         testing.assert_array_equal(coord.translation,
                                    [1, 2, 3])
+        original_id = hex(id(coord))
+        coord.transform(make_coords(pos=[1, 2, 3]),
+                        coord)
+        self.assertEqual(original_id,
+                         hex(id(coord)))
+
+        coord = make_coords().rotate(pi / 2.0, 'y')
+        coord.transform(make_coords(pos=[1, 2, 3]),
+                        'world')
+        testing.assert_array_equal(coord.translation,
+                                   [1, 2, 3])
+
+        wrt = make_coords().rotate(pi / 2.0, 'y')
+        coord = make_coords()
+        coord.transform(make_coords(pos=[1, 2, 3]), wrt)
+        testing.assert_almost_equal(coord.translation, [3.0, 2.0, -1.0])
+
+    def test_move_coords(self):
+        coord = make_coords()
+        target_coord = make_coords(
+            pos=(1, 2, 3), rot=(0, 0, 1, 0))
+        local_coord = make_coords(
+            pos=(-2, -2, -1))
+        coord.move_coords(target_coord, local_coord)
+        result = coord.copy_worldcoords().transform(local_coord)
+        testing.assert_almost_equal(
+            result.translation, (1, 2, 3))
+        testing.assert_almost_equal(
+            result.quaternion, (0, 0, 1, 0))
 
     def test_translate(self):
         c = make_coords()
@@ -214,9 +262,14 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(dif_rot,
                                     [-0.88435715, 0.74192175, 0.0])
 
+        # TODO(iory) This case's rotation_axis='xx' is unstable
+        # due to float point
         dif_rot = coord1.difference_rotation(coord2, 'xx')
-        testing.assert_almost_equal(
-            dif_rot, [0.0, -1.36034952, -0.78539816])
+        testing.assert_almost_equal(dif_rot[0], 0)
+        testing.assert_almost_equal(abs(dif_rot[1]), 1.36034952)
+        testing.assert_almost_equal(abs(dif_rot[2]), 0.78539816)
+        testing.assert_almost_equal(sign(dif_rot[1]) * sign(dif_rot[2]), 1)
+
         dif_rot = coord1.difference_rotation(coord2, 'yy')
         testing.assert_almost_equal(
             dif_rot, [0.35398131, 0.0, 0.97442695])
@@ -232,6 +285,39 @@ class TestCoordinates(unittest.TestCase):
         coord2 = make_coords().rotate(pi / 2.0, 'x')
         dif_rot = coord1.difference_rotation(coord2, 'xm')
         testing.assert_almost_equal(dif_rot, [-pi / 2.0, 0, 0])
+
+        # corner case
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(0.2564565431501872, 'y')
+        dif_rot = coord1.difference_rotation(coord2, 'zy')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
+        # norm == 0 case
+        coord1 = make_coords()
+        coord2 = make_coords()
+        dif_rot = coord1.difference_rotation(coord2, 'xy')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'x').rotate(pi / 2, 'y')
+        dif_rot = coord1.difference_rotation(coord2, 'xy')
+        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
+        dif_rot = coord1.difference_rotation(coord2, 'yx')
+        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'y').rotate(pi / 2, 'z')
+        dif_rot = coord1.difference_rotation(coord2, 'yz')
+        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
+        dif_rot = coord1.difference_rotation(coord2, 'zy')
+        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
+
+        coord1 = make_coords()
+        coord2 = make_coords().rotate(pi / 2, 'z').rotate(pi / 2, 'x')
+        dif_rot = coord1.difference_rotation(coord2, 'zx')
+        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
+        dif_rot = coord1.difference_rotation(coord2, 'xz')
+        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
 
 
 class TestCascadedCoordinates(unittest.TestCase):
@@ -317,3 +403,42 @@ class TestCascadedCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             b.worldpos(),
             [0.1, 0, 0.2])
+
+    def test_worldcoords(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0],
+                           name='a')
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2],
+                           name='b',
+                           parent=a)
+        original_id = hex(id(b.worldcoords()))
+        a.rotate(pi / 2.0, 'z')
+        self.assertEqual(original_id,
+                         hex(id(b.worldcoords())))
+
+    def test_transform(self):
+        a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
+                           pos=[0.1, 0, 0])
+        b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
+                           pos=[0.1, 0, 0.2])
+        a.assoc(b)
+
+        testing.assert_almost_equal(
+            b.copy_worldcoords().transform(
+                make_cascoords(pos=(-0.1, -0.2, -0.3)), 'local').translation,
+            (-0.20980762113533155, -0.1999999999999999, 0.13660254037844383))
+
+        testing.assert_almost_equal(
+            b.copy_worldcoords().transform(
+                make_cascoords(pos=(-0.1, -0.2, -0.3)), 'world').translation,
+            (0, -0.2, -0.1))
+
+        c = make_coords(pos=(-0.2, -0.3, -0.4)).rotate(pi / 2, 'y')
+        b.transform(
+            make_cascoords(pos=(-0.1, -0.2, -0.3)), c)
+        testing.assert_almost_equal(
+            b.translation, (-0.3, 0.15980762113533148, 0.32320508075688775))
+        testing.assert_almost_equal(
+            b.copy_worldcoords().translation,
+            (-0.2, -0.2, 0.3))

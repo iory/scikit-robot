@@ -14,8 +14,6 @@ class PR2(RobotModelFromURDF):
 
     """
 
-    default_urdf_path = pr2_urdfpath()
-
     def __init__(self, *args, **kwargs):
         super(PR2, self).__init__(*args, **kwargs)
 
@@ -70,6 +68,10 @@ class PR2(RobotModelFromURDF):
                  np.deg2rad(74.2702))):
             j.min_angle = min_angle
             j.max_angle = max_angle
+
+    @cached_property
+    def default_urdf_path(self):
+        return pr2_urdfpath()
 
     @cached_property
     def rarm(self):
@@ -156,3 +158,48 @@ class PR2(RobotModelFromURDF):
         self.head_pan_joint.joint_angle(0)
         self.head_tilt_joint.joint_angle(0)
         return self.angle_vector()
+
+    def gripper_distance(self, dist=None, arm='arms'):
+        """Change gripper angle function
+
+        Parameters
+        ----------
+        dist : None or float
+            gripper distance.
+            If dist is None, return gripper distance.
+            If flaot value is given, change joint angle.
+        arm : str
+            Specify target arm.  You can specify 'larm', 'rarm', 'arms'.
+
+        Returns
+        -------
+        dist : float
+            Result of gripper distance in meter.
+        """
+        if arm == 'larm':
+            joints = [self.l_gripper_l_finger_joint]
+        elif arm == 'rarm':
+            joints = [self.r_gripper_l_finger_joint]
+        elif arm == 'arms':
+            joints = [self.r_gripper_l_finger_joint,
+                      self.l_gripper_l_finger_joint]
+        else:
+            raise ValueError('Invalid arm arm argument. You can specify '
+                             "'larm', 'rarm' or 'arms'.")
+
+        def _dist(angle):
+            return 0.0099 * (18.4586 * np.sin(angle) + np.cos(angle) - 1.0101)
+
+        if dist is not None:
+            # calculate joint_angle from approximated equation
+            max_dist = _dist(joints[0].max_angle)
+            dist = max(min(dist, max_dist), 0)
+            d = dist / 2.0
+            angle = 2 * np.arctan(
+                (9137 - np.sqrt(2)
+                 * np.sqrt(-5e9 * (d**2) - 5e7 * d + 41739897))
+                / (5 * (20000 * d + 199)))
+            for joint in joints:
+                joint.joint_angle(angle)
+        angle = joints[0].joint_angle()
+        return _dist(angle)

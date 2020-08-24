@@ -77,14 +77,14 @@ class ROSRobotInterfaceBase(object):
         wait_seconds = 180
         start_time = datetime.datetime.now()
         ros_current_time = rospy.Time.now()
-        if rospy.get_param('use_sim_time', False) and \
-           ros_current_time.to_sec() == 0 and \
-           ros_current_time.to_nsec() == 0:
+        if rospy.get_param('use_sim_time', False) \
+                and ros_current_time.to_sec() == 0 \
+                and ros_current_time.to_nsec() == 0:
             rospy.logdebug(
                 '[{}] /use_sim_time is TRUE, check if /clock is published'.
                 format(rospy.get_name()))
-            while (ros_current_time.to_sec() == 0 and
-                   ros_current_time.to_nsec() == 0):
+            while (ros_current_time.to_sec() == 0
+                   and ros_current_time.to_nsec() == 0):
                 diff_time = datetime.datetime.now() - start_time
                 if diff_time.seconds > wait_seconds:
                     rospy.logfatal(
@@ -106,18 +106,20 @@ class ROSRobotInterfaceBase(object):
         self.controller_timeout = controller_timeout
         self.joint_action_enable = True
         self.namespace = namespace
+        self._joint_state_msg = None
         if self.namespace:
             rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
-                             JointState,
-                             callback=self.joint_state_callback,
-                             queue_size=joint_states_queue_size)
+                JointState,
+                callback=self.joint_state_callback,
+                queue_size=joint_states_queue_size)
         else:
             rospy.Subscriber(joint_states_topic, JointState,
                              callback=self.joint_state_callback,
                              queue_size=joint_states_queue_size)
 
         self.controller_table = {}
+        self.controller_param_table = {}
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
@@ -131,14 +133,18 @@ class ROSRobotInterfaceBase(object):
             time of send angle vector.
         fastest_time : float
             fastest time
-        time_scale: float
-            time scale
+        time_scale : float
+            Time will use 1/time_scale of the fastest speed.
+            time_scale must be >=1.
 
         Returns
         -------
         time : float
             time of send angle vector.
         """
+        if time_scale < 1:
+            raise ValueError(
+                'time_scale must be >=1, but given: {}'.format(time_scale))
         if isinstance(time, Number):
             # Normal Number disgnated Mode
             if time < fastest_time:
@@ -202,6 +208,7 @@ class ROSRobotInterfaceBase(object):
             joint.joint_torque = effort
 
     def joint_state_callback(self, msg):
+        self._joint_state_msg = msg
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
@@ -251,6 +258,8 @@ class ROSRobotInterfaceBase(object):
         """
         tmp_actions = []
         tmp_actions_name = []
+        controller_type_actions = {}
+        controller_type_params = {}
         if create_actions:
             for controller in self.default_controller():
                 controller_action = controller['controller_action']
@@ -263,6 +272,11 @@ class ROSRobotInterfaceBase(object):
                                                 controller['action_type'])
                 tmp_actions.append(action)
                 tmp_actions_name.append(controller_action)
+                if 'controller_type' in controller:
+                    controller_type_actions[
+                        controller['controller_type']] = [action]
+                    controller_type_params[
+                        controller['controller_type']] = [controller]
             for action, action_name in zip(tmp_actions, tmp_actions_name):
                 if self.controller_timeout is None:
                     rospy.logwarn(
@@ -296,16 +310,21 @@ class ROSRobotInterfaceBase(object):
         else:  # not creating actions, just search
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
+        self.controller_param_table[controller_type] \
+            = self.default_controller()
+        self.controller_table.update(controller_type_actions)
+        self.controller_param_table.update(controller_type_params)
         return self.controller_table[controller_type]
 
     def default_controller(self):
         return [dict(
+            controller_type='fullbody_controller',
             controller_action='fullbody_controller/'
             'follow_joint_trajectory_action',
             controller_state='fullbody_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=[
-                    joint.name for joint in self.robot.joint_list])]
+                joint.name for joint in self.robot.joint_list])]
 
     def sub_angle_vector(self, v0, v1):
         """Return subtraction of angle vector
@@ -340,7 +359,7 @@ class ROSRobotInterfaceBase(object):
                      time=None,
                      controller_type=None,
                      start_time=0.0,
-                     time_scale=0.2,
+                     time_scale=5.0,
                      velocities=None):
         """Send joint angle to robot
 
@@ -363,6 +382,7 @@ class ROSRobotInterfaceBase(object):
         time_scale : float
             if time is not specified,
             it will use 1/time_scale of the fastest speed.
+            time_scale must be >=1. (default: 5.0)
 
         Returns
         -------
@@ -395,7 +415,8 @@ class ROSRobotInterfaceBase(object):
             angle_velocities = np.zeros_like(av)
         duration = time
         traj_points = [(av, angle_velocities, duration), ]
-        for action, controller_param in zip(cacts, self.default_controller()):
+        controller_params = self.controller_param_table[controller_type]
+        for action, controller_param in zip(cacts, controller_params):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
@@ -464,7 +485,7 @@ class ROSRobotInterfaceBase(object):
                               times=None,
                               controller_type=None,
                               start_time=0.0,
-                              time_scale=0.2):
+                              time_scale=5.0):
         """Send sequence of joint angles to robot
 
         Send sequence of joint angle to robot, this method retuns
@@ -491,8 +512,9 @@ class ROSRobotInterfaceBase(object):
         start_time : float
             time to start moving
         time_scale : float
-            if times is not specified, it will use 1 / time_scale of the
-            fastest speed
+            if time is not specified,
+            it will use 1/time_scale of the fastest speed.
+            time_scale must be >=1. (default: 5.0)
 
         Returns
         -------
@@ -534,14 +556,15 @@ class ROSRobotInterfaceBase(object):
                     v0 = self.sub_angle_vector(av, prev_av)
                     v1 = self.sub_angle_vector(next_av, av)
                     indices = v0 * v1 >= 0.0
-                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices] +
-                                          (1.0 / next_time) * v1[indices])
+                    vel[indices] = 0.5 * ((1.0 / time) * v0[indices]
+                                          + (1.0 / next_time) * v1[indices])
             traj_points.append((av, vel, time + next_start_time))
             next_start_time += time
             prev_av = av
 
         cacts = self.controller_table[controller_type]
-        for action, controller_param in zip(cacts, self.default_controller()):
+        controller_params = self.controller_param_table[controller_type]
+        for action, controller_param in zip(cacts, controller_params):
             self.send_ros_controller(
                 action,
                 controller_param['joint_names'],
@@ -567,7 +590,7 @@ class ROSRobotInterfaceBase(object):
         if controller_type:
             controller_actions = self.controller_table[controller_type]
         else:
-            controller_actions = self.controller_actions
+            controller_actions = self.controller_table[self.controller_type]
         for action in controller_actions:
             # TODO(simultaneously wait_for_result)
             action.wait_for_result(timeout=rospy.Duration(timeout))
@@ -591,18 +614,20 @@ class ROSRobotInterfaceBase(object):
         av_duration : float
             time of angle vector.
         """
+        if controller_type is None:
+            controller_type = self.controller_type
         unordered_joint_names = set(
             _flatten([c['joint_names']
-                      for c in self.default_controller()]))
+                      for c in self.controller_param_table[controller_type]]))
         joint_list = self.robot.joint_list
         diff_avs = self.sub_angle_vector(end_av, start_av)
         time_list = []
         for diff_angle, joint in zip(diff_avs, joint_list):
             if joint.name in unordered_joint_names:
-                if (isinstance(joint, RotationalJoint) and
-                    abs(diff_angle) < 0.0017453292519943296) or \
-                    (isinstance(joint, LinearJoint) and
-                     abs(diff_angle) < 0.01):
+                if (isinstance(joint, RotationalJoint)
+                    and abs(diff_angle) < 0.0017453292519943296) \
+                    or (isinstance(joint, LinearJoint)
+                        and abs(diff_angle) < 0.01):
                     time = 0
                 else:
                     time = 1. * abs(diff_angle) / joint.max_joint_velocity

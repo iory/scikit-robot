@@ -50,11 +50,13 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             'move_base_simple_name',
             'move_base_simple')
         self.odom_topic = kwargs.pop('odom_topic', '/base_odometry/odom')
+        self.use_tf2 = kwargs.pop('use_tf2', False)
+
         super(ROSRobotMoveBaseInterface, self).__init__(
             *args, **kwargs)
 
         self.tf_listener = TransformListener(
-            use_tf2=kwargs.pop('use_tf2', False))
+            use_tf2=self.use_tf2)
 
         self.move_base_action = actionlib.SimpleActionClient(
             self.move_base_action_name,
@@ -363,8 +365,8 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             odom = self.odom
             odom_pos = odom.translation
             odom_angle = odom.rpy_angle()[0][0]
-            diff_position = goal_position - (odom_pos +
-                                             np.array((0, 0, odom_angle)))
+            diff_position = goal_position - (
+                odom_pos + np.array((0, 0, odom_angle)))
             v = rotate_vector(
                 np.array((diff_position[0], diff_position[1], 0.0)),
                 -odom_angle, 'z') - np.array((0, 0, odom_angle))

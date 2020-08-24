@@ -63,8 +63,8 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             controller_type, timeout)
         while not rospy.is_shutdown():
             self.update_robot_state(wait_until_update=True)
-            if all(map(lambda j: j.name in self.ignore_joint_list or
-                       abs(j.joint_velocity) < 0.05
+            if all(map(lambda j: j.name in self.ignore_joint_list
+                       or abs(j.joint_velocity) < 0.05
                        if isinstance(j, RotationalJoint) else
                        abs(j.joint_velocity) < 0.001,
                        self.robot.joint_list)):
@@ -75,6 +75,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def larm_controller(self):
         return dict(
+            controller_type='larm_controller',
             controller_action='l_arm_controller/follow_joint_trajectory',
             controller_state='l_arm_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -89,6 +90,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def rarm_controller(self):
         return dict(
+            controller_type='rarm_controller',
             controller_action='r_arm_controller/follow_joint_trajectory',
             controller_state='r_arm_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -103,6 +105,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def head_controller(self):
         return dict(
+            controller_type='head_controller',
             controller_action='head_traj_controller/follow_joint_trajectory',
             controller_state='head_traj_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -111,6 +114,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def torso_controller(self):
         return dict(
+            controller_type='torso_controller',
             controller_action='torso_controller/follow_joint_trajectory',
             controller_state='torso_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,

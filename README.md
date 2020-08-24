@@ -19,6 +19,12 @@ motion planning, visualization and control.
 pip install scikit-robot
 ```
 
+If you would like to use `Pybullet Interface`,
+
+```bash
+pip install scikit-robot[all]
+```
+
 ## Features
 
 - [x] Loading robot model from URDF ([examples/robot_models.py](examples/robot_models.py))

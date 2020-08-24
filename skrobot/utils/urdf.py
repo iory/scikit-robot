@@ -771,8 +771,8 @@ class Geometry(URDFType):
     _TAG = 'geometry'
 
     def __init__(self, box=None, cylinder=None, sphere=None, mesh=None):
-        if (box is None and cylinder is None and
-                sphere is None and mesh is None):
+        if (box is None and cylinder is None
+                and sphere is None and mesh is None):
             raise ValueError('At least one geometry element must be set')
         self.box = box
         self.cylinder = cylinder
@@ -2933,14 +2933,14 @@ class URDF(URDFType):
         # Compute alphas for each time
         right_inds = np.digitize(times, bins, right=True)
         right_inds[right_inds == 0] = 1
-        alphas = ((bins[right_inds] - times) /
-                  (bins[right_inds] - bins[right_inds - 1]))
+        alphas = ((bins[right_inds] - times)
+                  / (bins[right_inds] - bins[right_inds - 1]))
 
         # Create the new interpolated trajectory
         new_ct = {}
         for k in ct_np:
-            new_ct[k] = (alphas * ct_np[k][right_inds - 1] +
-                         (1.0 - alphas) * ct_np[k][right_inds])
+            new_ct[k] = (alphas * ct_np[k][right_inds - 1]
+                         + (1.0 - alphas) * ct_np[k][right_inds])
 
         # Create the scene
         if use_collision:

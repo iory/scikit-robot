@@ -525,7 +525,10 @@ def rpy_angle(matrix):
     (array([1.57079633, 1.04719755, 0.52359878]),
      array([ 4.71238898,  2.0943951 , -2.61799388]))
     """
-    a = np.arctan2(matrix[1, 0], matrix[0, 0])
+    if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
+        a = 0.0
+    else:
+        a = np.arctan2(matrix[1, 0], matrix[0, 0])
     sa = np.sin(a)
     ca = np.cos(a)
     b = np.arctan2(-matrix[2, 0], ca * matrix[0, 0] + sa * matrix[1, 0])
@@ -622,13 +625,15 @@ def matrix2quaternion(m):
     return np.array([q0, q1, q2, q3])
 
 
-def quaternion2matrix(q):
+def quaternion2matrix(q, normalize=False):
     """Returns matrix of given quaternion.
 
     Parameters
     ----------
     quaternion : list or numpy.ndarray
         quaternion [w, x, y, z] order
+    normalize : bool
+        if normalize is True, input quaternion is normalized.
 
     Returns
     -------
@@ -644,25 +649,47 @@ def quaternion2matrix(q):
            [0., 1., 0.],
            [0., 0., 1.]])
     """
-    q0 = q[0]
-    q1 = q[1]
-    q2 = q[2]
-    q3 = q[3]
-    norm = np.linalg.norm(q)
-    if not np.isclose(norm, 1.0):
-        raise ValueError("quaternion q's norm is not 1")
-    m = np.zeros((3, 3))
-    m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
-    m[0, 1] = 2 * (q1 * q2 - q0 * q3)
-    m[0, 2] = 2 * (q1 * q3 + q0 * q2)
+    q = np.array(q)
+    if normalize:
+        q = quaternion_normalize(q)
+    else:
+        norm = quaternion_norm(q)
+        if not np.allclose(norm, 1.0):
+            raise ValueError("quaternion q's norm is not 1")
+    if q.ndim == 1:
+        q0 = q[0]
+        q1 = q[1]
+        q2 = q[2]
+        q3 = q[3]
 
-    m[1, 0] = 2 * (q1 * q2 + q0 * q3)
-    m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
-    m[1, 2] = 2 * (q2 * q3 - q0 * q1)
+        m = np.zeros((3, 3))
+        m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
+        m[0, 1] = 2 * (q1 * q2 - q0 * q3)
+        m[0, 2] = 2 * (q1 * q3 + q0 * q2)
 
-    m[2, 0] = 2 * (q1 * q3 - q0 * q2)
-    m[2, 1] = 2 * (q2 * q3 + q0 * q1)
-    m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+        m[1, 0] = 2 * (q1 * q2 + q0 * q3)
+        m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
+        m[1, 2] = 2 * (q2 * q3 - q0 * q1)
+
+        m[2, 0] = 2 * (q1 * q3 - q0 * q2)
+        m[2, 1] = 2 * (q2 * q3 + q0 * q1)
+        m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+    elif q.ndim == 2:
+        m = np.zeros((q.shape[0], 3, 3), dtype=np.float64)
+        m[:, 0, 0] = q[:, 0] * q[:, 0] + \
+            q[:, 1] * q[:, 1] - q[:, 2] * q[:, 2] - q[:, 3] * q[:, 3]
+        m[:, 0, 1] = 2 * (q[:, 1] * q[:, 2] - q[:, 0] * q[:, 3])
+        m[:, 0, 2] = 2 * (q[:, 1] * q[:, 3] + q[:, 0] * q[:, 2])
+
+        m[:, 1, 0] = 2 * (q[:, 1] * q[:, 2] + q[:, 0] * q[:, 3])
+        m[:, 1, 1] = q[:, 0] * q[:, 0] - \
+            q[:, 1] * q[:, 1] + q[:, 2] * q[:, 2] - q[:, 3] * q[:, 3]
+        m[:, 1, 2] = 2 * (q[:, 2] * q[:, 3] - q[:, 0] * q[:, 1])
+
+        m[:, 2, 0] = 2 * (q[:, 1] * q[:, 3] - q[:, 0] * q[:, 2])
+        m[:, 2, 1] = 2 * (q[:, 2] * q[:, 3] + q[:, 0] * q[:, 1])
+        m[:, 2, 2] = q[:, 0] * q[:, 0] - \
+            q[:, 1] * q[:, 1] - q[:, 2] * q[:, 2] + q[:, 3] * q[:, 3]
     return m
 
 
@@ -861,13 +888,69 @@ def rotation_matrix_from_rpy(rpy):
     return quaternion2matrix(quat_from_rpy(rpy))
 
 
+def rotation_matrix_from_axis(
+        first_axis=(1, 0, 0), second_axis=(0, 1, 0), axes='xy'):
+    """Return rotation matrix orienting first_axis
+
+    Parameters
+    ----------
+    first_axis : list or tuple or numpy.ndarray
+        direction of first axis
+    second_axis : list or tuple or numpy.ndarray
+        direction of second axis.
+        This input axis is normalized using Gram-Schmidt.
+    axes : str
+        valid inputs are 'xy', 'yx', 'xz', 'zx', 'yz', 'zy'.
+        first index indicates first_axis's axis.
+
+    Returns
+    -------
+    rotation_matrix : numpy.ndarray
+        Rotation matrix
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import rotation_matrix_from_axis
+    >>> rotation_matrix_from_axis((1, 0, 0), (0, 1, 0))
+    array([[1., 0., 0.],
+           [0., 1., 0.],
+           [0., 0., 1.]])
+    >>> rotation_matrix_from_axis((1, 1, 1), (0, 1, 0))
+    array([[ 0.57735027, -0.40824829, -0.70710678],
+           [ 0.57735027,  0.81649658,  0.        ],
+           [ 0.57735027, -0.40824829,  0.70710678]])
+    """
+    if axes not in ['xy', 'yx', 'xz', 'zx', 'yz', 'zy']:
+        raise ValueError("Valid axes are 'xy', 'yx', 'xz', 'zx', 'yz', 'zy'.")
+    e1 = normalize_vector(first_axis)
+    e2 = normalize_vector(second_axis - np.dot(second_axis, e1) * e1)
+    if axes in ['xy', 'zx', 'yz']:
+        third_axis = np.cross(e1, e2)
+    else:
+        third_axis = np.cross(e2, e1)
+    e3 = normalize_vector(
+        third_axis - np.dot(third_axis, e1) * e1 - np.dot(third_axis, e2) * e2)
+    first_index = ord(axes[0]) - ord('x')
+    second_index = ord(axes[1]) - ord('x')
+    third_index = ((first_index + 1) ^ (second_index + 1)) - 1
+    indices = [first_index, second_index, third_index]
+    return np.vstack([e1, e2, e3])[indices].T
+
+
 def rodrigues(axis, theta=None):
     """Rodrigues formula.
+
+    See: `Rodrigues' rotation formula - Wikipedia
+    <https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula>`_.
+
+    See: `Axis-angle representation - Wikipedia
+    <https://en.wikipedia.org/wiki/Axis%E2%80%93angle_representation>`_.
 
     Parameters
     ----------
     axis : numpy.ndarray or list
-        [x, y, z]
+        [x, y, z] vector.
+        You can give axis-angle representation to `axis` if `theta` is None.
     theta: float or None (optional)
         radian. If None is given, calculate theta from axis.
 
@@ -938,9 +1021,10 @@ def rotation_angle(mat):
     if abs(theta) < _EPS:
         raise ValueError('Rotation Angle is too small. \nvalue : {}'.
                          format(theta))
-    axis = 1.0 / (2 * np.sin(theta)) * \
-        np.array([mat[2, 1] - mat[1, 2], mat[0, 2] -
-                  mat[2, 0], mat[1, 0] - mat[0, 1]])
+    axis = 1.0 / (2 * np.sin(theta)) \
+        * np.array([mat[2, 1] - mat[1, 2],
+                    mat[0, 2] - mat[2, 0],
+                    mat[1, 0] - mat[0, 1]])
     return theta, axis
 
 
@@ -998,13 +1082,26 @@ def quaternion_multiply(quaternion1, quaternion0):
     >>> numpy.allclose(q, [28, -44, -14, 48])
     True
     """
-    w0, x0, y0, z0 = quaternion0
-    w1, x1, y1, z1 = quaternion1
-    return np.array((
-        -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
-        x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
-        -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
-        x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+    quaternion1 = np.array(quaternion1)
+    if quaternion1.ndim == 1:
+        w0, x0, y0, z0 = quaternion0
+        w1, x1, y1, z1 = quaternion1
+        return np.array((
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+    elif quaternion1.ndim == 2:
+        w0, x0, y0, z0 = np.split(quaternion0, 4, 1)
+        w1, x1, y1, z1 = np.split(quaternion1, 4, 1)
+        result = np.array((
+            -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
+            x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
+            -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
+            x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
+        return np.transpose(np.squeeze(result))
+    else:
+        raise ValueError
 
 
 def quaternion_conjugate(quaternion):
@@ -1027,9 +1124,15 @@ def quaternion_conjugate(quaternion):
     >>> np.allclose(quaternion_multiply(q0, q1), [1.0, 0, 0, 0])
     True
     """
-    return np.array((quaternion[0], -quaternion[1],
-                     -quaternion[2], -quaternion[3]),
-                    dtype=np.float64)
+    quaternion = np.array(quaternion, dtype=np.float64)
+    if quaternion.ndim == 1:
+        return np.array((quaternion[0], -quaternion[1],
+                         -quaternion[2], -quaternion[3]),
+                        dtype=np.float64)
+    elif quaternion.ndim == 2:
+        return quaternion * np.array([[1, -1, -1, -1]])
+    else:
+        raise ValueError
 
 
 def quaternion_inverse(quaternion):
@@ -1053,7 +1156,8 @@ def quaternion_inverse(quaternion):
     True
     """
     q = np.array(quaternion, dtype=np.float64)
-    return quaternion_conjugate(q) / np.dot(q, q)
+    return quaternion_conjugate(q) / np.sum(
+        q * q, axis=q.ndim - 1, keepdims=True)
 
 
 def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
@@ -1111,8 +1215,8 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     if abs(angle) < _EPS:
         return q0
     isin = 1.0 / sin(angle)
-    q = (sin((1.0 - fraction) * angle) * q0 +
-         sin(fraction * angle) * q1) * isin
+    q = (sin((1.0 - fraction) * angle) * q0
+         + sin(fraction * angle) * q1) * isin
     return q
 
 
@@ -1209,7 +1313,12 @@ def quaternion_norm(q):
     1.0
     """
     q = np.array(q)
-    norm_q = np.sqrt(np.dot(q.T, q))
+    if q.ndim == 1:
+        norm_q = np.sqrt(np.dot(q.T, q))
+    elif q.ndim == 2:
+        norm_q = np.sqrt(np.sum(q * q, axis=1, keepdims=True))
+    else:
+        raise ValueError
     return norm_q
 
 
@@ -1338,6 +1447,29 @@ def axis_angle_from_matrix(rotation):
     array([0.        , 1.57079633, 0.        ])
     """
     return axis_angle_from_quaternion(quat_from_rotation_matrix(rotation))
+
+
+def angle_between_vectors(v1, v2, normalize=True):
+    """Returns the smallest angle in radians between two vectors.
+
+    Parameters
+    ----------
+    v1 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    v2 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    normalize : bool
+        If normalize is True, normalize v1 and v2.
+
+    Returns
+    -------
+    theta : float
+        smallest angle between v1 and v2.
+    """
+    if normalize:
+        v1 = normalize_vector(v1)
+        v2 = normalize_vector(v2)
+    return np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
 
 
 def random_rotation():

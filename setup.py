@@ -10,7 +10,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.0.1'
+version = '0.0.8'
 
 
 if sys.argv[-1] == 'release':
@@ -52,6 +52,17 @@ with open('requirements.txt') as f:
         req = line.split('#')[0].strip()
         install_requires.append(req)
 
+# Python 2.7 and 3.4 support has been dropped from packages
+# version lock those packages here so install succeeds
+if (sys.version_info.major, sys.version_info.minor) <= (3, 4):
+    # packages that no longer support old Python
+    lock = [('pyglet', '1.4.10')]
+    for name, version in lock:
+        # remove version-free requirements
+        install_requires.remove(name)
+        # add working version locked requirements
+        install_requires.append('{}=={}'.format(name, version))
+
 setup(
     name='scikit-robot',
     version=version,
@@ -79,6 +90,11 @@ setup(
     zip_safe=False,
     setup_requires=setup_requires,
     install_requires=install_requires,
+    entry_points={
+        "console_scripts": [
+            "visualize-urdf=skrobot.apps.visualize_urdf:main"
+        ]
+    },
     extras_require={
         'all': ['pybullet>=2.1.9'],
     },
