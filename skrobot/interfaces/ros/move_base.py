@@ -444,7 +444,7 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             raise ValueError
         while self.odom_msg is None:
             rospy.sleep(0.01)
-        odom_coords = geometry_pose_to_coords(self.odom_msg.pose)
+        odom_coords = geometry_pose_to_coords(self.odom_msg.pose.pose)
         goal = control_msgs.msg.FollowJointTrajectoryActionGoal()
         msg = trajectory_msgs.msg.JointTrajectory()
         msg.joint_names = self.move_base_trajectory_joint_names
