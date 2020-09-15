@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import distutils.spawn
 import os
+import platform
 import shlex
 import subprocess
 import sys
@@ -62,6 +63,11 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 4):
         install_requires.remove(name)
         # add working version locked requirements
         install_requires.append('{}=={}'.format(name, version))
+
+uname = platform.uname()[0]
+if uname == 'Darwin':
+    # python-fcl could not install.
+    install_requires.remove('python-fcl')
 
 setup(
     name='scikit-robot',
