@@ -7,6 +7,7 @@ from skrobot.models.primitives import CameraMarker
 from skrobot.models.primitives import Cone
 from skrobot.models.primitives import Cylinder
 from skrobot.models.primitives import MeshLink
+from skrobot.models.primitives import PointCloudLink
 from skrobot.models.primitives import Sphere
 
 from skrobot.models.fetch import Fetch

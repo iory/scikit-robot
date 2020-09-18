@@ -158,3 +158,16 @@ class MeshLink(model_module.Link):
 
         super(MeshLink, self).__init__(pos=pos, rot=rot, name=name)
         self.visual_mesh = visual_mesh
+
+
+class PointCloudLink(model_module.Link):
+
+    def __init__(self,
+                 visual_mesh=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+        if name is None:
+            name = 'pointcloudlink_{}'.format(
+                str(uuid.uuid1()).replace('-', '_'))
+
+        super(PointCloudLink, self).__init__(pos=pos, rot=rot, name=name)
+        self.visual_mesh = visual_mesh
