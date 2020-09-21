@@ -604,18 +604,20 @@ class Link(CascadedCoords):
 
         Parameters
         ----------
-        mesh : None, trimesh.Trimesh, sequence of trimesh.Trimesh, or str
+        mesh : None, trimesh.Trimesh, sequence of trimesh.Trimesh,
+               trimesh.points.PointCloud or str
             A set of visual meshes for the link in the link frame.
         """
         if not (mesh is None
                 or isinstance(mesh, trimesh.Trimesh)
                 or (isinstance(mesh, collections.Sequence)
                     and all(isinstance(m, trimesh.Trimesh) for m in mesh))
+                or isinstance(mesh, trimesh.points.PointCloud)
                 or isinstance(mesh, str)):
             raise TypeError(
                 'mesh must be None, trimesh.Trimesh, sequence of '
-                'trimesh.Trimesh, or path of mesh file, but got: {}'.format(
-                    type(mesh)))
+                'trimesh.Trimesh, trimesh.points.PointCloud '
+                'or path of mesh file, but got: {}'.format(type(mesh)))
         if isinstance(mesh, str):
             mesh = trimesh.load(mesh)
         self._visual_mesh = mesh
