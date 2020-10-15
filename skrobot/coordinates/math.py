@@ -934,7 +934,7 @@ def rotation_matrix_from_axis(
     second_index = ord(axes[1]) - ord('x')
     third_index = ((first_index + 1) ^ (second_index + 1)) - 1
     indices = [first_index, second_index, third_index]
-    return np.vstack([e1, e2, e3])[indices].T
+    return np.vstack([e1, e2, e3])[np.argsort(indices)].T
 
 
 def rodrigues(axis, theta=None):
