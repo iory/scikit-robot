@@ -728,6 +728,9 @@ def matrix_log(m):
 def matrix_exponent(omega, p=1.0):
     """Returns exponent of given omega.
 
+    This function is similar to cv2.Rodrigues.
+    Convert rvec (which is log quaternion) to rotation matrix.
+
     Parameters
     ----------
     omega : list or numpy.ndarray
@@ -1388,6 +1391,27 @@ def quaternion_from_axis_angle(theta, axis):
     return np.array([w, x, y, z], dtype=np.float64)
 
 
+def rotation_vector_to_quaternion(rvec):
+    """Convert rotation vector to quaternion.
+
+    Parameters
+    ----------
+    rvec : list or numpy.ndarray
+        vector of shape (3,)
+
+    Returns
+    -------
+    q : numpy.ndarray
+        quaternion
+    """
+    rvec = np.array(rvec).reshape(-1)
+    theta = np.linalg.norm(rvec)
+    if theta == 0:
+        return np.array([1, 0, 0, 0], dtype=np.float64)
+    axis = rvec / theta
+    return quaternion_from_axis_angle(theta, axis)
+
+
 def axis_angle_from_quaternion(quat):
     """Converts a quaternion into the axis-angle representation.
 
@@ -1573,3 +1597,4 @@ quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion
 rotation_matrix_from_quat = quaternion2matrix
 rpy_from_quat = quaternion2rpy
+rvec_to_quaternion = rotation_vector_to_quaternion

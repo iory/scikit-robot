@@ -33,6 +33,7 @@ from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
+from skrobot.coordinates.math import rotation_vector_to_quaternion
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
 from skrobot.coordinates.math import rpy_matrix
@@ -417,6 +418,11 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             q,
             matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))
+
+    def test_rotation_vector_to_quaternion(self):
+        testing.assert_almost_equal(
+            [1, 0, 0, 0],
+            rotation_vector_to_quaternion([0, 0, 0]))
 
     def test_angle_between_vectors(self):
         v = (1., 1., 1.)
