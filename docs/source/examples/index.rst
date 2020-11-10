@@ -69,7 +69,7 @@ First, set the initial pose. Note that the position of the prismatic joint is in
 >>> robot_model.r_elbow_flex_joint.joint_angle(-120 * 3.14/180.0)
 >>> robot_model.r_forearm_roll_joint.joint_angle(-20 * 3.14/180.0)
 >>> robot_model.r_wrist_flex_joint.joint_angle(-30 * 3.14/180.0)
->>> robot_model.r_wrist_roll_joint.joint_angle(180 * 3.14/180.0
+>>> robot_model.r_wrist_roll_joint.joint_angle(180 * 3.14/180.0)
 >>> robot_model.head_pan_joint.joint_angle(0)
 >>> robot_model.head_tilt_joint.joint_angle(0)
 
