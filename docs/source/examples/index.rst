@@ -44,32 +44,32 @@ You have direct access to link and joint information.
 >>> robot_model.l_elbow_flex_joint.joint_angle()
 0.0
 
->>> robot_model.l_elbow_flex_joint.joint_angle(-90.0)
--90.0
+>>> robot_model.l_elbow_flex_joint.joint_angle(-0.5)
+-0.5
 
 >>> robot_model.l_elbow_flex_joint.joint_angle()
--90.0
+-0.5
 
 Inverse Kinematics
 ------------------
 
-First, set initial pose.
+First, set the initial pose. Note that the position of the prismatic joint is in [m] and angles of rotational joints are in [rad].
 
 >>> robot_model.torso_lift_joint.joint_angle(0.05)
->>> robot_model.l_shoulder_pan_joint.joint_angle(60)
->>> robot_model.l_shoulder_lift_joint.joint_angle(74)
->>> robot_model.l_upper_arm_roll_joint.joint_angle(70)
->>> robot_model.l_elbow_flex_joint.joint_angle(-120)
->>> robot_model.l_forearm_roll_joint.joint_angle(20)
->>> robot_model.l_wrist_flex_joint.joint_angle(-30)
->>> robot_model.l_wrist_roll_joint.joint_angle(180)
->>> robot_model.r_shoulder_pan_joint.joint_angle(-60)
->>> robot_model.r_shoulder_lift_joint.joint_angle(74)
->>> robot_model.r_upper_arm_roll_joint.joint_angle(-70)
->>> robot_model.r_elbow_flex_joint.joint_angle(-120)
->>> robot_model.r_forearm_roll_joint.joint_angle(-20)
->>> robot_model.r_wrist_flex_joint.joint_angle(-30)
->>> robot_model.r_wrist_roll_joint.joint_angle(180)
+>>> robot_model.l_shoulder_pan_joint.joint_angle(60 * 3.14/180.0)
+>>> robot_model.l_shoulder_lift_joint.joint_angle(74 * 3.14/180.0)
+>>> robot_model.l_upper_arm_roll_joint.joint_angle(70* 3.14/180.0)
+>>> robot_model.l_elbow_flex_joint.joint_angle(-120 * 3.14/180.0)
+>>> robot_model.l_forearm_roll_joint.joint_angle(20 * 3.14/180.0)
+>>> robot_model.l_wrist_flex_joint.joint_angle(-30 * 3.14/180.0)
+>>> robot_model.l_wrist_roll_joint.joint_angle(180 * 3.14/180.0)
+>>> robot_model.r_shoulder_pan_joint.joint_angle(-60 * 3.14/180.0)
+>>> robot_model.r_shoulder_lift_joint.joint_angle(74 * 3.14/180.0)
+>>> robot_model.r_upper_arm_roll_joint.joint_angle(-70 * 3.14/180.0)
+>>> robot_model.r_elbow_flex_joint.joint_angle(-120 * 3.14/180.0)
+>>> robot_model.r_forearm_roll_joint.joint_angle(-20 * 3.14/180.0)
+>>> robot_model.r_wrist_flex_joint.joint_angle(-30 * 3.14/180.0)
+>>> robot_model.r_wrist_roll_joint.joint_angle(180 * 3.14/180.0)
 >>> robot_model.head_pan_joint.joint_angle(0)
 >>> robot_model.head_tilt_joint.joint_angle(0)
 
@@ -90,8 +90,7 @@ Next, set move_target and link_list
 
 Set target_coords.
 
->>> target_coords = rarm_end_coords.copy_worldcoords()
->>> target_coords.translate((0.3, 0, 0), 'local')
+>>> target_coords = skrobot.coordinates.Coordinates([0.5, -0.3, 0.7], [0, 0, 0])
 >>> robot_model.inverse_kinematics(
 ...     target_coords,
 ...     link_list=link_list,
