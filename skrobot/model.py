@@ -2527,6 +2527,8 @@ class RobotModel(CascadedLink):
             coords.worldpos(),
             self.head.link_list)
 
+    from .planner import plan_trajectory
+
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     if jamm is None:
