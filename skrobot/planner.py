@@ -36,18 +36,21 @@ def plan_trajectory(self,
         initial_trajectory = np.array([av_init + i * regular_interval for i in range(n_wp)])
 
     # define forward kinematics functions
-    def compute_jacobian_wrt_baselink(av0, move_target):
+    def compute_jacobian_wrt_baselink(av0, move_target, rot_also=False):
         set_joint_angles(av0)
         base_link = self.link_list[0]
-        J = self.calc_jacobian_from_link_list([move_target], link_list, transform_coords=base_link)
-        return J, move_target.worldpos()
+        J = self.calc_jacobian_from_link_list([move_target], link_list, 
+                transform_coords=base_link,
+                rotation_axis=rot_also)
+        return J
 
     def collision_forward_kinematics(av_seq):
         points = []
         jacobs = []
         for av in av_seq:
             for collision_coords in coll_cascaded_coords_list:
-                J, pos = compute_jacobian_wrt_baselink(av, collision_coords)
+                J = compute_jacobian_wrt_baselink(av, collision_coords)
+                pos = collision_coords.worldpos()
                 points.append(pos)
                 jacobs.append(J)
         return np.vstack(points), np.vstack(jacobs)
@@ -56,7 +59,8 @@ def plan_trajectory(self,
         points = []
         jacobs = []
         for av in av_seq:
-            J, pos = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords)
+            J = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords)
+            pos = end_effector_cascaded_coords.worldpos()
             points.append(pos)
             jacobs.append(J)
         return np.vstack(points), np.vstack(jacobs)
