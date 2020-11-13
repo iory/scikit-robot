@@ -134,8 +134,8 @@ class GradBasedPlannerCommon:
 
     def fun_objective(self, x):
         Q = x.reshape(self.n_wp, self.n_dof)
-        f = (0.5 * self.A.dot(x).dot(x)).item() 
-        grad = self.A.dot(x) 
+        f = (0.5 * self.A.dot(x).dot(x)).item() / self.n_wp
+        grad = self.A.dot(x) / self.n_wp
         return f, grad
 
     def fun_ineq(self, xi):
