@@ -122,11 +122,11 @@ def scipinize(fun):
     return fun_scipinized, fun_scipinized_jac
 
 class GradBasedPlannerCommon:
-    def __init__(self, av_seq_init, n_features, collision_fk, joint_limit, sdf, sdf_margin=0.08, weights=None):
+    def __init__(self, av_seq_init, n_features, collision_fk, joint_limit, sdf, weights=None):
         self.av_seq_init = av_seq_init
         self.n_features = n_features
         self.collision_fk = collision_fk
-        self.sdf = lambda X: sdf(X) - sdf_margin
+        self.sdf = sdf
         self.n_wp, self.n_dof = av_seq_init.shape
         self.joint_limit  = joint_limit
         #w = [0.5, 0.5, 0.3, 0.1, 0.1, 0.1, 0.1]
