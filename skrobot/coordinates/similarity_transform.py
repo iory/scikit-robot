@@ -133,8 +133,8 @@ class SimilarityTransformCoordinates(CascadedCoords):
         """
         v = np.array(v, dtype=np.float64)
         if v.ndim == 2:
-            return (self.scale * np.matmul(self.rotation, v.T) +
-                    self.translation.reshape(3, -1)).T
+            return (self.scale * np.matmul(self.rotation, v.T)
+                    + self.translation.reshape(3, -1)).T
         return self.scale * np.matmul(self.rotation, v) + self.translation
 
     def inverse_transform_vector(self, vec):
@@ -153,11 +153,12 @@ class SimilarityTransformCoordinates(CascadedCoords):
         vec = np.array(vec, dtype=np.float64)
         inv_scale = 1.0 / self.scale
         if vec.ndim == 2:
-            return inv_scale * (np.matmul(self.rotation.T, vec.T) -
-                                np.matmul(
-                        self.rotation.T, self.translation).reshape(3, -1)).T
-        return inv_scale * (np.matmul(self.rotation.T, vec) -
-                            np.matmul(self.rotation.T, self.translation))
+            return inv_scale \
+                * (np.matmul(self.rotation.T, vec.T) - np.matmul(
+                    self.rotation.T, self.translation).reshape(3, -1)).T
+        return inv_scale \
+            * (np.matmul(self.rotation.T, vec)
+               - np.matmul(self.rotation.T, self.translation))
 
     def copy_coords(self):
         """Return a deep copy of the Coordinates."""

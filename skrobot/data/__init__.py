@@ -7,6 +7,10 @@ download_dir = osp.expanduser('~/.skrobot')
 data_dir = osp.abspath(osp.dirname(__file__))
 
 
+def bunny_objpath():
+    return osp.join(data_dir, 'bunny.obj')
+
+
 def fetch_urdfpath():
     gdown.cached_download(
         url='https://drive.google.com/uc?id=1y7Jc3QoVW6J072CrSNupfKpyLp4NNxuH',
