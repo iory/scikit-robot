@@ -9,6 +9,7 @@ def plan_trajectory(self,
         end_effector_cascaded_coords,
         coll_cascaded_coords_list,
         signed_distance_function,
+        rot_also=True,
         weights=None,
         initial_trajectory=None):
     """ A skrobot interface to GradBasedPlannerCommon below"""
@@ -26,7 +27,8 @@ def plan_trajectory(self,
             target_coords, 
             link_list=link_list, 
             move_target= end_effector_cascaded_coords, 
-            rotation_axis=False)
+            rotation_axis=rot_also)
+        print("target inverse kinematics solved")
         av_target = get_joint_angles()
 
         assert (res is not False), "IK to the target coords isn't solvable. \
@@ -55,24 +57,13 @@ def plan_trajectory(self,
                 jacobs.append(J)
         return np.vstack(points), np.vstack(jacobs)
 
-    def endcoord_forward_kinematics(av_seq):
-        points = []
-        jacobs = []
-        for av in av_seq:
-            J = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords)
-            pos = end_effector_cascaded_coords.worldpos()
-            points.append(pos)
-            jacobs.append(J)
-        return np.vstack(points), np.vstack(jacobs)
-
     # solve!
     opt = GradBasedPlannerCommon(initial_trajectory, 
-            target_coords.worldpos(), 
             collision_forward_kinematics, 
-            endcoord_forward_kinematics, 
             joint_limits,
             signed_distance_function,
-            weights=weights)
+            weights=weights,
+            )
     optimal_trajectory = opt.solve()
 
     return optimal_trajectory
@@ -85,7 +76,7 @@ def construct_smoothcost_fullmat(n_dof, n_wp, weights = None): # A, b and c
         A = np.zeros((n_wp, n_wp))
         for i in [1 + i for i in range(n_wp - 2)]:
             A[i-1:i+2, i-1:i+2] += acc_block # i-1 to i+1 (3x3)
-            #A[i-1:i+1, i-1:i+1] += vel_block * 2.0
+            #A[i-1:i+1, i-1:i+1] += vel_block 
         return A
 
     w_mat = np.eye(n_dof) if weights is None else np.diag(weights)
@@ -104,30 +95,20 @@ def scipinize(fun):
     return fun_scipinized, fun_scipinized_jac
 
 class GradBasedPlannerCommon:
-    def __init__(self, av_seq_init, pos_target, collision_fk, endcoord_fk, joint_limit, sdf, sdf_margin=0.08, weights=None):
+    def __init__(self, av_seq_init, collision_fk, joint_limit, sdf, sdf_margin=0.08, weights=None):
         self.av_seq_init = av_seq_init
         self.n_features = 2
         self.collision_fk = collision_fk
-        self.endcoord_fk = endcoord_fk
         self.sdf = lambda X: sdf(X) - sdf_margin
         self.n_wp, self.n_dof = av_seq_init.shape
-        self.pos_target = pos_target
         self.joint_limit  = joint_limit
         #w = [0.5, 0.5, 0.3, 0.1, 0.1, 0.1, 0.1]
         self.A = construct_smoothcost_fullmat(self.n_dof, self.n_wp, weights=weights) 
 
     def fun_objective(self, x):
         Q = x.reshape(self.n_wp, self.n_dof)
-        qe = Q[-1]
-
-        P_ef, J_ef = self.endcoord_fk([qe])
-        diff = P_ef[0] - self.pos_target
-        cost_terminal = np.linalg.norm(diff) ** 2
-        grad_cost_terminal = 2 * diff.dot(J_ef)
-
-        f = (0.5 * self.A.dot(x).dot(x)).item() + cost_terminal
+        f = (0.5 * self.A.dot(x).dot(x)).item() 
         grad = self.A.dot(x) 
-        grad[-self.n_dof:] += grad_cost_terminal # cause only final av affects the terminal cost
         return f, grad
 
     def fun_ineq(self, xi):
@@ -154,11 +135,12 @@ class GradBasedPlannerCommon:
     def fun_eq(self, xi):
         # terminal constraint
         Q = xi.reshape(self.n_wp, self.n_dof)
-        qs = Q[0]
         q_start = self.av_seq_init[0]
-        f = np.hstack((q_start - qs))
-        grad_ = np.zeros((self.n_dof * 1, self.n_dof * self.n_wp))
-        grad_[0:self.n_dof, 0:self.n_dof] = - np.eye(self.n_dof) 
+        q_end = self.av_seq_init[-1]
+        f = np.hstack((q_start - Q[0], q_end - Q[-1]))
+        grad_ = np.zeros((self.n_dof * 2, self.n_dof * self.n_wp))
+        grad_[:self.n_dof, :self.n_dof] = - np.eye(self.n_dof) 
+        grad_[-self.n_dof:, -self.n_dof:] = - np.eye(self.n_dof) 
         return f, grad_
 
     def solve(self):
