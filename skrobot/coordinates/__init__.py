@@ -19,3 +19,5 @@ from .math import normalize_vector
 from .math import rpy_angle
 from .math import rpy_matrix
 from .math import sr_inverse
+
+from .similarity_transform import SimilarityTransformCoordinates
