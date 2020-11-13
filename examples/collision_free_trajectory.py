@@ -7,30 +7,14 @@ import numpy as np
 import time 
 import copy
 from skrobot.interfaces import PybulletRobotInterface
-
-def sdf_box(b, c):
-    def sdf(X):
-        n_pts = X.shape[0]
-        dim = X.shape[1]
-        center = np.array(c).reshape(1, dim)
-        center_copied = np.repeat(center, n_pts, axis=0)
-        P = X - center_copied
-        Q = np.abs(P) - np.repeat(np.array(b).reshape(1, dim), n_pts, axis=0)
-        left__ = np.array([Q, np.zeros((n_pts, dim))])
-        left_ = np.max(left__, axis = 0)
-        left = np.sqrt(np.sum(left_**2, axis=1))
-        right_ = np.max(Q, axis=1)
-        right = np.min(np.array([right_, np.zeros(n_pts)]), axis=0)
-        return left + right 
-    return sdf
+from skrobot.utils import sdf_box
 
 def create_box(center, b, client_id):
     quat = [0, 0, 0, 1]
     vis_id = pb.createVisualShape(pb.GEOM_BOX, halfExtents=b, rgbaColor=[0.0, 1.0, 0, 0.7], physicsClientId=client_id)
     pb.createMultiBody(basePosition=center, baseOrientation=quat, baseVisualShapeIndex=vis_id)
-    sdf = sdf_box(b, center) 
+    sdf = lambda X: sdf_box(X, b, center)
     return sdf
-
 
 if __name__ == '__main__':
     try:
