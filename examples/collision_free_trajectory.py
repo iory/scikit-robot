@@ -31,14 +31,18 @@ def create_box(center, b, client_id):
     sdf = sdf_box(b, center) 
     return sdf
 
-def main():
-    robot_model = skrobot.models.urdf.RobotModelFromURDF(urdf_file=skrobot.data.pr2_urdfpath())
-    robot_model.init_pose()
-    client_id = pybullet.connect(pybullet.GUI)
-    pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI,0)
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
-    interface = PybulletRobotInterface(robot_model, connect=client_id)
-    interface.angle_vector(robot_model.angle_vector())
+
+if __name__ == '__main__':
+    try:
+        robot_model
+    except:
+        robot_model = skrobot.models.urdf.RobotModelFromURDF(urdf_file=skrobot.data.pr2_urdfpath())
+        robot_model.init_pose()
+        client_id = pybullet.connect(pybullet.GUI)
+        pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI,0)
+        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+        interface = PybulletRobotInterface(robot_model, connect=client_id)
+        interface.angle_vector(robot_model.angle_vector())
 
     link_idx_table = {}
     for link_idx in range(len(robot_model.link_list)):
@@ -64,7 +68,7 @@ def main():
     set_joint_angles(av_init)
 
     target_coords = skrobot.coordinates.Coordinates([0.7, -0.7, 1.0], [0, 0, 0])
-    sdf = create_box([0.9, -0.2, 0.9], [0.4, 0.25, 0.3], client_id)
+    sdf = create_box([0.9, -0.2, 0.9], [0.25, 0.25, 0.3], client_id)
 
     traj = robot_model.plan_trajectory(target_coords, 10, link_list, rarm_end_coords,
             [rarm_end_coords, forarm_coords], sdf,
@@ -77,6 +81,3 @@ def main():
         set_joint_angles(av)
         interface.angle_vector(robot_model.angle_vector())
         time.sleep(0.5)
-
-if __name__ == '__main__':
-    main()
