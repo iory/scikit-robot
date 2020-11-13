@@ -9,6 +9,7 @@ from skrobot.coordinates import make_coords
 from skrobot.model import calc_dif_with_axis
 from skrobot.model import joint_angle_limit_weight
 from skrobot.model import RotationalJoint
+from skrobot.utils import sdf_box
 
 
 class TestRobotModel(unittest.TestCase):
@@ -217,6 +218,50 @@ class TestRobotModel(unittest.TestCase):
             target_coords, True)
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+    def test_plan_trajectory(self):
+
+        def create_box(center, b, margin=0.0):
+            def sdf(X):
+                return sdf_box(X, b, center) - margin
+            return sdf
+        fetch = self.fetch
+        box_width = np.array([0.5, 0.3, 0.6])
+        box_center = np.array([0.9, -0.2, 0.9])
+        sdf = create_box(box_center, box_width * 0.5, margin=0.1)
+        box = skrobot.models.Box(
+            extents=box_width, face_colors=(1., 0, 0)
+        )
+        box.translate(box_center)
+
+        link_list = [fetch.link_list[3]] + fetch.link_list[6:13]
+        joint_list = [link.joint for link in link_list]
+
+        def set_joint_angles(av):
+            return [j.joint_angle(a) for j, a in zip(joint_list, av)]
+
+        av_init = [0.0, 0.58, 0.35, -0.74, -0.70, -0.17, -0.63, 0.0]
+        set_joint_angles(av_init)
+
+        target_coords = skrobot.coordinates.Coordinates(
+            [0.6, -0.7, 1.0], [0, 0, 0])
+        collision_coords_list = [skrobot.coordinates.CascadedCoords(
+            parent=link) for link in [
+                fetch.r_gripper_finger_link,
+                fetch.wrist_roll_link,
+                fetch.elbow_flex_link]]
+
+        traj = fetch.plan_trajectory(
+            target_coords, 10, link_list, fetch.end_coords,
+            collision_coords_list, sdf, rot_also=True)
+
+        X = []
+        for av in traj:
+            set_joint_angles(av)
+            for co in collision_coords_list:
+                X.append(co.worldpos())
+        eps = 1e-3
+        assert np.all(sdf(np.vstack(X)) > -eps)
 
     def test_calc_target_joint_dimension(self):
         fetch = self.fetch
