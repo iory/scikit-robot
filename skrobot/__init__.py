@@ -16,3 +16,4 @@ from skrobot import model
 from skrobot import models
 from skrobot import viewers
 from skrobot import utils
+from skrobot import sdf

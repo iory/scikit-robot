@@ -9,6 +9,7 @@ ordered_set
 pillow
 pycollada!=0.7  # required for robot model using collada
 pyglet
+pysdfgen
 python-fcl  # for collision check in trimesh module
 pyyaml
 quadprog
