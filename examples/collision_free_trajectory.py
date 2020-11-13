@@ -1,32 +1,17 @@
 #!/usr/bin/env python
 
 import skrobot
-import pybullet
-import pybullet as pb
 import numpy as np
 import time 
 import copy
-from skrobot.interfaces import PybulletRobotInterface
 from skrobot.utils import sdf_box
 
-def create_box(center, b, client_id):
-    quat = [0, 0, 0, 1]
-    vis_id = pb.createVisualShape(pb.GEOM_BOX, halfExtents=b, rgbaColor=[0.0, 1.0, 0, 0.7], physicsClientId=client_id)
-    pb.createMultiBody(basePosition=center, baseOrientation=quat, baseVisualShapeIndex=vis_id)
-    sdf = lambda X: sdf_box(X, b, center)
-    return sdf
-
 if __name__ == '__main__':
-    try:
-        robot_model
-    except:
-        robot_model = skrobot.models.urdf.RobotModelFromURDF(urdf_file=skrobot.data.pr2_urdfpath())
-        robot_model.init_pose()
-        client_id = pybullet.connect(pybullet.GUI)
-        pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI,0)
-        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
-        interface = PybulletRobotInterface(robot_model, connect=client_id)
-        interface.angle_vector(robot_model.angle_vector())
+    robot_model = skrobot.models.urdf.RobotModelFromURDF(urdf_file=skrobot.data.pr2_urdfpath())
+    robot_model.init_pose()
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    viewer.add(robot_model)
+    viewer.show()
 
     link_idx_table = {}
     for link_idx in range(len(robot_model.link_list)):
@@ -39,8 +24,8 @@ if __name__ == '__main__':
 
     link_list = [robot_model.link_list[link_idx_table[name]] for name in link_names]
     joint_list = [link.joint for link in link_list]
-    set_joint_angles = lambda av: [j.joint_angle(a) for j, a in zip(joint_list, av)]
-    get_joint_angles = lambda : np.array([j.joint_angle() for j in joint_list])
+    def set_joint_angles(av):
+        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
 
     rarm_end_coords = skrobot.coordinates.CascadedCoords(
             parent=robot_model.r_gripper_tool_frame) 
@@ -52,16 +37,24 @@ if __name__ == '__main__':
     set_joint_angles(av_init)
 
     target_coords = skrobot.coordinates.Coordinates([0.7, -0.7, 1.0], [0, 0, 0])
-    sdf = create_box([0.9, -0.2, 0.9], [0.25, 0.25, 0.3], client_id)
+    box_center = np.array([0.9, -0.2, 0.9])
+    box_width = np.array([0.5, 0.5, 0.6])
+    box = skrobot.models.Box(
+        extents=box_width, face_colors=(1., 0, 0)
+    )
+    box.translate(box_center)
+    viewer.add(box)
+    margin = 0.1
+    def sdf(X):
+        return sdf_box(X, box_width * 0.5, box_center) - margin
 
     traj = robot_model.plan_trajectory(target_coords, 10, link_list, rarm_end_coords,
             [rarm_end_coords, forarm_coords], sdf,
-            weights = [0.5, 0.5, 0.3, 0.1, 0.1, 0.1, 0.1]
             )
 
     time.sleep(1.0)
     print("show trajectory")
     for av in traj:
         set_joint_angles(av)
-        interface.angle_vector(robot_model.angle_vector())
-        time.sleep(0.5)
+        viewer.redraw()
+        time.sleep(1.0)
