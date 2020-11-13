@@ -12,7 +12,32 @@ def plan_trajectory(self,
         rot_also=True,
         weights=None,
         initial_trajectory=None):
-    """ A skrobot interface to GradBasedPlannerCommon below"""
+    """Gradient based trajectory optimization using scipy's SLSQP. Collision constraint is considered in an inequality constraits. Terminal constraint (start and end) is considered as an equality constraint.
+
+    Parameters
+    ----------
+    target_coords : skrobot.coordinates.base.Coordinates
+        target coordinate of the end effector at the final step of the trajectory
+    n_wp : int 
+        number of waypoints
+    link_list : skrobot.model.Link
+        link list to be controlled (similar to inverse_kinematics function)
+    end_effector_cascaded_coords : skrobot.coordinates.base.CascadedCoords
+        cascaded coords of the end-effector 
+    coll_cascaded_coords_list :  list[skrobot.coordinates.base.CascadedCoords]
+        list of collision cascaded coords
+    signed_distance_function : function object [2d numpy.ndarray (n_point x 3)] -> [1d numpy.ndarray (n_point)]
+    rot_also : bool
+        if enabled, rotation of the target coords is considered
+    weights : 1d numpy.ndarray 
+        cost to move of each joint. For example, if you set weights=numpy.array([1.0, 0.1, 0.1]) for a 3 DOF manipulator, moving the first joint is with high cost compared to others.
+    initial_trajectory : 2d numpy.ndarray (n_wp, n_dof)
+        If None, initial trajectory is automatically generated. If set, target_coords and n_wp are ignored. If the considered geometry is complex, you should set a feasible path as an initial solution. 
+
+    Returns
+    ------------
+    planned_trajectory : 2d numpy.ndarray (n_wp, n_dof)
+    """
 
     # common stuff
     joint_list = [link.joint for link in link_list]
