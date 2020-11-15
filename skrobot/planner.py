@@ -17,7 +17,7 @@ def util_set_robot_state(robot_model, joint_list, av, base_also=False):
         joint.joint_angle(angle)
 
 def util_get_robot_state(robot_model, joint_list, base_also=False):
-    av_joint = [j.joint_angle() for j in joint_list]
+    av_joint = np.array([j.joint_angle() for j in joint_list])
     if base_also:
         x, y, _ = robot_model.translation
         rpy = rpy_angle(robot_model.rotation)[0]
@@ -132,19 +132,25 @@ def plan_trajectory(self,
     # common stuff
     joint_list = [link.joint for link in link_list]
     joint_limits = [[j.min_angle, j.max_angle] for j in joint_list]
+    if base_also:
+        joint_limits += [[-np.inf, np.inf]]*3
+
 
     # create initial solution for the optimization problem
     if initial_trajectory is None:
         av_init = util_get_robot_state(self, joint_list, base_also)
-        res = self.inverse_kinematics(
+        res = self.inverse_kinematics_slsqp(
             target_coords,
             link_list=link_list,
             move_target=move_target,
-            rotation_axis=rot_also)
-        print("target inverse kinematics solved")
-        av_target = np.array([j.joint_angle() for j in joint_list])
-        assert (res is not False), "IK to the target coords isn't solvable. \
+            rot_also=rot_also,
+            base_also=base_also)
+        ik_success = res.fun < 1e-2
+        assert ik_success, "IK to the target coords isn't solvable. \
                 You can directry pass initial_trajectory instead."
+
+        print("target inverse kinematics solved")
+        av_target = util_get_robot_state(self, joint_list, base_also)
 
         regular_interval = (av_target - av_init) / (n_wp - 1)
         initial_trajectory = np.array(
@@ -295,14 +301,15 @@ def inverse_kinematics_slsqp(self,
     def endcoord_forward_kinematics(av):
         return util_forward_kinematics(self, link_list, av, move_target, rot_also, base_also)
 
-    av_solved = inverse_kinematics_slsqp_common(
+    res = inverse_kinematics_slsqp_common(
             av_init,
             endcoord_forward_kinematics, 
             joint_limits,
             pos_target, 
             quat_target)
+    av_solved = res.x
     util_set_robot_state(self, joint_list, av_solved, base_also)
-    return av_solved
+    return res
 
 def inverse_kinematics_slsqp_common(av_init, 
         endeffector_fk, 
@@ -337,4 +344,4 @@ def inverse_kinematics_slsqp_common(av_init,
         res = scipy.optimize.minimize(
                 f, av_init, method='SLSQP', jac=jac, bounds=joint_limits,
                 options={'ftol': 1e-4, 'disp': False})
-        return res.x
+        return res
