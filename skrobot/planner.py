@@ -2,7 +2,6 @@ import scipy
 import numpy as np
 import copy
 
-
 def plan_trajectory(self,
                     target_coords,
                     n_wp,
@@ -215,3 +214,97 @@ class GradBasedPlannerCommon:
                                       options={'ftol': 1e-4, 'disp': False})
         traj_opt = res.x.reshape(self.n_wp, self.n_dof)
         return traj_opt
+
+def inverse_kinematics_slsqp(self, 
+                             target_coords,
+                             link_list,
+                             end_effector_cascaded_coords,
+                             rot_also=True
+                             ):
+    joint_list = [link.joint for link in link_list]
+    joint_limits = [[j.min_angle, j.max_angle] for j in joint_list]
+
+    def set_joint_angles(av):
+        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
+
+    def get_joint_angles():
+        return np.array([j.joint_angle() for j in joint_list])
+
+    def compute_jacobian_wrt_baselink(av0, move_target, rot_also=False):
+        set_joint_angles(av0)
+        base_link = self.link_list[0]
+        J = self.calc_jacobian_from_link_list([move_target], link_list,
+                                              transform_coords=base_link,
+                                              rotation_axis=rot_also)
+        return J
+
+    def endcoord_forward_kinematics(av, rotalso=True):
+        def quaternion_kinematic_matrix(q):
+            # dq/dt = 0.5 * mat * omega 
+            q1, q2, q3, q4 = q
+            mat = np.array([
+                [-q2, -q3, -q4], [q1, q4, -q3], [-q4, q1, q2], [q3, -q2, q1],
+                ])
+            return mat * 0.5
+
+        J_geometric = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords, rot_also=rotalso)
+        J_geo_pos = J_geometric[:3]
+
+        pos = end_effector_cascaded_coords.worldpos()
+        if rotalso:
+            rot = end_effector_cascaded_coords.worldcoords().quaternion
+            pose = np.hstack((pos, rot))
+            kine_mat = quaternion_kinematic_matrix(rot)
+            J_geo_rot = J_geometric[3:]
+            J_geo_quat = kine_mat.dot(J_geo_rot)
+            J = np.vstack((J_geo_pos, J_geo_quat))
+        else:
+            pose = pos
+            J = J_geo_pos
+        return pose, J
+
+    pos_target = target_coords.worldpos()
+    quat_target = target_coords.worldcoords().quaternion if rot_also else None
+    av_solved = inverse_kinematics_slsqp_common(
+            get_joint_angles(), 
+            endcoord_forward_kinematics, 
+            joint_limits,
+            pos_target, 
+            quat_target)
+    set_joint_angles(av_solved)
+    return av_solved
+
+def inverse_kinematics_slsqp_common(av_init, 
+        endeffector_fk, 
+        joint_limits, 
+        pos_target, 
+        quat_target=None):
+
+        def fun_objective(av):
+            if quat_target is None:
+                position, jac = endeffector_fk(av, rotalso=False)
+                diff = position - pos_target
+                cost = np.linalg.norm(diff) ** 2
+                cost_grad = 2 * diff.dot(jac)
+            else:
+                # see below for distnace metric for quaternion
+                #https://math.stackexchange.com/questions/90081/quaternion-distance
+                pose, jac = endeffector_fk(av, rotalso=True)
+                position, rot = pose[:3], pose[3:]
+                pos_diff = position - pos_target
+                cost_position = np.linalg.norm(position - pos_target) ** 2
+                cost_position_grad = 2 * pos_diff.dot(jac[:3, :])
+
+                inpro = np.sum(rot * quat_target)
+                cost_rotation = 1 - inpro ** 2
+                cost_rotation_grad = - 2 * inpro * quat_target.dot(jac[3:, :])
+
+                cost = cost_position + cost_rotation
+                cost_grad = cost_position_grad + cost_rotation_grad
+            return cost, cost_grad
+
+        f, jac = scipinize(fun_objective)
+        res = scipy.optimize.minimize(
+                f, av_init, method='SLSQP', jac=jac, bounds=joint_limits,
+                options={'ftol': 1e-4, 'disp': False})
+        return res.x
