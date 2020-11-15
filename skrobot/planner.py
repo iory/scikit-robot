@@ -54,22 +54,16 @@ def plan_trajectory(self,
     joint_list = [link.joint for link in link_list]
     joint_limits = [[j.min_angle, j.max_angle] for j in joint_list]
 
-    def set_joint_angles(av):
-        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
-
-    def get_joint_angles():
-        return np.array([j.joint_angle() for j in joint_list])
-
     # create initial solution for the optimization problem
     if initial_trajectory is None:
-        av_init = get_joint_angles()
+        av_init = np.array([j.joint_angle() for j in joint_list])
         res = self.inverse_kinematics(
             target_coords,
             link_list=link_list,
             move_target=end_effector_cascaded_coords,
             rotation_axis=rot_also)
         print("target inverse kinematics solved")
-        av_target = get_joint_angles()
+        av_target = np.array([j.joint_angle() for j in joint_list])
 
         assert (res is not False), "IK to the target coords isn't solvable. \
                 You can directry pass initial_trajectory instead."
@@ -79,8 +73,9 @@ def plan_trajectory(self,
             [av_init + i * regular_interval for i in range(n_wp)])
 
     # define forward kinematics functions
-    def compute_jacobian_wrt_baselink(av0, move_target, rot_also=False):
-        set_joint_angles(av0)
+    def compute_jacobian_wrt_baselink(av, move_target, rot_also=False):
+        for joint, angle in zip(joint_list, av):
+            joint.joint_angle(angle)
         base_link = self.link_list[0]
         J = self.calc_jacobian_from_link_list([move_target], link_list,
                                               transform_coords=base_link,
@@ -224,21 +219,16 @@ def inverse_kinematics_slsqp(self,
     joint_list = [link.joint for link in link_list]
     joint_limits = [[j.min_angle, j.max_angle] for j in joint_list]
 
-    def set_joint_angles(av):
-        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
-
-    def get_joint_angles():
-        return np.array([j.joint_angle() for j in joint_list])
-
-    def compute_jacobian_wrt_baselink(av0, move_target, rot_also=False):
-        set_joint_angles(av0)
+    def compute_jacobian_wrt_baselink(av, move_target, rot_also=False):
+        for joint, angle in zip(joint_list, av):
+            joint.joint_angle(angle)
         base_link = self.link_list[0]
         J = self.calc_jacobian_from_link_list([move_target], link_list,
                                               transform_coords=base_link,
                                               rotation_axis=rot_also)
         return J
 
-    def endcoord_forward_kinematics(av, rotalso=True):
+    def endcoord_forward_kinematics(av, rot_also=True):
         def quaternion_kinematic_matrix(q):
             # dq/dt = 0.5 * mat * omega 
             q1, q2, q3, q4 = q
@@ -247,11 +237,11 @@ def inverse_kinematics_slsqp(self,
                 ])
             return mat * 0.5
 
-        J_geometric = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords, rot_also=rotalso)
+        J_geometric = compute_jacobian_wrt_baselink(av, end_effector_cascaded_coords, rot_also=rot_also)
         J_geo_pos = J_geometric[:3]
 
         pos = end_effector_cascaded_coords.worldpos()
-        if rotalso:
+        if rot_also:
             rot = end_effector_cascaded_coords.worldcoords().quaternion
             pose = np.hstack((pos, rot))
             kine_mat = quaternion_kinematic_matrix(rot)
@@ -263,6 +253,7 @@ def inverse_kinematics_slsqp(self,
             J = J_geo_pos
         return pose, J
 
+    av_init = np.array([j.joint_angle() for j in joint_list])
     pos_target = target_coords.worldpos()
     quat_target = target_coords.worldcoords().quaternion if rot_also else None
     av_solved = inverse_kinematics_slsqp_common(
@@ -271,7 +262,7 @@ def inverse_kinematics_slsqp(self,
             joint_limits,
             pos_target, 
             quat_target)
-    set_joint_angles(av_solved)
+    [j.joint_angle(a) for j, a in zip(joint_list, av)]
     return av_solved
 
 def inverse_kinematics_slsqp_common(av_init, 
@@ -282,14 +273,14 @@ def inverse_kinematics_slsqp_common(av_init,
 
         def fun_objective(av):
             if quat_target is None:
-                position, jac = endeffector_fk(av, rotalso=False)
+                position, jac = endeffector_fk(av, rot_also=False)
                 diff = position - pos_target
                 cost = np.linalg.norm(diff) ** 2
                 cost_grad = 2 * diff.dot(jac)
             else:
                 # see below for distnace metric for quaternion
                 #https://math.stackexchange.com/questions/90081/quaternion-distance
-                pose, jac = endeffector_fk(av, rotalso=True)
+                pose, jac = endeffector_fk(av, rot_also=True)
                 position, rot = pose[:3], pose[3:]
                 pos_diff = position - pos_target
                 cost_position = np.linalg.norm(position - pos_target) ** 2
