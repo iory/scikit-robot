@@ -798,15 +798,39 @@ class Coordinates(object):
     def rotate(self, theta, axis=None, wrt='local'):
         """Rotate this coordinate by given theta and axis.
 
+        This coordinate system is rotated relative to theta radians
+        around the `axis` axis.
+        Note that this function does not change a position of this coordinate.
+        If you want to rotate this coordinates around with world frame,
+        you can use `transform` function.
+        Please see examples.
+
         Parameters
         ----------
         theta : float
-            radian
+            relartive rotation angle in radian.
+        axis : str or None or numpy.ndarray
+            axis of rotation.
+            The value of `axis` is represented as `wrt` frame.
         wrt : string or skrobot.coordinates.Coordinates
 
         Returns
         -------
         self : skrobot.coordinates.Coordinates
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> from numpy import pi
+        >>> c = Coordinates()
+        >>> c.translate((1.0, 0, 0))
+        >>> c.rotate(pi / 2.0, 'z', wrt='local')
+        >>> c.translation
+        array([1., 0., 0.])
+
+        >>> c.transform(Coordinates().rotate(np.pi / 2.0, 'z'), wrt='world')
+        >>> c.translation
+        array([0., 1., 0.])
         """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             self.rotate_with_matrix(
