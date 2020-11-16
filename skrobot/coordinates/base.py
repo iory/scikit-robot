@@ -1107,9 +1107,10 @@ class CascadedCoords(Coordinates):
             # multiply c from the left.
             transform_coords(c, self, self)
         elif wrt == 'world':
-            transform_coords(self.parentcoords, self, self)
+            parentcoords = self.parentcoords()
+            transform_coords(parentcoords, self, self)
             transform_coords(c, self, self)
-            transform_coords(self.parentcoords.inverse_transformation(),
+            transform_coords(parentcoords.inverse_transformation(),
                              self, self)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))

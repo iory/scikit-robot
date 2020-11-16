@@ -442,3 +442,8 @@ class TestCascadedCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             b.copy_worldcoords().translation,
             (-0.2, -0.2, 0.3))
+
+        wrts = ['local', 'world', 'parent']
+        for wrt in wrts:
+            b.transform(
+                make_cascoords(pos=(-0.1, -0.2, -0.3)), wrt=wrt)
