@@ -2529,6 +2529,7 @@ class RobotModel(CascadedLink):
 
     from .planner import plan_trajectory
     from .planner import inverse_kinematics_slsqp
+    from .planner import plan_trajectory_rrt
 
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     if jamm is None:
