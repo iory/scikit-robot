@@ -3,21 +3,24 @@ from . import utils
 import matplotlib.pyplot as plt
 
 def plan_trajectory_rrt(self, 
+        av_init,
         av_goal,
         link_list,
         coll_cascaded_coords_list,
         signed_distance_function,
+        base_also=False,
         debug_plot=False
         ):
     joint_list = [link.joint for link in link_list]
-    joint_mins = [max(j.min_angle, -3.14) for j in joint_list]
-    joint_maxs = [min(j.max_angle, +3.14) for j in joint_list]
+    joint_mins = [max(j.min_angle, -3.14) for j in joint_list] # TODO tmp
+    joint_maxs = [min(j.max_angle, +3.14) for j in joint_list] # TODO tmp
+    if base_also:
+        joint_mins += [-0.5]*3 # TODO tmp
+        joint_maxs += [0.5]*3 # TODO tmp
     cspace = ConfigurationSpace(joint_mins, joint_maxs)
-    av_init = utils.get_robot_state(self, joint_list)
 
     def isValidConfiguration(av):
         rot_also = False # rotation is nothing to do with point collision
-        base_also = False # TODO tmp 
         point_list = []
         for collision_coords in coll_cascaded_coords_list:
             p = utils.forward_kinematics(self, link_list, av, collision_coords, 

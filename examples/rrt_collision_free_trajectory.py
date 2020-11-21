@@ -4,6 +4,8 @@ import skrobot
 import numpy as np
 import time
 from skrobot.utils import sdf_box
+from skrobot.planner.utils import set_robot_state
+np.random.seed(0)
 
 if __name__ == '__main__':
     robot_model = skrobot.models.urdf.RobotModelFromURDF(
@@ -27,17 +29,17 @@ if __name__ == '__main__':
                  for lname in link_names]
     joint_list = [link.joint for link in link_list]
 
-    def set_joint_angles(av):
-        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
-
     rarm_end_coords = skrobot.coordinates.CascadedCoords(
         parent=robot_model.r_gripper_tool_frame)
     forarm_coords = skrobot.coordinates.CascadedCoords(
         parent=robot_model.r_forearm_link)
 
     # set initial angle vector of rarm
+    base_also = False
     av_init = [0.58, 0.35, -0.74, -0.70, -0.17, -0.63, 0.0]
-    set_joint_angles(av_init)
+    if base_also:
+        av_init += [0.0]*3
+    set_robot_state(robot_model, joint_list, av_init, base_also=base_also)
 
     target_coords = skrobot.coordinates.Coordinates(
         [0.7, -0.7, 1.0], [0, 0, 0])
@@ -46,8 +48,9 @@ if __name__ == '__main__':
         target_coords,
         link_list=link_list,
         move_target=rarm_end_coords,
-        rot_also=True,
-        base_also=False)
+        rot_also=False,
+        base_also=base_also)
+    assert res.fun < 1e-2
     av_goal = res.x
 
     box_center = np.array([0.9, -0.2, 0.9])
@@ -63,12 +66,12 @@ if __name__ == '__main__':
         return sdf_box(X, box_width * 0.5, box_center) - margin
 
     col_links = [rarm_end_coords, forarm_coords]
-    set_joint_angles(av_init) # set av_init again
-    traj = robot_model.plan_trajectory_rrt(av_goal, link_list, col_links, sdf, debug_plot=True)
+    set_robot_state(robot_model, joint_list, av_init, base_also=base_also)
+    traj = robot_model.plan_trajectory_rrt(av_init, av_goal, link_list, col_links, sdf, debug_plot=True, base_also=base_also)
 
     time.sleep(1.0)
     print("show trajectory")
     for av in traj:
-        set_joint_angles(av)
+        set_robot_state(robot_model, joint_list, av, base_also=base_also)
         viewer.redraw()
-        time.sleep(0.2)
+        time.sleep(0.1)
