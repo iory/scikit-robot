@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 def plan_trajectory_rrt(self, 
         av_goal,
         link_list,
-        end_effector,
+        coll_cascaded_coords_list,
+        signed_distance_function,
         debug_plot=False
         ):
     joint_list = [link.joint for link in link_list]
@@ -13,9 +14,20 @@ def plan_trajectory_rrt(self,
     joint_maxs = [min(j.max_angle, +3.14) for j in joint_list]
     cspace = ConfigurationSpace(joint_mins, joint_maxs)
     av_init = utils.get_robot_state(self, joint_list)
-    pred_valid_config = lambda q : True # tmp, no obstacle
 
-    brrt = BidirectionalRRT(cspace, av_init, av_goal, pred_valid_config)
+    def isValidConfiguration(av):
+        rot_also = False # rotation is nothing to do with point collision
+        base_also = False # TODO tmp 
+        point_list = []
+        for collision_coords in coll_cascaded_coords_list:
+            p = utils.forward_kinematics(self, link_list, av, collision_coords, 
+                    rot_also=rot_also, base_also=base_also, with_jacobian=False) 
+            point_list.append(p)
+        sd_vals = signed_distance_function(np.vstack(point_list))
+        return np.all(sd_vals > 0.0)
+
+    brrt = BidirectionalRRT(cspace, av_init, av_goal, 
+            pred_valid_config=isValidConfiguration)
     av_seq = brrt.solve()
 
     if debug_plot:
@@ -38,7 +50,7 @@ class RapidlyExploringRandomTree(object):
     def __init__(self, cspace, q_start, pred_goal_condition=None, pred_valid_config=None,
             N_maxiter=30000):
         self.cspace = cspace
-        self.eps = 0.2
+        self.eps = 0.3
         self.n_resolution = 10
         self.N_maxiter = N_maxiter
 
@@ -89,8 +101,7 @@ class RapidlyExploringRandomTree(object):
             q_new = q_rand
 
         # update tree
-        q_new_reshaped = q_new.reshape(1, -1)
-        if self.isValid(q_new_reshaped):
+        if self.isValid(q_new):
             self._Q_sample[self.n_sample] = q_new
             self._idxes_parents[self.n_sample] = idx_nearest
             self.n_sample += 1
