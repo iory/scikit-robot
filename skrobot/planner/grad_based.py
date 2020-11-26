@@ -114,25 +114,10 @@ class GradBasedPlannerCommon:
 
     def fun_ineq(self, xi):
         av_seq = xi.reshape(self.n_wp, self.n_dof)
-        P_link, J_link = self.collision_fk(av_seq)
-
-        sdf_grads = np.zeros(P_link.shape)
-        F_link_cost0 = self.sdf(np.array(P_link))
-        eps = 1e-7
-        for i in range(3):
-            P_link_ = copy.copy(P_link)
-            P_link_[:, i] += eps
-            F_link_cost1 = self.sdf(np.array(P_link_))
-            sdf_grads[:, i] = (F_link_cost1 - F_link_cost0) / eps
-
-        sdf_grads = sdf_grads.reshape(self.n_wp * self.n_features, 1, 3)
-        J_link = J_link.reshape(self.n_wp * self.n_features, 3, self.n_dof)
-        J_link_list = np.matmul(sdf_grads, J_link)
-        J_link_block = J_link_list.reshape(
-            self.n_wp, self.n_features, self.n_dof)
-        J_link_full = scipy.linalg.block_diag(*list(J_link_block))
-        F_cost_full, J_cost_full = F_link_cost0, J_link_full
-        return F_cost_full, J_cost_full
+        return utils.sdf_collision_inequality_function(av_seq, 
+                self.collision_fk,
+                self.sdf,
+                self.n_features)
 
     def fun_eq(self, xi):
         # terminal constraint

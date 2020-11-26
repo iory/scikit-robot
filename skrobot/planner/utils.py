@@ -1,4 +1,6 @@
 import numpy as np
+import scipy
+import copy
 from skrobot.coordinates import CascadedCoords, Coordinates
 from skrobot.coordinates.math import rpy_matrix, rpy_angle
 
@@ -80,6 +82,27 @@ def forward_kinematics(robot_model, link_list, av, move_target, rot_also, base_a
         return pose, J
     else:
         return pose
+
+def sdf_collision_inequality_function(av_seq, collision_fk, sdf, n_feature):
+    n_wp, n_dof = av_seq.shape
+    P_link, J_link = collision_fk(av_seq)
+    sdf_grads = np.zeros(P_link.shape)
+    F_link_cost0 = sdf(np.array(P_link))
+    eps = 1e-7
+    for i in range(3):
+        P_link_ = copy.copy(P_link)
+        P_link_[:, i] += eps
+        F_link_cost1 = sdf(np.array(P_link_))
+        sdf_grads[:, i] = (F_link_cost1 - F_link_cost0) / eps
+
+    sdf_grads = sdf_grads.reshape(n_wp * n_feature, 1, 3)
+    J_link = J_link.reshape(n_wp * n_feature, 3, n_dof)
+    J_link_list = np.matmul(sdf_grads, J_link)
+    J_link_block = J_link_list.reshape(
+        n_wp, n_feature, n_dof)
+    J_link_full = scipy.linalg.block_diag(*list(J_link_block))
+    F_cost_full, J_cost_full = F_link_cost0, J_link_full
+    return F_cost_full, J_cost_full
 
 def scipinize(fun):
     closure_member = {'jac_cache': None}

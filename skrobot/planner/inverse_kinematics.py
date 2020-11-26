@@ -6,6 +6,8 @@ def inverse_kinematics_slsqp(self,
                              target_coords,
                              link_list,
                              move_target,
+                             coll_cascaded_coords_list=[],
+                             signed_distance_function=None,
                              rot_also=True,
                              base_also=False
                              ):
@@ -21,12 +23,33 @@ def inverse_kinematics_slsqp(self,
     def endcoord_forward_kinematics(av):
         return utils.forward_kinematics(self, link_list, av, move_target, rot_also, base_also)
 
+    n_feature = len(coll_cascaded_coords_list)
+    if n_feature > 0 and signed_distance_function is not None:
+        def collision_fk(av_seq):
+            points, jacobs = [], [] # TODO duplicate
+            for av in av_seq:
+                for collision_coords in coll_cascaded_coords_list:
+                    rot_also = False # rotation is nothing to do with point collision
+                    p, J = utils.forward_kinematics(self, link_list, av, collision_coords, 
+                            rot_also=rot_also, base_also=base_also) 
+                    points.append(p)
+                    jacobs.append(J)
+            return np.vstack(points), np.vstack(jacobs)
+
+        def collision_ineq_fun(av):
+            av_trajectory = av.reshape(1, -1) 
+            return utils.sdf_collision_inequality_function(
+                    av_trajectory, collision_fk, signed_distance_function, n_feature)
+    else:
+        collision_ineq_fun = None
+
     res = inverse_kinematics_slsqp_common(
             av_init,
             endcoord_forward_kinematics, 
             joint_limits,
             pos_target, 
-            quat_target)
+            quat_target,
+            collision_ineq_fun)
     av_solved = res.x
     utils.set_robot_state(self, joint_list, av_solved, base_also)
     return res
@@ -35,7 +58,9 @@ def inverse_kinematics_slsqp_common(av_init,
         endeffector_fk, 
         joint_limits, 
         pos_target, 
-        quat_target=None):
+        quat_target=None,
+        collision_ineq_fun=None
+        ):
 
         def fun_objective(av):
             if quat_target is None:
@@ -61,7 +86,17 @@ def inverse_kinematics_slsqp_common(av_init,
             return cost, cost_grad
 
         f, jac = utils.scipinize(fun_objective)
+        if collision_ineq_fun is None:
+            constraints = []
+        else:
+            ineq_const_scipy, ineq_const_jac_scipy = utils.scipinize(collision_ineq_fun)
+            ineq_dict = {'type': 'ineq', 'fun': ineq_const_scipy,
+                         'jac': ineq_const_jac_scipy}
+            constraints = [ineq_dict]
+
         res = scipy.optimize.minimize(
                 f, av_init, method='SLSQP', jac=jac, bounds=joint_limits,
-                options={'ftol': 1e-4, 'disp': False})
+                options={'ftol': 1e-4, 'disp': False}, 
+                constraints=constraints)
+
         return res
