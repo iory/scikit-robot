@@ -51,6 +51,8 @@ def plan_trajectory(self,
     if base_also:
         joint_limits += [[-np.inf, np.inf]]*3
 
+    n_feature = len(coll_cascaded_coords_list)
+
     # create initial solution for the optimization problem
     if initial_trajectory is None:
         regular_interval = (av_goal - av_start) / (n_wp - 1)
@@ -68,12 +70,13 @@ def plan_trajectory(self,
                 jacobs.append(J)
         return np.vstack(points), np.vstack(jacobs)
 
-    n_features = len(coll_cascaded_coords_list)
+    def collision_ineq_fun(av_trajectory):
+        return utils.sdf_collision_inequality_function(
+                av_trajectory, collision_fk, signed_distance_function, n_feature)
+
     opt = GradBasedPlannerCommon(initial_trajectory,
-                                 n_features,
-                                 collision_fk,
+                                 collision_ineq_fun,
                                  joint_limits,
-                                 signed_distance_function,
                                  weights=weights,
                                  )
     optimal_trajectory = opt.solve()
@@ -96,12 +99,10 @@ def construct_smoothcost_fullmat(n_dof, n_wp, weights=None):
     return Afullmat
 
 class GradBasedPlannerCommon:
-    def __init__(self, av_seq_init, n_features,
-                 collision_fk, joint_limit, sdf, weights=None):
+    def __init__(self, av_seq_init,
+                 collision_ineq_fun, joint_limit, weights=None):
         self.av_seq_init = av_seq_init
-        self.n_features = n_features
-        self.collision_fk = collision_fk
-        self.sdf = sdf
+        self.collision_ineq_fun = collision_ineq_fun
         self.n_wp, self.n_dof = av_seq_init.shape
         self.joint_limit = joint_limit
         self.A = construct_smoothcost_fullmat(
@@ -114,10 +115,7 @@ class GradBasedPlannerCommon:
 
     def fun_ineq(self, xi):
         av_seq = xi.reshape(self.n_wp, self.n_dof)
-        return utils.sdf_collision_inequality_function(av_seq, 
-                self.collision_fk,
-                self.sdf,
-                self.n_features)
+        return self.collision_ineq_fun(av_seq)
 
     def fun_eq(self, xi):
         # terminal constraint
