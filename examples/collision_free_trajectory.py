@@ -4,6 +4,7 @@ import skrobot
 import numpy as np
 import time
 from skrobot.utils import sdf_box
+from skrobot.planner.utils import get_robot_state, set_robot_state
 
 if __name__ == '__main__':
     robot_model = skrobot.models.urdf.RobotModelFromURDF(
@@ -27,9 +28,6 @@ if __name__ == '__main__':
                  for lname in link_names]
     joint_list = [link.joint for link in link_list]
 
-    def set_joint_angles(av):
-        return [j.joint_angle(a) for j, a in zip(joint_list, av)]
-
     rarm_end_coords = skrobot.coordinates.CascadedCoords(
         parent=robot_model.r_gripper_tool_frame)
     forarm_coords = skrobot.coordinates.CascadedCoords(
@@ -37,7 +35,7 @@ if __name__ == '__main__':
 
     # set initial angle vector of rarm
     av_init = [0.58, 0.35, -0.74, -0.70, -0.17, -0.63, 0.0]
-    set_joint_angles(av_init)
+    set_robot_state(robot_model, joint_list, av_init)
 
     target_coords = skrobot.coordinates.Coordinates(
         [0.7, -0.7, 1.0], [0, 0, 0])
@@ -53,13 +51,18 @@ if __name__ == '__main__':
     def sdf(X):
         return sdf_box(X, box_width * 0.5, box_center) - margin
 
+    av_start = get_robot_state(robot_model, joint_list) 
+    robot_model.inverse_kinematics_slsqp(
+            target_coords, link_list, rarm_end_coords, rot_also=True)
+    av_goal = get_robot_state(robot_model, joint_list) 
+
+    coll_coords_list = [rarm_end_coords, forarm_coords]
     traj = robot_model.plan_trajectory(
-        target_coords, 10, link_list, rarm_end_coords,
-        [rarm_end_coords, forarm_coords], sdf)
+            av_start, av_goal, link_list, coll_coords_list, sdf, 10)
 
     time.sleep(1.0)
     print("show trajectory")
     for av in traj:
-        set_joint_angles(av)
+        set_robot_state(robot_model, joint_list, av)
         viewer.redraw()
         time.sleep(1.0)

@@ -4,13 +4,12 @@ import numpy as np
 from . import utils
 
 def plan_trajectory(self,
-                    target_coords,
-                    n_wp,
+                    av_start,
+                    av_goal,
                     link_list,
-                    move_target,
                     coll_cascaded_coords_list,
                     signed_distance_function,
-                    rot_also=True,
+                    n_wp,
                     base_also=False,
                     weights=None,
                     initial_trajectory=None):
@@ -21,21 +20,18 @@ def plan_trajectory(self,
 
     Parameters
     ----------
-    target_coords : skrobot.coordinates.base.Coordinates
-        target coordinate of the end effector 
-        at the final step of the trajectory
-    n_wp : int 
-        number of waypoints
+    av_start : numpy.ndarray(n_control_dof)
+        joint angle vector at start point
+    av_start : numpy.ndarray(n_control_dof)
+        joint angle vector at goal point
     link_list : skrobot.model.Link
         link list to be controlled (similar to inverse_kinematics function)
-    move_target : skrobot.coordinates.base.CascadedCoords
-        cascaded coords of the end-effector 
     coll_cascaded_coords_list :  list[skrobot.coordinates.base.CascadedCoords]
         list of collision cascaded coords
     signed_distance_function : function object 
     [2d numpy.ndarray (n_point x 3)] -> [1d numpy.ndarray (n_point)]
-    rot_also : bool
-        if enabled, rotation of the target coords is considered
+    n_wp : int 
+        number of waypoints
     weights : 1d numpy.ndarray 
         cost to move of each joint. For example, 
         if you set weights=numpy.array([1.0, 0.1, 0.1]) for a 
@@ -43,9 +39,6 @@ def plan_trajectory(self,
         high cost compared to others.
     initial_trajectory : 2d numpy.ndarray (n_wp, n_dof)
         If None, initial trajectory is automatically generated. 
-        If set, target_coords and n_wp are ignored. 
-        If the considered geometry is complex, you should 
-        set a feasible path as an initial solution. 
 
     Returns
     ------------
@@ -58,26 +51,11 @@ def plan_trajectory(self,
     if base_also:
         joint_limits += [[-np.inf, np.inf]]*3
 
-
     # create initial solution for the optimization problem
     if initial_trajectory is None:
-        av_init = utils.get_robot_state(self, joint_list, base_also)
-        res = self.inverse_kinematics_slsqp(
-            target_coords,
-            link_list=link_list,
-            move_target=move_target,
-            rot_also=rot_also,
-            base_also=base_also)
-        ik_success = res.fun < 1e-2
-        assert ik_success, "IK to the target coords isn't solvable. \
-                You can directry pass initial_trajectory instead."
-
-        print("target inverse kinematics solved")
-        av_target = utils.get_robot_state(self, joint_list, base_also)
-
-        regular_interval = (av_target - av_init) / (n_wp - 1)
+        regular_interval = (av_goal - av_start) / (n_wp - 1)
         initial_trajectory = np.array(
-            [av_init + i * regular_interval for i in range(n_wp)])
+            [av_start + i * regular_interval for i in range(n_wp)])
 
     def collision_fk(av_seq):
         points, jacobs = [], []
