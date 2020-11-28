@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import warnings
 
 import numpy as np
 
@@ -990,13 +991,39 @@ class CascadedCoords(Coordinates):
     def descendants(self):
         return self._descendants
 
-    def assoc(self, child, c=None):
+    def assoc(self, child, relative_coords=None,
+              **kwargs):
+        """Associate child coords to this coordinate.
+
+        If `relative_coords` is `None`, the translation and rotation
+        of childcoord in the world coordinate system do not change.
+        If `relative_coords` is specified, childcoord is assoced
+        at translation and rotation of `relative_coords`.
+
+        Parameters
+        ----------
+        child : CascadedCoords
+            child coordinate.
+        relative_coords : None or Coordinates
+            child coordinate's relative coordinate.
+
+        Returns
+        -------
+        child : CascadedCoords
+            assoced child.
+        """
+        if 'c' in kwargs:
+            warnings.warn(
+                'Argument `c` is deprecated. '
+                'Please use `relative_coords` instead',
+                DeprecationWarning)
+            relative_coords = kwargs['c']
         if not (child in self.descendants):
-            if c is None:
-                c = self.worldcoords().transformation(
+            if relative_coords is None:
+                relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
             child.obey(self)
-            child.newcoords(c)
+            child.newcoords(relative_coords)
             self._descendants.append(child)
             return child
 
