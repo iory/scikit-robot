@@ -1024,8 +1024,8 @@ class CascadedCoords(Coordinates):
                 DeprecationWarning)
             relative_coords = kwargs['c']
 
-        isInvalidAssoc = (child.parent is not None) and (not force)
-        if isInvalidAssoc:
+        is_invalid_assoc = (child.parent is not None) and (not force)
+        if is_invalid_assoc:
             msg = "child already has a assoc relation with {0} \
                     to overwrite this, please specify force=True".format(
                 child.parent)
