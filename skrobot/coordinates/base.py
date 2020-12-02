@@ -983,9 +983,11 @@ class CascadedCoords(Coordinates):
                                         rot=self.rotation,
                                         hook=self.update)
 
-        if parent is not None:
-            parent.assoc(self)
         self.parent = parent
+        if parent is not None:
+            # Because we must self.parent = parent in this case,
+            # force=True is required.
+            parent.assoc(self, force=True)
 
     @property
     def descendants(self):
@@ -1035,27 +1037,17 @@ class CascadedCoords(Coordinates):
             if relative_coords is None:
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
-            child.obey(self)
+            child.parent = self
             child.newcoords(relative_coords)
             self._descendants.append(child)
             return child
-
-    def obey(self, mother):
-        if self.parent is not None:
-            self.parent.dissoc(self)
-        self.parent = mother
 
     def dissoc(self, child):
         if child in self.descendants:
             c = child.worldcoords().copy_coords()
             self._descendants.remove(child)
-            child.disobey(self)
+            child.parent = None
             child.newcoords(c)
-
-    def disobey(self, mother):
-        if self.parent == mother:
-            self.parent = None
-        return self.parent
 
     def newcoords(self, c, pos=None):
         super(CascadedCoords, self).newcoords(c, pos)
