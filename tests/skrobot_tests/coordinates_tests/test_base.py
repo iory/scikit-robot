@@ -374,7 +374,7 @@ class TestCascadedCoordinates(unittest.TestCase):
             [-0.07320508, -0.08660254, 0.05])
 
         c = make_cascoords()
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             c.assoc(b)
 
     def test_dissoc(self):

@@ -1009,7 +1009,7 @@ class CascadedCoords(Coordinates):
             child coordinate.
         relative_coords : None or Coordinates
             child coordinate's relative coordinate.
-        force : bool  
+        force : bool
             predicate for overwriting the existing assoc-relation
 
         Returns
@@ -1028,8 +1028,8 @@ class CascadedCoords(Coordinates):
         if isInvalidAssoc:
             msg = "child already has a assoc relation with {0} \
                     to overwrite this, please specify force=True".format(
-                        child.parent)
-            raise Exception(msg)
+                child.parent)
+            raise RuntimeError(msg)
 
         if not (child in self.descendants):
             if relative_coords is None:
