@@ -983,15 +983,15 @@ class CascadedCoords(Coordinates):
                                         rot=self.rotation,
                                         hook=self.update)
 
-        self.parent = parent
         if parent is not None:
-            self.parent.assoc(self)
+            parent.assoc(self)
+        self.parent = parent
 
     @property
     def descendants(self):
         return self._descendants
 
-    def assoc(self, child, relative_coords=None,
+    def assoc(self, child, relative_coords=None, force=False,
               **kwargs):
         """Associate child coords to this coordinate.
 
@@ -999,6 +999,9 @@ class CascadedCoords(Coordinates):
         of childcoord in the world coordinate system do not change.
         If `relative_coords` is specified, childcoord is assoced
         at translation and rotation of `relative_coords`.
+        By default, if child is already assoced to some other coords,
+        raise an exception. But if `force` is `True`, you can overwrite
+        the existing assoc relation.
 
         Parameters
         ----------
@@ -1006,6 +1009,8 @@ class CascadedCoords(Coordinates):
             child coordinate.
         relative_coords : None or Coordinates
             child coordinate's relative coordinate.
+        force : bool  
+            predicate for overwriting the existing assoc-relation
 
         Returns
         -------
@@ -1018,6 +1023,14 @@ class CascadedCoords(Coordinates):
                 'Please use `relative_coords` instead',
                 DeprecationWarning)
             relative_coords = kwargs['c']
+
+        isInvalidAssoc = (child.parent is not None) and (not force)
+        if isInvalidAssoc:
+            msg = "child already has a assoc relation with {0} \
+                    to overwrite this, please specify force=True".format(
+                        child.parent)
+            raise Exception(msg)
+
         if not (child in self.descendants):
             if relative_coords is None:
                 relative_coords = self.worldcoords().transformation(
