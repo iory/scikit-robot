@@ -1028,7 +1028,7 @@ class CascadedCoords(Coordinates):
 
         is_invalid_assoc = (child.parent is not None) and (not force)
         if is_invalid_assoc:
-            msg = "child already has a assoc relation with {0} \
+            msg = "child already has a assoc relation with {0}\
                     to overwrite this, please specify force=True".format(
                 child.parent)
             raise RuntimeError(msg)
