@@ -153,6 +153,16 @@ class TestRobotModel(unittest.TestCase):
                           fetch.wrist_flex_link,
                           fetch.wrist_roll_link])
 
+    def test_inverse_kinematics_args(self):
+        kuka = self.kuka
+        kuka.inverse_kinematics_args()
+        d = kuka.inverse_kinematics_args(
+            union_link_list=kuka.rarm.link_list,
+            rotation_axis=[True],
+            translation_axis=[True])
+        self.assertEqual(d['dim'], 6)
+        self.assertEqual(d['n_joint_dimension'], 7)
+
     def test_inverse_kinematics(self):
         kuka = self.kuka
         move_target = kuka.rarm.end_coords
