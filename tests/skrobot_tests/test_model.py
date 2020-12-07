@@ -88,6 +88,11 @@ class TestRobotModel(unittest.TestCase):
             ],
         )
 
+    def test_calc_inverse_kinematics_nspace_from_link_list(self):
+        kuka = self.kuka
+        kuka.calc_inverse_kinematics_nspace_from_link_list(
+            kuka.rarm.link_list)
+
     def test_find_joint_angle_limit_weight_from_union_link_list(self):
         fetch = self.fetch
         links = fetch.calc_union_link_list([fetch.rarm.link_list])
