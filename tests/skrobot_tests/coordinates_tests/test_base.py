@@ -373,6 +373,10 @@ class TestCascadedCoordinates(unittest.TestCase):
             b.worldpos(),
             [-0.07320508, -0.08660254, 0.05])
 
+        c = make_cascoords()
+        with self.assertRaises(RuntimeError):
+            c.assoc(b)
+
     def test_dissoc(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
                            pos=[0.1, 0, 0],
