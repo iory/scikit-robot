@@ -969,6 +969,8 @@ class CascadedLink(CascadedCoords):
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(
                 union_link_list)
+        if weight is None:
+            weight = np.ones(n_joint_dimension, dtype=np.float64)
         # calc null-space from joint-limit
         nspace = self.calc_nspace_from_joint_limit(
             avoid_nspace_gain, union_link_list, weight)
