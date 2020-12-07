@@ -1028,9 +1028,9 @@ class CascadedCoords(Coordinates):
 
         is_invalid_assoc = (child.parent is not None) and (not force)
         if is_invalid_assoc:
-            msg = "child already has a assoc relation with {0}\
-                    to overwrite this, please specify force=True".format(
-                child.parent)
+            msg = "child already has an assoc relation with '{0}'."\
+                " To overwrite this, please specify force=True."\
+                .format(child.parent.name)
             raise RuntimeError(msg)
 
         if not (child in self.descendants):
