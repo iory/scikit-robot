@@ -1350,8 +1350,14 @@ class CascadedLink(CascadedCoords):
             union_link_list=None,
             rotation_axis=None,
             translation_axis=None,
-            additional_jacobi_dimension=None,
+            additional_jacobi_dimension=0,
             **kwargs):
+        if union_link_list is None:
+            union_link_list = []
+        if translation_axis is None:
+            translation_axis = []
+        if rotation_axis is None:
+            rotation_axis = []
         c = self.calc_target_joint_dimension(
             union_link_list)
         # add dimensions of additonal-jacobi
@@ -1936,7 +1942,12 @@ class CascadedLink(CascadedCoords):
         return ret1
 
     def calc_union_link_list(self, link_list):
-        if not isinstance(link_list[0], list):
+        if not isinstance(link_list, list):
+            raise TypeError('Input should be `list`, get type=={}'
+                            .format(type(link_list)))
+        if len(link_list) == 0:
+            return link_list
+        elif not isinstance(link_list[0], list):
             return link_list
         elif len(link_list) == 1:
             return link_list[0]
