@@ -1,5 +1,8 @@
 import os.path as osp
+import shutil
 import unittest
+
+import numpy as np
 
 import skrobot
 import trimesh
@@ -23,6 +26,13 @@ class TestBox(unittest.TestCase):
 
     def test_init(self):
         skrobot.models.Box(extents=(1, 1, 1))
+        skrobot.models.Box(extents=(1, 1, 1), with_sdf=True)
+
+    def test_init_with_sdf(self):
+        b = skrobot.models.Box(extents=(1, 1, 1), with_sdf=True)
+        booleans, _ = b.sdf.on_surface(b.visual_mesh.vertices)
+        is_all_vertices_on_surface = np.all(booleans)
+        self.assertTrue(is_all_vertices_on_surface)
 
 
 class TestCone(unittest.TestCase):
@@ -42,6 +52,12 @@ class TestSphere(unittest.TestCase):
     def test_init(self):
         skrobot.models.Sphere(radius=1)
 
+    def test_init_with_sdf(self):
+        s = skrobot.models.Sphere(radius=1.0, with_sdf=True)
+        booleans, _ = s.sdf.on_surface(s.visual_mesh.vertices)
+        is_all_vertices_on_surface = np.all(booleans)
+        self.assertTrue(is_all_vertices_on_surface)
+
 
 class TestAnnulus(unittest.TestCase):
 
@@ -59,3 +75,16 @@ class TestMeshLink(unittest.TestCase):
         base_obj_path = osp.join(osp.dirname(skrobot.data.pr2_urdfpath()),
                                  'meshes', 'base_v0', 'base.obj')
         skrobot.models.MeshLink(base_obj_path)
+
+    def test_init_with_sdf(self):
+        home_dir = osp.expanduser("~")
+        sdf_cache_dir = osp.join(home_dir, '.skrobot', 'sdf')
+        if osp.exists(sdf_cache_dir):
+            shutil.rmtree(sdf_cache_dir)
+
+        bunny_obj_path = skrobot.data.bunny_objpath()
+        m = skrobot.models.MeshLink(bunny_obj_path, with_sdf=True, dim_grid=50)
+
+        booleans, _ = m.sdf.on_surface(m.visual_mesh.vertices)
+        is_all_vertices_on_surface = np.all(booleans)
+        self.assertTrue(is_all_vertices_on_surface)
