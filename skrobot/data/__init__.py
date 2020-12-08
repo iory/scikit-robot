@@ -15,11 +15,11 @@ def fetch_urdfpath():
         postprocess=gdown.extractall,
         quiet=True,
     )
-    return osp.join(download_dir, 'fetch_description/fetch.urdf')
+    return osp.join(download_dir, 'fetch_description', 'fetch.urdf')
 
 
 def kuka_urdfpath():
-    return osp.join(data_dir, 'kuka_description/kuka.urdf')
+    return osp.join(data_dir, 'kuka_description', 'kuka.urdf')
 
 
 def panda_urdfpath():
@@ -30,7 +30,7 @@ def panda_urdfpath():
         postprocess=gdown.extractall,
         quiet=True,
     )
-    return osp.join(download_dir, 'franka_description/panda.urdf')
+    return osp.join(download_dir, 'franka_description', 'panda.urdf')
 
 
 def pr2_urdfpath():
@@ -41,4 +41,4 @@ def pr2_urdfpath():
         postprocess=gdown.extractall,
         quiet=True,
     )
-    return osp.join(download_dir, 'pr2_description/pr2.urdf')
+    return osp.join(download_dir, 'pr2_description', 'pr2.urdf')
