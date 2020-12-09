@@ -946,9 +946,9 @@ def rotation_matrix_from_axis(
     e1 = normalize_vector(first_axis)
     e2 = normalize_vector(second_axis - np.dot(second_axis, e1) * e1)
     if axes in ['xy', 'zx', 'yz']:
-        third_axis = np.cross(e1, e2)
+        third_axis = cross_product(e1, e2)
     else:
-        third_axis = np.cross(e2, e1)
+        third_axis = cross_product(e2, e1)
     e3 = normalize_vector(
         third_axis - np.dot(third_axis, e1) * e1 - np.dot(third_axis, e2) * e2)
     first_index = ord(axes[0]) - ord('x')

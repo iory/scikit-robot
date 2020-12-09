@@ -16,6 +16,7 @@ from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
 from skrobot.coordinates import manipulability
+from skrobot.coordinates.math import cross_product
 from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
@@ -330,7 +331,7 @@ def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
         paxis, world_default_coords, child_reverse, transform_coords)
     p_diff = np.matmul(transform_coords.worldrot().T,
                        (move_target.worldpos() - child_link.worldpos()))
-    j_translation = np.cross(j_rot, p_diff)
+    j_translation = cross_product(j_rot, p_diff)
     j_translation = calc_dif_with_axis(j_translation, translation_axis)
     jacobian[row:row + len(j_translation), column] = j_translation
     j_rotation = calc_dif_with_axis(j_rot, rotation_axis)

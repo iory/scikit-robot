@@ -9,6 +9,7 @@ from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import _check_valid_translation
 from skrobot.coordinates.math import _wrap_axis
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
@@ -695,9 +696,9 @@ class Coordinates(object):
             a1 = coords1.axis(ax)
             a1_mirror = - a1
             dr1 = angle_between_vectors(a0, a1, normalize=False) \
-                * normalize_vector(np.cross(a0, a1))
+                * normalize_vector(cross_product(a0, a1))
             dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) \
-                * normalize_vector(np.cross(a0, a1_mirror))
+                * normalize_vector(cross_product(a0, a1_mirror))
             return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
 
         if rotation_axis in ['x', 'y', 'z']:
@@ -709,7 +710,7 @@ class Coordinates(object):
                 dif_rot = np.matmul(
                     self.worldrot().T,
                     angle_between_vectors(a0, a1, normalize=False)
-                    * normalize_vector(np.cross(a0, a1)))
+                    * normalize_vector(cross_product(a0, a1)))
         elif rotation_axis in ['xx', 'yy', 'zz']:
             ax = rotation_axis[0]
             a0 = self.axis(ax)
@@ -719,7 +720,7 @@ class Coordinates(object):
             dif_rot = np.matmul(
                 self.worldrot().T,
                 angle_between_vectors(a0, a2, normalize=False)
-                * normalize_vector(np.cross(a0, a2)))
+                * normalize_vector(cross_product(a0, a2)))
         elif rotation_axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
             if rotation_axis in ['xy', 'yx']:
                 ax1 = 'z'
@@ -735,7 +736,7 @@ class Coordinates(object):
             dif_rot = np.matmul(
                 self.worldrot().T,
                 angle_between_vectors(a0, a1, normalize=False)
-                * normalize_vector(np.cross(a0, a1)))
+                * normalize_vector(cross_product(a0, a1)))
             norm = np.linalg.norm(dif_rot)
             if np.isclose(norm, 0.0):
                 self_coords = self.copy_worldcoords()
@@ -746,7 +747,7 @@ class Coordinates(object):
             dif_rot = np.matmul(
                 self_coords.worldrot().T,
                 angle_between_vectors(a0, a1, normalize=False)
-                * normalize_vector(np.cross(a0, a1)))
+                * normalize_vector(cross_product(a0, a1)))
         elif rotation_axis in ['xm', 'ym', 'zm']:
             rot = coords.worldrot()
             ax = rotation_axis[0]
