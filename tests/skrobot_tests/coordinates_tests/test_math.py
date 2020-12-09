@@ -7,6 +7,7 @@ from numpy import testing
 
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_exponent
 from skrobot.coordinates.math import matrix_log
@@ -194,6 +195,11 @@ class TestMath(unittest.TestCase):
                                    np.array([[0.0, -3.0, 2.0],
                                              [3.0, 0.0, -1.0],
                                              [-2.0, 1.0, 0.0]]))
+
+    def test_cross_product(self):
+        testing.assert_array_equal(
+            cross_product([-1, 2, -3], [1, 2, 3]),
+            [12, 0, -4])
 
     def test_matrix_exponent(self):
         m1 = rotate_matrix(rotate_matrix(rotate_matrix(

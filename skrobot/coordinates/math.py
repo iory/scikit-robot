@@ -797,6 +797,24 @@ def outer_product_matrix(v):
                      [-v[1], v[0], 0]])
 
 
+def cross_product(a, b):
+    """Return cross product.
+
+    Parameters
+    ----------
+    a : numpy.ndarray
+        3-dimensional vector.
+    b : numpy.ndarray
+        3-dimensional vector.
+
+    Returns
+    -------
+    cross_prod : numpy.ndarray
+        calculated cross product
+    """
+    return np.dot(outer_product_matrix(a), b)
+
+
 def quaternion2rpy(q):
     """Returns Roll-pitch-yaw angles of a given quaternion.
 
