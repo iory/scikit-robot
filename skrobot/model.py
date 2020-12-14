@@ -639,6 +639,57 @@ class CascadedLink(CascadedCoords):
         self.joint_angle_limit_weight_maps = {}
 
         self._collision_manager = None
+        self._is_relevant_table = None
+
+    def _compute_is_relevant_table(self):
+        is_relevant_table = {}
+        for joint in self.joint_list:
+            for link in self.link_list:
+                key = (joint.name, link.name)
+                is_relevant_table[key] = False
+
+        def inner_recursion(joint, link):
+            key = (joint.name, link.name)
+            is_relevant_table[key] = True
+            is_no_childlen = len(link._child_links) == 0
+            if is_no_childlen:
+                return
+            for clink in link._child_links:
+                inner_recursion(joint, clink)
+
+        for joint in self.joint_list:
+            link = joint.child_link
+            inner_recursion(joint, link)
+        return is_relevant_table
+
+    def _is_relevant(self, joint, something):
+        """check if `joint` affects `something`
+
+        `somthing` must be at least CascadedCoords and must be
+        connected to this CascadedLink. Otherwirse, this method
+        raise AssertionError. If `something` is a decendant of `joint`,
+        which means movement of `joint` affects `something`, thus
+        this method returns `True`. Otherwise returns `False`.
+        """
+
+        assert isinstance(something, CascadedCoords),\
+            "input must be at least a cascaded coords"
+
+        def find_nearest_ancestor_link(something):
+            # back-recursively find the closest ancestor link
+            # if ancestor link is not found, return None
+            if (something is None) or (isinstance(something, Link)):
+                return something
+            return find_nearest_ancestor_link(something.parent)
+        link = find_nearest_ancestor_link(something)
+
+        found_ancestor_link = (link is not None)
+        assert found_ancestor_link, "input is not connected to the robot"
+
+        key = (joint.name, link.name)
+        if key in self._is_relevant_table:
+            return self._is_relevant_table[key]
+        return False
 
     def angle_vector(self, av=None, return_av=None):
         """Returns angle vector
@@ -1971,6 +2022,9 @@ class CascadedLink(CascadedCoords):
                                      additional_jacobi_dimension=0,
                                      n_joint_dimension=None,
                                      *args, **kwargs):
+        assert self._is_relevant_table is not None,\
+            "relevant table must be set beforehand"
+
         if link_list is None:
             link_list = self.link_list
         if rotation_axis is None:
@@ -2034,50 +2088,50 @@ class CascadedLink(CascadedCoords):
                     length = len(link_list)
                     ll = link_list.index(ul)
                     joint = ul.joint
+                    if self._is_relevant(joint, move_target):
+                        def find_parent(parent_link, link_list):
+                            if parent_link is None or parent_link in link_list:
+                                return parent_link
+                            else:
+                                return find_parent(parent_link.parent_link,
+                                                   link_list)
 
-                    def find_parent(parent_link, link_list):
-                        if parent_link is None or parent_link in link_list:
-                            return parent_link
+                        if not isinstance(joint.child_link, Link):
+                            child_reverse = False
+                        elif ((ll + 1 < length)
+                              and not joint.child_link == find_parent(
+                                  link_list[ll + 1].parent_link, link_list)):
+                            child_reverse = True
+                        elif ((ll + 1 == length)
+                              and (not joint.child_link == find_parent(
+                                  move_target.parent, link_list))):
+                            child_reverse = True
                         else:
-                            return find_parent(parent_link.parent_link,
-                                               link_list)
+                            child_reverse = False
 
-                    if not isinstance(joint.child_link, Link):
-                        child_reverse = False
-                    elif ((ll + 1 < length)
-                          and not joint.child_link == find_parent(
-                              link_list[ll + 1].parent_link, link_list)):
-                        child_reverse = True
-                    elif ((ll + 1 == length)
-                          and (not joint.child_link == find_parent(
-                              move_target.parent, link_list))):
-                        child_reverse = True
-                    else:
-                        child_reverse = False
+                        if joint.joint_dof <= 1:
+                            paxis = _wrap_axis(joint.axis)
+                        else:
+                            paxis = joint.axis
+                        child_link = joint.child_link
+                        parent_link = joint.parent_link
+                        default_coords = joint.default_coords
+                        world_default_coords = parent_link.copy_worldcoords().\
+                            transform(default_coords)
 
-                    if joint.joint_dof <= 1:
-                        paxis = _wrap_axis(joint.axis)
-                    else:
-                        paxis = joint.axis
-                    child_link = joint.child_link
-                    parent_link = joint.parent_link
-                    default_coords = joint.default_coords
-                    world_default_coords = parent_link.copy_worldcoords().\
-                        transform(default_coords)
-
-                    jacobian = joint.calc_jacobian(
-                        jacobian,
-                        row,
-                        col,
-                        joint,
-                        paxis,
-                        child_link,
-                        world_default_coords,
-                        child_reverse,
-                        move_target,
-                        transform_coord,
-                        rotation_axis,
-                        translation_axis)
+                        jacobian = joint.calc_jacobian(
+                            jacobian,
+                            row,
+                            col,
+                            joint,
+                            paxis,
+                            child_link,
+                            world_default_coords,
+                            child_reverse,
+                            move_target,
+                            transform_coord,
+                            rotation_axis,
+                            translation_axis)
                 row += self.calc_target_axis_dimension(rotation_axis,
                                                        translation_axis)
             col += joint.joint_dof
@@ -2363,6 +2417,8 @@ class RobotModel(CascadedLink):
             offset = j.mimic.offset
             joint_a.register_mimic_joint(joint_b, multiplier, offset)
 
+        self._is_relevant_table = self._compute_is_relevant_table()
+
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
         return self.inverse_kinematics(
@@ -2616,7 +2672,7 @@ def joint_angle_limit_weight(joint_list):
                 r = abs(((joint_max - joint_min) ** 2)
                         * (2.0 * joint_angle - joint_max - joint_min)
                         / (4.0 * ((joint_max - joint_angle) ** 2)
-                        * ((joint_angle - joint_min) ** 2)))
+                           * ((joint_angle - joint_min) ** 2)))
             res[i] = r
     return res
 

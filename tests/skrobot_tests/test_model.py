@@ -6,6 +6,7 @@ from numpy import testing
 import trimesh
 
 import skrobot
+from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_coords
 from skrobot.model import calc_dif_with_axis
 from skrobot.model import joint_angle_limit_weight
@@ -53,41 +54,6 @@ class TestRobotModel(unittest.TestCase):
             assert all(isinstance(m, trimesh.Trimesh)
                        for m in link.visual_mesh)
 
-    def test_calc_jacobian_from_link_list(self):
-        # must be coinside with the one computed via numerical method
-        fetch = self.fetch
-        link_list = [fetch.torso_lift_link] + fetch.rarm.link_list
-        joint_list = [l.joint for l in link_list]
-
-        def set_angle_vector_util(av):
-            for joint, angle in zip(joint_list, av):
-                joint.joint_angle(angle)
-
-        def compare(move_target):
-            # first, compute jacobian numerically
-            n_dof = len(joint_list)
-            av0 = np.array([0.3] + [-0.4] * 7)
-            set_angle_vector_util(av0)
-            pos0 = move_target.worldpos()
-
-            jac_numerical = np.zeros((3, n_dof))
-            eps = 1e-7
-            for idx in range(n_dof):
-                av1 = copy.copy(av0)
-                av1[idx] += eps
-                set_angle_vector_util(av1)
-                pos1 = move_target.worldpos()
-                jac_numerical[:, idx] = (pos1 - pos0) / eps
-
-            # second compute analytical jacobian
-            base_link = fetch.link_list[0]
-            jac_analytic = fetch.calc_jacobian_from_link_list(
-                move_target, link_list,
-                rotation_axis=None, transform_coords=base_link)
-            testing.assert_almost_equal(jac_numerical, jac_analytic, decimal=5)
-        for move_target in [fetch.rarm_end_coords] + link_list:
-            compare(move_target)
-
     def test_calc_union_link_list(self):
         fetch = self.fetch
         links = fetch.calc_union_link_list([fetch.rarm.link_list,
@@ -123,6 +89,64 @@ class TestRobotModel(unittest.TestCase):
                 'head_camera_depth_optical_frame',
             ],
         )
+
+    def test_is_relevant(self):
+        fetch = self.fetch
+        self.assertTrue(fetch._is_relevant(
+            fetch.shoulder_pan_joint, fetch.wrist_roll_link))
+        self.assertFalse(fetch._is_relevant(
+            fetch.shoulder_pan_joint, fetch.base_link))
+        self.assertTrue(fetch._is_relevant(
+            fetch.shoulder_pan_joint, fetch.rarm_end_coords))
+
+        co = make_coords()
+        with self.assertRaises(AssertionError):
+            fetch._is_relevant(fetch.shoulder_pan_joint, co)
+
+        # if it's not connceted to the robot,
+        casco = CascadedCoords()
+        with self.assertRaises(AssertionError):
+            fetch._is_relevant(fetch.shoulder_pan_joint, casco)
+
+        # but, if casco connects to the robot,
+        fetch.rarm_end_coords.assoc(casco)
+        self.assertTrue(fetch._is_relevant(
+            fetch.shoulder_pan_joint, casco))
+
+    def test_calc_jacobian_from_link_list(self):
+        # must be coinside with the one computed via numerical method
+        fetch = self.fetch
+        link_list = [fetch.torso_lift_link] + fetch.rarm.link_list
+        joint_list = [l.joint for l in link_list]
+
+        def set_angle_vector_util(av):
+            for joint, angle in zip(joint_list, av):
+                joint.joint_angle(angle)
+
+        def compare(move_target):
+            # first, compute jacobian numerically
+            n_dof = len(joint_list)
+            av0 = np.array([0.3] + [-0.4] * 7)
+            set_angle_vector_util(av0)
+            pos0 = move_target.worldpos()
+
+            jac_numerical = np.zeros((3, n_dof))
+            eps = 1e-7
+            for idx in range(n_dof):
+                av1 = copy.copy(av0)
+                av1[idx] += eps
+                set_angle_vector_util(av1)
+                pos1 = move_target.worldpos()
+                jac_numerical[:, idx] = (pos1 - pos0) / eps
+
+            # second compute analytical jacobian
+            base_link = fetch.link_list[0]
+            jac_analytic = fetch.calc_jacobian_from_link_list(
+                move_target, link_list,
+                rotation_axis=None, transform_coords=base_link)
+            testing.assert_almost_equal(jac_numerical, jac_analytic, decimal=5)
+        for move_target in [fetch.rarm_end_coords] + link_list:
+            compare(move_target)
 
     def test_calc_inverse_kinematics_nspace_from_link_list(self):
         kuka = self.kuka
