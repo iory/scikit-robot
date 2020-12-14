@@ -639,18 +639,18 @@ class CascadedLink(CascadedCoords):
         self.joint_angle_limit_weight_maps = {}
 
         self._collision_manager = None
-        self._is_relevant_table = None
+        self._relevance_predicate_table = None
 
-    def _compute_is_relevant_table(self):
-        is_relevant_table = {}
+    def _compute_relevance_predicate_table(self):
+        relevance_predicate_table = {}
         for joint in self.joint_list:
             for link in self.link_list:
                 key = (joint.name, link.name)
-                is_relevant_table[key] = False
+                relevance_predicate_table[key] = False
 
         def inner_recursion(joint, link):
             key = (joint.name, link.name)
-            is_relevant_table[key] = True
+            relevance_predicate_table[key] = True
             is_no_childlen = len(link._child_links) == 0
             if is_no_childlen:
                 return
@@ -660,7 +660,7 @@ class CascadedLink(CascadedCoords):
         for joint in self.joint_list:
             link = joint.child_link
             inner_recursion(joint, link)
-        return is_relevant_table
+        return relevance_predicate_table
 
     def _is_relevant(self, joint, something):
         """check if `joint` affects `something`
@@ -687,8 +687,8 @@ class CascadedLink(CascadedCoords):
         assert found_ancestor_link, "input is not connected to the robot"
 
         key = (joint.name, link.name)
-        if key in self._is_relevant_table:
-            return self._is_relevant_table[key]
+        if key in self._relevance_predicate_table:
+            return self._relevance_predicate_table[key]
         return False
 
     def angle_vector(self, av=None, return_av=None):
@@ -2022,7 +2022,7 @@ class CascadedLink(CascadedCoords):
                                      additional_jacobi_dimension=0,
                                      n_joint_dimension=None,
                                      *args, **kwargs):
-        assert self._is_relevant_table is not None,\
+        assert self._relevance_predicate_table is not None,\
             "relevant table must be set beforehand"
 
         if link_list is None:
@@ -2417,7 +2417,8 @@ class RobotModel(CascadedLink):
             offset = j.mimic.offset
             joint_a.register_mimic_joint(joint_b, multiplier, offset)
 
-        self._is_relevant_table = self._compute_is_relevant_table()
+        self._relevance_predicate_table = \
+            self._compute_relevance_predicate_table()
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
