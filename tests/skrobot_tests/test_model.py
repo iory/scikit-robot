@@ -1,5 +1,6 @@
 import unittest
 
+import copy
 import numpy as np
 from numpy import testing
 import trimesh
@@ -51,6 +52,41 @@ class TestRobotModel(unittest.TestCase):
             assert isinstance(link.visual_mesh, list)
             assert all(isinstance(m, trimesh.Trimesh)
                        for m in link.visual_mesh)
+
+    def test_calc_jacobian_from_link_list(self):
+        # must be coinside with the one computed via numerical method
+        fetch = self.fetch
+        link_list = [fetch.torso_lift_link] + fetch.rarm.link_list
+        joint_list = [l.joint for l in link_list]
+
+        def set_angle_vector_util(av):
+            for joint, angle in zip(joint_list, av):
+                joint.joint_angle(angle)
+
+        def compare(move_target):
+            # first, compute jacobian numerically
+            n_dof = len(joint_list)
+            av0 = np.array([0.3] + [-0.4] * 7)
+            set_angle_vector_util(av0)
+            pos0 = move_target.worldpos()
+
+            jac_numerical = np.zeros((3, n_dof))
+            eps = 1e-7
+            for idx in range(n_dof):
+                av1 = copy.copy(av0)
+                av1[idx] += eps
+                set_angle_vector_util(av1)
+                pos1 = move_target.worldpos()
+                jac_numerical[:, idx] = (pos1 - pos0) / eps
+
+            # second compute analytical jacobian
+            base_link = fetch.link_list[0]
+            jac_analytic = fetch.calc_jacobian_from_link_list(
+                move_target, link_list,
+                rotation_axis=None, transform_coords=base_link)
+            testing.assert_almost_equal(jac_numerical, jac_analytic, decimal=5)
+        for move_target in [fetch.rarm_end_coords] + link_list:
+            compare(move_target)
 
     def test_calc_union_link_list(self):
         fetch = self.fetch
