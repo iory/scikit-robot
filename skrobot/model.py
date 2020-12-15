@@ -2673,7 +2673,7 @@ def joint_angle_limit_weight(joint_list):
                 r = abs(((joint_max - joint_min) ** 2)
                         * (2.0 * joint_angle - joint_max - joint_min)
                         / (4.0 * ((joint_max - joint_angle) ** 2)
-                           * ((joint_angle - joint_min) ** 2)))
+                        * ((joint_angle - joint_min) ** 2)))
             res[i] = r
     return res
 

@@ -1,6 +1,6 @@
+import copy
 import unittest
 
-import copy
 import numpy as np
 from numpy import testing
 import trimesh
