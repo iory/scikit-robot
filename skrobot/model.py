@@ -645,11 +645,11 @@ class CascadedLink(CascadedCoords):
         relevance_predicate_table = {}
         for joint in self.joint_list:
             for link in self.link_list:
-                key = (joint.name, link.name)
+                key = (joint, link)
                 relevance_predicate_table[key] = False
 
         def inner_recursion(joint, link):
-            key = (joint.name, link.name)
+            key = (joint, link)
             relevance_predicate_table[key] = True
             is_no_childlen = len(link._child_links) == 0
             if is_no_childlen:
@@ -686,7 +686,7 @@ class CascadedLink(CascadedCoords):
         found_ancestor_link = (link is not None)
         assert found_ancestor_link, "input is not connected to the robot"
 
-        key = (joint.name, link.name)
+        key = (joint, link)
         if key in self._relevance_predicate_table:
             return self._relevance_predicate_table[key]
         return False
