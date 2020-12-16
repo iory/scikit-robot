@@ -1,6 +1,7 @@
 # scikit-robot: A Flexible Framework for Robot Control in Python
 
-[![Build Status](https://travis-ci.com/iory/scikit-robot.svg?token=zM5rExyvuRoJThsnqHAF&branch=master)](https://travis-ci.com/iory/scikit-robot)
+[![Build Status](https://github.com/iory/scikit-robot/workflows/Run%20Tests/badge.svg?branch=master)](https://github.com/iory/scikit-robot/actions)
+
 
 <h4>
     <a href="https://scikit-robot.readthedocs.io/en/latest/">Documentation</a> |
