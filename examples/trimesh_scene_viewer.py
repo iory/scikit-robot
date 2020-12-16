@@ -24,7 +24,7 @@ def main():
     viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 
     # base plane
-    plane = skrobot.models.Box(
+    plane = skrobot.model.Box(
         extents=(2, 2, 0.01), face_colors=(0.75, 0.75, 0.75)
     )
     viewer.add(plane)
@@ -35,7 +35,7 @@ def main():
 
     viewer.show()
 
-    box = skrobot.models.Box(
+    box = skrobot.model.Box(
         extents=(0.05, 0.05, 0.05), face_colors=(1., 0, 0)
     )
     box.translate((0.5, 0, 0.3))

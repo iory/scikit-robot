@@ -4,9 +4,9 @@ import numpy as np
 
 import skrobot
 from skrobot.coordinates.math import rotation_matrix_from_axis
-from skrobot.models import Axis
-from skrobot.models import Box
-from skrobot.models import MeshLink
+from skrobot.model import Axis
+from skrobot.model import Box
+from skrobot.model import MeshLink
 from skrobot.sdf import UnionSDF
 
 b = Box(extents=[0.05, 0.1, 0.05], with_sdf=True)
