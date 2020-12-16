@@ -1499,30 +1499,9 @@ class CascadedLink(CascadedCoords):
                      rotation_axes,
                      translation_axes):
                 if ul in link_list:
-                    length = len(link_list)
-                    ll = link_list.index(ul)
                     joint = ul.joint
+
                     if self._is_relevant(joint, move_target):
-                        def find_parent(parent_link, link_list):
-                            if parent_link is None or parent_link in link_list:
-                                return parent_link
-                            else:
-                                return find_parent(parent_link.parent_link,
-                                                   link_list)
-
-                        if not isinstance(joint.child_link, Link):
-                            child_reverse = False
-                        elif ((ll + 1 < length)
-                              and not joint.child_link == find_parent(
-                                  link_list[ll + 1].parent_link, link_list)):
-                            child_reverse = True
-                        elif ((ll + 1 == length)
-                              and (not joint.child_link == find_parent(
-                                  move_target.parent, link_list))):
-                            child_reverse = True
-                        else:
-                            child_reverse = False
-
                         if joint.joint_dof <= 1:
                             paxis = _wrap_axis(joint.axis)
                         else:
@@ -1541,7 +1520,6 @@ class CascadedLink(CascadedCoords):
                             paxis,
                             child_link,
                             world_default_coords,
-                            child_reverse,
                             move_target,
                             transform_coord,
                             rotation_axis,
