@@ -302,11 +302,11 @@ class FixedJoint(Joint):
 
 
 def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
-                             world_default_coords, child_reverse,
+                             world_default_coords,
                              move_target, transform_coords, rotation_axis,
                              translation_axis):
     j_rot = calc_jacobian_default_rotate_vector(
-        paxis, world_default_coords, child_reverse, transform_coords)
+        paxis, world_default_coords, transform_coords)
     p_diff = np.matmul(transform_coords.worldrot().T,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = cross_product(j_rot, p_diff)
@@ -321,11 +321,11 @@ def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
 
 def calc_jacobian_linear(jacobian, row, column,
                          joint, paxis, child_link,
-                         world_default_coords, child_reverse,
+                         world_default_coords,
                          move_target, transform_coords,
                          rotation_axis, translation_axis):
     j_trans = calc_jacobian_default_rotate_vector(
-        paxis, world_default_coords, child_reverse, transform_coords)
+        paxis, world_default_coords, transform_coords)
     j_rot = np.array([0, 0, 0])
     j_trans = calc_dif_with_axis(j_trans, translation_axis)
     jacobian[row:row + len(j_trans), column] = j_trans
@@ -337,13 +337,9 @@ def calc_jacobian_linear(jacobian, row, column,
 
 
 def calc_jacobian_default_rotate_vector(
-        paxis, world_default_coords, child_reverse,
+        paxis, world_default_coords,
         transform_coords):
-    if child_reverse:
-        sign = -1.0
-    else:
-        sign = 1.0
-    v = sign * normalize_vector(world_default_coords.rotate_vector(paxis))
+    v = normalize_vector(world_default_coords.rotate_vector(paxis))
     return np.dot(transform_coords.worldrot().T, v)
 
 
@@ -469,22 +465,22 @@ class OmniWheelJoint(Joint):
     def calc_jacobian(self,
                       jacobian, row, column,
                       joint, paxis, child_link,
-                      world_default_coords, child_reverse,
+                      world_default_coords,
                       move_target, transform_coords,
                       rotation_axis, translation_axis):
         calc_jacobian_linear(jacobian, row, column + 0,
                              joint, [1, 0, 0], child_link,
-                             world_default_coords, child_reverse,
+                             world_default_coords,
                              move_target, transform_coords,
                              rotation_axis, translation_axis)
         calc_jacobian_linear(jacobian, row, column + 1,
                              joint, [0, 1, 0], child_link,
-                             world_default_coords, child_reverse,
+                             world_default_coords,
                              move_target, transform_coords,
                              rotation_axis, translation_axis)
         calc_jacobian_rotational(jacobian, row, column + 2,
                                  joint, [0, 0, 1], child_link,
-                                 world_default_coords, child_reverse,
+                                 world_default_coords,
                                  move_target, transform_coords,
                                  rotation_axis, translation_axis)
         return jacobian
