@@ -35,7 +35,7 @@ def main():
                 robot = robots[i * nrow + j]
             except IndexError:
                 break
-            plane = skrobot.models.Box(extents=(row - 0.01, col - 0.01, 0.01))
+            plane = skrobot.model.Box(extents=(row - 0.01, col - 0.01, 0.01))
             plane.translate((row * i, col * j, -0.01))
             viewer.add(plane)
             robot.translate((row * i, col * j, 0))
