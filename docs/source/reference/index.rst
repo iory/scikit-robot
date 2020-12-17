@@ -13,3 +13,4 @@ API Reference
    functions
    interfaces
    sdfs
+   planner
