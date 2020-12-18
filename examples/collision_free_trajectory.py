@@ -6,8 +6,8 @@ import numpy as np
 import skrobot
 from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
-from skrobot.planner import sqp_plan_trajectory
-from skrobot.planner import SweptSphereSdfCollisionChecker
+from skrobot.planner import tinyfk_sqp_plan_trajectory
+from skrobot.planner import TinyfkSweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
@@ -53,13 +53,13 @@ robot_model.inverse_kinematics(
 av_goal = get_robot_config(robot_model, joint_list, with_base=with_base)
 
 # collision checker setup
-sscc = SweptSphereSdfCollisionChecker(lambda X: box.sdf(X), robot_model)
+sscc = TinyfkSweptSphereSdfCollisionChecker(lambda X: box.sdf(X), robot_model)
 for link in coll_link_list:
     sscc.add_collision_link(link)
 
 # motion planning
 ts = time.time()
-av_seq = sqp_plan_trajectory(
+av_seq = tinyfk_sqp_plan_trajectory(
     sscc, av_start, av_goal, joint_list, 10,
     safety_margin=1e-2, with_base=with_base)
 print("solving time : {0} sec".format(time.time() - ts))
