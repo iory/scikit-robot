@@ -19,3 +19,4 @@ six
 trimesh>=3.5.20
 sphinx==1.8.2
 sphinx_rtd_theme
+repoze.lru;python_version<"3.2"

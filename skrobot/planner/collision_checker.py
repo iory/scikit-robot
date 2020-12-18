@@ -93,7 +93,7 @@ class SweptSphereSdfCollisionChecker(object):
 
         Returns
         -------
-        dists : numpy.array(n_sphere,)
+        dists : numpy.ndarray(n_sphere,)
             array of the signed distances for each sphere against sdf.
         """
 
@@ -186,7 +186,7 @@ class SweptSphereSdfCollisionChecker(object):
         ----------
         pts_batch : numpy.ndarray(n_wp, n_feature, 3)
             all feature points in a trajectory.
-        jac_batch : Union[numpy.ndarray(n_wp, n_feature, 3, n_dof), None]
+        jac_batch : numpy.ndarray(n_wp, n_feature, 3, n_dof) or None
             jacobians for all feature points in a trajectory. If set to
             None, jacobian for `pts_batch` will not be computed.
 
