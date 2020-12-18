@@ -82,6 +82,7 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_coords_list.extend(coords_list)
         self.coll_radius_list.extend([R] * len(sphere_list))
         self.n_feature = len(self.coll_coords_list)
+        return centers, coords_list, sphere_list, R
 
     def update_color(self):  # for debugging
         """Update the color of links under collision
