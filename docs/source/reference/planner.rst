@@ -2,13 +2,22 @@ Planning
 ========
 
 Sdf-swept-sphere-based collision checker
---------------------------------------------
+----------------------------------------
 
 .. autosummary::
    :toctree: generated/
    :nosignatures:
 
    skrobot.planner.SweptSphereSdfCollisionChecker
+
+SQP-based trajectory planner
+----------------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   skrobot.planner.sqp_plan_trajectory
 
 Swept sphere generater 
 ----------------------
@@ -25,6 +34,7 @@ Planner utils
    :toctree: generated/
    :nosignatures:
 
+   skrobot.planner.utils.scipinize
    skrobot.planner.utils.set_robot_config
    skrobot.planner.utils.get_robot_config
    skrobot.planner.utils.forward_kinematics_multi
