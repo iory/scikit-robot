@@ -148,7 +148,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        self._qr : np.narray
+        self._qr : numpy.narray
             [w, x, y, z] order
         """
         return self._qr
@@ -217,7 +217,7 @@ class DualQuaternion(object):
 
         Returns
         -------
-        (qr_norm, qd_norm) : tuple of float
+        qr_norm, qd_norm : tuple(float, float)
             qr and qd's norm
 
         Examples
@@ -340,11 +340,9 @@ class DualQuaternion(object):
 
         Returns
         -------
-        screw_axis : numpy.ndarray
+        screw_axis, theta, translation : tuple(numpy.ndarray, float, float)
             screw axis of this dual quaternion.
-        theta : float
             rotation angle in radian.
-        translation : float
             translation
         """
         qr_w = self.qr.w

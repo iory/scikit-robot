@@ -363,12 +363,17 @@ def midrot(p, r1, r2):
 def transform(m, v):
     """Return transform m v
 
-    Args:
-        m (numpy.ndarray): 3 x 3 matrix
-        v (numpy.ndarray or list): vector
+    Parameters
+    ----------
+    m : numpy.ndarray
+        3 x 3 rotation matrix.
+    v  : numpy.ndarray or list
+        input vector.
 
-    Returns:
-        numpy.array vector
+    Returns
+    -------
+    np.matmul(m, v) : numpy.ndarray
+        transformed vector.
     """
     m = np.array(m)
     v = np.array(v)
@@ -385,7 +390,7 @@ def rotation_matrix(theta, axis):
     ----------
     theta : float
         radian
-    axis : string or list or numpy.ndarray
+    axis : str or list or numpy.ndarray
         rotation axis such that 'x', 'y', 'z'
         [0, 0, 1], [0, 1, 0], [1, 0, 0]
 
@@ -429,7 +434,7 @@ def rotate_vector(vec, theta, axis):
         target vector
     theta : float
         rotation angle
-    axis : list or numpy.ndarray or string.
+    axis : list or numpy.ndarray or str
         axis of rotation.
 
     Returns
@@ -509,7 +514,7 @@ def rpy_angle(matrix):
 
     Returns
     -------
-    rpy : numpy.ndarray
+    rpy : tuple(numpy.ndarray, numpy.ndarray)
         pair of rpy in yaw-pitch-roll order.
 
     Examples
@@ -1021,10 +1026,8 @@ def rotation_angle(mat):
 
     Returns
     -------
-    theta : float
-        rotation angle in radian
-    axis : numpy.ndarray
-        rotation axis
+    theta, axis : tuple(float, numpy.ndarray)
+        rotation angle in radian and rotation axis
 
     Examples
     --------
