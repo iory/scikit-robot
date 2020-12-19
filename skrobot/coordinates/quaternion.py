@@ -152,7 +152,7 @@ class Quaternion(object):
 
         Returns
         -------
-        self.q[1:] : numpy.ndarray
+        quaternion_xyz : numpy.ndarray
             xyz elements of this quaternion
         """
         return self.q[1:]

@@ -92,7 +92,7 @@ class Coordinates(object):
         we can take 3x3 rotation matrix or
         [yaw, pitch, roll] or
         quaternion [w, x, y, z] order
-    name : string or None
+    name : str or None
         name of this coordinates
     """
 
@@ -129,7 +129,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self._rotation : np.ndarray
+        self._rotation : numpy.ndarray
             3x3 rotation matrix
 
         Examples
@@ -158,7 +158,7 @@ class Coordinates(object):
 
         Parameters
         ----------
-        rotation : list or np.ndarray
+        rotation : list or numpy.ndarray
             we can take 3x3 rotation matrix or
             rpy angle [yaw, pitch, roll] or
             quaternion [w, x, y, z] order
@@ -192,7 +192,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self._translation : np.ndarray
+        self._translation : numpy.ndarray
             vector shape of (3, ). unit is [m]
 
         Examples
@@ -216,7 +216,7 @@ class Coordinates(object):
 
         Parameters
         ----------
-        translation : list or tuple or np.ndarray
+        translation : list or tuple or numpy.ndarray
             shape of (3,) translation vector
         """
         # Convert lists to translation arrays
@@ -232,7 +232,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self._name : string
+        self._name : str
             name of this coordinate
         """
         return self._name
@@ -243,7 +243,7 @@ class Coordinates(object):
 
         Parameters
         ----------
-        name : string
+        name : str
             name of this coordinate
         """
         if not isinstance(name, str):
@@ -282,9 +282,9 @@ class Coordinates(object):
 
         Parameters
         ----------
-        vec : list or np.ndarray
+        vec : list or numpy.ndarray
             shape of (3,) translation vector. unit is [m] order.
-        wrt : string or Coordinates (optional)
+        wrt : str or Coordinates (optional)
             translate with respect to wrt.
 
         Examples
@@ -416,7 +416,7 @@ class Coordinates(object):
 
         Returns
         -------
-        matrix : np.ndarray
+        matrix : numpy.ndarray
             homogeneous transformation matrix shape of (4, 4)
 
         Examples
@@ -452,7 +452,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self._q : np.ndarray
+        self._q : numpy.ndarray
             [w, x, y, z] quaternion
 
         Examples
@@ -500,11 +500,12 @@ class Coordinates(object):
 
         Parameters
         ----------
-        v : np.ndarray
+        v : numpy.ndarray
             vector shape of (3,)
 
-        Returns:
-        np.matmul(self.rotation, v) : np.ndarray
+        Returns
+        -------
+        np.matmul(self.rotation, v) : numpy.ndarray
             rotated vector
 
         Examples
@@ -521,18 +522,18 @@ class Coordinates(object):
         return np.matmul(v, self.rotation)
 
     def transform(self, c, wrt='local'):
-        """Transform this coordinate by coords based on wrt
+        """Transform this coordinates by coords based on wrt
 
-        Note that this function changes this coordinate's
+        Note that this function changes this coordinates
         translation and rotation.
-        If you would like not to change this coordinate,
+        If you would like not to change this coordinates,
         Please use copy_worldcoords()
 
         Parameters
         ----------
         c : skrobot.coordinates.Coordinates
             coordinate
-        wrt : string or skrobot.coordinates.Coordinates
+        wrt : str or skrobot.coordinates.Coordinates
             If wrt is 'local' or self, multiply c from the right.
             If wrt is 'world' or 'parent' or self.parent,
             transform c with respect to worldcoord.
@@ -585,7 +586,7 @@ class Coordinates(object):
 
         Returns
         -------
-        rpy_angle(self.rotation) : tuple of np.ndarray
+        rpy_angle(self.rotation) : tuple(numpy.ndarray, numpy.ndarray)
             a pair of rpy angles. See also skrobot.coordinates.math.rpy_angle
 
         Examples
@@ -771,9 +772,10 @@ class Coordinates(object):
 
         Parameters
         ----------
-        mat : np.ndarray
+        mat : numpy.ndarray
             rotation matrix shape of (3, 3)
-        wrt : string or skrobot.coordinates.Coordinates
+        wrt : str or skrobot.coordinates.Coordinates
+            with respect to.
 
         Returns
         -------
@@ -814,7 +816,7 @@ class Coordinates(object):
         axis : str or None or numpy.ndarray
             axis of rotation.
             The value of `axis` is represented as `wrt` frame.
-        wrt : string or skrobot.coordinates.Coordinates
+        wrt : str or skrobot.coordinates.Coordinates
 
         Returns
         -------
@@ -880,7 +882,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self.rotation : np.ndarray
+        self.rotation : numpy.ndarray
             rotation matrix of this coordinate
         """
         return self.rotation
@@ -892,7 +894,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self.translation : np.ndarray
+        self.translation : numpy.ndarray
             translation of this coordinate
         """
         return self.translation
@@ -1101,9 +1103,9 @@ class CascadedCoords(Coordinates):
         ----------
         theta : float
             radian
-        axis : string or numpy.ndarray
+        axis : str or numpy.ndarray
             'x', 'y', 'z' or vector
-        wrt : string or Coordinates
+        wrt : str or Coordinates
 
         Returns
         -------
