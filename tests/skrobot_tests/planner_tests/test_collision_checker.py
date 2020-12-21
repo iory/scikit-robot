@@ -6,7 +6,7 @@ from numpy import testing
 
 import skrobot
 from skrobot.model.primitives import Box
-from skrobot.planner import SweptSphereSdfCollisionChecker
+from skrobot.planner import TinyfkSweptSphereSdfCollisionChecker
 from skrobot.planner.utils import set_robot_config
 
 
@@ -56,7 +56,7 @@ class TestCollisionChecker(unittest.TestCase):
                      for lname in link_names]
         joint_list = [l.joint for l in link_list]
 
-        coll_checker = SweptSphereSdfCollisionChecker(table.sdf, robot_model)
+        coll_checker = TinyfkSweptSphereSdfCollisionChecker(table.sdf, robot_model)
         for link in coll_link_list:
             coll_checker.add_collision_link(link)
 
@@ -100,7 +100,7 @@ class TestCollisionChecker(unittest.TestCase):
             # output will be scipy-style (f, jac)
             n_dof = len(av)
             f_tmp, jac_tmp = self.coll_checker._coll_batch_forward_kinematics(
-                joint_list, [av], with_base=with_base, with_jacobian=True)
+                joint_list, np.array([av]), with_base=with_base, with_jacobian=True)
             f = f_tmp.flatten()
             jac = jac_tmp.reshape((n_wp * n_feature * 3, n_dof))
             return f, jac
@@ -116,5 +116,5 @@ class TestCollisionChecker(unittest.TestCase):
 
         def func(av):
             return self.coll_checker.compute_batch_sd_vals(
-                joint_list, [av], with_jacobian=True)
+                joint_list, np.array([av]), with_jacobian=True)
         jacobian_test_util(func, av)

@@ -5,8 +5,8 @@ from numpy import testing
 
 import skrobot
 from skrobot.model.primitives import Box
-from skrobot.planner import sqp_plan_trajectory
-from skrobot.planner import SweptSphereSdfCollisionChecker
+from skrobot.planner import tinyfk_sqp_plan_trajectory
+from skrobot.planner import TinyfkSweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
@@ -39,7 +39,7 @@ class Test_sqp_based_planner(unittest.TestCase):
             robot_model.r_gripper_l_finger_link]
 
         # collision checker setup
-        sscc = SweptSphereSdfCollisionChecker(
+        sscc = TinyfkSweptSphereSdfCollisionChecker(
             lambda X: box.sdf(X), robot_model)
         for link in coll_link_list:
             sscc.add_collision_link(link)
@@ -75,7 +75,7 @@ class Test_sqp_based_planner(unittest.TestCase):
             else:
                 av_start, av_goal = _av_start, _av_goal
 
-            av_seq = sqp_plan_trajectory(
+            av_seq = tinyfk_sqp_plan_trajectory(
                 sscc, av_start, av_goal, joint_list, n_wp,
                 safety_margin=1e-2, with_base=with_base)
             # check equality (terminal) constraint
