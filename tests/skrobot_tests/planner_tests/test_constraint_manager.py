@@ -36,7 +36,7 @@ class TestConstraintManager(unittest.TestCase):
         joint_names = ["r_shoulder_pan_joint", "r_shoulder_lift_joint", "r_upper_arm_roll_joint", "r_elbow_flex_joint", "r_forearm_roll_joint", "r_wrist_flex_joint", "r_wrist_roll_joint"]
 
         n_dof = len(joint_names) + 3
-        cm = ConstraintManager(n_wp, joint_names, fksolver, with_base=True)
+        cm = ConstraintManager(n_wp, joint_names, fksolver, True)
 
         cls.n_wp = n_wp
         cls.n_dof = n_dof
