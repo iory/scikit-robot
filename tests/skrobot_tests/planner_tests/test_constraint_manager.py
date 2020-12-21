@@ -4,8 +4,11 @@ import json
 import unittest
 import numpy as np
 from numpy import testing
+import tinyfk
 
+import skrobot
 from skrobot.planner import ConstraintManager
+from skrobot.planner.utils import get_robot_config
 
 
 def jacobian_test_util(func, x0, decimal=5):
@@ -28,8 +31,12 @@ class TestConstraintManager(unittest.TestCase):
     @classmethod
     def setup_class(cls):
         n_wp = 5
-        n_dof = 10
-        cm = ConstraintManager(n_wp, n_dof)
+        urdf_path = skrobot.data.pr2_urdfpath()
+        fksolver = tinyfk.RobotModel(urdf_path)
+        joint_names = ["r_shoulder_pan_joint", "r_shoulder_lift_joint", "r_upper_arm_roll_joint", "r_elbow_flex_joint", "r_forearm_roll_joint", "r_wrist_flex_joint", "r_wrist_roll_joint"]
+
+        n_dof = len(joint_names) + 3
+        cm = ConstraintManager(n_wp, joint_names, fksolver, with_base=True)
 
         cls.n_wp = n_wp
         cls.n_dof = n_dof
@@ -54,6 +61,7 @@ class TestConstraintManager(unittest.TestCase):
         cm.check_func(dummy_good_func)
 
     def test_add_eq_configuration(self):
+        # TODO must be deepcopied
         cm, n_wp, n_dof = copy.copy(self.cm), self.n_wp, self.n_dof
         n_dof_all = n_wp * n_dof
         idx_mid = 3
@@ -75,4 +83,17 @@ class TestConstraintManager(unittest.TestCase):
         f_expected = np.hstack((av1 - av_start, av2 - av_mid))
         f, _ = fun_eq(dummy_av_seq)
         testing.assert_equal(f, f_expected)
+        jacobian_test_util(fun_eq, dummy_av_seq)
+
+    def test_add_eq_pose(self):
+        # TODO must be deepcopied
+
+        cm, n_wp, n_dof = copy.copy(self.cm), self.n_wp, self.n_dof
+        n_dof_all = n_wp * n_dof
+
+        position_desired = np.array([0.8, -0.6, 0.7])
+        cm.add_eq_pose(2, "r_gripper_tool_frame", pose_desired = position_desired)
+        fun_eq = cm.gen_combined_eq_constraint()
+
+        dummy_av_seq = np.random.randn(n_wp * n_dof) 
         jacobian_test_util(fun_eq, dummy_av_seq)
