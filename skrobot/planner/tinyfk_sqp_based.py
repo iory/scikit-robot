@@ -45,7 +45,7 @@ def tinyfk_sqp_plan_trajectory(collision_checker,
         sd_vals_margined = sd_vals - safety_margin
         return sd_vals_margined, sd_val_jac
 
-    cm = ConstraintManager(n_wp, n_dof)
+    cm = ConstraintManager(n_wp, [j.name for j in joint_list], collision_checker.fksolver, with_base)
     cm.add_eq_configuration(0, av_start)
     cm.add_eq_configuration(n_wp-1, av_goal)
 

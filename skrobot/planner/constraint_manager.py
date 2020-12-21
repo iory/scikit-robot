@@ -8,7 +8,7 @@ import numpy as np
 
 # give a problem specification
 class ConstraintManager(object):
-    def __init__(self, n_wp, joint_names, fksolver, with_base=False): 
+    def __init__(self, n_wp, joint_names, fksolver, with_base): 
         # must be with_base=True now
         self.n_wp = n_wp
         n_dof = len(joint_names) + (3 if with_base else 0)
