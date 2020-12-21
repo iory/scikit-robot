@@ -6,9 +6,11 @@ import os
 import time
 try:
     # for python3
+    from functools import lru_cache
     from urllib.parse import urlparse
 except ImportError:
     # for python2
+    from repoze.lru import lru_cache
     from urlparse import urlparse
 
 from lxml import etree as ET
@@ -85,14 +87,19 @@ def unparse_origin(matrix):
     return node
 
 
+@lru_cache(maxsize=None)
+def get_path_with_cache(ros_package):
+    rospack = rospkg.RosPack()
+    return rospack.get_path(ros_package)
+
+
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
 
     if rospkg and parsed_url.scheme == 'package':
         try:
-            rospack = rospkg.RosPack()
             ros_package = parsed_url.netloc
-            package_path = rospack.get_path(ros_package)
+            package_path = get_path_with_cache(ros_package)
             resolve_filepath = package_path + parsed_url.path
             if os.path.exists(resolve_filepath):
                 return resolve_filepath
