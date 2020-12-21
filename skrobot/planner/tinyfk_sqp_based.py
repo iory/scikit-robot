@@ -1,6 +1,7 @@
 import numpy as np
 
 from skrobot.planner.sqp_based import _sqp_based_trajectory_optimization
+from skrobot.planner.constraint_manager import ConstraintManager
 
 
 def tinyfk_sqp_plan_trajectory(collision_checker,
@@ -18,6 +19,7 @@ def tinyfk_sqp_plan_trajectory(collision_checker,
     joint_limit_list = [[j.min_angle, j.max_angle] for j in joint_list]
     if with_base:
         joint_limit_list += [[-np.inf, np.inf]] * 3
+    n_dof = len(joint_list) + (3 if with_base else 0)
 
     # determine default weight
     if weights is None:
@@ -43,9 +45,14 @@ def tinyfk_sqp_plan_trajectory(collision_checker,
         sd_vals_margined = sd_vals - safety_margin
         return sd_vals_margined, sd_val_jac
 
+    cm = ConstraintManager(n_wp, n_dof)
+    cm.add_eq_configuration(0, av_start)
+    cm.add_eq_configuration(n_wp-1, av_goal)
+
     optimal_trajectory = _sqp_based_trajectory_optimization(
         initial_trajectory,
         collision_ineq_fun,
+        cm.gen_combined_eq_constraint(),
         joint_limit_list,
         weights,
         slsqp_option)
