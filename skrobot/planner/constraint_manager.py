@@ -1,10 +1,6 @@
 import uuid
 import numpy as np
 
-# TODO add class Constraint, EqualityConstraint, InequalityConstraint
-
-# TODO add name to each function
-
 # TODO check added eq_configuration is valid by pre-solving collision checking
 
 class EqualityConstraint(object):
@@ -51,7 +47,9 @@ class ConfigurationConstraint(EqualityConstraint):
         return func
 
 class PoseConstraint(EqualityConstraint):
-    def __init__(self, n_wp, n_dof, idx_wp, coords_name, pose_desired, name=None):
+    def __init__(self, n_wp, n_dof, idx_wp, coords_name, pose_desired, 
+            fksolver, joint_ids, with_base,
+            name=None):
         if name is None:
             name = 'eq_pose_const_{}'.format(str(uuid.uuid1()).replace('-', '_'))
         super(PoseConstraint, self).__init__(n_wp, n_dof, idx_wp, name)
@@ -59,18 +57,22 @@ class PoseConstraint(EqualityConstraint):
         self.coords_name = coords_name
         self.pose_desired = pose_desired
 
-    def gen_func(self, fksolver, joint_ids, with_base):
+        self.joint_ids = joint_ids
+        self.fksolver = fksolver
+        self.with_base = with_base
+
+    def gen_func(self):
         rank = len(self.pose_desired)
         n_dof_all = self.n_dof * self.n_wp
 
-        coords_ids = fksolver.get_link_ids([self.coords_name])
+        coords_ids = self.fksolver.get_link_ids([self.coords_name])
         def func(av_seq):
             with_rot = False
             with_jacobian = True
             J_whole = np.zeros((rank, n_dof_all))
-            P, J = fksolver.solve_forward_kinematics(
-                    [av_seq[self.idx_wp]], coords_ids, joint_ids,
-                    with_rot, with_base, with_jacobian) 
+            P, J = self.fksolver.solve_forward_kinematics(
+                    [av_seq[self.idx_wp]], coords_ids, self.joint_ids,
+                    with_rot, self.with_base, with_jacobian) 
             J_whole[:, self.n_dof*self.idx_wp:self.n_dof*(self.idx_wp+1)] = J
             return (P - self.pose_desired).flatten(), J_whole
         self._check_func(func)
@@ -93,40 +95,11 @@ class ConstraintManager(object):
         constraint = ConfigurationConstraint(self.n_wp, self.n_dof, idx_wp, av_desired)
         self.constraint_list.append(constraint)
 
-    """
-    def add_eq_pose(self, idx_wp, coords_name, pose_desired):
-        assert len(pose_desired) == 3, "currently only position is supported"
-        #assert len(pose_desired) == 7, "quaternion based pose"
-        #position, rotation = pose_desired[:3], pose_desired[3:]
-        rank = len(pose_desired)
-        n_dof_all = self.n_dof * self.n_wp
-
-        fksolver = self.fksolver
-
-        ## TODO implement this in c++ side
-        def quaternion_kinematic_matrix(q): # same as the one in utils
-            # dq/dt = 0.5 * mat * omega
-            q2, q2, q3, q4 = q
-            mat = np.array([
-                [-q2, -q3, -q4],
-                [q1, q4, -q3],
-                [-q4, q1, q2],
-                [q3, -q2, q1]])
-            return mat * 0.5 
-
-        target_coords_ids = fksolver.get_link_ids([coords_name])
-        def func(av_seq):
-            with_rot = False
-            with_jacobian = True
-            J_whole = np.zeros((rank, n_dof_all))
-            P, J = fksolver.solve_forward_kinematics(
-                    [av_seq[idx_wp]], target_coords_ids, self.joint_ids,
-                    with_rot, self.with_base, with_jacobian) 
-            J_whole[:, self.n_dof*idx_wp:self.n_dof*(idx_wp+1)] = J
-            return (P - pose_desired).flatten(), J_whole
-        self.check_func(func)
-        self.c_eq_func_list_list[idx_wp].append((func, "eq_pose"))
-    """
+    def add_pose_constraint(self, idx_wp, coords_name, pose_desired):
+        constraint = PoseConstraint(self.n_wp, self.n_dof, idx_wp,
+                coords_name, pose_desired,
+                self.fksolver, self.joint_ids, self.with_base)
+        self.constraint_list.append(constraint)
 
     def gen_combined_constraint_func(self):
         # correct all funcs
