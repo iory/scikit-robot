@@ -9,6 +9,8 @@ import tinyfk
 import skrobot
 from skrobot.planner import ConstraintManager
 from skrobot.planner.utils import get_robot_config
+from skrobot.planner.constraint_manager import ConfigurationConstraint
+from skrobot.planner.constraint_manager import EqualityConstraint
 
 
 def jacobian_test_util(func, x0, decimal=5):
@@ -56,9 +58,23 @@ class TestConstraintManager(unittest.TestCase):
             jac = np.zeros((5, n_wp * n_dof))
             return f, jac
 
+        cons = EqualityConstraint(n_wp, n_dof, 2, "who")
+        cons._check_func(dummy_good_func)
+
         with self.assertRaises(AssertionError):
-            cm.check_func(dummy_shitty_func)
-        cm.check_func(dummy_good_func)
+            cons._check_func(dummy_shitty_func)
+
+    def test_configuration_constraint(self):
+        cm, n_wp, n_dof = self.cm, self.n_wp, self.n_dof
+        idx_mid = 3
+        av_desired = np.random.randn(n_dof)
+        ceq_config = ConfigurationConstraint(n_wp, n_dof, idx_mid, av_desired)
+        func = ceq_config.gen_func()
+
+        dummy_av_seq = np.random.randn(n_wp, n_dof) 
+        f, jac = func(dummy_av_seq)
+        f_expected = dummy_av_seq[idx_mid] - av_desired
+        testing.assert_equal(f, f_expected)
 
     def test_add_eq_configuration(self):
         # TODO must be deepcopied
@@ -75,7 +91,7 @@ class TestConstraintManager(unittest.TestCase):
         cm.add_eq_configuration(0, av_start)
         cm.add_eq_configuration(idx_mid, av_mid)
 
-        fun_eq = cm.gen_combined_eq_constraint()
+        fun_eq = cm.gen_combined_constraint_func()
 
         dummy_av_seq = np.random.randn(n_wp * n_dof) 
         av1 = dummy_av_seq[:n_dof]
@@ -85,6 +101,7 @@ class TestConstraintManager(unittest.TestCase):
         testing.assert_equal(f, f_expected)
         jacobian_test_util(fun_eq, dummy_av_seq)
 
+    """
     def test_add_eq_pose(self):
         # TODO must be deepcopied
 
@@ -97,3 +114,4 @@ class TestConstraintManager(unittest.TestCase):
 
         dummy_av_seq = np.random.randn(n_wp * n_dof) 
         jacobian_test_util(fun_eq, dummy_av_seq)
+    """
