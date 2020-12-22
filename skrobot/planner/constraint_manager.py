@@ -31,7 +31,7 @@ class ConstraintManager(object):
             grad[:, self.n_dof*idx:self.n_dof*(idx+1)] = np.eye(rank)
             return f, grad
         self.check_func(func)
-        self.c_eq_func_list_list[idx].append(func)
+        self.c_eq_func_list_list[idx].append((func, "eq_config"))
 
     def add_eq_pose(self, idx_wp, coords_name, pose_desired):
         assert len(pose_desired) == 3, "currently only position is supported"
@@ -64,7 +64,7 @@ class ConstraintManager(object):
             J_whole[:, self.n_dof*idx_wp:self.n_dof*(idx_wp+1)] = J
             return (P - pose_desired).flatten(), J_whole
         self.check_func(func)
-        self.c_eq_func_list_list[idx_wp].append(func)
+        self.c_eq_func_list_list[idx_wp].append((func, "eq_pose"))
 
     def gen_combined_eq_constraint(self):
         return self._gen_func_combined(self.c_eq_func_list_list)
@@ -84,7 +84,8 @@ class ConstraintManager(object):
         # correct all funcs
         flattened = []
         for func_list in func_list_list:
-            for func in func_list:
+            for func_data in func_list:
+                func, func_type = func_data
                 flattened.append(func)
 
         def func_combined(xi):
