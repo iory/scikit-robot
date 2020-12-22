@@ -1,10 +1,10 @@
 import numpy as np
 
 from skrobot.planner.sqp_based import _sqp_based_trajectory_optimization
-from skrobot.planner.constraint_manager import ConstraintManager
 
 
 def tinyfk_sqp_plan_trajectory(collision_checker,
+                               constraint_manager,
                                av_start,
                                av_goal,
                                joint_list,
@@ -45,14 +45,10 @@ def tinyfk_sqp_plan_trajectory(collision_checker,
         sd_vals_margined = sd_vals - safety_margin
         return sd_vals_margined, sd_val_jac
 
-    cm = ConstraintManager(n_wp, [j.name for j in joint_list], collision_checker.fksolver, with_base)
-    cm.add_eq_configuration(0, av_start)
-    cm.add_eq_configuration(n_wp-1, av_goal)
-
     optimal_trajectory = _sqp_based_trajectory_optimization(
         initial_trajectory,
         collision_ineq_fun,
-        cm.gen_combined_eq_constraint(),
+        constraint_manager.gen_combined_eq_constraint(),
         joint_limit_list,
         weights,
         slsqp_option)

@@ -8,6 +8,7 @@ from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
 from skrobot.planner import tinyfk_sqp_plan_trajectory
 from skrobot.planner import TinyfkSweptSphereSdfCollisionChecker
+from skrobot.planner import ConstraintManager
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
@@ -57,10 +58,17 @@ sscc = TinyfkSweptSphereSdfCollisionChecker(lambda X: box.sdf(X), robot_model)
 for link in coll_link_list:
     sscc.add_collision_link(link)
 
+# constraint manager
+n_wp = 10
+fksolver = sscc.fksolver # TODO temporary
+cm = ConstraintManager(n_wp, [j.name for j in joint_list], fksolver, with_base)
+cm.add_eq_configuration(0, av_start)
+cm.add_eq_configuration(n_wp-1, av_goal)
+
 # motion planning
 ts = time.time()
 av_seq = tinyfk_sqp_plan_trajectory(
-    sscc, av_start, av_goal, joint_list, 10,
+    sscc, cm, av_start, av_goal, joint_list, n_wp,
     safety_margin=1e-2, with_base=with_base)
 print("solving time : {0} sec".format(time.time() - ts))
 
