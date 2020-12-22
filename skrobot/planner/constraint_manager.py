@@ -9,6 +9,7 @@ import numpy as np
 
 class EqualityConstraint(object):
     def __init__(self, n_wp, n_dof, idx_wp, name):
+        assert (idx_wp in range(n_wp)), "index {0} is out fo range".format(idx_wp)
         self.n_wp = n_wp
         self.n_dof = n_dof
         self.idx_wp = idx_wp
@@ -49,26 +50,31 @@ class ConfigurationConstraint(EqualityConstraint):
         self._check_func(func)
         return func
 
-"""
 class PoseConstraint(EqualityConstraint):
-    def __init__(self, n_wp, n_dof, idx_wp, pose_desired, name=None):
+    def __init__(self, n_wp, n_dof, idx_wp, coords_name, pose_desired, name=None):
         if name is None:
             name = 'eq_pose_const_{}'.format(str(uuid.uuid1()).replace('-', '_'))
-        super(ConfigurationConstraint, self).__init__(n_wp, n_dof, name)
+        super(PoseConstraint, self).__init__(n_wp, n_dof, idx_wp, name)
 
-        rank = len(pose_desired)
+        self.coords_name = coords_name
+        self.pose_desired = pose_desired
+
+    def gen_func(self, fksolver, joint_ids, with_base):
+        rank = len(self.pose_desired)
         n_dof_all = self.n_dof * self.n_wp
 
+        coords_ids = fksolver.get_link_ids([self.coords_name])
         def func(av_seq):
-            f = av_seq[idx_wp] - av_desired
-            grad = np.zeros((rank, n_dof_all)) 
-            grad[:, n_dof*idx_wp:n_dof*(idx_wp+1)] = np.eye(rank)
-            return f, grad
+            with_rot = False
+            with_jacobian = True
+            J_whole = np.zeros((rank, n_dof_all))
+            P, J = fksolver.solve_forward_kinematics(
+                    [av_seq[self.idx_wp]], coords_ids, joint_ids,
+                    with_rot, with_base, with_jacobian) 
+            J_whole[:, self.n_dof*self.idx_wp:self.n_dof*(self.idx_wp+1)] = J
+            return (P - self.pose_desired).flatten(), J_whole
         self._check_func(func)
-
-        self.func = func
-        self.name = name
-"""
+        return func
 
 # give a problem specification
 class ConstraintManager(object):
@@ -84,7 +90,6 @@ class ConstraintManager(object):
         self.with_base = with_base
 
     def add_eq_configuration(self, idx_wp, av_desired):
-        assert (idx_wp in range(self.n_wp)), "index {0} is out fo range".format(idx_wp)
         constraint = ConfigurationConstraint(self.n_wp, self.n_dof, idx_wp, av_desired)
         self.constraint_list.append(constraint)
 

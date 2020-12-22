@@ -11,7 +11,7 @@ from skrobot.planner import ConstraintManager
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.constraint_manager import ConfigurationConstraint
 from skrobot.planner.constraint_manager import EqualityConstraint
-
+from skrobot.planner.constraint_manager import PoseConstraint
 
 def jacobian_test_util(func, x0, decimal=5):
     f0, jac = func(x0)
@@ -25,6 +25,8 @@ def jacobian_test_util(func, x0, decimal=5):
         f1, _ = func(x1)
         jac_numerical[:, idx] = (f1 - f0) / eps
 
+    print(jac.T)
+    print(jac_numerical.T)
     testing.assert_almost_equal(jac, jac_numerical, decimal=decimal)
 
 
@@ -66,7 +68,7 @@ class TestConstraintManager(unittest.TestCase):
 
     def test_configuration_constraint(self):
         cm, n_wp, n_dof = self.cm, self.n_wp, self.n_dof
-        idx_mid = 3
+        idx_mid = 1
         av_desired = np.random.randn(n_dof)
         ceq_config = ConfigurationConstraint(n_wp, n_dof, idx_mid, av_desired)
         func = ceq_config.gen_func()
@@ -75,6 +77,21 @@ class TestConstraintManager(unittest.TestCase):
         f, jac = func(dummy_av_seq)
         f_expected = dummy_av_seq[idx_mid] - av_desired
         testing.assert_equal(f, f_expected)
+
+        jacobian_test_util(lambda xi: func(xi.reshape(n_wp, n_dof)), dummy_av_seq.flatten())
+
+    def test_pose_constraint(self):
+        cm, n_wp, n_dof = copy.copy(self.cm), self.n_wp, self.n_dof
+        n_dof_all = n_wp * n_dof
+
+        position_desired = np.array([0.8, -0.6, 0.7])
+        cons = PoseConstraint(n_wp, n_dof, 2, "r_gripper_tool_frame", position_desired)
+        with_base = True
+        func = cons.gen_func(cm.fksolver, cm.joint_ids, with_base)
+        # TODO test generated function
+        dummy_av_seq = np.random.randn(n_wp, n_dof) 
+        jacobian_test_util(lambda xi: func(xi.reshape(n_wp, n_dof)), dummy_av_seq.flatten())
+
 
     def test_add_eq_configuration(self):
         # TODO must be deepcopied
@@ -100,18 +117,3 @@ class TestConstraintManager(unittest.TestCase):
         f, _ = fun_eq(dummy_av_seq)
         testing.assert_equal(f, f_expected)
         jacobian_test_util(fun_eq, dummy_av_seq)
-
-    """
-    def test_add_eq_pose(self):
-        # TODO must be deepcopied
-
-        cm, n_wp, n_dof = copy.copy(self.cm), self.n_wp, self.n_dof
-        n_dof_all = n_wp * n_dof
-
-        position_desired = np.array([0.8, -0.6, 0.7])
-        cm.add_eq_pose(2, "r_gripper_tool_frame", pose_desired = position_desired)
-        fun_eq = cm.gen_combined_eq_constraint()
-
-        dummy_av_seq = np.random.randn(n_wp * n_dof) 
-        jacobian_test_util(fun_eq, dummy_av_seq)
-    """
