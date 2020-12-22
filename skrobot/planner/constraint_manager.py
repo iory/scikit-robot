@@ -33,15 +33,15 @@ class ConfigurationConstraint(EqualityConstraint):
             name = 'eq_config_const_{}'.format(str(uuid.uuid1()).replace('-', '_'))
         super(ConfigurationConstraint, self).__init__(n_wp, n_dof, idx_wp, name)
         self.av_desired = av_desired
+        self.rank = n_dof
 
     def gen_func(self):
         n_dof, n_wp = self.n_dof, self.n_wp
         n_dof_all = n_dof * n_wp
-        rank = n_dof
         def func(av_seq):
             f = av_seq[self.idx_wp] - self.av_desired
-            grad = np.zeros((rank, n_dof_all)) 
-            grad[:, n_dof*self.idx_wp:n_dof*(self.idx_wp+1)] = np.eye(rank)
+            grad = np.zeros((self.rank, n_dof_all)) 
+            grad[:, n_dof*self.idx_wp:n_dof*(self.idx_wp+1)] = np.eye(self.rank)
             return f, grad
         self._check_func(func)
         return func
@@ -56,20 +56,20 @@ class PoseConstraint(EqualityConstraint):
 
         self.coords_name = coords_name
         self.pose_desired = pose_desired
+        self.rank = len(pose_desired)
 
         self.joint_ids = joint_ids
         self.fksolver = fksolver
         self.with_base = with_base
 
     def gen_func(self):
-        rank = len(self.pose_desired)
         n_dof_all = self.n_dof * self.n_wp
 
         coords_ids = self.fksolver.get_link_ids([self.coords_name])
         def func(av_seq):
             with_rot = False
             with_jacobian = True
-            J_whole = np.zeros((rank, n_dof_all))
+            J_whole = np.zeros((self.rank, n_dof_all))
             P, J = self.fksolver.solve_forward_kinematics(
                     [av_seq[self.idx_wp]], coords_ids, self.joint_ids,
                     with_rot, self.with_base, with_jacobian) 
@@ -85,7 +85,7 @@ class ConstraintManager(object):
         self.n_wp = n_wp
         n_dof = len(joint_names) + (3 if with_base else 0)
         self.n_dof = n_dof
-        self.constraint_list = []
+        self.constraint_table = {}
 
         self.joint_ids = fksolver.get_joint_ids(joint_names)
         self.fksolver = fksolver
@@ -93,18 +93,20 @@ class ConstraintManager(object):
 
     def add_eq_configuration(self, idx_wp, av_desired):
         constraint = ConfigurationConstraint(self.n_wp, self.n_dof, idx_wp, av_desired)
-        self.constraint_list.append(constraint)
+        self.constraint_table[idx_wp] = constraint
 
     def add_pose_constraint(self, idx_wp, coords_name, pose_desired):
         constraint = PoseConstraint(self.n_wp, self.n_dof, idx_wp,
                 coords_name, pose_desired,
                 self.fksolver, self.joint_ids, self.with_base)
-        self.constraint_list.append(constraint)
+        self.constraint_table[idx_wp] = constraint
 
     def gen_combined_constraint_func(self):
+        has_initial_and_terminal_const = 0 in self.constraint_table.keys() and (self.n_wp-1) in self.constraint_table.keys(), "please set initial and terminal constraint"
+        assert has_initial_and_terminal_const
         # correct all funcs
         func_list = []
-        for constraint in self.constraint_list:
+        for constraint in self.constraint_table.values():
             func_list.append(constraint.gen_func())
 
         def func_combined(xi):
@@ -113,3 +115,6 @@ class ConstraintManager(object):
             f_list, jac_list = zip(*[fun(av_seq) for fun in func_list])
             return np.hstack(f_list), np.vstack(jac_list)
         return func_combined
+
+    def gen_initial_trajectory(self):
+        pass
