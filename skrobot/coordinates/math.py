@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import math
 from math import acos
 from math import asin
 from math import atan2
@@ -600,34 +601,32 @@ def matrix2quaternion(m):
     array([1., 0., 0., 0.])
     """
     m = np.array(m, dtype=np.float64)
-    q0_2 = (1 + m[0, 0] + m[1, 1] + m[2, 2]) / 4.0
-    q1_2 = (1 + m[0, 0] - m[1, 1] - m[2, 2]) / 4.0
-    q2_2 = (1 - m[0, 0] + m[1, 1] - m[2, 2]) / 4.0
-    q3_2 = (1 - m[0, 0] - m[1, 1] + m[2, 2]) / 4.0
-    mq_2 = max(q0_2, q1_2, q2_2, q3_2)
-    if np.isclose(mq_2, q0_2):
-        q0 = np.sqrt(q0_2)
-        q1 = ((m[2, 1] - m[1, 2]) / (4.0 * q0))
-        q2 = ((m[0, 2] - m[2, 0]) / (4.0 * q0))
-        q3 = ((m[1, 0] - m[0, 1]) / (4.0 * q0))
-    elif np.isclose(mq_2, q1_2):
-        q1 = np.sqrt(q1_2)
-        q0 = ((m[2, 1] - m[1, 2]) / (4.0 * q1))
-        q2 = ((m[1, 0] + m[0, 1]) / (4.0 * q1))
-        q3 = ((m[0, 2] + m[2, 0]) / (4.0 * q1))
-    elif np.isclose(mq_2, q2_2):
-        q2 = np.sqrt(q2_2)
-        q0 = ((m[0, 2] - m[2, 0]) / (4.0 * q2))
-        q1 = ((m[1, 0] + m[0, 1]) / (4.0 * q2))
-        q3 = ((m[1, 2] + m[2, 1]) / (4.0 * q2))
-    elif np.isclose(mq_2, q3_2):
-        q3 = np.sqrt(q3_2)
-        q0 = ((m[1, 0] - m[0, 1]) / (4.0 * q3))
-        q1 = ((m[0, 2] + m[2, 0]) / (4.0 * q3))
-        q2 = ((m[1, 2] + m[2, 1]) / (4.0 * q3))
+    tr = m[0, 0] + m[1, 1] + m[2, 2]
+    if tr > 0:
+        S = math.sqrt(tr + 1.0) * 2
+        qw = 0.25 * S
+        qx = (m[2, 1] - m[1, 2]) / S
+        qy = (m[0, 2] - m[2, 0]) / S
+        qz = (m[1, 0] - m[0, 1]) / S
+    elif (m[0, 0] > m[1, 1]) and (m[0, 0] > m[2, 2]):
+        S = math.sqrt(1. + m[0, 0] - m[1, 1] - m[2, 2]) * 2
+        qw = (m[2, 1] - m[1, 2]) / S
+        qx = 0.25 * S
+        qy = (m[0, 1] + m[1, 0]) / S
+        qz = (m[0, 2] + m[2, 0]) / S
+    elif m[1, 1] > m[2, 2]:
+        S = math.sqrt(1. + m[1, 1] - m[0, 0] - m[2, 2]) * 2
+        qw = (m[0, 2] - m[2, 0]) / S
+        qx = (m[0, 1] + m[1, 0]) / S
+        qy = 0.25 * S
+        qz = (m[1, 2] + m[2, 1]) / S
     else:
-        raise ValueError('matrix {} is invalid'.format(m))
-    return np.array([q0, q1, q2, q3])
+        S = math.sqrt(1. + m[2, 2] - m[0, 0] - m[1, 1]) * 2
+        qw = (m[1, 0] - m[0, 1]) / S
+        qx = (m[0, 2] + m[2, 0]) / S
+        qy = (m[1, 2] + m[2, 1]) / S
+        qz = 0.25 * S
+    return np.array([qw, qx, qy, qz])
 
 
 def quaternion2matrix(q, normalize=False):
