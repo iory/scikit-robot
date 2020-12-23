@@ -75,6 +75,26 @@ def transform_coords(c1, c2, out=None):
     return out
 
 
+class Transform(object):
+    def __init__(self, translation, rotation):
+        self.translation = np.array(translation)
+        self.rotation = rotation
+
+    def __call__(self, pts):
+        return pts.dot(self.rotation) + self.translation[None, :]
+
+    def get_inverse(self):
+        return Transform(-self.translation, self.rotation.T)
+
+    def __mull__(self, tf_23):
+        tf_12 = self
+        tran_12, rot_12 = tf_12.translation, tf_12.rotation
+        tran_23, rot_23 = tf_23.translation, tf_23.rotation
+        rot_13 = rot_12.dot(rot_23)
+        tran_13 = tran_23 + rot_23.dot(tran_12)
+        return Transform(tran_13, rot_13)
+
+
 class Coordinates(object):
 
     """Coordinates class to manipulate rotation and translation.
@@ -120,6 +140,9 @@ class Coordinates(object):
         self.name = name
         self.parent = None
         self._hook = hook if hook else lambda: None
+
+    def get_transform(self):
+        return Transform(self.worldpos(), self.worldrot())
 
     @contextlib.contextmanager
     def disable_hook(self):

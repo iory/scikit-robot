@@ -2,6 +2,7 @@
 
 from .base import CascadedCoords
 from .base import Coordinates
+from .base import Transform
 from .base import make_coords
 from .base import make_cascoords
 

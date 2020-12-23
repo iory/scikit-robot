@@ -8,6 +8,7 @@ import numpy as np
 import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import Transform
 
 logger = getLogger(__name__)
 
@@ -33,8 +34,7 @@ class SignedDistanceFunction(object):
             coords = CascadedCoords()
 
         self.coords = coords
-        self.sdf_to_obj_transform = CascadedCoords(
-            pos=origin)
+        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
         self._origin = np.array(origin)
         self.use_abs = use_abs
 
@@ -108,8 +108,10 @@ class SignedDistanceFunction(object):
         points_sdf : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. a sdf-specific coordinate.
         """
-        points_sdf = self.coords.copy_worldcoords().transform(
-            self.sdf_to_obj_transform).inverse_transform_vector(points_obj)
+        tf_world_to_local = self.coords.get_transform().get_inverse()
+        tf_local_to_sdf = self.sdf_to_obj_transform.get_inverse()
+        tf_world_to_sdf = tf_world_to_local.__mull__(tf_local_to_sdf)
+        points_sdf = tf_world_to_sdf(points_obj)
         return points_sdf
 
     def _transform_pts_sdf_to_obj(self, points_sdf):
@@ -125,9 +127,10 @@ class SignedDistanceFunction(object):
         points_obj : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. an object coordinate.
         """
-        points_obj = self.coords.copy_worldcoords().transform(
-            self.sdf_to_obj_transform).transform_vector(
-                points_sdf.astype(np.float32))
+        tf_local_to_world = self.coords.get_transform()
+        tf_sdf_to_local = self.sdf_to_obj_transform
+        tf_sdf_to_world = tf_sdf_to_local.__mull__(tf_local_to_world)
+        points_obj = tf_sdf_to_world(points_sdf)
         return points_obj
 
 
@@ -255,8 +258,7 @@ class GridSDF(SignedDistanceFunction):
 
         spts, _ = self._surface_points()
 
-        self.sdf_to_obj_transform = CascadedCoords(
-            pos=origin)
+        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
 
     def is_out_of_bounds(self, points_obj):
         """check if the the input points is out of bounds
