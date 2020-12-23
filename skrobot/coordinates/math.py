@@ -575,9 +575,10 @@ def normalize_vector(v, ord=2):
     array([0., 0., 0.])
     """
     v = np.array(v, dtype=np.float64)
-    if np.allclose(v, 0) is True:
+    norm = np.linalg.norm(v, ord=ord)
+    if norm == 0:
         return v
-    return v / np.linalg.norm(v, ord=ord)
+    return v / norm
 
 
 def matrix2quaternion(m):
