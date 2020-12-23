@@ -110,7 +110,7 @@ class SignedDistanceFunction(object):
         """
         tf_world_to_local = self.coords.get_transform().get_inverse()
         tf_local_to_sdf = self.sdf_to_obj_transform.get_inverse()
-        tf_world_to_sdf = tf_world_to_local.__mull__(tf_local_to_sdf)
+        tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
         points_sdf = tf_world_to_sdf(points_obj)
         return points_sdf
 
@@ -129,7 +129,7 @@ class SignedDistanceFunction(object):
         """
         tf_local_to_world = self.coords.get_transform()
         tf_sdf_to_local = self.sdf_to_obj_transform
-        tf_sdf_to_world = tf_sdf_to_local.__mull__(tf_local_to_world)
+        tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
         points_obj = tf_sdf_to_world(points_sdf)
         return points_obj
 

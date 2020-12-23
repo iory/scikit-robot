@@ -105,9 +105,9 @@ class Transform(object):
         """
         assert pts.ndim < 3, "pts must be either 1 or 2 dimensional."
         if pts.ndim == 1:
-            return pts.dot(self.rotation) + self.translation
+            return self.rotation.dot(pts.T) + self.translation
         if pts.ndim == 2:
-            return pts.dot(self.rotation) + self.translation[None, :]
+            return self.rotation.dot(pts.T).T + self.translation[None, :]
 
     def get_inverse(self):
         """Return inverse transform
@@ -117,9 +117,11 @@ class Transform(object):
         inv_transform : skrobot.coordinates.base.Transform
             inverse transformation
         """
-        return Transform(-self.translation, self.rotation.T)
+        new_rot = self.rotation.T
+        new_trans = -new_rot.dot(self.translation)
+        return Transform(new_trans, new_rot)
 
-    def __mull__(self, tf_23):
+    def __mul__(self, tf_23):
         """Composite this transform with other transform
 
         Parameters
@@ -136,10 +138,13 @@ class Transform(object):
         tf_12 = self
         tran_12, rot_12 = tf_12.translation, tf_12.rotation
         tran_23, rot_23 = tf_23.translation, tf_23.rotation
-        rot_13 = rot_12.dot(rot_23)
+        rot_13 = rot_23.dot(rot_12)
         tran_13 = tran_23 + rot_23.dot(tran_12)
         tf_13 = Transform(tran_13, rot_13)
         return tf_13
+
+    def __rmul__(self, other):
+        return other.__mul__(self)
 
 
 class Coordinates(object):
