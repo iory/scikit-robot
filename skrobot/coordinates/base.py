@@ -15,7 +15,6 @@ from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
-from skrobot.coordinates.math import quaternion_normalize
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
@@ -68,12 +67,11 @@ def transform_coords(c1, c2, out=None):
            [-5.00000000e-01,  8.66025404e-01,  2.77555756e-17]])
     """
     if out is None:
-        out = Coordinates()
+        out = Coordinates(check_validity=False)
     elif not isinstance(out, Coordinates):
         raise TypeError("Input type should be skrobot.coordinates.Coordinates")
-    out.translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    out.rotation = quaternion_normalize(
-        quaternion_multiply(c1.quaternion, c2.quaternion))
+    out._translation = c1.translation + np.dot(c1.rotation, c2.translation)
+    out._rotation = np.matmul(c1.rotation, c2.rotation)
     return out
 
 
@@ -94,20 +92,29 @@ class Coordinates(object):
         quaternion [w, x, y, z] order
     name : str or None
         name of this coordinates
+    check_validity : bool (optional)
+        Default `True`.
+        If this value is `True`, check whether an input rotation
+        and an input translation are valid.
     """
 
     def __init__(self,
                  pos=[0, 0, 0],
                  rot=np.eye(3),
                  name=None,
-                 hook=None):
-        if (isinstance(pos, list) or isinstance(pos, np.ndarray)):
-            T = np.array(pos, dtype=np.float64)
-            if T.shape == (4, 4):
-                pos = T[:3, 3]
-                rot = T[:3, :3]
-        self.rotation = rot
-        self.translation = pos
+                 hook=None,
+                 check_validity=True):
+        if check_validity:
+            if (isinstance(pos, list) or isinstance(pos, np.ndarray)):
+                T = np.array(pos, dtype=np.float64)
+                if T.shape == (4, 4):
+                    pos = T[:3, 3]
+                    rot = T[:3, :3]
+            self.rotation = rot
+            self.translation = pos
+        else:
+            self._rotation = rot
+            self._translation = pos
         if name is None:
             name = ''
         self.name = name
@@ -166,18 +173,16 @@ class Coordinates(object):
         rotation = np.array(rotation)
         # Convert quaternions
         if rotation.shape == (4,):
-            self._q = np.array([q for q in rotation])
-            if np.abs(np.linalg.norm(self._q) - 1.0) > 1e-3:
+            q = np.array([q for q in rotation])
+            if np.abs(np.linalg.norm(q) - 1.0) > 1e-3:
                 raise ValueError('Invalid quaternion. Must be '
                                  'norm 1.0, get {}'.
-                                 format(np.linalg.norm(self._q)))
-            rotation = quaternion2matrix(self._q)
+                                 format(np.linalg.norm(q)))
+            rotation = quaternion2matrix(q)
         elif rotation.shape == (3,):
             # Convert [yaw-pitch-roll] to rotation matrix
-            self._q = rpy2quaternion(rotation)
-            rotation = quaternion2matrix(self._q)
-        else:
-            self._q = matrix2quaternion(rotation)
+            q = rpy2quaternion(rotation)
+            rotation = quaternion2matrix(q)
 
         # Convert lists and tuples
         if type(rotation) in (list, tuple):
@@ -315,7 +320,8 @@ class Coordinates(object):
         vec = np.array(vec, dtype=np.float64)
         return self.newcoords(
             self.rotation,
-            self.parent_orientation(vec, wrt) + self.translation)
+            self.parent_orientation(vec, wrt) + self.translation,
+            check_validity=False)
 
     def transform_vector(self, v):
         """"Return vector represented at world frame.
@@ -386,7 +392,7 @@ class Coordinates(object):
             result of inverse transformation.
         """
         if dest is None:
-            dest = Coordinates()
+            dest = Coordinates(check_validity=False)
         dest.rotation = self.rotation.T
         dest.translation = np.matmul(dest.rotation, self.translation)
         dest.translation = -1.0 * dest.translation
@@ -452,7 +458,7 @@ class Coordinates(object):
 
         Returns
         -------
-        self._q : numpy.ndarray
+        q : numpy.ndarray
             [w, x, y, z] quaternion
 
         Examples
@@ -466,7 +472,7 @@ class Coordinates(object):
         >>> c.quaternion
         array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
-        return self._q
+        return matrix2quaternion(self._rotation)
 
     @property
     def dual_quaternion(self):
@@ -516,10 +522,10 @@ class Coordinates(object):
         >>> c.rotate_vector([1, 2, 3])
         array([-1., -2.,  3.])
         """
-        return np.matmul(self.rotation, v)
+        return np.matmul(self._rotation, v)
 
     def inverse_rotate_vector(self, v):
-        return np.matmul(v, self.rotation)
+        return np.matmul(v, self._rotation)
 
     def transform(self, c, wrt='local'):
         """Transform this coordinates by coords based on wrt
@@ -783,18 +789,18 @@ class Coordinates(object):
         """
         if wrt == 'local' or wrt == self:
             rot = np.matmul(self.rotation, mat)
-            self.newcoords(rot, self.translation)
+            self.newcoords(rot, self.translation, check_validity=False)
         elif wrt == 'parent' or wrt == self.parent or \
                 wrt == 'world' or wrt is None or \
                 wrt == worldcoords:
             rot = np.matmul(mat, self.rotation)
-            self.newcoords(rot, self.translation)
+            self.newcoords(rot, self.translation, check_validity=False)
         elif isinstance(wrt, Coordinates):
             r2 = wrt.worldrot()
             r2t = r2.T
             r2t = np.matmul(mat, r2t)
             r2t = np.matmul(r2, r2t)
-            self.rotation = np.matmul(r2t, self.rotation)
+            self._rotation = np.matmul(r2t, self.rotation)
         else:
             raise ValueError('wrt {} is not supported'.format(wrt))
         return self
@@ -842,16 +848,17 @@ class Coordinates(object):
         elif axis is None or axis is False:
             self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
-            self.rotation = rotate_matrix(self.rotation, theta, axis)
+            self._rotation = rotate_matrix(self.rotation, theta, axis)
         elif wrt == 'parent' or wrt == 'world':
-            self.rotation = rotate_matrix(self.rotation, theta,
-                                          axis, True)
+            self._rotation = rotate_matrix(self.rotation, theta,
+                                           axis, True)
         elif isinstance(wrt, Coordinates):  # C1'=C2*R*C2(-1)*C1
             self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
-        return self.newcoords(self.rotation, self.translation)
+        return self.newcoords(self.rotation, self.translation,
+                              check_validity=False)
 
     def copy(self):
         """Return a deep copy of the Coordinates."""
@@ -859,8 +866,9 @@ class Coordinates(object):
 
     def copy_coords(self):
         """Return a deep copy of the Coordinates."""
-        return Coordinates(pos=copy.deepcopy(self.worldpos()),
-                           rot=copy.deepcopy(self.worldrot()))
+        return Coordinates(pos=np.copy(self.worldpos()),
+                           rot=np.copy(self.worldrot()),
+                           check_validity=False)
 
     def coords(self):
         """Return a deep copy of the Coordinates."""
@@ -899,14 +907,34 @@ class Coordinates(object):
         """
         return self.translation
 
-    def newcoords(self, c, pos=None):
-        """Update of coords is always done through newcoords."""
+    def newcoords(self, c, pos=None, check_validity=True):
+        """Update of coords is always done through newcoords.
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates or numpy.ndarray
+            If pos is `None`, `c` means new Coordinates.
+            If pos is given, `c` means rotation matrix.
+        pos : numpy.ndarray or None
+            new translation.
+        check_validity : bool
+            If this value is `True`, check whether an input rotation
+            and an input translation are valid.
+        """
         if pos is not None:
-            self.rotation = copy.deepcopy(c)
-            self.translation = copy.deepcopy(pos)
+            if check_validity:
+                self.rotation = copy.deepcopy(c)
+                self.translation = copy.deepcopy(pos)
+            else:
+                self._rotation = np.copy(c)
+                self._translation = np.copy(pos)
         else:
-            self.rotation = copy.deepcopy(c.rotation)
-            self.translation = copy.deepcopy(c.translation)
+            if check_validity:
+                self.rotation = copy.deepcopy(c.rotation)
+                self.translation = copy.deepcopy(c.translation)
+            else:
+                self._rotation = np.copy(c.rotation)
+                self._translation = np.copy(c.translation)
         return self
 
     def __mul__(self, other_c):
@@ -984,7 +1012,8 @@ class CascadedCoords(Coordinates):
 
         self._worldcoords = Coordinates(pos=self.translation,
                                         rot=self.rotation,
-                                        hook=self.update)
+                                        hook=self.update,
+                                        check_validity=False)
 
         self.parent = parent
         if parent is not None:
@@ -1041,7 +1070,7 @@ class CascadedCoords(Coordinates):
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
             child.parent = self
-            child.newcoords(relative_coords)
+            child.newcoords(relative_coords, check_validity=False)
             self._descendants.append(child)
             return child
 
@@ -1050,10 +1079,26 @@ class CascadedCoords(Coordinates):
             c = child.worldcoords().copy_coords()
             self._descendants.remove(child)
             child.parent = None
-            child.newcoords(c)
+            child.newcoords(c, check_validity=False)
 
-    def newcoords(self, c, pos=None):
-        super(CascadedCoords, self).newcoords(c, pos)
+    def newcoords(self, c, pos=None, check_validity=True):
+        """Update this coordinates.
+
+        This function records that this CascadedCoords has changed and
+        recursively records the change to descendants of this CascadedCoords.
+
+        Parameters
+        ----------
+        c : skrobot.coordinates.Coordinates or numpy.ndarray
+            If pos is `None`, `c` means new Coordinates.
+            If pos is given, `c` means rotation matrix.
+        pos : numpy.ndarray or None
+            new translation.
+        check_validity : bool
+            If this value is `True`, check whether an input rotation
+            and an input translation are valid.
+        """
+        super(CascadedCoords, self).newcoords(c, pos, check_validity)
         self.changed()
         return self
 
@@ -1076,11 +1121,13 @@ class CascadedCoords(Coordinates):
 
     def rotate_with_matrix(self, matrix, wrt):
         if wrt == 'local' or wrt == self:
-            self.rotation = np.dot(self.rotation, matrix)
-            return self.newcoords(self.rotation, self.translation)
+            self._rotation = np.dot(self.rotation, matrix)
+            return self.newcoords(self.rotation, self.translation,
+                                  check_validity=False)
         elif wrt == 'parent' or wrt == self.parent:
-            self.rotation = np.matmul(matrix, self.rotation)
-            return self.newcoords(self.rotation, self.translation)
+            rotation = np.matmul(matrix, self.rotation)
+            return self.newcoords(
+                rotation, self.translation, check_validity=False)
         else:
             parent_coords = self.parentcoords()
             parent_rot = parent_coords.rotation
@@ -1090,8 +1137,9 @@ class CascadedCoords(Coordinates):
                 matrix = np.matmul(matrix, wrt_rot.T)
             matrix = np.matmul(matrix, parent_rot)
             matrix = np.matmul(parent_rot.T, matrix)
-            self.rotation = np.matmul(matrix, self.rotation)
-            return self.newcoords(self.rotation, self.translation)
+            rotation = np.matmul(matrix, self.rotation)
+            return self.newcoords(rotation, self.translation,
+                                  check_validity=False)
 
     def rotate(self, theta, axis, wrt='local'):
         """Rotate this coordinate.
@@ -1118,11 +1166,13 @@ class CascadedCoords(Coordinates):
             return self.rotate_with_matrix(theta, wrt)
 
         if wrt == 'local' or wrt == self:
-            self.rotation = rotate_matrix(self.rotation, theta, axis)
-            return self.newcoords(self.rotation, self.translation)
+            rotation = rotate_matrix(self.rotation, theta, axis)
+            return self.newcoords(rotation, self.translation,
+                                  check_validity=False)
         elif wrt == 'parent' or wrt == self.parent:
-            self.rotation = rotate_matrix(self.rotation, theta, axis)
-            return self.newcoords(self.rotation, self.translation)
+            rotation = rotate_matrix(self.rotation, theta, axis)
+            return self.newcoords(rotation, self.translation,
+                                  check_validity=False)
         else:
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
@@ -1173,7 +1223,8 @@ class CascadedCoords(Coordinates):
                              self, self)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
-        return self.newcoords(self.rotation, self.translation)
+        return self.newcoords(self.rotation, self.translation,
+                              check_validity=False)
 
     def update(self, force=False):
         if not force and not self._changed:
@@ -1185,8 +1236,8 @@ class CascadedCoords(Coordinates):
                     self,
                     self._worldcoords)
             else:
-                self._worldcoords.rotation = self.rotation
-                self._worldcoords.translation = self.translation
+                self._worldcoords._rotation = self.rotation
+                self._worldcoords._translation = self.translation
         self._changed = False
 
     def worldcoords(self):
