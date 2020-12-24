@@ -148,6 +148,9 @@ class TestRobotModel(unittest.TestCase):
         for move_target in [fetch.rarm_end_coords] + link_list:
             compare(move_target)
 
+        # check initialization of limb of RobotModel
+        fetch.rarm.calc_jacobian_from_link_list(fetch.rarm.end_coords)
+
     def test_calc_inverse_kinematics_nspace_from_link_list(self):
         kuka = self.kuka
         kuka.calc_inverse_kinematics_nspace_from_link_list(
