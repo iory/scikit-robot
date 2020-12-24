@@ -190,24 +190,7 @@ class RotationalJoint(Joint):
             max_joint_velocity=max_joint_velocity,
             max_joint_torque=max_joint_torque,
             *args, **kwargs)
-        if isinstance(axis, str):
-            if axis == 'z':
-                self.axis = np.array([0, 0, 1], dtype=np.float32)
-            elif axis == 'y':
-                self.axis = np.array([0, 1, 0], dtype=np.float32)
-            elif axis == 'x':
-                self.axis = np.array([1, 0, 0], dtype=np.float32)
-            else:
-                raise ValueError
-        elif isinstance(axis, list):
-            if len(axis) != 3:
-                raise ValueError('Axis must be length 3(xyz)')
-            self.axis = normalize_vector(np.array(axis, dtype=np.float32))
-        elif isinstance(axis, np.ndarray):
-            self.axis = normalize_vector(axis)
-        else:
-            raise TypeError
-
+        self.axis = normalize_vector(_wrap_axis(axis))
         self._joint_angle = 0.0
 
         if self.min_angle is None:
@@ -359,7 +342,7 @@ class LinearJoint(Joint):
                  max_joint_velocity=np.pi / 4,  # [m/s]
                  max_joint_torque=100,  # [N]
                  *args, **kwargs):
-        self.axis = _wrap_axis(axis)
+        self.axis = normalize_vector(_wrap_axis(axis))
         self._joint_angle = 0.0
         super(LinearJoint, self).__init__(
             max_joint_velocity=max_joint_velocity,
