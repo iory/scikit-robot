@@ -202,9 +202,9 @@ class RotationalJoint(Joint):
         elif isinstance(axis, list):
             if len(axis) != 3:
                 raise ValueError('Axis must be length 3(xyz)')
-            self.axis = np.array(axis, dtype=np.float32)
+            self.axis = normalize_vector(np.array(axis, dtype=np.float32))
         elif isinstance(axis, np.ndarray):
-            self.axis = axis
+            self.axis = normalize_vector(axis)
         else:
             raise TypeError
 
@@ -349,7 +349,7 @@ def calc_jacobian_linear(jacobian, row, column,
 def calc_jacobian_default_rotate_vector(
         paxis, world_default_coords,
         transform_coords):
-    v = normalize_vector(world_default_coords.rotate_vector(paxis))
+    v = world_default_coords.rotate_vector(paxis)
     return np.dot(transform_coords.worldrot().T, v)
 
 
