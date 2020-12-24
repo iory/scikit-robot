@@ -172,15 +172,17 @@ class Coordinates(object):
 
     Parameters
     ----------
-    pos : list or numpy.ndarray
+    pos : list or numpy.ndarray or None
         shape of (3,) translation vector. or
         4x4 homogeneous transformation matrix.
         If the homogeneous transformation matrix is given,
         `rot` will be overwritten.
-    rot : list or numpy.ndarray
+        If this value is `None`, set [0, 0, 0] vector as default.
+    rot : list or numpy.ndarray or None
         we can take 3x3 rotation matrix or
         [yaw, pitch, roll] or
         quaternion [w, x, y, z] order
+        If this value is `None`, set the identity matrix as default.
     name : str or None
         name of this coordinates
     check_validity : bool (optional)
@@ -190,8 +192,8 @@ class Coordinates(object):
     """
 
     def __init__(self,
-                 pos=[0, 0, 0],
-                 rot=np.eye(3),
+                 pos=None,
+                 rot=None,
                  name=None,
                  hook=None,
                  check_validity=True):
@@ -201,11 +203,23 @@ class Coordinates(object):
                 if T.shape == (4, 4):
                     pos = T[:3, 3]
                     rot = T[:3, :3]
-            self.rotation = rot
-            self.translation = pos
+            if rot is None:
+                self._rotation = np.eye(3)
+            else:
+                self.rotation = rot
+            if pos is None:
+                self._translation = np.array([0, 0, 0])
+            else:
+                self.translation = pos
         else:
-            self._rotation = rot
-            self._translation = pos
+            if rot is None:
+                self._rotation = np.eye(3)
+            else:
+                self._rotation = rot
+            if pos is None:
+                self._translation = np.array([0, 0, 0])
+            else:
+                self._translation = pos
         if name is None:
             name = ''
         self.name = name
