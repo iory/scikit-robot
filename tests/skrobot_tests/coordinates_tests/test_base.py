@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 from numpy import deg2rad
 from numpy import pi
 from numpy import sign
@@ -9,6 +10,60 @@ from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates import Transform
+
+
+class TestTransform(unittest.TestCase):
+
+    def test_transform_vector_and_rotate_vector(self):
+        # see test_transform_vector for these values
+        pos = [0.13264493, 0.05263172, 0.93042636]
+        q = [-0.20692513, 0.50841015, 0.82812527, 0.1136206]
+        coords = make_coords(pos=pos, rot=q)
+        tf = coords.get_transform()
+
+        pt_original = np.array([0.2813606, 0.97762403, 0.83617263])
+        pt_transformed = tf.transform_vector(pt_original)
+        pt_ground_truth = coords.transform_vector(pt_original)
+        testing.assert_equal(pt_transformed, pt_ground_truth)
+
+        pt_transformed = tf.rotate_vector(pt_original)
+        pt_ground_truth = coords.rotate_vector(pt_original)
+        testing.assert_equal(pt_transformed, pt_ground_truth)
+
+        tf.transform_vector(np.zeros((100, 3)))  # ok
+        with self.assertRaises(AssertionError):
+            tf.transform_vector(np.zeros((100, 100, 3)))  # ng
+
+        tf.rotate_vector(np.zeros((100, 3)))  # ok
+        with self.assertRaises(AssertionError):
+            tf.rotate_vector(np.zeros((100, 100, 3)))  # ng
+
+    def test__mull__(self):
+        trans12 = np.array([0, 0, 1])
+        rot12 = rpy_matrix(pi / 2.0, 0, 0)
+        tf12 = Transform(trans12, rot12)
+
+        trans23 = np.array([1, 0, 0])
+        rot23 = rpy_matrix(0, 0, pi / 2.0)
+        tf23 = Transform(trans23, rot23)
+
+        tf13 = tf12 * tf23
+
+        # from principle
+        testing.assert_almost_equal(
+            tf13.translation, rot23.dot(trans12) + trans23)
+        testing.assert_almost_equal(tf13.rotation, rot23.dot(rot12))
+
+    def test_inverse_transformation(self):
+        # this also checks __mull__
+        trans = np.array([1, 1, 1])
+        rot = rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0)
+        tf = Transform(trans, rot)
+        tf_inv = tf.inverse_transformation()
+
+        tf_id = tf * tf_inv
+        testing.assert_almost_equal(tf_id.translation, np.zeros(3))
 
 
 class TestCoordinates(unittest.TestCase):
