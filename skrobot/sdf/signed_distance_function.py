@@ -108,10 +108,11 @@ class SignedDistanceFunction(object):
         points_sdf : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. a sdf-specific coordinate.
         """
-        tf_world_to_local = self.coords.get_transform().get_inverse()
-        tf_local_to_sdf = self.sdf_to_obj_transform.get_inverse()
+        tf_world_to_local =\
+            self.coords.get_transform().inverse_transformation()
+        tf_local_to_sdf = self.sdf_to_obj_transform.inverse_transformation()
         tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
-        points_sdf = tf_world_to_sdf(points_obj)
+        points_sdf = tf_world_to_sdf.transform_vector(points_obj)
         return points_sdf
 
     def _transform_pts_sdf_to_obj(self, points_sdf):
@@ -130,7 +131,7 @@ class SignedDistanceFunction(object):
         tf_local_to_world = self.coords.get_transform()
         tf_sdf_to_local = self.sdf_to_obj_transform
         tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
-        points_obj = tf_sdf_to_world(points_sdf)
+        points_obj = tf_sdf_to_world.transform_vector(points_sdf)
         return points_obj
 
 

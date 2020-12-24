@@ -90,26 +90,45 @@ class Transform(object):
         self.translation = np.array(translation)
         self.rotation = rotation
 
-    def __call__(self, pts):
-        """Apply this transform to point/points
+    def transform_vector(self, vec):
+        """Apply this transform to vector/vectors
 
         Parameters
         ----------
-        pts : numpy.ndarray(3,) or numpy.ndarray(n_points, 3)
-            point/points to be transformed
+        vec : numpy.ndarray(3,) or numpy.ndarray(n_points, 3)
+            vector/vectors to be transformed
 
         Returns
         -------
-        pts_transformed : numpy.ndarray(3,) or numpy.ndarray(n_points, 3)
+        vec_transformed : numpy.ndarray(3,) or numpy.ndarray(n_points, 3)
             transformed points
         """
-        assert pts.ndim < 3, "pts must be either 1 or 2 dimensional."
-        if pts.ndim == 1:
-            return self.rotation.dot(pts.T) + self.translation
-        if pts.ndim == 2:
-            return self.rotation.dot(pts.T).T + self.translation[None, :]
+        assert vec.ndim < 3, "vec must be either 1 or 2 dimensional."
+        if vec.ndim == 1:
+            return self.rotation.dot(vec.T) + self.translation
+        if vec.ndim == 2:
+            return self.rotation.dot(vec.T).T + self.translation[None, :]
 
-    def get_inverse(self):
+    def rotate_vector(self, vec):
+        """Rotate 3-dimensional vector using rotation of this Transform
+
+        Parameters
+        ----------
+        vec : numpy.ndarray(3,) or numpy.ndarray(3, n_points)
+            vector (or vectors) to be roated
+
+        Returns
+        -------
+        vec_transformed : numpy.ndarray(3,), numpy.ndarray(3, n_points)
+            rotated vector (or vectors)
+        """
+        assert vec.ndim < 3, "vec must be either 1 or 2 dimensional."
+        if vec.ndim == 1:
+            return self.rotation.dot(vec.T)
+        if vec.ndim == 2:
+            return self.rotation.dot(vec.T).T
+
+    def inverse_transformation(self):
         """Return inverse transform
 
         Returns
