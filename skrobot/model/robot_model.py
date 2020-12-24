@@ -1636,6 +1636,9 @@ class RobotModel(CascadedLink):
             self.__dict__[joint.name] = joint
         self.urdf_path = None
 
+        self._relevance_predicate_table = \
+            self._compute_relevance_predicate_table()
+
     def reset_pose(self):
         raise NotImplementedError()
 
