@@ -542,16 +542,16 @@ def joint_angle_limit_weight(joint_list):
             k += 1
 
         # limitation
-        if np.isclose(joint_angle, joint_max, e) and \
-           np.isclose(joint_angle, joint_min, e):
+        if np.abs(joint_angle - joint_max) < e and \
+           np.abs(joint_angle - joint_min) < e:
             pass
-        elif np.isclose(joint_angle, joint_max, e):
+        elif np.abs(joint_angle - joint_max) < e:
             joint_angle = joint_max - e
-        elif np.isclose(joint_angle, joint_min, e):
+        elif np.abs(joint_angle - joint_min) < e:
             joint_angle = joint_min + e
         # calculate weight
-        if np.isclose(joint_angle, joint_max, e) and \
-           np.isclose(joint_angle, joint_min, e):
+        if np.abs(joint_angle - joint_max) < e and \
+           np.abs(joint_angle - joint_min) < e:
             res[i] = float('inf')
         else:
             if np.isinf(joint_min) or np.isinf(joint_max):
