@@ -256,12 +256,9 @@ class RotationalJoint(Joint):
                 logger.warning('{} :joint-angle({}) violate min-angle({})'
                                .format(self, v, self.min_angle))
             v = self.min_angle
+        diff_angle = v - self._joint_angle
         self._joint_angle = v
-        # (send child-link :replace-coords default-coords)
-        # (send child-link :rotate (deg2rad joint-angle) axis))
-        self.child_link.rotation = self.default_coords.rotation.copy()
-        self.child_link.translation = self.default_coords.translation.copy()
-        self.child_link.rotate(self._joint_angle, self.axis)
+        self.child_link.rotate(diff_angle, self.axis)
         if enable_hook:
             for hook in self._hooks:
                 hook()
@@ -406,11 +403,9 @@ class LinearJoint(Joint):
                     logger.warning('{} :joint-angle({}) violate min-angle({})'
                                    .format(self, v, self.min_angle))
                 v = self.min_angle
+            diff_translation = v - self._joint_angle
             self._joint_angle = v
-            self.child_link.rotation = self.default_coords.rotation.copy()
-            self.child_link.translation = \
-                self.default_coords.translation.copy()
-            self.child_link.translate(self._joint_angle * self.axis)
+            self.child_link.translate(diff_translation * self.axis)
 
             if enable_hook:
                 for hook in self._hooks:
