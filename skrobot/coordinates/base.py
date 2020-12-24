@@ -642,13 +642,13 @@ class Coordinates(object):
     def inverse_rotate_vector(self, v):
         return np.matmul(v, self._rotation)
 
-    def transform(self, c, wrt='local'):
+    def transform(self, c, wrt='local', out=None):
         """Transform this coordinates by coords based on wrt
 
         Note that this function changes this coordinates
         translation and rotation.
         If you would like not to change this coordinates,
-        Please use copy_worldcoords()
+        Please use copy_worldcoords() or give `out`.
 
         Parameters
         ----------
@@ -659,6 +659,9 @@ class Coordinates(object):
             If wrt is 'world' or 'parent' or self.parent,
             transform c with respect to worldcoord.
             If wrt is Coordinates, transform c with respect to c.
+        out : None or skrobot.coordinates.Coordinates
+            If the `out` is specified, set new coordinates to `out`.
+            Note that if the `out` is given, these coordinates don't change.
 
         Returns
         -------
@@ -668,20 +671,22 @@ class Coordinates(object):
         Examples
         --------
         """
+        if out is None:
+            out = self
         if wrt == 'local' or wrt == self:
             # multiply c from the right
-            transform_coords(self, c, self)
+            transform_coords(self, c, out)
         elif wrt == 'parent' or wrt == self.parent \
                 or wrt == 'world':
             # multiply c from the left
-            transform_coords(c, self, self)
+            transform_coords(c, self, out)
         elif isinstance(wrt, Coordinates):
-            transform_coords(wrt.inverse_transformation(), self, self)
-            transform_coords(c, self, self)
-            transform_coords(wrt.worldcoords(), self, self)
+            transform_coords(wrt.inverse_transformation(), self, out)
+            transform_coords(c, out, out)
+            transform_coords(wrt.worldcoords(), out, out)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
-        return self
+        return out
 
     def move_coords(self, target_coords, local_coords):
         """Transform this coordinate so that local_coords to target_coords.
@@ -1298,7 +1303,7 @@ class CascadedCoords(Coordinates):
     def inverse_rotate_vector(self, v):
         return self.worldcoords().inverse_rotate_vector(v)
 
-    def transform(self, c, wrt='local'):
+    def transform(self, c, wrt='local', out=None):
         """Transform this coordinates
 
         Parameters
@@ -1311,35 +1316,40 @@ class CascadedCoords(Coordinates):
             If wrt is 'parent' or self.parent, transform c
             with respect to parentcoords. (multiply c from the left.)
             If wrt is Coordinates, transform c with respect to c.
+        out : None or skrobot.coordinates.Coordinates
+            If the `out` is specified, set new coordinates to `out`.
+            Note that if the `out` is given, these coordinates don't change.
 
         Returns
         -------
         self : skrobot.coordinates.CascadedCoords
             return self
         """
+        if out is None:
+            out = self
         if isinstance(wrt, Coordinates):
-            transform_coords(self.parentcoords(), self, self)
-            transform_coords(wrt.inverse_transformation(), self, self)
-            transform_coords(c, self, self)
-            transform_coords(wrt.worldcoords(), self, self)
+            transform_coords(self.parentcoords(), self, out)
+            transform_coords(wrt.inverse_transformation(), out, out)
+            transform_coords(c, out, out)
+            transform_coords(wrt.worldcoords(), out, out)
             transform_coords(self.parentcoords().inverse_transformation(),
-                             self, self)
+                             out, out)
         elif wrt == 'local' or wrt == self:
             # multiply c from the right.
-            transform_coords(self, c, self)
+            transform_coords(self, c, out)
         elif wrt == 'parent' or wrt == self.parent:
             # multiply c from the left.
-            transform_coords(c, self, self)
+            transform_coords(c, self, out)
         elif wrt == 'world':
             parentcoords = self.parentcoords()
-            transform_coords(parentcoords, self, self)
-            transform_coords(c, self, self)
+            transform_coords(parentcoords, self, out)
+            transform_coords(c, out, out)
             transform_coords(parentcoords.inverse_transformation(),
-                             self, self)
+                             out, out)
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
-        return self.newcoords(self.rotation, self.translation,
-                              check_validity=False)
+        return out.newcoords(out.rotation, out.translation,
+                             check_validity=False)
 
     def update(self, force=False):
         if not force and not self._changed:
