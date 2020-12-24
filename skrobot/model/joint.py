@@ -220,11 +220,24 @@ class RotationalJoint(Joint):
         self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Joint angle method
+        """Return joint angle.
 
-        Return joint-angle if v is not set, if v is given, set joint
-        angle.
-        v is rotational value in degree.
+        Return joint angle if v is not set, if v is given, set the value as
+        a joint angle.
+
+        Parameters
+        ----------
+        v : None or float
+            Joint angle in a radian.
+            If v is `None`, return this joint's joint angle.
+        relative : None or bool
+            If relative is `True`, an input `v` represents the relative
+            translation.
+
+        Parameters
+        ----------
+        self._joint_angle : float
+            Current joint_angle in a radian.
         """
         if v is None:
             return self._joint_angle
@@ -243,12 +256,9 @@ class RotationalJoint(Joint):
                 logger.warning('{} :joint-angle({}) violate min-angle({})'
                                .format(self, v, self.min_angle))
             v = self.min_angle
+        diff_angle = v - self._joint_angle
         self._joint_angle = v
-        # (send child-link :replace-coords default-coords)
-        # (send child-link :rotate (deg2rad joint-angle) axis))
-        self.child_link.rotation = self.default_coords.rotation.copy()
-        self.child_link.translation = self.default_coords.translation.copy()
-        self.child_link.rotate(self._joint_angle, self.axis)
+        self.child_link.rotate(diff_angle, self.axis)
         if enable_hook:
             for hook in self._hooks:
                 hook()
@@ -364,9 +374,21 @@ class LinearJoint(Joint):
         self.joint_torque = 0.0  # [N]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """return joint-angle if v is not set, if v is given, set joint angle.
+        """Return this joint's linear translation (joint angle).
 
-        v is linear value in [m].
+        Parameters
+        ----------
+        v : None or float
+            Linear translation (joint angle) in a meter.
+            If v is `None`, return current this joint's translation.
+        relative : None or bool
+            If relative is `True`, an input `v` represents the relative
+            translation.
+
+        Parameters
+        ----------
+        self._joint_angle : float
+            current linear translation (joint_angle).
         """
         if v is not None:
             if relative is not None:
@@ -381,11 +403,9 @@ class LinearJoint(Joint):
                     logger.warning('{} :joint-angle({}) violate min-angle({})'
                                    .format(self, v, self.min_angle))
                 v = self.min_angle
+            diff_translation = v - self._joint_angle
             self._joint_angle = v
-            self.child_link.rotation = self.default_coords.rotation.copy()
-            self.child_link.translation = \
-                self.default_coords.translation.copy()
-            self.child_link.translate(self._joint_angle * self.axis)
+            self.child_link.translate(diff_translation * self.axis)
 
             if enable_hook:
                 for hook in self._hooks:
@@ -542,16 +562,16 @@ def joint_angle_limit_weight(joint_list):
             k += 1
 
         # limitation
-        if np.isclose(joint_angle, joint_max, e) and \
-           np.isclose(joint_angle, joint_min, e):
+        if np.abs(joint_angle - joint_max) < e and \
+           np.abs(joint_angle - joint_min) < e:
             pass
-        elif np.isclose(joint_angle, joint_max, e):
+        elif np.abs(joint_angle - joint_max) < e:
             joint_angle = joint_max - e
-        elif np.isclose(joint_angle, joint_min, e):
+        elif np.abs(joint_angle - joint_min) < e:
             joint_angle = joint_min + e
         # calculate weight
-        if np.isclose(joint_angle, joint_max, e) and \
-           np.isclose(joint_angle, joint_min, e):
+        if np.abs(joint_angle - joint_max) < e and \
+           np.abs(joint_angle - joint_min) < e:
             res[i] = float('inf')
         else:
             if np.isinf(joint_min) or np.isinf(joint_max):
