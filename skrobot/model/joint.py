@@ -220,11 +220,24 @@ class RotationalJoint(Joint):
         self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Joint angle method
+        """Return joint angle.
 
-        Return joint-angle if v is not set, if v is given, set joint
-        angle.
-        v is rotational value in degree.
+        Return joint angle if v is not set, if v is given, set the value as
+        a joint angle.
+
+        Parameters
+        ----------
+        v : None or float
+            Joint angle in a radian.
+            If v is `None`, return this joint's joint angle.
+        relative : None or bool
+            If relative is `True`, an input `v` represents the relative
+            translation.
+
+        Parameters
+        ----------
+        self._joint_angle : float
+            Current joint_angle in a radian.
         """
         if v is None:
             return self._joint_angle
@@ -364,9 +377,21 @@ class LinearJoint(Joint):
         self.joint_torque = 0.0  # [N]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """return joint-angle if v is not set, if v is given, set joint angle.
+        """Return this joint's linear translation (joint angle).
 
-        v is linear value in [m].
+        Parameters
+        ----------
+        v : None or float
+            Linear translation (joint angle) in a meter.
+            If v is `None`, return current this joint's translation.
+        relative : None or bool
+            If relative is `True`, an input `v` represents the relative
+            translation.
+
+        Parameters
+        ----------
+        self._joint_angle : float
+            current linear translation (joint_angle).
         """
         if v is not None:
             if relative is not None:
