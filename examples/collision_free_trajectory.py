@@ -34,7 +34,7 @@ coll_link_list = [
     robot_model.r_gripper_l_finger_link]
 
 # obtain av_start (please try both with_base=True, FalseA)
-with_base = True
+with_base = False
 av_start = np.array([0.564, 0.35, -0.74, -0.7, -0.7, -0.17, -0.63])
 if with_base:
     av_start = np.hstack([av_start, [0, 0, 0]])
@@ -64,6 +64,8 @@ fksolver = sscc.fksolver # TODO temporary
 cm = ConstraintManager(n_wp, [j.name for j in joint_list], fksolver, with_base)
 cm.add_eq_configuration(0, av_start)
 cm.add_eq_configuration(n_wp-1, av_goal)
+cm.add_pose_constraint(n_wp-2, "r_gripper_tool_frame", [0.75, -0.6, 0.8, 0.0, 0.0, 0.0])
+cm.add_pose_constraint(n_wp-3, "r_gripper_tool_frame", [0.7, -0.6, 0.8, 0.0, 0.0, 0.0])
 
 # motion planning
 ts = time.time()

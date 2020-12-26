@@ -12,6 +12,7 @@ class EqualityConstraint(object):
         self.name = name
 
     def _check_func(self, func):
+        # TODO insert jacobian test utils here
         error_report_prefix = "ill-formed function {} is detected. ".format(self.name)
         av_seq_dummy = np.zeros((self.n_wp, self.n_dof))
         try:
@@ -50,6 +51,7 @@ class PoseConstraint(EqualityConstraint):
     def __init__(self, n_wp, n_dof, idx_wp, coords_name, pose_desired, 
             fksolver, joint_ids, with_base,
             name=None):
+        # here pose order is [x, y, z, r, p, y]
         if name is None:
             name = 'eq_pose_const_{}'.format(str(uuid.uuid1()).replace('-', '_'))
         super(PoseConstraint, self).__init__(n_wp, n_dof, idx_wp, name)
@@ -57,6 +59,8 @@ class PoseConstraint(EqualityConstraint):
         self.coords_name = coords_name
         self.pose_desired = pose_desired
         self.rank = len(pose_desired)
+
+        self.with_rot = (self.rank == 6)
 
         self.joint_ids = joint_ids
         self.fksolver = fksolver
@@ -67,12 +71,10 @@ class PoseConstraint(EqualityConstraint):
 
         coords_ids = self.fksolver.get_link_ids([self.coords_name])
         def func(av_seq):
-            with_rot = False
-            with_jacobian = True
             J_whole = np.zeros((self.rank, n_dof_all))
             P, J = self.fksolver.solve_forward_kinematics(
                     [av_seq[self.idx_wp]], coords_ids, self.joint_ids,
-                    with_rot, self.with_base, with_jacobian) 
+                    with_rot=self.with_rot, with_base=self.with_base, with_jacobian=True) 
             J_whole[:, self.n_dof*self.idx_wp:self.n_dof*(self.idx_wp+1)] = J
             return (P - self.pose_desired).flatten(), J_whole
         self._check_func(func)
