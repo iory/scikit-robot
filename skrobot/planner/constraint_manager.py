@@ -93,14 +93,20 @@ class ConstraintManager(object):
         self.fksolver = fksolver
         self.with_base = with_base
 
-    def add_eq_configuration(self, idx_wp, av_desired):
+    def add_eq_configuration(self, idx_wp, av_desired, force=False):
         constraint = ConfigurationConstraint(self.n_wp, self.n_dof, idx_wp, av_desired)
-        self.constraint_table[idx_wp] = constraint
+        self._add_constraint(idx_wp, constraint, force)
 
-    def add_pose_constraint(self, idx_wp, coords_name, pose_desired):
+    def add_pose_constraint(self, idx_wp, coords_name, pose_desired, force=False):
         constraint = PoseConstraint(self.n_wp, self.n_dof, idx_wp,
                 coords_name, pose_desired,
                 self.fksolver, self.joint_ids, self.with_base)
+        self._add_constraint(idx_wp, constraint, force)
+
+    def _add_constraint(self, idx_wp, constraint, force):
+        is_already_exist = idx_wp in self.constraint_table.keys()
+        if is_already_exist and (not force):
+            raise Exception("to overwrite the constraint, please set force=True")
         self.constraint_table[idx_wp] = constraint
 
     def gen_combined_constraint_func(self):
