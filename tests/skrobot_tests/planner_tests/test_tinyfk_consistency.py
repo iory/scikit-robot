@@ -70,7 +70,7 @@ class TestTinyfkConsistency(unittest.TestCase):
                     with_rot=with_rot, with_base=with_base, with_jacobian=True)
 
             pose_flatten = pose_arr.flatten()  # (pose_dim * n_feature)
-            n_dof = len(joint_ids) + (6 if with_rot else 3) 
+            n_dof = len(joint_ids) + (3 if with_base else 0) 
             pose_dim = 6 if with_rot else 3
             jac_flatten = jac_arr.reshape(n_feature * pose_dim, n_dof)
             return pose_flatten, jac_flatten
