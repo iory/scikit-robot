@@ -1484,6 +1484,7 @@ class CascadedLink(CascadedCoords):
 
         col = col_offset
         i = 0
+        world_default_coords = Coordinates()
         while col < (col_offset + jdim):
             ul = union_link_list[i]
             row = 0
@@ -1509,8 +1510,9 @@ class CascadedLink(CascadedCoords):
                         child_link = joint.child_link
                         parent_link = joint.parent_link
                         default_coords = joint.default_coords
-                        world_default_coords = parent_link.copy_worldcoords().\
-                            transform(default_coords)
+                        # set new coordinates to world_default_coords.
+                        parent_link.worldcoords().\
+                            transform(default_coords, out=world_default_coords)
 
                         jacobian = joint.calc_jacobian(
                             jacobian,
