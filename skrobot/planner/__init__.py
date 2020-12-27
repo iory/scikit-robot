@@ -7,3 +7,4 @@ from skrobot.planner.tinyfk_collision_checker import TinyfkSweptSphereSdfCollisi
 from skrobot.planner.tinyfk_sqp_based import tinyfk_sqp_plan_trajectory
 
 from skrobot.planner.constraint_manager import ConstraintManager
+from skrobot.planner.constraint_viewer import ConstraintViewer

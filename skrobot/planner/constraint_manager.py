@@ -126,3 +126,5 @@ class ConstraintManager(object):
 
     def gen_initial_trajectory(self):
         pass
+
+
