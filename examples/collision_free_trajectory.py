@@ -8,6 +8,8 @@ from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
 from skrobot.planner import tinyfk_sqp_plan_trajectory
 from skrobot.planner import TinyfkSweptSphereSdfCollisionChecker
+from skrobot.planner import ConstraintManager
+from skrobot.planner import ConstraintViewer
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
@@ -33,7 +35,7 @@ coll_link_list = [
     robot_model.r_gripper_l_finger_link]
 
 # obtain av_start (please try both with_base=True, FalseA)
-with_base = True
+with_base = False
 av_start = np.array([0.564, 0.35, -0.74, -0.7, -0.7, -0.17, -0.63])
 if with_base:
     av_start = np.hstack([av_start, [0, 0, 0]])
@@ -57,16 +59,31 @@ sscc = TinyfkSweptSphereSdfCollisionChecker(lambda X: box.sdf(X), robot_model)
 for link in coll_link_list:
     sscc.add_collision_link(link)
 
+# constraint manager
+n_wp = 10
+fksolver = sscc.fksolver # TODO temporary
+cm = ConstraintManager(n_wp, [j.name for j in joint_list], fksolver, with_base)
+cm.add_eq_configuration(0, av_start)
+cm.add_eq_configuration(n_wp-1, av_goal)
+cm.add_pose_constraint(n_wp-2, "r_gripper_tool_frame", [0.75, -0.6, 0.8, 0.0, 0.0, 0.0])
+cm.add_pose_constraint(n_wp-3, "r_gripper_tool_frame", [0.7, -0.6, 0.8])
+
+
+
 # motion planning
 ts = time.time()
 av_seq = tinyfk_sqp_plan_trajectory(
-    sscc, av_start, av_goal, joint_list, 10,
+    sscc, cm, av_start, av_goal, joint_list, n_wp,
     safety_margin=1e-2, with_base=with_base)
 print("solving time : {0} sec".format(time.time() - ts))
 
 # visualizatoin
 print("show trajectory")
 viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(641, 480))
+
+cv = ConstraintViewer(viewer, cm)
+cv.show()
+
 viewer.add(robot_model)
 viewer.add(box)
 viewer.add(Axis(pos=[0.8, -0.6, 0.8]))
@@ -77,6 +94,8 @@ for av in av_seq:
     sscc.update_color()
     viewer.redraw()
     time.sleep(1.0)
+
+cv.delete()
 
 print('==> Press [q] to close window')
 while not viewer.has_exit:
