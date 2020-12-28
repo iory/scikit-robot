@@ -5,6 +5,13 @@ from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import rpy_angle
 from skrobot.coordinates.math import rpy_matrix
 
+def update_fksolver(fksolver, robot_model):
+    joint_list = robot_model.joint_list
+    joint_names = [j.name for j in joint_list]
+    joint_ids = fksolver.get_joint_ids(joint_names)
+
+    av_full = get_robot_config(robot_model, joint_list, with_base=True)
+    fksolver.set_joint_angles(joint_ids, av_full, with_base=True)
 
 def scipinize(fun):
     """Scipinize a function returning both f and jac
