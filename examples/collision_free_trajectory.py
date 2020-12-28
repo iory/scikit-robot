@@ -64,16 +64,16 @@ n_wp = 10
 fksolver = sscc.fksolver # TODO temporary
 cm = ConstraintManager(n_wp, [j.name for j in joint_list], fksolver, with_base)
 cm.add_eq_configuration(0, av_start)
-cm.add_eq_configuration(n_wp-1, av_goal)
-cm.add_pose_constraint(n_wp-2, "r_gripper_tool_frame", [0.75, -0.6, 0.8, 0.0, 0.0, 0.0])
-cm.add_pose_constraint(n_wp-3, "r_gripper_tool_frame", [0.7, -0.6, 0.8])
+cm.add_pose_constraint(n_wp-1, "r_gripper_tool_frame", [0.75, -0.6, 0.8])
 
+av_current = get_robot_config(robot_model, joint_list, with_base=with_base)
+av_seq_init = cm.gen_initial_trajectory(av_current)
 
 
 # motion planning
 ts = time.time()
 av_seq = tinyfk_sqp_plan_trajectory(
-    sscc, cm, av_start, av_goal, joint_list, n_wp,
+    sscc, cm, av_seq_init, joint_list, n_wp,
     safety_margin=1e-2, with_base=with_base)
 print("solving time : {0} sec".format(time.time() - ts))
 

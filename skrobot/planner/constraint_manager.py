@@ -27,7 +27,6 @@ class EqualityConstraint(object):
         assert jac.shape == (dim_constraint, dof_all), error_report_prefix \
                 + "shape of jac is strainge. Desired: {0}, Copmuted {1}".format((dim_constraint, dof_all), jac.shape)
 
-
 class ConfigurationConstraint(EqualityConstraint):
     def __init__(self, n_wp, n_dof, idx_wp, av_desired, name=None):
         if name is None:
@@ -46,6 +45,9 @@ class ConfigurationConstraint(EqualityConstraint):
             return f, grad
         self._check_func(func)
         return func
+
+    def satisfying_angle_vector(self, av_init=None):
+        return self.av_desired
 
 class PoseConstraint(EqualityConstraint):
     def __init__(self, n_wp, n_dof, idx_wp, coords_name, pose_desired, 
@@ -79,6 +81,17 @@ class PoseConstraint(EqualityConstraint):
             return (P - self.pose_desired).flatten(), J_whole
         self._check_func(func)
         return func
+
+    def satisfying_angle_vector(self, av_init=None, option=None):
+        if option is None:
+            option = {"maxitr": 200, "ftol": 1e-4, "sr_weight":1.0}
+        coords_id = self.fksolver.get_link_ids([self.coords_name])[0]
+        if av_init is None:
+            n_dof = len(self.joint_ids) + (3 if self.with_base else 0)
+            av_init = np.zeros(n_dof)
+        av_solved = self.fksolver.solve_inverse_kinematics(self.pose_desired, av_init, coords_id,
+                self.joint_ids, self.with_rot, self.with_base, option=option, ignore_fail=True)
+        return av_solved
 
 # give a problem specification
 class ConstraintManager(object):
@@ -124,7 +137,11 @@ class ConstraintManager(object):
             return np.hstack(f_list), np.vstack(jac_list)
         return func_combined
 
-    def gen_initial_trajectory(self):
-        pass
+    def gen_initial_trajectory(self, av_current=None):
+        av_start = self.constraint_table[0].satisfying_angle_vector(av_init=av_current)
+        av_goal = self.constraint_table[self.n_wp-1].satisfying_angle_vector(av_init=av_current)
 
-
+        regular_interval = (av_goal - av_start) / (self.n_wp - 1)
+        initial_trajectory = np.array(
+            [av_start + i * regular_interval for i in range(self.n_wp)])
+        return initial_trajectory

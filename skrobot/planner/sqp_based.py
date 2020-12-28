@@ -105,7 +105,7 @@ def _sqp_based_trajectory_optimization(
         slsqp_option=None):
 
     if slsqp_option is None:
-        slsqp_option = {'ftol': 1e-4, 'disp': True, 'maxiter': 100}
+        slsqp_option = {'ftol': 1e-3, 'disp': True, 'maxiter': 100}
     n_wp, n_dof = av_seq_init.shape
     A = construct_smoothcost_fullmat(n_wp, n_dof, weights=weights)
 

@@ -5,14 +5,12 @@ from skrobot.planner.sqp_based import _sqp_based_trajectory_optimization
 
 def tinyfk_sqp_plan_trajectory(collision_checker,
                                constraint_manager,
-                               av_start,
-                               av_goal,
+                               initial_trajectory,
                                joint_list,
                                n_wp,
                                safety_margin=1e-2,
                                with_base=False,
                                weights=None,
-                               initial_trajectory=None,
                                slsqp_option=None
                                ):
     # common stuff
@@ -27,12 +25,6 @@ def tinyfk_sqp_plan_trajectory(collision_checker,
         if with_base:
             weights += [3.0] * 3  # base should be difficult to move
     weights = tuple(weights)  # to use cache
-
-    # create initial solution for the optimization problem
-    if initial_trajectory is None:
-        regular_interval = (av_goal - av_start) / (n_wp - 1)
-        initial_trajectory = np.array(
-            [av_start + i * regular_interval for i in range(n_wp)])
 
     joint_name_list = [j.name for j in joint_list]
     joint_ids = collision_checker.fksolver.get_joint_ids(joint_name_list)
