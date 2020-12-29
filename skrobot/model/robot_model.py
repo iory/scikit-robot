@@ -1,7 +1,6 @@
 import io
 import itertools
 from logging import getLogger
-import warnings
 
 import numpy as np
 import numpy.linalg as LA
@@ -30,6 +29,7 @@ from skrobot.model.joint import joint_angle_limit_weight
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import Link
+from skrobot.model.utils import _meshes_from_urdf_visuals
 from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
@@ -1650,53 +1650,6 @@ class RobotModel(CascadedLink):
     def init_pose(self):
         return self.angle_vector(np.zeros_like(self.angle_vector()))
 
-    def _meshes_from_urdf_visuals(self, visuals):
-        meshes = []
-        for visual in visuals:
-            meshes.extend(self._meshes_from_urdf_visual(visual))
-        return meshes
-
-    def _meshes_from_urdf_visual(self, visual):
-        if not isinstance(visual, urdf.Visual):
-            raise TypeError('visual must be urdf.Visual, but got: {}'
-                            .format(type(visual)))
-
-        meshes = []
-        for mesh in visual.geometry.meshes:
-            mesh = mesh.copy()
-
-            # rescale
-            if visual.geometry.mesh is not None:
-                if visual.geometry.mesh.scale is not None:
-                    mesh.vertices = mesh.vertices * visual.geometry.mesh.scale
-
-            # TextureVisuals is usually slow to render
-            if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
-                mesh.visual = mesh.visual.to_color()
-                if mesh.visual.vertex_colors.ndim == 1:
-                    mesh.visual.vertex_colors = \
-                        mesh.visual.vertex_colors[None].repeat(
-                            mesh.vertices.shape[0], axis=0
-                        )
-
-            # If color or texture is not specified in mesh file,
-            # use information specified in URDF.
-            if (
-                (mesh.visual.face_colors
-                 == trimesh.visual.DEFAULT_COLOR).all()
-                and visual.material
-            ):
-                if visual.material.texture is not None:
-                    warnings.warn(
-                        'texture specified in URDF is not supported'
-                    )
-                elif visual.material.color is not None:
-                    mesh.visual.face_colors = visual.material.color
-
-            mesh.apply_transform(visual.origin)
-            meshes.append(mesh)
-        return meshes
-
     def load_urdf(self, urdf):
         f = io.StringIO()
         f.write(urdf)
@@ -1715,8 +1668,7 @@ class RobotModel(CascadedLink):
         for urdf_link in self.urdf_robot_model.links:
             link = Link(name=urdf_link.name)
             link.collision_mesh = urdf_link.collision_mesh
-            link.visual_mesh = self._meshes_from_urdf_visuals(
-                urdf_link.visuals)
+            link.visual_mesh = _meshes_from_urdf_visuals(urdf_link.visuals)
             links.append(link)
         link_maps = {l.name: l for l in links}
 
