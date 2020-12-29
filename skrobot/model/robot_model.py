@@ -29,7 +29,6 @@ from skrobot.model.joint import joint_angle_limit_weight
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import Link
-from skrobot.model.utils import _meshes_from_urdf_visuals
 from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
@@ -1666,9 +1665,7 @@ class RobotModel(CascadedLink):
 
         links = []
         for urdf_link in self.urdf_robot_model.links:
-            link = Link(name=urdf_link.name)
-            link.collision_mesh = urdf_link.collision_mesh
-            link.visual_mesh = _meshes_from_urdf_visuals(urdf_link.visuals)
+            link = Link.from_urdf_link(urdf_link)
             links.append(link)
         link_maps = {l.name: l for l in links}
 

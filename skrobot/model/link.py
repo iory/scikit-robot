@@ -4,6 +4,7 @@ import numpy as np
 import trimesh
 
 from skrobot.coordinates import CascadedCoords
+from skrobot.model.utils import _meshes_from_urdf_visuals
 
 
 class Link(CascadedCoords):
@@ -12,6 +13,7 @@ class Link(CascadedCoords):
                  inertia_tensor=None,
                  collision_mesh=None,
                  visual_mesh=None,
+                 urdf_link=None,
                  *args, **kwargs):
         super(Link, self).__init__(*args, **kwargs)
         self.centroid = centroid
@@ -22,6 +24,15 @@ class Link(CascadedCoords):
             inertia_tensor = np.eye(3)
         self._collision_mesh = collision_mesh
         self._visual_mesh = visual_mesh
+        self.urdf_link = urdf_link
+
+    @classmethod
+    def from_urdf_link(cls, urdf_link):
+        return cls(
+            name=urdf_link.name,
+            collision_mesh=urdf_link.collision_mesh,
+            visual_mesh=_meshes_from_urdf_visuals(urdf_link.visuals),
+            urdf_link=urdf_link)
 
     @property
     def parent_link(self):
