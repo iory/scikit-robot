@@ -9,8 +9,77 @@ import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Transform
+from skrobot.coordinates import make_cascoords
+from skrobot.utils.urdf import get_filename
 
 logger = getLogger(__name__)
+
+
+def trimesh2sdf(mesh, dim_grid):
+    is_loaded_mesh = 'file_path' in mesh.metadata
+    if is_loaded_mesh:
+        file_path = mesh.metadata['file_path']
+        return GridSDF.from_objfile(file_path, dim_grid=dim_grid)
+
+    # process primtives 
+    shape = mesh.metadata['shape']
+    if shape == 'box':
+        extents = mesh.metadata['extents']
+        return BoxSDF([0, 0, 0], extents)
+    elif shape == 'cylinder':
+        height = mesh.metadata['height']
+        radius = mesh.metadata['radius']
+        return CylinderSDF([0, 0, 0], radius=radius, height=height)
+    elif shape == 'sphere':
+        radius = mesh.metadata['radius']
+        return SphereSDF([0, 0, 0], radius)
+
+    msg = "primtive type {0} is not supported".format(shape)
+    raise ValueError(msg)
+
+def link2sdf(link, urdf_path, dim_grid=30):
+    """convert Link to corresponding sdf
+
+    Parameters
+    -------
+    link : skrobot.model.Link
+        link object
+    urdf_path : str
+        urdf path of the robot model that the link belongs to
+    dim_grid : int
+        dimension of the GridSDF
+
+    Returns
+    -------
+    sdf : skrobot.sdf.SignedDistanceFunction
+        corresponding signed distance function to the link type.
+        e.g. if Link has geometry of urdf.Box, then BoxSDF is
+        created.
+    """
+
+    """
+    def geometry2sdf(geometry):
+        if geometry.mesh:
+            filename_raw = geometry.mesh.filename
+            filename = get_filename(urdf_path, filename_raw)
+            return GridSDF.from_objfile(filename, dim_grid=dim_grid)
+        elif geometry.box:
+            size = geometry.box.size
+            return BoxSDF([0, 0, 0], size)
+        elif geometry.sphere:
+            radius = geometry.sphere.radius
+            return SphereSDF([0, 0, 0], radius)
+        elif geometry.cylinder:
+            radius = geometry.cylinder.radius
+            length = geometry.cylinder.length
+            return CylinderSDF([0, 0, 0], radius=radius, height=length)
+        else:
+            raise Exception
+    """
+
+    sdf = trimesh2sdf(link.collision_mesh, dim_grid=dim_grid)
+    link.assoc(sdf.coords, relative_coords=sdf.coords)
+    return sdf
 
 
 class SignedDistanceFunction(object):
@@ -173,6 +242,28 @@ class UnionSDF(SignedDistanceFunction):
                             in zip(self.sdf_list, num_list)])
         logicals, sd_vals = self.on_surface(points)
         return points[logicals], sd_vals[logicals]
+
+    @classmethod
+    def from_robot_model(cls, robot_model, dim_grid=50):
+        """Create union sdf from a robot model
+
+        Parameters
+        ----------
+        robot_model : skrobot.model.RobotModel
+            Using the links of the robot_model this creates
+            the UnionSDF instance.
+
+        Returns
+        -------
+        union_sdf : skrobot.sdf.UnionSDF
+            union sdf of robot_model
+        """
+        sdf_list = []
+        for link in robot_model.link_list:
+            if link.collision_mesh is not None:
+                sdf = link2sdf(link, robot_model.urdf_path, dim_grid=50)
+                sdf_list.append(sdf)
+        return cls(sdf_list)
 
 
 class BoxSDF(SignedDistanceFunction):
