@@ -6,11 +6,9 @@ import os
 import time
 try:
     # for python3
-    from functools import lru_cache
     from urllib.parse import urlparse
 except ImportError:
     # for python2
-    from repoze.lru import lru_cache
     from urlparse import urlparse
 
 from lxml import etree as ET
@@ -23,6 +21,7 @@ import trimesh
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
+from skrobot.pycompat import lru_cache
 
 try:
     import rospkg

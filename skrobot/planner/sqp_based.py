@@ -1,14 +1,8 @@
 import numpy as np
 import scipy
 
-try:
-    # in python3
-    from functools import lru_cache
-except ImportError:
-    # in python2
-    from repoze.lru import lru_cache
-
 from skrobot.planner.utils import scipinize
+from skrobot.pycompat import lru_cache
 
 
 def sqp_plan_trajectory(collision_checker,
