@@ -211,3 +211,21 @@ class TestSDF(unittest.TestCase):
 
         cond_and = (sum(on_surface1) > 0) and (sum(on_surface2) > 0)
         self.assertTrue(cond_and)  # each surface has at least a single points
+
+    def test_union_sdf_from_robot_model(self):
+        fetch = skrobot.models.Fetch()
+        fetch.reset_manip_pose()
+        union_sdf = UnionSDF.from_robot_model(fetch)
+
+        # check if the vertices of the links have almost 0 sd vals.
+        gripper_link = fetch.gripper_link
+        coll_mesh = gripper_link._collision_mesh
+        vertices = gripper_link.transform_vector(coll_mesh.vertices)
+        sd_vals = union_sdf(vertices)
+        self.assertTrue(np.all(sd_vals < 1e-3))
+
+        finger_link = fetch.r_gripper_finger_link
+        coll_mesh = finger_link._collision_mesh
+        vertices = finger_link.transform_vector(coll_mesh.vertices)
+        sd_vals = union_sdf(vertices)
+        self.assertTrue(np.all(sd_vals < 1e-3))
