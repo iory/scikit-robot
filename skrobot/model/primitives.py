@@ -8,6 +8,7 @@ from skrobot.coordinates.base import CascadedCoords
 from skrobot.coordinates.base import Coordinates
 from skrobot.model import Link
 from skrobot.sdf import BoxSDF
+from skrobot.sdf import CylinderSDF
 from skrobot.sdf import GridSDF
 from skrobot.sdf import SphereSDF
 
@@ -114,7 +115,7 @@ class Cylinder(Link):
     def __init__(self, radius, height,
                  sections=32,
                  vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
         if name is None:
             name = 'cylinder_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -126,6 +127,13 @@ class Cylinder(Link):
             vertex_colors=vertex_colors,
             face_colors=face_colors,
         )
+
+        if with_sdf:
+            sdf = CylinderSDF(np.zeros(3), height, radius)
+            self.assoc(sdf.coords)
+            self.sdf = sdf
+        else:
+            self.sdf = None
 
 
 class Sphere(Link):

@@ -234,6 +234,52 @@ class SphereSDF(SignedDistanceFunction):
                             self._surface_threshold)
 
 
+class CylinderSDF(SignedDistanceFunction):
+    """SDF for a cylinder specified by `origin`,`radius` and `height`"""
+
+    def __init__(self, origin, height, radius, coords=None, use_abs=False):
+        super(CylinderSDF, self).__init__(origin,
+                                          coords=coords, use_abs=use_abs)
+        self._height = height
+        self._radius = radius
+        self._surface_threshold = min(radius, height) * 1e-2
+
+    def _signed_distance(self, points_sdf):
+        n_pts, _ = points_sdf.shape
+        c = self._origin
+        height_half = 0.5 * self._height
+
+        pts_from_center_3d = points_sdf - c[None, :]
+        radius_from_center = np.sqrt(
+            pts_from_center_3d[:, 0]**2 + pts_from_center_3d[:, 1]**2)
+        height_from_center = pts_from_center_3d[:, 2]
+
+        # Now the problem is reduced to 2 dim [radius, height] box sdf
+        # so the algorithm from now is the same as the box sdf computation
+        half_extent_2d = np.array([self._radius, height_half])
+        pts_from_center_2d = np.vstack(
+            [radius_from_center, height_from_center]).T
+        sd_vals_each_axis = np.abs(pts_from_center_2d)\
+            - half_extent_2d[None, :]
+
+        positive_dists_each_axis = np.maximum(sd_vals_each_axis, 0.0)
+        positive_dists = np.sqrt(np.sum(positive_dists_each_axis**2, axis=1))
+
+        negative_dists_each_axis = np.max(sd_vals_each_axis, axis=1)
+        negative_dists = np.minimum(negative_dists_each_axis, 0.0)
+
+        sd_vals = positive_dists + negative_dists
+        return sd_vals
+
+    def _surface_points(self, n_sample=1000):
+        # surface points by raymarching
+        vecs = np.random.randn(n_sample, 3)
+        ray_tips = np.zeros((n_sample, 3))
+        return ray_marching(ray_tips, vecs,
+                            self._signed_distance,
+                            self._surface_threshold)
+
+
 class GridSDF(SignedDistanceFunction):
     """SDF using precopmuted signed distances for gridded points."""
 
