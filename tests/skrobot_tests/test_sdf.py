@@ -213,19 +213,29 @@ class TestSDF(unittest.TestCase):
         self.assertTrue(cond_and)  # each surface has at least a single points
 
     def test_union_sdf_from_robot_model(self):
+        r2d2 = skrobot.models.urdf.RobotModelFromURDF(
+            urdf_file=skrobot.data.r2d2_urdfpath())
+        r2d2_union_sdf = UnionSDF.from_robot_model(r2d2)
+        for link in r2d2.link_list:
+            coll_mesh = link._collision_mesh
+            vertices = link.transform_vector(coll_mesh.vertices)
+            sd_vals = r2d2_union_sdf(vertices)
+            self.assertTrue(np.all(sd_vals < 1e-3))
+
         fetch = skrobot.models.Fetch()
         fetch.reset_manip_pose()
-        union_sdf = UnionSDF.from_robot_model(fetch)
+        # this a takes
+        fetch_union_sdf = UnionSDF.from_robot_model(fetch)
 
         # check if the vertices of the links have almost 0 sd vals.
         gripper_link = fetch.gripper_link
         coll_mesh = gripper_link._collision_mesh
         vertices = gripper_link.transform_vector(coll_mesh.vertices)
-        sd_vals = union_sdf(vertices)
+        sd_vals = fetch_union_sdf(vertices)
         self.assertTrue(np.all(sd_vals < 1e-3))
 
         finger_link = fetch.r_gripper_finger_link
         coll_mesh = finger_link._collision_mesh
         vertices = finger_link.transform_vector(coll_mesh.vertices)
-        sd_vals = union_sdf(vertices)
+        sd_vals = fetch_union_sdf(vertices)
         self.assertTrue(np.all(sd_vals < 1e-3))

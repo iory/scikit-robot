@@ -79,8 +79,6 @@ def link2sdf(link, urdf_path, dim_grid=30):
             radius = geometry.cylinder.radius
             length = geometry.cylinder.length
             return CylinderSDF([0, 0, 0], radius=radius, height=length)
-        else:
-            raise Exception
     """
 
     sdf = trimesh2sdf(link.collision_mesh, dim_grid=dim_grid)

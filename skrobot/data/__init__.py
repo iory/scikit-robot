@@ -33,6 +33,10 @@ def kuka_urdfpath():
     return osp.join(data_dir, 'kuka_description', 'kuka.urdf')
 
 
+def r2d2_urdfpath():
+    return osp.join(data_dir, 'r2d2_description', 'r2d2.urdf')
+
+
 def panda_urdfpath():
     gdown.cached_download(
         url='https://drive.google.com/uc?id=1h6ib9jpEUNa1xB2DNrnRQtqpSD2Rj9bz',
