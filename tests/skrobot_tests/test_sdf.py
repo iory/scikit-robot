@@ -7,6 +7,7 @@ import unittest
 
 import skrobot
 from skrobot.sdf import BoxSDF
+from skrobot.sdf import CylinderSDF
 from skrobot.sdf import GridSDF
 from skrobot.sdf import SphereSDF
 from skrobot.sdf import UnionSDF
@@ -43,8 +44,11 @@ class TestSDF(unittest.TestCase):
 
         # prepare SphereSDF
         radius = 1.0
+        height = 1.0
         cls.radius = radius
+        cls.height = height
         cls.sphere_sdf = SphereSDF([0, 0, 0], radius=radius)
+        cls.cylinder_sdf = CylinderSDF([0, 0, 0], radius=radius, height=height)
 
         # preapare UnionSDF
         unionsdf = UnionSDF(sdf_list=[boxsdf, gridsdf])
@@ -75,6 +79,29 @@ class TestSDF(unittest.TestCase):
 
     def test_sphere__surface_points(self):
         sdf = self.sphere_sdf
+        ray_tips, sd_vals = sdf._surface_points()
+        testing.assert_array_equal(sdf._signed_distance(ray_tips), sd_vals)
+        self.assertTrue(np.all(np.abs(sd_vals) < sdf._surface_threshold))
+
+    def test_cylinder__signed_distance(self):
+        sdf, radius, height = self.cylinder_sdf, self.radius, self.height
+        half_height = height * 0.5
+        pts_on_surface = np.array([
+            [0, 0, half_height],
+            [radius, 0, half_height],
+            [radius, 0, half_height],
+            [radius, 0, 0],
+            [0, 0, -half_height],
+            [radius, 0, -half_height],
+            [radius, 0, -half_height]
+        ])
+        testing.assert_almost_equal(sdf(pts_on_surface),
+                                    np.zeros(len(pts_on_surface)))
+        self.assertEqual(sdf(np.zeros((1, 3))).item(),
+                         -min(radius, half_height))
+
+    def test_cylinder__surface_points(self):
+        sdf = self.cylinder_sdf
         ray_tips, sd_vals = sdf._surface_points()
         testing.assert_array_equal(sdf._signed_distance(ray_tips), sd_vals)
         self.assertTrue(np.all(np.abs(sd_vals) < sdf._surface_threshold))
