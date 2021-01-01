@@ -5,6 +5,7 @@ import logging
 import threading
 
 import pyglet
+import trimesh
 import trimesh.viewer
 
 from .. import model as model_module
@@ -98,8 +99,13 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             if link_id in self._links:
                 return
             transform = link.worldcoords().T()
+            mesh = link.visual_mesh
+            # TODO(someone) fix this at trimesh's scene.
+            if (isinstance(mesh, list) or isinstance(mesh, tuple)) \
+               and len(mesh) > 0:
+                mesh = trimesh.util.concatenate(mesh)
             self.scene.add_geometry(
-                geometry=link.visual_mesh,
+                geometry=mesh,
                 node_name=link_id,
                 geom_name=link_id,
                 transform=transform,
