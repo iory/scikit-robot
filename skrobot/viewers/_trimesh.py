@@ -5,6 +5,7 @@ import logging
 import threading
 
 import pyglet
+from pyglet import compat_platform
 import trimesh
 import trimesh.viewer
 
@@ -13,6 +14,15 @@ from .. import model as model_module
 
 logger = logging.getLogger('trimesh')
 logger.setLevel(logging.ERROR)
+
+
+def _redraw_all_windows():
+    for window in pyglet.app.windows:
+        window.switch_to()
+        window.dispatch_events()
+        window.dispatch_event('on_draw')
+        window.flip()
+        window._legacy_invalid = False
 
 
 class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
@@ -37,9 +47,15 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.lock = threading.Lock()
 
     def show(self):
-        self.thread = threading.Thread(target=self._init_and_start_app)
-        self.thread.daemon = True  # terminate when main thread exit
-        self.thread.start()
+        if compat_platform == 'darwin':
+            super(TrimeshSceneViewer, self).__init__(**self._kwargs)
+            init_loop = 30
+            for _ in range(init_loop):
+                _redraw_all_windows()
+        else:
+            self.thread = threading.Thread(target=self._init_and_start_app)
+            self.thread.daemon = True  # terminate when main thread exit
+            self.thread.start()
 
     def _init_and_start_app(self):
         with self.lock:
@@ -48,6 +64,8 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def redraw(self):
         self._redraw = True
+        if compat_platform == 'darwin':
+            _redraw_all_windows()
 
     def on_update(self, dt):
         self.on_draw()
