@@ -63,24 +63,6 @@ def link2sdf(link, urdf_path, dim_grid=30):
         created.
     """
 
-    """
-    def geometry2sdf(geometry):
-        if geometry.mesh:
-            filename_raw = geometry.mesh.filename
-            filename = get_filename(urdf_path, filename_raw)
-            return GridSDF.from_objfile(filename, dim_grid=dim_grid)
-        elif geometry.box:
-            size = geometry.box.size
-            return BoxSDF([0, 0, 0], size)
-        elif geometry.sphere:
-            radius = geometry.sphere.radius
-            return SphereSDF([0, 0, 0], radius)
-        elif geometry.cylinder:
-            radius = geometry.cylinder.radius
-            length = geometry.cylinder.length
-            return CylinderSDF([0, 0, 0], radius=radius, height=length)
-    """
-
     sdf = trimesh2sdf(link.collision_mesh, dim_grid=dim_grid)
     link.assoc(sdf.coords, relative_coords=sdf.coords)
     return sdf
