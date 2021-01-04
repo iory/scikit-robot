@@ -8,9 +8,8 @@ import numpy as np
 import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 from skrobot.coordinates import CascadedCoords
-from skrobot.coordinates import Transform
 from skrobot.coordinates import make_cascoords
-from skrobot.utils.urdf import get_filename
+from skrobot.coordinates import Transform
 
 logger = getLogger(__name__)
 
@@ -19,23 +18,30 @@ def trimesh2sdf(mesh, dim_grid):
     is_loaded_mesh = 'file_path' in mesh.metadata
     if is_loaded_mesh:
         file_path = mesh.metadata['file_path']
-        return GridSDF.from_objfile(file_path, dim_grid=dim_grid)
+        sdf = GridSDF.from_objfile(file_path, dim_grid=dim_grid)
+    else:
+        # process primtives
+        shape = mesh.metadata['shape']
+        if shape == 'box':
+            extents = mesh.metadata['extents']
+            sdf = BoxSDF([0, 0, 0], extents)
+        elif shape == 'cylinder':
+            height = mesh.metadata['height']
+            radius = mesh.metadata['radius']
+            sdf = CylinderSDF([0, 0, 0], radius=radius, height=height)
+        elif shape == 'sphere':
+            radius = mesh.metadata['radius']
+            sdf = SphereSDF([0, 0, 0], radius)
+        else:
+            msg = "primtive type {0} is not supported".format(shape)
+            raise ValueError(msg)
 
-    # process primtives 
-    shape = mesh.metadata['shape']
-    if shape == 'box':
-        extents = mesh.metadata['extents']
-        return BoxSDF([0, 0, 0], extents)
-    elif shape == 'cylinder':
-        height = mesh.metadata['height']
-        radius = mesh.metadata['radius']
-        return CylinderSDF([0, 0, 0], radius=radius, height=height)
-    elif shape == 'sphere':
-        radius = mesh.metadata['radius']
-        return SphereSDF([0, 0, 0], radius)
+    origin = mesh.metadata["origin"]
+    rotation_matrix = origin[:3, :3]
+    translation = origin[:3, 3]
+    sdf.coords = make_cascoords(pos=translation, rot=rotation_matrix)
+    return sdf
 
-    msg = "primtive type {0} is not supported".format(shape)
-    raise ValueError(msg)
 
 def link2sdf(link, urdf_path, dim_grid=30):
     """convert Link to corresponding sdf
