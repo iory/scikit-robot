@@ -9,6 +9,7 @@ from skrobot.model import Box
 from skrobot.model import MeshLink
 from skrobot.sdf import UnionSDF
 
+
 b = Box(extents=[0.05, 0.1, 0.05], with_sdf=True)
 m = MeshLink(visual_mesh=skrobot.data.bunny_objpath(), with_sdf=True)
 b.translate([0, 0.1, 0])

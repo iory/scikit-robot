@@ -6,6 +6,7 @@ from skrobot.model import Box
 from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import set_robot_config
 
+
 try:
     robot_model  # noqa
 except:  # noqa

@@ -3,9 +3,9 @@ import shutil
 import unittest
 
 import numpy as np
+import trimesh
 
 import skrobot
-import trimesh
 
 
 class TestAxis(unittest.TestCase):

@@ -1,9 +1,10 @@
-import numpy as np
-from numpy import testing
 import os
 import shutil
-import trimesh
 import unittest
+
+import numpy as np
+from numpy import testing
+import trimesh
 
 import skrobot
 from skrobot.sdf import BoxSDF

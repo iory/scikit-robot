@@ -1,5 +1,4 @@
 import numpy as np
-
 from quadprog import solve_qp as _solve_qp
 
 

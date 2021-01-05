@@ -5,10 +5,9 @@ from logging import getLogger
 from numbers import Number
 import sys
 
-import numpy as np
-
 import actionlib
 import control_msgs.msg
+import numpy as np
 import rospy
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
