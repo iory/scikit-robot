@@ -213,13 +213,17 @@ class TestSDF(unittest.TestCase):
         self.assertTrue(cond_and)  # each surface has at least a single points
 
     def test_union_sdf_from_robot_model(self):
-        r2d2 = skrobot.models.urdf.RobotModelFromURDF(
-            urdf_file=skrobot.data.r2d2_urdfpath())
-        r2d2_union_sdf = UnionSDF.from_robot_model(r2d2)
-        for link in r2d2.link_list:
+        here_full_filepath = os.path.join(os.getcwd(), __file__)
+        here_full_dirpath = os.path.dirname(here_full_filepath)
+        test_model_path = os.path.join(here_full_dirpath, 'primitives.urdf')
+
+        primitive_robot = skrobot.models.urdf.RobotModelFromURDF(
+            urdf_file=test_model_path)
+        primitive_robot_sdf = UnionSDF.from_robot_model(primitive_robot)
+        for link in primitive_robot.link_list:
             coll_mesh = link._collision_mesh
             vertices = link.transform_vector(coll_mesh.vertices)
-            sd_vals = r2d2_union_sdf(vertices)
+            sd_vals = primitive_robot_sdf(vertices)
             self.assertTrue(np.all(sd_vals < 1e-3))
 
         fetch = skrobot.models.Fetch()
