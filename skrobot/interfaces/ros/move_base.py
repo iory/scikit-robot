@@ -1,8 +1,3 @@
-import numpy as np
-from skrobot.coordinates import Coordinates
-from skrobot.coordinates.math import rotate_vector
-from skrobot.coordinates.math import rotation_distance
-
 import actionlib
 import actionlib_msgs.msg
 import control_msgs.msg
@@ -11,9 +6,14 @@ import dynamic_reconfigure.srv
 import geometry_msgs.msg
 import move_base_msgs.msg
 import nav_msgs.msg
+import numpy as np
 import rospy
 import std_srvs.srv
 import trajectory_msgs.msg
+
+from skrobot.coordinates import Coordinates
+from skrobot.coordinates.math import rotate_vector
+from skrobot.coordinates.math import rotation_distance
 
 from .base import ROSRobotInterfaceBase
 from .tf_utils import coords_to_geometry_pose

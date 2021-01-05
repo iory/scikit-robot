@@ -3,6 +3,8 @@ import unittest
 from numpy import testing
 
 from skrobot.coordinates import Coordinates
+
+
 try:
     ModuleNotFoundError
 except NameError:

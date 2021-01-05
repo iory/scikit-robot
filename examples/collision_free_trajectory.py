@@ -11,6 +11,7 @@ from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
+
 # initialization stuff
 np.random.seed(0)
 robot_model = skrobot.models.PR2()

@@ -24,11 +24,11 @@ Running Code Style Checks
 We follow `PEP 8 <https://www.python.org/dev/peps/pep-0008/>`_ and partially `OpenStack Style Guidelines <https://docs.openstack.org/developer/hacking/>`_ as basic style guidelines.
 Any contributions in terms of code are expected to follow these guidelines.
 
-You can use the ``autopep8`` and the ``flake8`` commands to check whether or not your code follows the guidelines.
+You can use the ``autopep8``, ``isort`` and the ``flake8`` commands to check whether or not your code follows the guidelines.
 In order to avoid confusion from using different tool versions, we pin the versions of those tools.
 Install them with the following command (from within the top directory of the Chainer repository)::
 
-  $ pip install hacking pytest autopep8
+  $ pip install hacking pytest autopep8 isort
 
 And check your code with::
 
@@ -38,6 +38,11 @@ And check your code with::
 ``autopep8`` can automatically correct Python code to conform to the PEP 8 style guide::
 
   $ autopep8 --in-place path/to/your/code.py
+
+
+``isort`` can automatically correct ``import order``::
+
+  $ cd scikit-robot && isort path/to/your/code.py
 
 
 For more information, please see `the flake8 documentation`_.
