@@ -224,7 +224,6 @@ class TestSDF(unittest.TestCase):
 
         fetch = skrobot.models.Fetch()
         fetch.reset_manip_pose()
-        # this a takes
         fetch_union_sdf = UnionSDF.from_robot_model(fetch)
 
         # check if the vertices of the links have almost 0 sd vals.
