@@ -216,7 +216,7 @@ class TestSDF(unittest.TestCase):
         here_full_filepath = os.path.join(os.getcwd(), __file__)
         here_full_dirpath = os.path.dirname(here_full_filepath)
         test_model_path = os.path.join(
-            here_full_dirpath, '..', 'data', 'primitives.urdf')
+            here_full_dirpath, 'data', 'primitives.urdf')
 
         primitive_robot = skrobot.models.urdf.RobotModelFromURDF(
             urdf_file=test_model_path)
