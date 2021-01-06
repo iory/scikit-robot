@@ -13,10 +13,10 @@ pysdfgen>=0.1.5
 python-fcl  # for collision check in trimesh module
 pyyaml
 quadprog
-scipy==1.2.1
+repoze.lru;python_version<"3.2"
 scikit-learn
+scipy==1.2.1
 six
-trimesh>=3.9.0
 sphinx==1.8.2
 sphinx_rtd_theme
-repoze.lru;python_version<"3.2"
+trimesh>=3.9.0
