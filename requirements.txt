@@ -15,7 +15,8 @@ pyyaml
 quadprog
 repoze.lru;python_version<"3.2"
 scikit-learn
-scipy==1.2.1
+scipy;python_version>="3.0"
+scipy<=1.2.3;python_version<"3.0"
 six
 sphinx==1.8.2
 sphinx_rtd_theme
