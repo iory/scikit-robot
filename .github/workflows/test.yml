@@ -31,6 +31,15 @@ jobs:
       run: |
         isort -c .
 
+  requirements-formatting:
+    name: Check Requirements Formatting
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Check Formatting
+      run: |
+        sort -C requirements.txt
+
   tests:
     name: Run Unit Tests
     runs-on: ${{ matrix.os }}
