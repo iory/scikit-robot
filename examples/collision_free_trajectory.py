@@ -78,7 +78,7 @@ print("solving time : {0} sec".format(time.time() - ts))
 
 # visualizatoin
 print("show trajectory")
-viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(641, 480))
+viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 viewer.add(robot_model)
 viewer.add(box)
 viewer.add(Axis(pos=[0.8, -0.6, 0.8]))
