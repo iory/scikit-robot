@@ -52,8 +52,7 @@ if with_base:
     av_start = np.hstack([av_start, [0, 0, 0]])
 
 # solve inverse kinematics to obtain av_goal
-coef = 3.1415 / 180.0
-joint_angles = [coef * e for e in [-60, 74, -70, -120, -20, -30, 180]]
+joint_angles = np.deg2rad([-60, 74, -70, -120, -20, -30, 180])
 set_robot_config(robot_model, joint_list, joint_angles)
 
 rarm_end_coords = skrobot.coordinates.CascadedCoords(
