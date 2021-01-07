@@ -34,4 +34,4 @@ pip install scikit-robot[all]
 - [x] Interactive viewer ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
 - [x] Pybullet and ROS command interface ([examples/pybullet_robot_interface.py](examples/pybullet_robot_interface.py))
 - [ ] Forward and inverse dynamics
-- [ ] Path planning
+- [x] Path planning ([examples/collision_free_trajectory.py](examples/collision_free_trajectory.py))
