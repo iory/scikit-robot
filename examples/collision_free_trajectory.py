@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+
+import argparse
 import time
 
 import numpy as np
@@ -11,6 +13,16 @@ from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
 
+
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+)
+parser.add_argument(
+    '--without-base',
+    action='store_true',
+    help='Solve motion planning without base.'
+)
+args = parser.parse_args()
 
 # initialization stuff
 np.random.seed(0)
@@ -33,15 +45,14 @@ coll_link_list = [
     robot_model.r_gripper_palm_link, robot_model.r_gripper_r_finger_link,
     robot_model.r_gripper_l_finger_link]
 
-# obtain av_start (please try both with_base=True, FalseA)
-with_base = True
+# obtain av_start (please try both with_base=True, False)
+with_base = not args.without_base
 av_start = np.array([0.564, 0.35, -0.74, -0.7, -0.7, -0.17, -0.63])
 if with_base:
     av_start = np.hstack([av_start, [0, 0, 0]])
 
 # solve inverse kinematics to obtain av_goal
-coef = 3.1415 / 180.0
-joint_angles = [coef * e for e in [-60, 74, -70, -120, -20, -30, 180]]
+joint_angles = np.deg2rad([-60, 74, -70, -120, -20, -30, 180])
 set_robot_config(robot_model, joint_list, joint_angles)
 
 rarm_end_coords = skrobot.coordinates.CascadedCoords(
@@ -67,7 +78,7 @@ print("solving time : {0} sec".format(time.time() - ts))
 
 # visualizatoin
 print("show trajectory")
-viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(641, 480))
+viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 viewer.add(robot_model)
 viewer.add(box)
 viewer.add(Axis(pos=[0.8, -0.6, 0.8]))
