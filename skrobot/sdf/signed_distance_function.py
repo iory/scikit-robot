@@ -482,15 +482,8 @@ class GridSDF(SignedDistanceFunction):
 
             # resolution of the grid cells in original mesh coords
             resolution = float(f.readline())
-            sdf_data = np.zeros(dims)
-
-            # loop through file, getting each value
-            count = 0
-            for k in range(nz):
-                for j in range(ny):
-                    for i in range(nx):
-                        sdf_data[i][j][k] = float(f.readline())
-                        count += 1
+            sdf_data = np.fromstring(f.read(), dtype=float, sep='\n').reshape(
+                *dims).transpose(2, 1, 0)
         return GridSDF(sdf_data, origin, resolution)
 
     @staticmethod
