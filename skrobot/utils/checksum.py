@@ -10,6 +10,7 @@ def checksum_md5(filename, blocksize=8192):
         input filename.
     blocksize : int
         MD5 has 128-byte digest blocks (default: 8192 is 128x64).
+
     Returns
     -------
     md5 : str
