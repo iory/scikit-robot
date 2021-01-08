@@ -1,4 +1,3 @@
-import os
 import uuid
 
 import numpy as np
@@ -9,8 +8,8 @@ from skrobot.coordinates.base import Coordinates
 from skrobot.model import Link
 from skrobot.sdf import BoxSDF
 from skrobot.sdf import CylinderSDF
-from skrobot.sdf import GridSDF
 from skrobot.sdf import SphereSDF
+from skrobot.sdf import trimesh2sdf
 
 
 class Axis(Link):
@@ -54,20 +53,19 @@ class Box(Link):
         if name is None:
             name = 'box_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Box, self).__init__(pos=pos, rot=rot, name=name)
-        self._extents = extents
-        self._visual_mesh = trimesh.creation.box(
+        mesh = trimesh.creation.box(
             extents=extents,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
         )
-
+        super(Box, self).__init__(pos=pos, rot=rot, name=name,
+                                  collision_mesh=mesh,
+                                  visual_mesh=mesh)
+        self._extents = extents
         if with_sdf:
             sdf = BoxSDF(np.zeros(3), extents)
             self.assoc(sdf.coords)
             self.sdf = sdf
-        else:
-            self.sdf = None
 
 
 class CameraMarker(Link):
@@ -100,14 +98,16 @@ class Cone(Link):
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Cone, self).__init__(pos=pos, rot=rot, name=name)
-        self._visual_mesh = trimesh.creation.cone(
+        mesh = trimesh.creation.cone(
             radius=radius,
             height=height,
             sections=sections,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
         )
+        super(Cone, self).__init__(pos=pos, rot=rot, name=name,
+                                   collision_mesh=mesh,
+                                   visual_mesh=mesh)
 
 
 class Cylinder(Link):
@@ -119,21 +119,20 @@ class Cylinder(Link):
         if name is None:
             name = 'cylinder_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Cylinder, self).__init__(pos=pos, rot=rot, name=name)
-        self._visual_mesh = trimesh.creation.cylinder(
+        mesh = trimesh.creation.cylinder(
             radius=radius,
             height=height,
             sections=sections,
             vertex_colors=vertex_colors,
             face_colors=face_colors,
         )
-
+        super(Cylinder, self).__init__(pos=pos, rot=rot, name=name,
+                                       collision_mesh=mesh,
+                                       visual_mesh=mesh)
         if with_sdf:
             sdf = CylinderSDF(np.zeros(3), height, radius)
             self.assoc(sdf.coords)
             self.sdf = sdf
-        else:
-            self.sdf = None
 
 
 class Sphere(Link):
@@ -143,19 +142,19 @@ class Sphere(Link):
         if name is None:
             name = 'sphere_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Sphere, self).__init__(pos=pos, rot=rot, name=name)
-        self._visual_mesh = trimesh.creation.icosphere(
+        mesh = trimesh.creation.icosphere(
             radius=radius,
             subdivisions=subdivisions,
             color=color,
         )
+        super(Sphere, self).__init__(pos=pos, rot=rot, name=name,
+                                     collision_mesh=mesh,
+                                     visual_mesh=mesh)
 
         if with_sdf:
             sdf = SphereSDF(np.zeros(3), radius)
             self.assoc(sdf.coords)
             self.sdf = sdf
-        else:
-            self.sdf = None
 
 
 class Annulus(Link):
@@ -166,14 +165,16 @@ class Annulus(Link):
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Annulus, self).__init__(pos=pos, rot=rot, name=name)
-        self._visual_mesh = trimesh.creation.annulus(
+        mesh = trimesh.creation.annulus(
             r_min=r_min,
             r_max=r_max,
             height=height,
             vertex_colors=vertex_colors,
             face_colors=face_colors
         )
+        super(Annulus, self).__init__(pos=pos, rot=rot, name=name,
+                                      collision_mesh=mesh,
+                                      visual_mesh=mesh)
 
 
 class MeshLink(Link):
@@ -187,18 +188,19 @@ class MeshLink(Link):
 
         super(MeshLink, self).__init__(pos=pos, rot=rot, name=name)
         self.visual_mesh = visual_mesh
+        if self.visual_mesh is not None:
+            if isinstance(self.visual_mesh, list):
+                self._collision_mesh = \
+                    self.visual_mesh[0] + self.visual_mesh[1:]
+            else:
+                self._collision_mesh = self.visual_mesh
+            self._collision_mesh.metadata['origin'] = np.eye(4)
 
         if with_sdf:
-            assert os.path.isfile(visual_mesh),\
-                "with_sdf is valid only with a mesh file"
-            sdf = GridSDF.from_objfile(
-                visual_mesh,
-                dim_grid=dim_grid,
-                padding_grid=padding_grid)
+            sdf = trimesh2sdf(self._collision_mesh, dim_grid=dim_grid,
+                              padding_grid=padding_grid)
             self.assoc(sdf.coords)
             self.sdf = sdf
-        else:
-            self.sdf = None
 
 
 class PointCloudLink(Link):

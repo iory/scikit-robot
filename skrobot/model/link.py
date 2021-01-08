@@ -3,6 +3,7 @@ import collections
 import numpy as np
 import trimesh
 
+import skrobot
 from skrobot.coordinates import CascadedCoords
 
 
@@ -22,6 +23,7 @@ class Link(CascadedCoords):
             inertia_tensor = np.eye(3)
         self._collision_mesh = collision_mesh
         self._visual_mesh = visual_mesh
+        self._sdf = None
 
     @property
     def parent_link(self):
@@ -116,3 +118,28 @@ class Link(CascadedCoords):
         if isinstance(mesh, str):
             mesh = trimesh.load(mesh)
         self._visual_mesh = mesh
+
+    @property
+    def sdf(self):
+        """Return signed distance function.
+
+        Returns
+        -------
+        self._sdf : None or skrobot.sdf.SignedDistanceFunction
+            signed distance function.
+        """
+        return self._sdf
+
+    @sdf.setter
+    def sdf(self, sdf):
+        """Setter of sdf.
+
+        Parameters
+        ----------
+        sdf : skrobot.sdf.SignedDistanceFunction
+            signed distance function.
+        """
+        if not isinstance(sdf, skrobot.sdf.SignedDistanceFunction):
+            raise TypeError('sdf must be skrobot.sdf.SignedDistanceFunction.'
+                            ' but is {}'.format(type(sdf)))
+        self._sdf = sdf
