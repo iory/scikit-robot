@@ -18,6 +18,21 @@ logger = getLogger(__name__)
 
 
 def trimesh2sdf(mesh, dim_grid):
+    """Convert trimesh to signed distance function.
+
+    Parameters
+    ----------
+    mesh : trimesh.base.Trimesh
+        mesh object.
+    dim_grid : int
+        dimension of the GridSDF.
+        This value is used for a not primitive mesh.
+
+    Returns
+    -------
+    sdf : skrobot.sdf.SignedDistanceFunction
+        converted signed distance function.
+    """
     is_loaded_mesh = 'file_path' in mesh.metadata
     if is_loaded_mesh:
         file_path = mesh.metadata['file_path']
