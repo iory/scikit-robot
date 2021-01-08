@@ -1145,7 +1145,7 @@ class CascadedCoords(Coordinates):
     def descendants(self):
         return self._descendants
 
-    def assoc(self, child, relative_coords=None, force=False,
+    def assoc(self, child, relative_coords='world', force=False,
               **kwargs):
         """Associate child coords to this coordinate system.
 
@@ -1224,6 +1224,11 @@ class CascadedCoords(Coordinates):
                     child.worldcoords())
             elif relative_coords == 'local':
                 relative_coords = child.worldcoords()
+            elif not isinstance(relative_coords, Coordinates):
+                raise TypeError(
+                    "`relative_coords`'s type should be"
+                    "skrobot.coordinates.Coordinates, but is {}"
+                    .format(type(relative_coords)))
             child.parent = self
             child.newcoords(relative_coords, check_validity=False)
             self._descendants.append(child)
