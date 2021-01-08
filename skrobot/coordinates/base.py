@@ -1226,8 +1226,9 @@ class CascadedCoords(Coordinates):
                 relative_coords = child.worldcoords()
             elif not isinstance(relative_coords, Coordinates):
                 raise TypeError(
-                    "`relative_coords`'s type should be skrobot.coordinates.Coordinates,"
-                    " but is {}".format(type(relative_coords)))
+                    "`relative_coords`'s type should be"
+                    "skrobot.coordinates.Coordinates, but is {}"
+                    .format(type(relative_coords)))
             child.parent = self
             child.newcoords(relative_coords, check_validity=False)
             self._descendants.append(child)
