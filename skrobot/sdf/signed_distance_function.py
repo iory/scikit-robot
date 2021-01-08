@@ -11,6 +11,7 @@ from scipy.interpolate import RegularGridInterpolator
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import Transform
+from skrobot.data import get_cache_dir
 from skrobot.utils import checksum_md5
 
 
@@ -510,9 +511,7 @@ class GridSDF(SignedDistanceFunction):
         sdf_instance : skrobot.sdf.GridSDF
             instance of sdf
         """
-
-        home_dir = os.path.expanduser('~')
-        sdf_cache_dir = os.path.join(home_dir, '.skrobot', 'sdf')
+        sdf_cache_dir = os.path.join(get_cache_dir(), 'sdf')
         if not os.path.exists(sdf_cache_dir):
             os.makedirs(sdf_cache_dir)
 
