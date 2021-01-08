@@ -6,6 +6,7 @@ import numpy as np
 import trimesh
 
 import skrobot
+from skrobot.data import get_cache_dir
 
 
 class TestAxis(unittest.TestCase):
@@ -77,8 +78,7 @@ class TestMeshLink(unittest.TestCase):
         skrobot.model.MeshLink(base_obj_path)
 
     def test_init_with_sdf(self):
-        home_dir = osp.expanduser("~")
-        sdf_cache_dir = osp.join(home_dir, '.skrobot', 'sdf')
+        sdf_cache_dir = osp.join(get_cache_dir(), 'sdf')
         if osp.exists(sdf_cache_dir):
             shutil.rmtree(sdf_cache_dir)
 

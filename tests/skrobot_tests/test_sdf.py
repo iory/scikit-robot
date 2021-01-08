@@ -7,6 +7,7 @@ from numpy import testing
 import trimesh
 
 import skrobot
+from skrobot.data import get_cache_dir
 from skrobot.sdf import BoxSDF
 from skrobot.sdf import CylinderSDF
 from skrobot.sdf import GridSDF
@@ -19,8 +20,7 @@ class TestSDF(unittest.TestCase):
     @classmethod
     def setup_class(cls):
         # clear cache
-        home_dir = os.path.expanduser("~")
-        sdf_cache_dir = os.path.join(home_dir, '.skrobot', 'sdf')
+        sdf_cache_dir = os.path.join(get_cache_dir(), 'sdf')
         if os.path.exists(sdf_cache_dir):
             shutil.rmtree(sdf_cache_dir)
 
