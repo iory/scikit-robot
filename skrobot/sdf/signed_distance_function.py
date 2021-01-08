@@ -35,8 +35,8 @@ def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
     sdf : skrobot.sdf.SignedDistanceFunction
         converted signed distance function.
     """
-    if not ('file_path' in mesh.metadata or
-            'shape' in mesh.metadata):
+    if not ('file_path' in mesh.metadata
+            or 'shape' in mesh.metadata):
         raise ValueError("Input mesh doesn't contain valid metadata"
                          " for converting SDF.")
     is_loaded_mesh = 'file_path' in mesh.metadata
