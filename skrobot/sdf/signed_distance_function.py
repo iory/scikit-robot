@@ -17,7 +17,7 @@ from skrobot.coordinates import Transform
 logger = getLogger(__name__)
 
 
-def trimesh2sdf(mesh, dim_grid):
+def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
     """Convert trimesh to signed distance function.
 
     Parameters
@@ -27,6 +27,8 @@ def trimesh2sdf(mesh, dim_grid):
     dim_grid : int
         dimension of the GridSDF.
         This value is used for a not primitive mesh.
+    padding_grid : int
+        number of padding.
 
     Returns
     -------
@@ -36,7 +38,8 @@ def trimesh2sdf(mesh, dim_grid):
     is_loaded_mesh = 'file_path' in mesh.metadata
     if is_loaded_mesh:
         file_path = mesh.metadata['file_path']
-        sdf = GridSDF.from_objfile(file_path, dim_grid=dim_grid)
+        sdf = GridSDF.from_objfile(file_path, dim_grid=dim_grid,
+                                   padding_grid=padding_grid)
     else:
         # process primtives
         shape = mesh.metadata['shape']
