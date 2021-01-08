@@ -1,5 +1,4 @@
 import os
-import shutil
 import unittest
 
 import numpy as np
@@ -18,12 +17,6 @@ class TestSDF(unittest.TestCase):
 
     @classmethod
     def setup_class(cls):
-        # clear cache
-        home_dir = os.path.expanduser("~")
-        sdf_cache_dir = os.path.join(home_dir, '.skrobot', 'sdf')
-        if os.path.exists(sdf_cache_dir):
-            shutil.rmtree(sdf_cache_dir)
-
         # prepare gridsdf
         objfile_path = skrobot.data.bunny_objpath()
         bunnymesh = trimesh.load_mesh(objfile_path)
