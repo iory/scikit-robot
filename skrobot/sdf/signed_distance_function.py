@@ -1,6 +1,5 @@
 from __future__ import division
 
-import hashlib
 from logging import getLogger
 from math import floor
 import os
@@ -12,6 +11,7 @@ from scipy.interpolate import RegularGridInterpolator
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import Transform
+from skrobot.utils import checksum_md5
 
 
 logger = getLogger(__name__)
@@ -516,8 +516,8 @@ class GridSDF(SignedDistanceFunction):
         if not os.path.exists(sdf_cache_dir):
             os.makedirs(sdf_cache_dir)
 
-        filename, extension = os.path.splitext(str(obj_filepath))
-        hashed_filename = hashlib.md5(filename.encode()).hexdigest()
+        hashed_filename = '{}_{}_{}'.format(
+            checksum_md5(obj_filepath), dim_grid, padding_grid)
 
         sdf_cache_path = os.path.join(sdf_cache_dir, hashed_filename + '.sdf')
         if not os.path.exists(sdf_cache_path):
