@@ -401,7 +401,10 @@ class TestCascadedCoordinates(unittest.TestCase):
         b = make_cascoords(rot=rotation_matrix(pi / 3, 'y'),
                            pos=[0.1, 0, 0.2],
                            name='b')
-        a.assoc(b)
+        child = a.assoc(b)
+        self.assertEqual(b, child)
+        child = a.assoc(b, force=True)
+        self.assertEqual(b, child)
         testing.assert_almost_equal(
             b.worldrot(),
             [[0.5, 0, 0.866025],

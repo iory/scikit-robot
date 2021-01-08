@@ -1192,7 +1192,7 @@ class CascadedCoords(Coordinates):
             child.parent = self
             child.newcoords(relative_coords, check_validity=False)
             self._descendants.append(child)
-            return child
+        return child
 
     def dissoc(self, child):
         if child in self.descendants:
