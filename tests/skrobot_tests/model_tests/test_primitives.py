@@ -82,6 +82,11 @@ class TestMeshLink(unittest.TestCase):
         if osp.exists(sdf_cache_dir):
             shutil.rmtree(sdf_cache_dir)
 
+        # test for trimesh.base.Trimeh
+        bunny_obj_path = skrobot.data.bunny_objpath()
+        m = skrobot.model.MeshLink(
+            trimesh.load(bunny_obj_path), with_sdf=True, dim_grid=50)
+
         bunny_obj_path = skrobot.data.bunny_objpath()
         m = skrobot.model.MeshLink(bunny_obj_path, with_sdf=True, dim_grid=50)
 
