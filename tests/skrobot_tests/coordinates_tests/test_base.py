@@ -435,6 +435,9 @@ class TestCascadedCoordinates(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             c.assoc(b)
 
+        with self.assertRaises(TypeError):
+            c.assoc(b, relative_coords=1)
+
     def test_dissoc(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
                            pos=[0.1, 0, 0],
