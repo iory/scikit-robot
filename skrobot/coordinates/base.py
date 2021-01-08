@@ -1145,7 +1145,7 @@ class CascadedCoords(Coordinates):
     def descendants(self):
         return self._descendants
 
-    def assoc(self, child, relative_coords=None, force=False,
+    def assoc(self, child, relative_coords='world', force=False,
               **kwargs):
         """Associate child coords to this coordinate system.
 
