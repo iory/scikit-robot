@@ -51,6 +51,17 @@ class SweptSphereSdfCollisionChecker(object):
         for s in self.coll_sphere_list:
             viewer.add(s)
 
+    def delete_coll_spheres_from_viewer(self, viewer):
+        """Delete collision sheres from viewer
+
+        Parameters
+        ----------
+        viewer : skrobot.viewers._trimesh.TrimeshSceneViewer
+            viewer
+        """
+        for s in self.coll_sphere_list:
+            viewer.delete(s)
+
     def add_collision_link(self, coll_link):
         """Add link for which collision with sdf is checked
 
