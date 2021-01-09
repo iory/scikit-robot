@@ -22,10 +22,20 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_sphere_list = []
         self.coll_radius_list = []
         self.coll_coords_list = []
-        self.n_feature = 0
 
         self.color_normal_sphere = [250, 250, 10, 200]
         self.color_collision_sphere = [255, 0, 0, 200]
+
+    @property
+    def n_feature(self):
+        """Return number of collision sphere.
+
+        Returns
+        -------
+        n_feature : int
+            number of collision spheres.
+        """
+        return len(self.coll_sphere_list)
 
     def add_coll_spheres_to_viewer(self, viewer):
         """Add collision sheres to viewer
@@ -81,7 +91,6 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_sphere_list.extend(sphere_list)
         self.coll_coords_list.extend(coords_list)
         self.coll_radius_list.extend([R] * len(sphere_list))
-        self.n_feature = len(self.coll_coords_list)
 
     def update_color(self):  # for debugging
         """Update the color of links under collision
