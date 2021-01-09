@@ -44,8 +44,6 @@ class SweptSphereSdfCollisionChecker(object):
         ----------
         viewer : skrobot.viewers._trimesh.TrimeshSceneViewer
             viewer
-        Returns
-        ----------
         """
 
         for s in self.coll_sphere_list:
@@ -70,7 +68,7 @@ class SweptSphereSdfCollisionChecker(object):
 
         Parameters
         ----------
-        coll_link : list[skrobot.model.Link]
+        coll_link : skrobot.model.Link
             link for which collision with sdf is checked
         """
 
