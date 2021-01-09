@@ -22,10 +22,20 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_sphere_list = []
         self.coll_radius_list = []
         self.coll_coords_list = []
-        self.n_feature = 0
 
         self.color_normal_sphere = [250, 250, 10, 200]
         self.color_collision_sphere = [255, 0, 0, 200]
+
+    @property
+    def n_feature(self):
+        """Return number of collision sphere.
+
+        Returns
+        -------
+        n_feature : int
+            number of collision spheres.
+        """
+        return len(self.coll_sphere_list)
 
     def add_coll_spheres_to_viewer(self, viewer):
         """Add collision sheres to viewer
@@ -34,12 +44,21 @@ class SweptSphereSdfCollisionChecker(object):
         ----------
         viewer : skrobot.viewers._trimesh.TrimeshSceneViewer
             viewer
-        Returns
-        ----------
         """
 
         for s in self.coll_sphere_list:
             viewer.add(s)
+
+    def delete_coll_spheres_from_viewer(self, viewer):
+        """Delete collision sheres from viewer
+
+        Parameters
+        ----------
+        viewer : skrobot.viewers._trimesh.TrimeshSceneViewer
+            viewer
+        """
+        for s in self.coll_sphere_list:
+            viewer.delete(s)
 
     def add_collision_link(self, coll_link):
         """Add link for which collision with sdf is checked
@@ -49,7 +68,7 @@ class SweptSphereSdfCollisionChecker(object):
 
         Parameters
         ----------
-        coll_link : list[skrobot.model.Link]
+        coll_link : skrobot.model.Link
             link for which collision with sdf is checked
         """
 
@@ -81,7 +100,20 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_sphere_list.extend(sphere_list)
         self.coll_coords_list.extend(coords_list)
         self.coll_radius_list.extend([R] * len(sphere_list))
-        self.n_feature = len(self.coll_coords_list)
+
+    def add_collision_links(self, coll_links):
+        """Add links for which collisions with SDF is checked.
+
+        The given `coll_links` will be approximated by swept-spheres
+        and these spheres will be added to collision sphere's list.
+
+        Parameters
+        ----------
+        coll_links : list[skrobot.model.Link]
+            link list for which collisions with sdf is checked.
+        """
+        for coll_link in coll_links:
+            self.add_collision_link(coll_link)
 
     def update_color(self):  # for debugging
         """Update the color of links under collision
