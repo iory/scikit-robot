@@ -1145,13 +1145,13 @@ class CascadedCoords(Coordinates):
     def descendants(self):
         return self._descendants
 
-    def assoc(self, child, relative_coords=None, force=False,
+    def assoc(self, child, relative_coords='world', force=False,
               **kwargs):
-        """Associate child coords to this coordinate.
+        """Associate child coords to this coordinate system.
 
-        If `relative_coords` is `None`, the translation and rotation
-        of childcoord in the world coordinate system do not change.
-        If `relative_coords` is specified, childcoord is assoced
+        If `relative_coords` is `None` or 'world', the translation and rotation
+        of childcoords in the world coordinate system do not change.
+        If `relative_coords` is specified, childcoords is assoced
         at translation and rotation of `relative_coords`.
         By default, if child is already assoced to some other coords,
         raise an exception. But if `force` is `True`, you can overwrite
@@ -1160,9 +1160,9 @@ class CascadedCoords(Coordinates):
         Parameters
         ----------
         child : CascadedCoords
-            child coordinate.
-        relative_coords : None or Coordinates
-            child coordinate's relative coordinate.
+            child coordinates.
+        relative_coords : None or Coordinates or str
+            child coordinates' relative coordinates.
         force : bool
             predicate for overwriting the existing assoc-relation
 
@@ -1170,6 +1170,39 @@ class CascadedCoords(Coordinates):
         -------
         child : CascadedCoords
             assoced child.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import CascadedCoords
+        >>> parent_coords = CascadedCoords(pos=[1, 0, 0])
+        >>> child_coords = CascadedCoords(pos=[1, 1, 0])
+        >>> parent_coords.assoc(child_coords)
+        #<CascadedCoords 0x7f1d30e29510 1.000 1.000 0.000 / 0.0 -0.0 0.0>
+        >>> child_coords.worldpos()
+        array([1., 1., 0.])
+        >>> child_coords.translation
+        array([0., 1., 0.])
+
+        `None` and 'world' have the same meaning.
+
+        >>> parent_coords = CascadedCoords(pos=[1, 0, 0])
+        >>> child_coords = CascadedCoords(pos=[1, 1, 0])
+        >>> parent_coords.assoc(child_coords, relative_coords='world')
+        #<CascadedCoords 0x7f1d30e29510 1.000 1.000 0.000 / 0.0 -0.0 0.0>
+        >>> child_coords.worldpos()
+        array([1., 1., 0.])
+
+        If `relative_coords` is 'local', `child` is associated at
+        world translation and world rotation of `child` from this coordinate
+        system.
+
+        >>> parent_coords = CascadedCoords(pos=[1, 0, 0])
+        >>> child_coords = CascadedCoords(pos=[1, 1, 0])
+        >>> parent_coords.assoc(child_coords, relative_coords='local')
+        >>> child_coords.worldpos()
+        array([2., 1., 0.])
+        >>> child_coords.translation
+        array([1., 1., 0.])
         """
         if 'c' in kwargs:
             warnings.warn(
@@ -1186,13 +1219,20 @@ class CascadedCoords(Coordinates):
             raise RuntimeError(msg)
 
         if not (child in self.descendants):
-            if relative_coords is None:
+            if relative_coords is None or relative_coords == 'world':
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
+            elif relative_coords == 'local':
+                relative_coords = child.worldcoords()
+            elif not isinstance(relative_coords, Coordinates):
+                raise TypeError(
+                    "`relative_coords`'s type should be"
+                    "skrobot.coordinates.Coordinates, but is {}"
+                    .format(type(relative_coords)))
             child.parent = self
             child.newcoords(relative_coords, check_validity=False)
             self._descendants.append(child)
-            return child
+        return child
 
     def dissoc(self, child):
         if child in self.descendants:
