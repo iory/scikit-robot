@@ -103,6 +103,20 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_coords_list.extend(coords_list)
         self.coll_radius_list.extend([R] * len(sphere_list))
 
+    def add_collision_links(self, coll_links):
+        """Add links for which collisions with SDF is checked.
+
+        The given `coll_links` will be approximated by swept-spheres
+        and these spheres will be added to collision sphere's list.
+
+        Parameters
+        ----------
+        coll_links : list[skrobot.model.Link]
+            link list for which collisions with sdf is checked.
+        """
+        for coll_link in coll_links:
+            self.add_collision_link(coll_link)
+
     def update_color(self):  # for debugging
         """Update the color of links under collision
 
