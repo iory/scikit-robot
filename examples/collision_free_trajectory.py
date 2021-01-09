@@ -18,6 +18,9 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 parser.add_argument(
+    '-n', type=int, default=10,
+    help='number of waypoints.')
+parser.add_argument(
     '--without-base',
     action='store_true',
     help='Solve motion planning without base.'
@@ -76,7 +79,7 @@ for link in coll_link_list:
 
 # motion planning
 ts = time.time()
-n_waypoint = 10
+n_waypoint = args.n
 av_seq = sqp_plan_trajectory(
     sscc, av_start, av_goal, joint_list, n_waypoint,
     safety_margin=1e-2, with_base=with_base)
