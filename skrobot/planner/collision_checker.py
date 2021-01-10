@@ -115,6 +115,25 @@ class SweptSphereSdfCollisionChecker(object):
         for coll_link in coll_links:
             self.add_collision_link(coll_link)
 
+    def collision_check(self):
+        """Check collision between links and collision spheres.
+
+        Returns
+        -------
+        is_collision : bool
+            `True` if a collision occurred between any pair of links and
+            collision spheres and `False` otherwise.
+        """
+        joint_list = [j for j in self.robot_model.joint_list]
+        angle_vector = get_robot_config(
+            self.robot_model, joint_list, with_base=True)
+
+        dists, _ = self.compute_batch_sd_vals(
+            joint_list, np.array([angle_vector]),
+            with_base=True, with_jacobian=False)
+        idxes_collide = np.where(dists < 0)[0]
+        return len(idxes_collide) > 0
+
     def update_color(self):  # for debugging
         """Update the color of links under collision
 
