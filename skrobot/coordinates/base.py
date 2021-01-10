@@ -1013,6 +1013,26 @@ class Coordinates(object):
         return self.newcoords(self.rotation, self.translation,
                               check_validity=False)
 
+    def orient_with_matrix(self, rotation_matrix, wrt='world'):
+        """Force update this coordinate system's rotation.
+
+        Parameters
+        ----------
+        rotation_matrix : numpy.ndarray
+            3x3 rotation matrix.
+        wrt : str or skrobot.coordinates.Coordinates
+            reference coordinates.
+        """
+        _check_valid_rotation(rotation_matrix)
+        if wrt == 'local' or wrt == self:
+            self._rotation = self._rotation.dot(rotation_matrix)
+        elif wrt == 'world':
+            self._rotation = rotation_matrix
+        elif isinstance(wrt, Coordinates):
+            self._rotation = wrt.worldrot().dot(rotation_matrix)
+        else:
+            raise TypeError('wrt {} not supported'.format(wrt))
+
     def copy(self):
         """Return a deep copy of the Coordinates."""
         return self.copy_coords()
@@ -1369,6 +1389,39 @@ class CascadedCoords(Coordinates):
         else:
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis), wrt)
+
+    def orient_with_matrix(self, rotation_matrix, wrt='world'):
+        """Force update this coordinate system's rotation.
+
+        Parameters
+        ----------
+        rotation_matrix : numpy.ndarray
+            3x3 rotation matrix.
+        wrt : str or skrobot.coordinates.Coordinates
+            reference coordinates.
+        """
+        _check_valid_rotation(rotation_matrix)
+        if wrt == 'local' or wrt == self:
+            rotation = self._rotation.dot(rotation_matrix)
+        elif wrt == 'parent' or wrt == self.parent:
+            rotation = rotation_matrix
+        elif wrt == 'world':
+            # R_{input} = R_{world} = R_{parent} R_{this}
+            # R_{this} = R_{parent}^{-1} R_{input}
+            parent_worldcoords = self.parentcoords()
+            rotation = parent_worldcoords.rotation.T.dot(rotation_matrix)
+        elif isinstance(wrt, Coordinates):
+            # R_{world} = R_{wrt} R_{input}
+            # R_{world} = R_{parent} R_{this}
+            # R_{this} = R_{parent}^{-1} R_{world}
+            # R_{this} = R_{parent}^{-1} R_{world} R_{wrt} R_{input}
+            world_rotation_matrix = wrt.worldrot().dot(rotation_matrix)
+            parent_worldcoords = self.parentcoords()
+            rotation = parent_worldcoords.rotation.T.dot(world_rotation_matrix)
+        else:
+            raise TypeError('wrt {} not supported'.format(wrt))
+        return self.newcoords(rotation, self.translation,
+                              check_validity=False)
 
     def rotate_vector(self, v):
         return self.worldcoords().rotate_vector(v)

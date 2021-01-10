@@ -120,6 +120,14 @@ class TestCoordinates(unittest.TestCase):
         coord.transform(make_coords(pos=[1, 2, 3]), wrt)
         testing.assert_almost_equal(coord.translation, [3.0, 2.0, -1.0])
 
+    def test_orient_with_matrix(self):
+        coords = make_coords()
+        rotation_matrix = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+        coords.orient_with_matrix(rotation_matrix, wrt='local')
+        coords.orient_with_matrix(rotation_matrix, wrt='world')
+        wrt = make_coords().rotate(np.pi / 2.0, 'z')
+        coords.orient_with_matrix(rotation_matrix, wrt=wrt)
+
     def test_move_coords(self):
         coord = make_coords()
         target_coord = make_coords(
@@ -524,3 +532,12 @@ class TestCascadedCoordinates(unittest.TestCase):
         for wrt in wrts:
             b.transform(
                 make_cascoords(pos=(-0.1, -0.2, -0.3)), wrt=wrt)
+
+    def test_orient_with_matrix(self):
+        coords = make_cascoords()
+        rotation_matrix = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+        coords.orient_with_matrix(rotation_matrix, wrt='local')
+        coords.orient_with_matrix(rotation_matrix, wrt='parent')
+        coords.orient_with_matrix(rotation_matrix, wrt='world')
+        wrt = make_coords().rotate(np.pi / 2.0, 'z')
+        coords.orient_with_matrix(rotation_matrix, wrt=wrt)
