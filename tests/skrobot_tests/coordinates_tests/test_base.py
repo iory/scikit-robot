@@ -86,6 +86,18 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(coord.rotation,
                                     [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
 
+    def test_x_axis(self):
+        coord = make_coords()
+        testing.assert_array_equal(coord.x_axis, [1, 0, 0])
+
+    def test_y_axis(self):
+        coord = make_coords()
+        testing.assert_array_equal(coord.y_axis, [0, 1, 0])
+
+    def test_z_axis(self):
+        coord = make_coords()
+        testing.assert_array_equal(coord.z_axis, [0, 0, 1])
+
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))

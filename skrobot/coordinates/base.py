@@ -382,6 +382,39 @@ class Coordinates(object):
         """
         return len(self.translation)
 
+    @property
+    def x_axis(self):
+        """Return x axis vector of this coordinates.
+
+        Returns
+        -------
+        axis : numpy.ndarray
+            x axis.
+        """
+        return self.rotation[:, 0].T
+
+    @property
+    def y_axis(self):
+        """Return y axis vector of this coordinates.
+
+        Returns
+        -------
+        axis : numpy.ndarray
+            y axis.
+        """
+        return self.rotation[:, 1].T
+
+    @property
+    def z_axis(self):
+        """Return z axis vector of this coordinates.
+
+        Returns
+        -------
+        axis : numpy.ndarray
+            z axis.
+        """
+        return self.rotation[:, 2].T
+
     def changed(self):
         """Return False
 
