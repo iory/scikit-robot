@@ -439,6 +439,15 @@ class TestMath(unittest.TestCase):
         theta = angle_between_vectors(unit_v, unit_v, normalize=False)
         testing.assert_almost_equal(theta, 0.0)
 
+        # directed
+        theta = angle_between_vectors(
+            [1, 0, 0], [-1, 0, 0], directed=False)
+        testing.assert_almost_equal(theta, 0.0)
+
+        theta = angle_between_vectors(
+            [1, 0, 0], [-1, 0, 0], directed=True)
+        testing.assert_almost_equal(theta, np.pi)
+
     def test_random_rotation(self):
         testing.assert_almost_equal(
             np.linalg.det(random_rotation()),

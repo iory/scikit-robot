@@ -1494,7 +1494,8 @@ def axis_angle_from_matrix(rotation):
     return axis_angle_from_quaternion(quat_from_rotation_matrix(rotation))
 
 
-def angle_between_vectors(v1, v2, normalize=True):
+def angle_between_vectors(v1, v2, normalize=True,
+                          directed=True):
     """Returns the smallest angle in radians between two vectors.
 
     Parameters
@@ -1505,6 +1506,9 @@ def angle_between_vectors(v1, v2, normalize=True):
         input vector.
     normalize : bool
         If normalize is True, normalize v1 and v2.
+    directed : bool
+        If directed is `False`, the input vectors are
+        interpreted as undirected axes.
 
     Returns
     -------
@@ -1514,7 +1518,8 @@ def angle_between_vectors(v1, v2, normalize=True):
     if normalize:
         v1 = normalize_vector(v1)
         v2 = normalize_vector(v2)
-    return np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
+    dot = np.dot(v1, v2)
+    return np.arccos(np.clip(dot if directed else np.fabs(dot), -1.0, 1.0))
 
 
 def random_rotation():
