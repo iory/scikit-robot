@@ -100,7 +100,7 @@ class TestCoordinates(unittest.TestCase):
 
         y_axis = coord.y_axis
         y_axis[0] = 10
-        testing.assert_array_equal(coord.y_axis, [1, 0, 0])
+        testing.assert_array_equal(coord.y_axis, [0, 1, 0])
 
     def test_z_axis(self):
         coord = make_coords()
@@ -108,7 +108,7 @@ class TestCoordinates(unittest.TestCase):
 
         z_axis = coord.z_axis
         z_axis[0] = 10
-        testing.assert_array_equal(coord.z_axis, [1, 0, 0])
+        testing.assert_array_equal(coord.z_axis, [0, 0, 1])
 
     def test_transform(self):
         coord = make_coords()
