@@ -90,12 +90,24 @@ class TestCoordinates(unittest.TestCase):
         coord = make_coords()
         testing.assert_array_equal(coord.x_axis, [1, 0, 0])
 
+        x_axis = coord.x_axis
+        x_axis[0] = 10
+        testing.assert_array_equal(coord.x_axis, [1, 0, 0])
+
     def test_y_axis(self):
         coord = make_coords()
         testing.assert_array_equal(coord.y_axis, [0, 1, 0])
 
+        y_axis = coord.y_axis
+        y_axis[0] = 10
+        testing.assert_array_equal(coord.y_axis, [0, 1, 0])
+
     def test_z_axis(self):
         coord = make_coords()
+        testing.assert_array_equal(coord.z_axis, [0, 0, 1])
+
+        z_axis = coord.z_axis
+        z_axis[0] = 10
         testing.assert_array_equal(coord.z_axis, [0, 0, 1])
 
     def test_transform(self):
