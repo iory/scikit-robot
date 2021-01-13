@@ -391,7 +391,7 @@ class Coordinates(object):
         axis : numpy.ndarray
             x axis.
         """
-        return self.rotation[:, 0].T
+        return np.array(self.rotation[:, 0].T, 'f')
 
     @property
     def y_axis(self):
@@ -402,7 +402,7 @@ class Coordinates(object):
         axis : numpy.ndarray
             y axis.
         """
-        return self.rotation[:, 1].T
+        return np.array(self.rotation[:, 1].T, 'f')
 
     @property
     def z_axis(self):
@@ -413,7 +413,7 @@ class Coordinates(object):
         axis : numpy.ndarray
             z axis.
         """
-        return self.rotation[:, 2].T
+        return np.array(self.rotation[:, 2].T, 'f')
 
     def changed(self):
         """Return False
