@@ -430,7 +430,7 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
         return ret
 
     def move_trajectory_sequence(self, trajectory_points, time_list, stop=True,
-                                 start_time=None, send_action=None):
+                                 start_time=None, send_action=None, wait=True):
         """Move base following the trajectory points at each time points
 
         trajectory-points [ list of #f(x y yaw) ([m] for x, y; [rad] for yaw) ]
@@ -503,18 +503,24 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
 
         msg.points = pts_msg_list
         goal.goal.trajectory = msg
-        if send_action:
-            if self.move_base_trajectory_action is None:
-                rospy.logerror(
-                    'send_action is True, '
-                    'but move_base_trajectory_action is not found')
-                return False
-            self.move_base_trajectory_action.send_goal(goal.goal)
-            if self.move_base_trajectory_action.wait_for_result():
-                return self.move_base_trajectory_action.get_result()
-            else:
-                return False
-        return goal
+
+        if not send_action:
+            return goal
+
+        if self.move_base_trajectory_action is None:
+            rospy.logerror(
+                'send_action is True, '
+                'but move_base_trajectory_action is not found')
+            return False
+
+        self.move_base_trajectory_action.send_goal(goal.goal)
+        if not wait:
+            return goal
+
+        if self.move_base_trajectory_action.wait_for_result():
+            return self.move_base_trajectory_action.get_result()
+        else:
+            return False
 
     def move_trajectory(self, x, y, yaw, sec=1.0, stop=True,
                         start_time=None,
