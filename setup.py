@@ -93,6 +93,7 @@ setup(
         ]
     },
     extras_require={
-        'all': ['pybullet>=2.1.9'],
+        'all': ['pybullet>=2.1.9;python_version>="3.0"',
+                'pybullet>=2.1.9, <=3.0.8;python_version<"3.0"'],
     },
 )
