@@ -1,4 +1,11 @@
 # flake8: noqa
 
-from .panda import PandaROSRobotInterface
-from .pr2 import PR2ROSRobotInterface
+try:
+    from .panda import PandaROSRobotInterface
+except ImportError:
+    pass
+
+try:
+    from .pr2 import PR2ROSRobotInterface
+except ImportError:
+    pass
