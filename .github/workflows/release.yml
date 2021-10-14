@@ -52,7 +52,7 @@ jobs:
     - name: Install APT On Linux
       run: |
         sudo apt-get update -qq -y
-        sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev python-cvxopt
+        sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev libumfpack5
     - name: Install Pytest
       run: |
         python -m pip install --upgrade pip setuptools wheel
