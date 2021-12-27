@@ -34,7 +34,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._links = collections.OrderedDict()
 
         self._redraw = True
-        pyglet.clock.schedule_interval(self.on_update, 1 / 30)
+        pyglet.clock.schedule_interval(self.on_update, 1.0)
 
         self.scene = trimesh.Scene()
         self._kwargs = dict(
