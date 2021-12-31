@@ -27,14 +27,14 @@ def _redraw_all_windows():
 
 class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
-    def __init__(self, resolution=None):
+    def __init__(self, resolution=None, update_interval=1.0):
         if resolution is None:
             resolution = (640, 480)
 
         self._links = collections.OrderedDict()
 
         self._redraw = True
-        pyglet.clock.schedule_interval(self.on_update, 1 / 30)
+        pyglet.clock.schedule_interval(self.on_update, update_interval)
 
         self.scene = trimesh.Scene()
         self._kwargs = dict(
