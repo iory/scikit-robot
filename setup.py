@@ -48,7 +48,7 @@ with open('requirements.txt') as f:
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 4):
     # packages that no longer support old Python
-    lock = [('pyglet', '1.4.10')]
+    lock = [('pyglet', '1.4.10'), ('cvxopt', '1.2.7')]
     for name, version in lock:
         # remove version-free requirements
         install_requires.remove(name)
