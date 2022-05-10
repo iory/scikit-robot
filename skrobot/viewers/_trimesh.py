@@ -168,3 +168,10 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     def set_camera(self, *args, **kwargs):
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
+
+    def save_image(self, file_obj):
+        self.switch_to()
+        self.dispatch_events()
+        self.dispatch_event('on_draw')
+        self.flip()
+        return super(TrimeshSceneViewer, self).save_image(file_obj)
