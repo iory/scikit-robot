@@ -90,6 +90,20 @@ class TestRobotModel(unittest.TestCase):
             ],
         )
 
+    def test_find_link_path(self):
+        fetch = self.fetch
+        links = fetch.find_link_path(
+            fetch.torso_lift_link,
+            fetch.rarm.end_coords.parent)
+        ref_lists = ['torso_lift_link', 'shoulder_pan_link',
+                     'shoulder_lift_link', 'upperarm_roll_link',
+                     'elbow_flex_link', 'forearm_roll_link',
+                     'wrist_flex_link', 'wrist_roll_link', 'gripper_link']
+        self.assertEqual([l.name for l in links], ref_lists)
+        links = fetch.find_link_path(fetch.rarm.end_coords.parent,
+                                     fetch.torso_lift_link)
+        self.assertEqual([l.name for l in links], ref_lists[::-1])
+
     def test_is_relevant(self):
         fetch = self.fetch
         self.assertTrue(fetch._is_relevant(
