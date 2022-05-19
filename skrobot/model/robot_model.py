@@ -29,6 +29,7 @@ from skrobot.model.joint import joint_angle_limit_nspace
 from skrobot.model.joint import joint_angle_limit_weight
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
+from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
 from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
@@ -1407,6 +1408,26 @@ class CascadedLink(CascadedCoords):
             ret2 = self.find_link_route(frm, ret1[0])
             ret1 = ret2[::-1] + ret1
         return ret1
+
+    def find_link_path(self, src_link, target_link):
+        """Find paths of src_link to target_link
+
+        Parameters
+        ----------
+        src_link : skrobot.model.link.Link
+            source link.
+        target_link : skrobot.model.link.Link
+            target link.
+
+        Returns
+        -------
+        ret : List[skrobot.model.link.Link]
+            If the links are connected, return Link list.
+            Otherwise, return an empty list.
+        """
+        paths, _ = find_link_path(
+            src_link, target_link)
+        return paths
 
     def calc_union_link_list(self, link_list):
         if not isinstance(link_list, list):
