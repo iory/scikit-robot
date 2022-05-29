@@ -10,7 +10,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.0.17'
+version = '0.0.18'
 
 
 if sys.argv[-1] == 'release':
