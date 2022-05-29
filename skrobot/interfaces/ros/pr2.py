@@ -1,5 +1,8 @@
+import math
+
 import actionlib
 import control_msgs.msg
+import numpy as np
 import pr2_controllers_msgs.msg
 import rospy
 
@@ -119,6 +122,120 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             controller_state='torso_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=['torso_lift_joint'])
+
+    def _continous_joint_largest_movement(self, av_diff, controller_type):
+        assert isinstance(controller_type, str)
+
+        controller_params = self.controller_param_table[controller_type]
+        controlling_joint_names = []
+        for param in controller_params:
+            controlling_joint_names.extend(param['joint_names'])
+
+        assert len(av_diff) == len(self.robot.joint_list)
+
+        abs_diff_largeest = - np.Inf
+        ret_joint_name = None
+        for joint, angle_diff in zip(self.robot.joint_list, av_diff):
+
+            if joint.name not in controlling_joint_names:
+                continue
+
+            is_continuous = (joint.max_angle - joint.min_angle) > 2 * math.pi
+            if is_continuous and abs_diff_largeest < abs(angle_diff):
+                abs_diff_largeest = abs(angle_diff)
+                ret_joint_name = joint.name
+
+        assert ret_joint_name is not None
+        return abs_diff_largeest, ret_joint_name
+
+    def angle_vector(self,
+                     av=None,
+                     time=None,
+                     controller_type=None,
+                     start_time=0.0,
+                     time_scale=5.0,
+                     velocities=None):
+
+        if controller_type is None:
+            controller_type = self.controller_type  # use default controller
+
+        if av is not None:
+            av_diff = av - self.potentio_vector()
+            diff_max, joint_name = self._continous_joint_largest_movement(
+                av_diff, controller_type)
+            if diff_max > math.pi:
+                rospy.logwarn(
+                    "continous joint {} movement over 180 degree detected"
+                    .format(joint_name))
+                rospy.logwarn(
+                    "angle_vector_sequence will be used as a workaround")
+                return self.angle_vector_sequence(
+                    [av], [time],
+                    controller_type=controller_type,
+                    start_time=start_time,
+                    time_scale=time_scale)
+
+        return super(PR2ROSRobotInterface, self).angle_vector(
+            av=av,
+            time=time,
+            controller_type=controller_type,
+            start_time=start_time,
+            time_scale=time_scale,
+            velocities=velocities)
+
+    def angle_vector_sequence(self,
+                              avs,
+                              times=None,
+                              controller_type=None,
+                              start_time=0.0,
+                              time_scale=5.0):
+
+        if controller_type is None:
+            controller_type = self.controller_type  # use default controller
+
+        if times is None:
+            default_duration = 3.0  # same as pr2eus
+            times = [default_duration for _ in range(len(avs))]
+
+        assert isinstance(times, list), 'times must be None or list'
+        assert len(avs) == len(times), 'length of times and avs must be equal'
+
+        av_initial = self.potentio_vector()
+        avs_with_initial = [av_initial] + avs
+
+        avs_reformed = []
+        times_reformed = []
+        for i in range(len(avs)):
+            av_here = avs_with_initial[i]
+            av_next = avs_with_initial[i + 1]
+            av_diff = av_next - av_here
+
+            diff_max, joint_name = self._continous_joint_largest_movement(
+                av_diff, controller_type)
+            if diff_max > math.pi:
+                rospy.logwarn(
+                    "continous joint {} movement over 180 degree detected"
+                    .format(joint_name))
+                rospy.logwarn('inverval will be splitted')
+                n_split = int(math.ceil(diff_max / (math.pi * 2 / 3)))
+                av_diff_partial = av_diff / n_split
+                for j in range(n_split):
+                    avs_reformed.append(av_here + av_diff_partial * (j + 1))
+                times_reformed.extend(
+                    [times[i] / n_split for _ in range(n_split)])
+            else:
+                avs_reformed.append(av_next)
+                times_reformed.append(times[i])
+
+        assert len(avs_reformed) == len(times_reformed)
+        assert abs(sum(times_reformed) - sum(times)) < 1e-8
+
+        return super(PR2ROSRobotInterface, self).angle_vector_sequence(
+            avs_reformed,
+            times=times_reformed,
+            controller_type=controller_type,
+            start_time=start_time,
+            time_scale=time_scale)
 
     def move_gripper(self, arm, pos, effort=25,
                      wait=True,
