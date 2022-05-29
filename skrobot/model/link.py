@@ -143,3 +143,59 @@ class Link(CascadedCoords):
             raise TypeError('sdf must be skrobot.sdf.SignedDistanceFunction.'
                             ' but is {}'.format(type(sdf)))
         self._sdf = sdf
+
+
+def _find_link_path(src_link, target_link, previous_link=None,
+                    include_target=False):
+    if src_link == target_link:
+        if include_target:
+            return [target_link], True
+        else:
+            return [], True
+    paths = []
+    links = []
+    if hasattr(src_link, 'parent'):
+        links = [src_link.parent]
+    if hasattr(src_link, '_descendants'):
+        links.extend(src_link._descendants)
+    for next_link in links:
+        if next_link is None or next_link == previous_link:
+            continue
+        path, succ = _find_link_path(next_link, target_link, src_link)
+        if succ is True:
+            paths.append(next_link)
+            paths.extend(path)
+            return paths, True
+    return [], False
+
+
+def find_link_path(src_link, target_link, include_source=True,
+                   include_target=True):
+    """Find paths of src_link to target_link
+
+    Parameters
+    ----------
+    src_link : skrobot.model.link.Link
+        source link.
+    target_link : skrobot.model.link.Link
+        target link.
+    include_source : bool
+        If `True`, return link list includes `src_link`.
+    include_target : bool
+        If `True`, return link list includes `target_link`.
+
+    Returns
+    -------
+    ret : tuple(List[skrobot.model.link.Link], bool)
+        If the links are connected, return Link list and `True`.
+        Otherwise, return an empty list and `False`.
+    """
+    paths, succ = _find_link_path(src_link, target_link,
+                                  include_target=include_target)
+    if succ:
+        if include_source:
+            return [src_link] + paths, succ
+        else:
+            return paths, succ
+    else:
+        return [], False
