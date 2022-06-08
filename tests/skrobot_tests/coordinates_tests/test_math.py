@@ -316,6 +316,11 @@ class TestMath(unittest.TestCase):
                   [0.57735027, 0.40824829, 0.70710678],
                   [0.57735027, -0.81649658, 0.0]])
 
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_axis((1, 0, 0), (-2, 0, 0))
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_axis((1, 0, 0), (1, 0, 0))
+
         rot = rotation_matrix_from_axis(y_axis, x_axis, axes='yx')
         _check_valid_rotation(rot)
 
