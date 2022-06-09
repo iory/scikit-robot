@@ -1531,6 +1531,51 @@ def angle_between_vectors(v1, v2, normalize=True,
     return np.arccos(np.clip(dot if directed else np.fabs(dot), -1.0, 1.0))
 
 
+def clockwise_angle_between_vectors(v1, v2, normal_vector):
+    """Returns the clockwise angle in radians between two vectors.
+
+    Parameters
+    ----------
+    v1 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    v2 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    normal_vector : numpy.ndarray, list[float] or tuple(float)
+        Base plane's normal vector.
+
+    Returns
+    -------
+    theta : float
+        clockwise angle between v1 and v2.
+        Return values in [0 radian, 2 * np.pi radian].
+    """
+    # https://stackoverflow.com/questions/14066933/direct-way-of-computing-clockwise-angle-between-2-vectors  # NOQA
+    det = triple_product(normal_vector, v1, v2)
+    dot = np.dot(v1, v2)
+    angle = np.arctan2(-det, -dot) + np.pi
+    if np.isclose(angle, 2 * np.pi):
+        angle = 0.0
+    return angle
+
+
+def is_parallel_two_vectors(v1, v2):
+    """Return if Two Vectors Are Parallel or not.
+
+    Parameters
+    ----------
+    v1 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+    v2 : numpy.ndarray, list[float] or tuple(float)
+        input vector.
+
+    Returns
+    -------
+    parallel : bool
+        parallel or not.
+    """
+    return np.all(np.cross(v1, v2) == 0.0)
+
+
 def random_rotation():
     """Generates a random 3x3 rotation matrix.
 

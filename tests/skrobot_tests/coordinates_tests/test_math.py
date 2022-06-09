@@ -7,6 +7,7 @@ from numpy import testing
 
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_exponent
@@ -452,6 +453,34 @@ class TestMath(unittest.TestCase):
         theta = angle_between_vectors(
             [1, 0, 0], [-1, 0, 0], directed=True)
         testing.assert_almost_equal(theta, np.pi)
+
+    def test_clockwise_angle_between_vectors(self):
+        v2_and_angles = [([1, 0, 0], 0),
+                         ([0.5, 0.5, 0], np.pi / 4),
+                         ([0, 1, 0], np.pi / 2),
+                         ([-0.5, 0.5, 0], np.pi * 3 / 4),
+                         ([-1, 0, 0], np.pi),
+                         ([-0.5, -0.5, 0], np.pi * 5 / 4),
+                         ([0, -1, 0], np.pi * 3 / 2),
+                         ([0.5, -0.5, 0], np.pi * 7 / 4)]
+        normal_vector = [0, 0, 1]
+        v1 = [1, 0, 0]
+        for v2, valid_angle in v2_and_angles:
+            angle = clockwise_angle_between_vectors(v1, v2, normal_vector)
+            testing.assert_equal(angle, valid_angle)
+        v2_and_angles = [([1, 0, 0], 0),
+                         ([0.5, 0.5, 0], 2 * np.pi - np.pi / 4),
+                         ([0, 1, 0], 2 * np.pi - np.pi / 2),
+                         ([-0.5, 0.5, 0], 2 * np.pi - np.pi * 3 / 4),
+                         ([-1, 0, 0], 2 * np.pi - np.pi),
+                         ([-0.5, -0.5, 0], 2 * np.pi - np.pi * 5 / 4),
+                         ([0, -1, 0], 2 * np.pi - np.pi * 3 / 2),
+                         ([0.5, -0.5, 0], 2 * np.pi - np.pi * 7 / 4)]
+        v1 = [1, 0, 0]
+        normal_vector = [0, 0, -1]
+        for v2, valid_angle in v2_and_angles:
+            angle = clockwise_angle_between_vectors(v1, v2, normal_vector)
+            testing.assert_equal(angle, valid_angle)
 
     def test_random_rotation(self):
         testing.assert_almost_equal(
