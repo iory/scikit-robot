@@ -217,7 +217,7 @@ class PybulletRobotInterface(Coordinates):
         self.joint_name_to_joint_id = joint_name_to_joint_id
 
         self.force = 200
-        self.max_velcity = 1.0
+        self.max_velocity = 1.0
         self.position_gain = 0.1
         self.target_velocity = 0.0
         self.velocity_gain = 0.1
@@ -264,7 +264,7 @@ class PybulletRobotInterface(Coordinates):
                                     force=self.force,
                                     positionGain=self.position_gain,
                                     velocityGain=self.velocity_gain,
-                                    maxVelocity=self.max_velcity)
+                                    maxVelocity=self.max_velocity)
 
         return angle_vector
 
