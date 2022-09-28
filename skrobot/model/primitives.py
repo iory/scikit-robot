@@ -156,6 +156,10 @@ class Sphere(Link):
             self.assoc(sdf.coords)
             self.sdf = sdf
 
+    @property
+    def radius(self) -> float:
+        return self.visual_mesh.metadata["radius"]
+
 
 class Annulus(Link):
 
