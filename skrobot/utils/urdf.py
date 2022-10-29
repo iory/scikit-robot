@@ -1826,8 +1826,8 @@ class Transmission(URDFType):
         'name': (str, True),
     }
     _ELEMENTS = {
-        'joints': (TransmissionJoint, True, True),
-        'actuators': (Actuator, True, True),
+        'joints': (TransmissionJoint, False, True),
+        'actuators': (Actuator, False, True),
     }
     _TAG = 'transmission'
 
@@ -1905,7 +1905,7 @@ class Transmission(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        kwargs['trans_type'] = node.find('type').text
+        kwargs["trans_type"] = node.attrib.get('type')
         return Transmission(**kwargs)
 
     def _to_xml(self, parent, path):
