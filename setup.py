@@ -46,7 +46,7 @@ with open('requirements.txt') as f:
 
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds
-if (sys.version_info.major, sys.version_info.minor) <= (3, 4):
+if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
     lock = [('pyglet', '1.4.10'), ('cvxopt', '1.2.7')]
     for name, version in lock:
