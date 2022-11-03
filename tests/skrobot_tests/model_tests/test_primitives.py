@@ -30,8 +30,9 @@ class TestBox(unittest.TestCase):
         skrobot.model.Box(extents=(1, 1, 1), with_sdf=True)
 
     def test_init_with_sdf(self):
-        b = skrobot.model.Box(extents=(1, 1, 1), with_sdf=True)
-        booleans, _ = b.sdf.on_surface(b.visual_mesh.vertices)
+        pos = np.ones(3)
+        b = skrobot.model.Box(extents=(1, 1, 1), pos=pos, with_sdf=True)
+        booleans, _ = b.sdf.on_surface(b.visual_mesh.vertices + pos)
         is_all_vertices_on_surface = np.all(booleans)
         self.assertTrue(is_all_vertices_on_surface)
 
@@ -54,8 +55,9 @@ class TestSphere(unittest.TestCase):
         skrobot.model.Sphere(radius=1)
 
     def test_init_with_sdf(self):
-        s = skrobot.model.Sphere(radius=1.0, with_sdf=True)
-        booleans, _ = s.sdf.on_surface(s.visual_mesh.vertices)
+        pos = np.ones(3)
+        s = skrobot.model.Sphere(radius=1.0, pos=pos, with_sdf=True)
+        booleans, _ = s.sdf.on_surface(s.visual_mesh.vertices + pos)
         is_all_vertices_on_surface = np.all(booleans)
         self.assertTrue(is_all_vertices_on_surface)
 
@@ -82,14 +84,17 @@ class TestMeshLink(unittest.TestCase):
         if osp.exists(sdf_cache_dir):
             shutil.rmtree(sdf_cache_dir)
 
-        # test for trimesh.base.Trimeh
+        # test: input is trimesh
         bunny_obj_path = skrobot.data.bunny_objpath()
         m = skrobot.model.MeshLink(
             trimesh.load(bunny_obj_path), with_sdf=True, dim_grid=50)
 
+        # test: input is mesh path
+        pos = np.ones(3)
         bunny_obj_path = skrobot.data.bunny_objpath()
-        m = skrobot.model.MeshLink(bunny_obj_path, with_sdf=True, dim_grid=50)
+        m = skrobot.model.MeshLink(
+            bunny_obj_path, pos=pos, with_sdf=True, dim_grid=50)
 
-        booleans, _ = m.sdf.on_surface(m.visual_mesh.vertices)
+        booleans, _ = m.sdf.on_surface(m.visual_mesh.vertices + pos)
         is_all_vertices_on_surface = np.all(booleans)
         self.assertTrue(is_all_vertices_on_surface)
