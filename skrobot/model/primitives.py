@@ -2,6 +2,7 @@ import uuid
 
 import numpy as np
 import trimesh
+from trimesh import PointCloud
 
 from skrobot.coordinates.base import CascadedCoords
 from skrobot.coordinates.base import Coordinates
@@ -206,11 +207,24 @@ class MeshLink(Link):
 class PointCloudLink(Link):
 
     def __init__(self,
-                 visual_mesh=None,
+                 point_cloud_like=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
+
+        accep_types = (type(None), np.ndarray, PointCloud)
+        if not isinstance(point_cloud_like, accep_types):
+            message = "point cloud must be either of {}".format(accep_types)
+            raise TypeError(message)
+
+        if isinstance(point_cloud_like, np.ndarray):
+            assert point_cloud_like.ndim == 2
+            assert point_cloud_like.shape[1] == 3
+            pcloud_mesh = PointCloud(point_cloud_like)
+        else:
+            pcloud_mesh = point_cloud_like
+
         if name is None:
             name = 'pointcloudlink_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
 
         super(PointCloudLink, self).__init__(pos=pos, rot=rot, name=name)
-        self.visual_mesh = visual_mesh
+        self.visual_mesh = pcloud_mesh
