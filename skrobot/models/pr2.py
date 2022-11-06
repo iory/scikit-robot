@@ -14,8 +14,8 @@ class PR2(RobotModelFromURDF):
 
     """
 
-    def __init__(self, *args, **kwargs):
-        super(PR2, self).__init__(*args, **kwargs)
+    def __init__(self, urdf=None, urdf_file=None, use_tight_joint_limit=True):
+        super(PR2, self).__init__(urdf=urdf, urdf_file=urdf_file)
 
         self.rarm_end_coords = CascadedCoords(
             parent=self.r_gripper_tool_frame,
@@ -39,35 +39,37 @@ class PR2(RobotModelFromURDF):
         self.head_root_link = self.head_pan_link
 
         # custom min_angle and max_angle for joints
-        joint_list = [
-            self.torso_lift_joint, self.l_shoulder_pan_joint,
-            self.l_shoulder_lift_joint, self.l_upper_arm_roll_joint,
-            self.l_elbow_flex_joint, self.l_forearm_roll_joint,
-            self.l_wrist_flex_joint, self.l_wrist_roll_joint,
-            self.r_shoulder_pan_joint, self.r_shoulder_lift_joint,
-            self.r_upper_arm_roll_joint, self.r_elbow_flex_joint,
-            self.r_forearm_roll_joint, self.r_wrist_flex_joint,
-            self.r_wrist_roll_joint, self.head_pan_joint, self.head_tilt_joint
-        ]
-        for j, min_angle, max_angle in zip(
-                joint_list,
-                (0.0115, np.deg2rad(-32.3493),
-                 np.deg2rad(-20.2598), np.deg2rad(-37.2423),
-                 np.deg2rad(-121.542), -float('inf'),
-                 np.deg2rad(-114.592), -float('inf'), np.deg2rad(-122.349),
-                 np.deg2rad(-20.2598), np.deg2rad(-214.859),
-                 np.deg2rad(-121.542), -float('inf'),
-                 np.deg2rad(-114.592), -float('inf'),
-                 np.deg2rad(-163.694), np.deg2rad(-21.2682)),
-                (0.325, np.deg2rad(122.349), np.deg2rad(74.2725),
-                 np.deg2rad(214.859), np.deg2rad(-8.59437),
-                 float('inf'), np.deg2rad(-5.72958),
-                 float('inf'), np.deg2rad(32.3493), np.deg2rad(74.2725),
-                 np.deg2rad(37.2423), np.deg2rad(-8.59437), float('inf'),
-                 np.deg2rad(-5.72958), float('inf'), np.deg2rad(163.694),
-                 np.deg2rad(74.2702))):
-            j.min_angle = min_angle
-            j.max_angle = max_angle
+        if use_tight_joint_limit:
+            joint_list = [
+                self.torso_lift_joint, self.l_shoulder_pan_joint,
+                self.l_shoulder_lift_joint, self.l_upper_arm_roll_joint,
+                self.l_elbow_flex_joint, self.l_forearm_roll_joint,
+                self.l_wrist_flex_joint, self.l_wrist_roll_joint,
+                self.r_shoulder_pan_joint, self.r_shoulder_lift_joint,
+                self.r_upper_arm_roll_joint, self.r_elbow_flex_joint,
+                self.r_forearm_roll_joint, self.r_wrist_flex_joint,
+                self.r_wrist_roll_joint, self.head_pan_joint,
+                self.head_tilt_joint
+            ]
+            for j, min_angle, max_angle in zip(
+                    joint_list,
+                    (0.0115, np.deg2rad(-32.3493),
+                     np.deg2rad(-20.2598), np.deg2rad(-37.2423),
+                     np.deg2rad(-121.542), -float('inf'),
+                     np.deg2rad(-114.592), -float('inf'), np.deg2rad(-122.349),
+                     np.deg2rad(-20.2598), np.deg2rad(-214.859),
+                     np.deg2rad(-121.542), -float('inf'),
+                     np.deg2rad(-114.592), -float('inf'),
+                     np.deg2rad(-163.694), np.deg2rad(-21.2682)),
+                    (0.325, np.deg2rad(122.349), np.deg2rad(74.2725),
+                     np.deg2rad(214.859), np.deg2rad(-8.59437),
+                     float('inf'), np.deg2rad(-5.72958),
+                     float('inf'), np.deg2rad(32.3493), np.deg2rad(74.2725),
+                     np.deg2rad(37.2423), np.deg2rad(-8.59437), float('inf'),
+                     np.deg2rad(-5.72958), float('inf'), np.deg2rad(163.694),
+                     np.deg2rad(74.2702))):
+                j.min_angle = min_angle
+                j.max_angle = max_angle
 
     @cached_property
     def default_urdf_path(self):
