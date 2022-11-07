@@ -14,8 +14,8 @@ class PR2(RobotModelFromURDF):
 
     """
 
-    def __init__(self, urdf=None, urdf_file=None, use_tight_joint_limit=True):
-        super(PR2, self).__init__(urdf=urdf, urdf_file=urdf_file)
+    def __init__(self, use_tight_joint_limit=True):
+        super(PR2, self).__init__()
 
         self.rarm_end_coords = CascadedCoords(
             parent=self.r_gripper_tool_frame,
