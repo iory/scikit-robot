@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from skrobot.optimizers.cvxopt_solver import solve_qp as cvxopt_solve_qp
-from skrobot.optimizers.quadprog_solver import solve_qp as quadprog_solve_qp
+from skrobot.optimizers import cvxopt_solver
+from skrobot.optimizers import quadprog_solver
 
 
 def solve_qp(P, q, G, h, A=None, b=None, solver='cvxopt', sym_proj=False):
@@ -42,7 +42,7 @@ def solve_qp(P, q, G, h, A=None, b=None, solver='cvxopt', sym_proj=False):
         If the QP is not feasible.
     """
     if solver == 'cvxopt':
-        return cvxopt_solve_qp(P, q, G, h, A, b, sym_proj=sym_proj)
+        return cvxopt_solver(P, q, G, h, A, b, sym_proj=sym_proj)
     elif solver == 'quadprog':
-        return quadprog_solve_qp(P, q, G, h, A, b, sym_proj=sym_proj)
+        return quadprog_solver(P, q, G, h, A, b, sym_proj=sym_proj)
     raise ValueError('QP solver {} not supported'.format(solver))

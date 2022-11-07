@@ -52,7 +52,7 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     lock = [('pyglet', '1.4.10')]
 
     # try cvxopt wheel found for this platform
-    # If not found, give up installing. 
+    # If not found, give up installing.
     with tempfile.TemporaryDirectory() as td:
         cvxopt_version = "1.2.7"
         cmd = "pip3 download cvxopt=={}"\
