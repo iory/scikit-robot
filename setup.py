@@ -5,6 +5,7 @@ import platform
 import shlex
 import subprocess
 import sys
+import tempfile
 
 from setuptools import find_packages
 from setuptools import setup
@@ -48,7 +49,18 @@ with open('requirements.txt') as f:
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
-    lock = [('pyglet', '1.4.10'), ('cvxopt', '1.2.7')]
+    lock = [('pyglet', '1.4.10')]
+
+    # try cvxopt wheel found for this platform
+    # If not found, give up installing. 
+    with tempfile.TemporaryDirectory() as td:
+        cvxopt_version = "1.2.7"
+        cmd = "pip3 download cvxopt=={}"\
+              "--only-binary :all: -d {}".format(cvxopt_version, td)
+        ret = subprocess.call(cmd, shell=True)
+        if ret == 0:
+            lock.append(('cvxopt', cvxopt_version))
+
     for name, version in lock:
         # remove version-free requirements
         install_requires.remove(name)
