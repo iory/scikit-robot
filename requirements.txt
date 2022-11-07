@@ -1,5 +1,4 @@
 cached-property
-cvxopt
 future
 gdown
 lxml
