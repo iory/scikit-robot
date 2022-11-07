@@ -54,7 +54,7 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # try cvxopt wheel found for this platform
     # If not found, give up installing.
     td = tempfile.mkdtemp()
-    cvxopt_version = "1.2.7"
+    cvxopt_version = "1.2.6"
     cmd = "pip3 download cvxopt=={}"\
           "--only-binary :all: -d {}".format(cvxopt_version, td)
     ret = subprocess.call(cmd, shell=True)
