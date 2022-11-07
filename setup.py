@@ -45,33 +45,46 @@ with open('requirements.txt') as f:
         req = line.split('#')[0].strip()
         install_requires.append(req)
 
+cvxopt_version = "1.2.6"
+
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
-    lock = [('pyglet', '1.4.10')]
-
-    # try cvxopt wheel found for this platform
-    # If not found, give up installing.
-    td = tempfile.mkdtemp()
-    cvxopt_version = "1.2.6"
-    cmd_download_wheel = "pip3 download cvxopt=={}"\
-        "--only-binary :all: -d {}".format(cvxopt_version, td)
-    return_code = subprocess.call(cmd_download_wheel, shell=True)
-    wheel_found = (return_code == 0)
-    if wheel_found:
-        lock.append(('cvxopt', cvxopt_version))
-
+    lock = [('pyglet', '1.4.10'), ('cvxopt', cvxopt_version)]
     for name, version in lock:
         # remove version-free requirements
         install_requires.remove(name)
         # add working version locked requirements
         install_requires.append('{}=={}'.format(name, version))
 
+
 uname = platform.uname()[0]
 if uname == 'Darwin':
     # python-fcl could not install.
     install_requires.remove('python-fcl')
+
+
+def is_wheel_released(module_name, version):
+    td = tempfile.mkdtemp()
+    if version is None:
+        module_with_version = module_name
+    else:
+        module_with_version = "{}=={}".format(module_name, version)
+
+    cmd_download_wheel = "pip3 download {}"\
+        "--only-binary :all: -d {}".format(module_with_version, td)
+
+    return_code = subprocess.call(cmd_download_wheel, shell=True)
+    wheel_found = (return_code == 0)
+    return wheel_found
+
+
+remove_candidates = [("cvxopt", cvxopt_version), ("python-fcl", None)]
+for module, version in remove_candidates:
+    if not is_wheel_released(module, version):
+        install_requires.remove(module)
+
 
 setup(
     name='scikit-robot',
