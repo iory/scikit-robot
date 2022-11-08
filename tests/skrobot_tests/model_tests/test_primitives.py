@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 import trimesh
+from trimesh import PointCloud
 
 import skrobot
 from skrobot.data import get_cache_dir
@@ -98,3 +99,18 @@ class TestMeshLink(unittest.TestCase):
         booleans, _ = m.sdf.on_surface(m.visual_mesh.vertices + pos)
         is_all_vertices_on_surface = np.all(booleans)
         self.assertTrue(is_all_vertices_on_surface)
+
+
+class TestPointCloudLink(unittest.TestCase):
+
+    def test_init_(self):
+        with self.assertRaises(AssertionError):
+            skrobot.model.PointCloudLink(np.random.randn(100,))
+        with self.assertRaises(AssertionError):
+            skrobot.model.PointCloudLink(np.random.randn(100, 1))
+
+        pts = np.random.randn(100, 3)
+        skrobot.model.PointCloudLink(pts)
+
+        pts_mesh = PointCloud(pts)
+        skrobot.model.PointCloudLink(pts_mesh)
