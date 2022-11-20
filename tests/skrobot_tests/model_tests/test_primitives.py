@@ -69,6 +69,23 @@ class TestAnnulus(unittest.TestCase):
         skrobot.model.Annulus(r_min=0.2, r_max=0.5, height=1)
 
 
+class TestLineString(unittest.TestCase):
+
+    def test_init(self):
+        points = np.random.randn(100, 3)
+        skrobot.model.LineString(points)
+
+        with self.assertRaises(AssertionError):
+            # array dimension must be 2
+            skrobot.model.LineString(np.random.randn(100,))
+        with self.assertRaises(AssertionError):
+            # point dimension must be 3
+            skrobot.model.LineString(np.random.randn(100, 1))
+        with self.assertRaises(AssertionError):
+            # len(paths) must be > 1
+            skrobot.model.LineString(np.random.randn(1, 3))
+
+
 class TestMeshLink(unittest.TestCase):
 
     def test_init(self):

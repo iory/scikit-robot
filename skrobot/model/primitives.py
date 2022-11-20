@@ -178,6 +178,29 @@ class Annulus(Link):
                                       visual_mesh=mesh)
 
 
+class LineString(Link):
+
+    def __init__(self, points, vertex_colors=None, face_colors=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+
+        if not isinstance(points, np.ndarray):
+            raise TypeError("points must be np.ndarray")
+
+        assert points.ndim == 2
+        assert points.shape[0] > 1, "points must be more than 1"
+        assert points.shape[1] == 3, "each point must be 3 dim"
+
+        if name is None:
+            name = 'linestring_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+        mesh = trimesh.load_path(points)
+        super(LineString, self).__init__(
+            pos=pos,
+            rot=rot,
+            name=name,
+            collision_mesh=mesh,
+            visual_mesh=mesh)
+
+
 class MeshLink(Link):
 
     def __init__(self,

@@ -8,6 +8,7 @@ from skrobot.model.primitives import Box
 from skrobot.model.primitives import CameraMarker
 from skrobot.model.primitives import Cone
 from skrobot.model.primitives import Cylinder
+from skrobot.model.primitives import LineString
 from skrobot.model.primitives import MeshLink
 from skrobot.model.primitives import PointCloudLink
 from skrobot.model.primitives import Sphere
