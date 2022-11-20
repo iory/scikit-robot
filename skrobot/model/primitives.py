@@ -180,8 +180,7 @@ class Annulus(Link):
 
 class LineString(Link):
 
-    def __init__(self, points, vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+    def __init__(self, points, pos=(0, 0, 0), rot=np.eye(3), name=None):
 
         if not isinstance(points, np.ndarray):
             raise TypeError("points must be np.ndarray")
