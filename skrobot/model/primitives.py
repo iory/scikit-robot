@@ -195,7 +195,7 @@ class LineString(Link):
         assert points.shape[1] == 3, "each point must be 3 dim"
 
         if color is not None:
-            assert len(color) == 4, "set color as 4-dim RGBA"
+            assert len(color) in (3, 4), "color must be RGB or RGBA"
             colors = [color]
         else:
             colors = None
