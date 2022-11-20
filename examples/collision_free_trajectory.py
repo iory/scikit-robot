@@ -8,6 +8,7 @@ import numpy as np
 import skrobot
 from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
+from skrobot.model.primitives import LineString
 from skrobot.planner import sqp_plan_trajectory
 from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
@@ -82,19 +83,32 @@ ts = time.time()
 n_waypoint = args.n
 av_seq = sqp_plan_trajectory(
     sscc, av_start, av_goal, joint_list, n_waypoint,
-    safety_margin=1e-2, with_base=with_base)
+    safety_margin=5.0e-2, with_base=with_base)
 print("solving time : {0} sec".format(time.time() - ts))
 
-# visualizatoin
+# visualization
 print("show trajectory")
 viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
 viewer.add(robot_model)
 viewer.add(box)
 viewer.add(Axis(pos=target_coords.worldpos(), rot=target_coords.worldrot()))
+
 sscc.add_coll_spheres_to_viewer(viewer)
 viewer.show()
+
+rarm_point_history = []
+line_string = None
 for av in av_seq:
     set_robot_config(robot_model, joint_list, av, with_base=with_base)
+    rarm_point_history.append(rarm_end_coords.worldpos())
+
+    # update rarm trajectory visualization
+    if line_string is not None:
+        viewer.delete(line_string)
+    if len(rarm_point_history) > 1:
+        line_string = LineString(np.array(rarm_point_history))
+        viewer.add(line_string)
+
     sscc.update_color()
     viewer.redraw()
     time.sleep(1.0)
