@@ -15,7 +15,7 @@ def get_cache_dir():
 def bunny_objpath():
     target_path = osp.join(get_cache_dir(), 'mesh', 'bunny.obj')
     gdown.cached_download(
-        url='https://drive.google.com/uc?id=18aAYzBglAGaSwes6oAENcufD8KC5XDph',
+        url='https://raw.githubusercontent.com/iory/scikit-robot-models/master/data/bunny.obj',  # NOQA
         path=target_path,
         md5='19bd31bde1fcf5242a8a82ed4ac03c72',
         quiet=True,
@@ -25,7 +25,7 @@ def bunny_objpath():
 
 def fetch_urdfpath():
     gdown.cached_download(
-        url='https://drive.google.com/uc?id=1y7Jc3QoVW6J072CrSNupfKpyLp4NNxuH',
+        url='https://github.com/iory/scikit-robot-models/raw/master/fetch_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'fetch_description.tar.gz'),
         md5='fbe29ab5f3d029d165a625175b43a265',
         postprocess=gdown.extractall,
@@ -40,7 +40,7 @@ def kuka_urdfpath():
 
 def panda_urdfpath():
     gdown.cached_download(
-        url='https://drive.google.com/uc?id=1h6ib9jpEUNa1xB2DNrnRQtqpSD2Rj9bz',
+        url='https://github.com/iory/scikit-robot-models/raw/master/franka_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'franka_description.tar.gz'),
         md5='3de5bd15262b519e3beb88f1422032ac',
         postprocess=gdown.extractall,
@@ -51,7 +51,7 @@ def panda_urdfpath():
 
 def pr2_urdfpath():
     gdown.cached_download(
-        url='https://drive.google.com/uc?id=1zy4C665o6efPko7eMk4XBdHbvgFfdC-6',
+        url='https://github.com/iory/scikit-robot-models/raw/master/pr2_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'pr2_description.tar.gz'),
         md5='e4fb915accdb3568a5524c92e9c35c9a',
         postprocess=gdown.extractall,
