@@ -427,6 +427,7 @@ class TestCascadedCoordinates(unittest.TestCase):
         a_again = pickle.loads(pickle.dumps(a))
 
         # see __getstate__ and __setstate__ implementation
+        assert a._worldcoords._hook == a.update  # original must be unchanged
         assert a_again._worldcoords._hook == a_again.update
 
         # test properly dumped and loaded
