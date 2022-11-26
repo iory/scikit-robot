@@ -1,3 +1,4 @@
+import pickle
 import unittest
 
 import numpy as np
@@ -85,6 +86,13 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_array_equal(coord.translation, [1, 0, -1])
         testing.assert_almost_equal(coord.rotation,
                                     [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
+    def test_pickling(self):
+        coords = make_coords()
+        coords.translate([1, 2, 3])
+        coords_again = pickle.loads(pickle.dumps(coords))
+        testing.assert_almost_equal(
+            coords.translation, coords_again.translation)
 
     def test_x_axis(self):
         coord = make_coords()
@@ -408,6 +416,23 @@ class TestCoordinates(unittest.TestCase):
 
 
 class TestCascadedCoordinates(unittest.TestCase):
+
+    def test_pickling(self):
+        a = make_cascoords(pos=[0.1, 0, 0])
+        b = make_cascoords(pos=[0, 0, 0.1])
+        c = make_cascoords(pos=[0, 0, -0.1])
+        a.assoc(b, relative_coords="local")
+        a.assoc(c, relative_coords="local")
+
+        a_again = pickle.loads(pickle.dumps(a))
+        assert len(a_again.descendants) == 2
+        b_again = a_again.descendants[0]
+        c_again = a_again.descendants[1]
+        assert id(b_again.parent) == id(a_again)
+        assert id(c_again.parent) == id(a_again)
+        testing.assert_almost_equal(a_again.translation, a.translation)
+        testing.assert_almost_equal(b_again.translation, b.translation)
+        testing.assert_almost_equal(c_again.translation, c.translation)
 
     def test_changed(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),
