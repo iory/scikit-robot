@@ -425,14 +425,22 @@ class TestCascadedCoordinates(unittest.TestCase):
         a.assoc(c, relative_coords="local")
 
         a_again = pickle.loads(pickle.dumps(a))
+
+        # see __getstate__ and __setstate__ implementation
+        assert a_again._worldcoords._hook == a_again.update
+
+        # test properly dumped and loaded
         assert len(a_again.descendants) == 2
         b_again = a_again.descendants[0]
         c_again = a_again.descendants[1]
         assert id(b_again.parent) == id(a_again)
         assert id(c_again.parent) == id(a_again)
-        testing.assert_almost_equal(a_again.translation, a.translation)
-        testing.assert_almost_equal(b_again.translation, b.translation)
-        testing.assert_almost_equal(c_again.translation, c.translation)
+        testing.assert_almost_equal(
+            a_again.translation, a.translation)
+        testing.assert_almost_equal(
+            b_again.translation, b.translation)
+        testing.assert_almost_equal(
+            c_again.translation, c.translation)
 
     def test_changed(self):
         a = make_cascoords(rot=rotation_matrix(pi / 3, 'x'),

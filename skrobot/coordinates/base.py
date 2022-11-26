@@ -1516,6 +1516,20 @@ class CascadedCoords(Coordinates):
                              'get type=={}'.format(type(c)))
         self._parent = c
 
+    def __getstate__(self):
+        # NOTE: python3 can serialize instance method as member
+        # but python2 cannot. So we need to write custom serialization.
+        assert self._worldcoords._hook == self.update
+        d = self.__dict__.copy()
+        worldcoords = d["_worldcoords"]
+        worldcoords._hook = None
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        assert self._worldcoords._hook is None  # as we set in __getstate__
+        self._worldcoords._hook = self.update  # register again
+
 
 def coordinates_p(x):
     """Return whether an object is an instance of a class or of a subclass"""
