@@ -224,12 +224,12 @@ class Coordinates(object):
             name = ''
         self.name = name
         self.parent = None
-        self._hook = hook if hook else lambda: None
+        self._hook = hook
 
     @contextlib.contextmanager
     def disable_hook(self):
         hook = self._hook
-        self._hook = lambda: None
+        self._hook = None
         try:
             yield
         finally:
@@ -269,7 +269,8 @@ class Coordinates(object):
                [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
                [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
         """
-        self._hook()
+        if self._hook is not None:
+            self._hook()
         return self._rotation
 
     @rotation.setter
@@ -325,7 +326,8 @@ class Coordinates(object):
         >>> c.translation
         array([0.1, 0.2, 0.3])
         """
-        self._hook()
+        if self._hook is not None:
+            self._hook()
         return self._translation
 
     @translation.setter
@@ -1049,7 +1051,8 @@ class Coordinates(object):
 
     def worldcoords(self):
         """Return thisself"""
-        self._hook()
+        if self._hook is not None:
+            self._hook()
         return self
 
     def copy_worldcoords(self):
@@ -1512,6 +1515,20 @@ class CascadedCoords(Coordinates):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
         self._parent = c
+
+    def __getstate__(self):
+        # NOTE: python3 can serialize instance method as member
+        # but python2 cannot. So we need to write custom serialization.
+        assert self._worldcoords._hook == self.update
+        d = self.__dict__.copy()
+        worldcoords = d["_worldcoords"]
+        worldcoords._hook = None
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+        assert self._worldcoords._hook is None  # as we set in __getstate__
+        self._worldcoords._hook = self.update  # register again
 
 
 def coordinates_p(x):
