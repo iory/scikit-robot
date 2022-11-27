@@ -13,7 +13,9 @@ from skrobot.data import get_cache_dir
 class TestAxis(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Axis()
+        prim = skrobot.model.Axis()
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is None
 
     def from_coords(self):
         coords = skrobot.coordinates.Coordinates()
@@ -27,8 +29,9 @@ class TestAxis(unittest.TestCase):
 class TestBox(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Box(extents=(1, 1, 1))
-        skrobot.model.Box(extents=(1, 1, 1), with_sdf=True)
+        prim = skrobot.model.Box(extents=(1, 1, 1))
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is not None
 
     def test_init_with_sdf(self):
         pos = np.ones(3)
@@ -41,19 +44,25 @@ class TestBox(unittest.TestCase):
 class TestCone(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Cone(radius=0.5, height=1)
+        prim = skrobot.model.Cone(radius=0.5, height=1)
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is not None
 
 
 class TestCylinder(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Cylinder(radius=0.5, height=1)
+        prim = skrobot.model.Cylinder(radius=0.5, height=1)
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is not None
 
 
 class TestSphere(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Sphere(radius=1)
+        prim = skrobot.model.Sphere(radius=1)
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is not None
 
     def test_init_with_sdf(self):
         pos = np.ones(3)
@@ -66,7 +75,9 @@ class TestSphere(unittest.TestCase):
 class TestAnnulus(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Annulus(r_min=0.2, r_max=0.5, height=1)
+        prim = skrobot.model.Annulus(r_min=0.2, r_max=0.5, height=1)
+        assert prim._visual_mesh is not None
+        assert prim._collision_mesh is not None
 
 
 class TestLineString(unittest.TestCase):
