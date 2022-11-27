@@ -1,4 +1,6 @@
+import copy
 import os.path as osp
+import pickle
 import shutil
 import unittest
 
@@ -142,3 +144,60 @@ class TestPointCloudLink(unittest.TestCase):
 
         pts_mesh = PointCloud(pts)
         skrobot.model.PointCloudLink(pts_mesh)
+
+
+class TestPrimitiveSerialization(unittest.TestCase):
+
+    @staticmethod
+    def check_mesh(mesh_like1, mesh_like2):
+        # TODO(HiroIshida): pickling and compare bytes seems easy
+        # bit somehow serialized value does not match
+        # so do the following check
+
+        if isinstance(mesh_like1, list):
+            assert len(mesh_like1) == len(mesh_like2)
+            for mesh1, mesh2 in zip(mesh_like1, mesh_like2):
+                verts1 = mesh1.vertices
+                verts2 = mesh2.vertices
+                np.testing.assert_almost_equal(verts1, verts2)
+        else:
+            verts1 = mesh_like1.vertices
+            verts2 = mesh_like2.vertices
+            np.testing.assert_almost_equal(verts1, verts2)
+
+    def test_light_serialization(self):
+        primitives = [
+            skrobot.model.Axis(),
+            skrobot.model.Box([1., 1., 1.]),
+            skrobot.model.CameraMarker(),
+            skrobot.model.Cone(1., 1.),
+            skrobot.model.Cylinder(1., 1.),
+            skrobot.model.Sphere(1.),
+            skrobot.model.Annulus(1., 1., 1.)]
+
+        primitives_ls = copy.deepcopy(primitives)
+        for p in primitives_ls:
+            p._light_serialize = True
+
+        # test serialization size
+        for prim, prim_ls in zip(primitives, primitives_ls):
+            byte = pickle.dumps(prim)
+            byte_ls = pickle.dumps(prim_ls)
+            assert len(byte_ls) < len(byte) * 0.5
+
+        # test serialization consistency
+        # NOTE: same mesh means same attributes
+        for prim, prim_ls in zip(primitives, primitives_ls):
+            prim_again = pickle.loads(pickle.dumps(prim))
+            prim_ls_again = pickle.loads(pickle.dumps(prim_ls))
+
+            # collision mesh maybe None
+            if prim._collision_mesh is None:
+                assert prim_ls._collision_mesh is None
+            else:
+                self.check_mesh(
+                    prim_again._collision_mesh, prim_ls_again._collision_mesh)
+
+            # visual mesh is supposed to not None
+            self.check_mesh(
+                prim_again._visual_mesh, prim_ls_again._visual_mesh)

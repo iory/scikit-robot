@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 import uuid
 
 import numpy as np
@@ -14,19 +13,47 @@ from skrobot.sdf import SphereSDF
 from skrobot.sdf import trimesh2sdf
 
 
-class MeshSettable(ABC, Link):
+class LightSerializableLink(Link):
+    """size efficient serialization for analytical primtives."""
 
-    @abstractmethod
+    def __getstate__(self):
+        if self._light_serialize:
+            heavy_attrs = ["_collision_mesh", "_visual_mesh"]
+            # stash
+            stash_dict = {}
+            for attr in heavy_attrs:
+                stash_dict[attr] = getattr(self, attr)
+
+            # invalidate
+            for attr in heavy_attrs:
+                setattr(self, attr, None)
+
+            # get dict
+            d = super(LightSerializableLink, self).__getstate__()
+
+            # recover
+            for attr in heavy_attrs:
+                setattr(self, attr, stash_dict[attr])
+            return d
+        else:
+            return super(LightSerializableLink, self).__getstate__()
+
+    def __setstate__(self, d):
+        super(LightSerializableLink, self).__setstate__(d)
+        if self._collision_mesh is None:
+            self._set_mesh()
+
     def _set_mesh(self):
-        pass
+        raise NotImplementedError("implement this")
 
 
-class Axis(MeshSettable, Link):
+class Axis(LightSerializableLink):
 
     def __init__(self,
                  axis_radius=0.01,
                  axis_length=0.1,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None,
+                 light_serialize=False):
         if name is None:
             name = 'axis_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -34,6 +61,8 @@ class Axis(MeshSettable, Link):
         self._axis_radius = axis_radius
         self._axis_length = axis_length
         self._set_mesh()
+
+        self._light_serialize = light_serialize
 
     def _set_mesh(self):
         self._visual_mesh = trimesh.creation.axis(
@@ -60,10 +89,11 @@ class Axis(MeshSettable, Link):
         return link
 
 
-class Box(MeshSettable):
+class Box(LightSerializableLink):
 
     def __init__(self, extents, vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False,
+                 light_serialize=False):
         if name is None:
             name = 'box_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -72,6 +102,8 @@ class Box(MeshSettable):
         self._vertex_colors = vertex_colors
         self._face_colors = face_colors
         self._set_mesh()
+
+        self._light_serialize = light_serialize
 
         if with_sdf:
             sdf = BoxSDF(np.zeros(3), extents)
@@ -88,10 +120,11 @@ class Box(MeshSettable):
         self._collision_mesh = mesh
 
 
-class CameraMarker(MeshSettable):
+class CameraMarker(LightSerializableLink):
 
     def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
-                 marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3), name=None,
+                 light_serialize=False):
         if name is None:
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
@@ -107,18 +140,21 @@ class CameraMarker(MeshSettable):
         self._marker_height = marker_height
         self._set_mesh()
 
+        self._light_serialize = light_serialize
+
     def _set_mesh(self):
         self._visual_mesh = trimesh.creation.camera_marker(
             self._camera,
             marker_height=self._marker_height)
 
 
-class Cone(MeshSettable):
+class Cone(LightSerializableLink):
 
     def __init__(self, radius, height,
                  sections=32,
                  vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None,
+                 light_serialize=False):
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -129,6 +165,8 @@ class Cone(MeshSettable):
         self._vertex_colors = vertex_colors
         self._face_colors = face_colors
         self._set_mesh()
+
+        self._light_serialize = light_serialize
 
     def _set_mesh(self):
         mesh = trimesh.creation.cone(
@@ -142,12 +180,13 @@ class Cone(MeshSettable):
         self._collision_mesh = mesh
 
 
-class Cylinder(MeshSettable):
+class Cylinder(LightSerializableLink):
 
     def __init__(self, radius, height,
                  sections=32,
                  vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False,
+                 light_serialize=False):
         if name is None:
             name = 'cylinder_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -158,6 +197,8 @@ class Cylinder(MeshSettable):
         self._vertex_colors = vertex_colors
         self._face_colors = face_colors
         self._set_mesh()
+
+        self._light_serialize = light_serialize
 
         if with_sdf:
             sdf = CylinderSDF(np.zeros(3), height, radius)
@@ -176,10 +217,11 @@ class Cylinder(MeshSettable):
         self._collision_mesh = mesh
 
 
-class Sphere(MeshSettable):
+class Sphere(LightSerializableLink):
 
     def __init__(self, radius, subdivisions=3, color=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False,
+                 light_serialize=False):
         if name is None:
             name = 'sphere_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -188,6 +230,8 @@ class Sphere(MeshSettable):
         self._subdivisions = subdivisions
         self._color = color
         self._set_mesh()
+
+        self._light_serialize = light_serialize
 
         if with_sdf:
             sdf = SphereSDF(np.zeros(3), radius)
@@ -204,11 +248,12 @@ class Sphere(MeshSettable):
         self._collision_mesh = mesh
 
 
-class Annulus(MeshSettable):
+class Annulus(LightSerializableLink):
 
     def __init__(self, r_min, r_max, height,
                  vertex_colors=None, face_colors=None,
-                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 pos=(0, 0, 0), rot=np.eye(3), name=None,
+                 light_serialize=False):
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -220,6 +265,7 @@ class Annulus(MeshSettable):
         self._face_colors = face_colors
         self._set_mesh()
 
+        self._light_serialize = light_serialize
 
     def _set_mesh(self):
         mesh = trimesh.creation.annulus(
