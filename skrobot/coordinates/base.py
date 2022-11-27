@@ -1534,7 +1534,7 @@ class CascadedCoords(Coordinates):
             # of CascadedCoords.
             self._worldcoords._hook = None
             d["_worldcoords"] = copy.deepcopy(self._worldcoords)
-            d["_worldcoords"].__setattr__("_hook", None)
+            d["_worldcoords"].__setattr__("_hook", "invalidated")
 
             # recover the original _hook
             self._worldcoords._hook = self.update
@@ -1546,9 +1546,9 @@ class CascadedCoords(Coordinates):
         if is_python3:
             return
         else:
-            assert self._worldcoords._hook is None  # as we set in __getstate__
-            self._worldcoords._hook = self.update  # register again
-            assert self._worldcoords._hook == self.update
+            if self._worldcoords._hook == "invalidated":
+                self._worldcoords._hook = self.update  # register again
+                assert self._worldcoords._hook == self.update
 
 
 def coordinates_p(x):
