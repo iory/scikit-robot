@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import uuid
 
 import numpy as np
@@ -13,7 +14,14 @@ from skrobot.sdf import SphereSDF
 from skrobot.sdf import trimesh2sdf
 
 
-class Axis(Link):
+class MeshSettable(ABC, Link):
+
+    @abstractmethod
+    def _set_mesh(self):
+        pass
+
+
+class Axis(MeshSettable, Link):
 
     def __init__(self,
                  axis_radius=0.01,
@@ -23,10 +31,15 @@ class Axis(Link):
             name = 'axis_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
         super(Axis, self).__init__(pos=pos, rot=rot, name=name)
+        self._axis_radius = axis_radius
+        self._axis_length = axis_length
+        self._set_mesh()
+
+    def _set_mesh(self):
         self._visual_mesh = trimesh.creation.axis(
             origin_size=0.00000001,
-            axis_radius=axis_radius,
-            axis_length=axis_length,
+            axis_radius=self._axis_radius,
+            axis_length=self._axis_length,
         )
 
     @classmethod
@@ -47,29 +60,35 @@ class Axis(Link):
         return link
 
 
-class Box(Link):
+class Box(MeshSettable):
 
     def __init__(self, extents, vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
         if name is None:
             name = 'box_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        mesh = trimesh.creation.box(
-            extents=extents,
-            vertex_colors=vertex_colors,
-            face_colors=face_colors,
-        )
-        super(Box, self).__init__(pos=pos, rot=rot, name=name,
-                                  collision_mesh=mesh,
-                                  visual_mesh=mesh)
+        super(Box, self).__init__(pos=pos, rot=rot, name=name)
         self._extents = extents
+        self._vertex_colors = vertex_colors
+        self._face_colors = face_colors
+        self._set_mesh()
+
         if with_sdf:
             sdf = BoxSDF(np.zeros(3), extents)
             self.assoc(sdf.coords, relative_coords="local")
             self.sdf = sdf
 
+    def _set_mesh(self):
+        mesh = trimesh.creation.box(
+            extents=self._extents,
+            vertex_colors=self._vertex_colors,
+            face_colors=self._face_colors,
+        )
+        self._visual_mesh = mesh
+        self._collision_mesh = mesh
 
-class CameraMarker(Link):
+
+class CameraMarker(MeshSettable):
 
     def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
                  marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3), name=None):
@@ -77,20 +96,24 @@ class CameraMarker(Link):
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
 
-        super(CameraMarker, self).__init__(
-            pos=pos, rot=rot, name=name)
+        super(CameraMarker, self).__init__(pos=pos, rot=rot, name=name)
         camera = trimesh.scene.Camera(name=name,
                                       focal=focal,
                                       fov=fov,
                                       z_near=z_near,
                                       z_far=z_far)
 
+        self._camera = camera
+        self._marker_height = marker_height
+        self._set_mesh()
+
+    def _set_mesh(self):
         self._visual_mesh = trimesh.creation.camera_marker(
-            camera,
-            marker_height=marker_height)
+            self._camera,
+            marker_height=self._marker_height)
 
 
-class Cone(Link):
+class Cone(MeshSettable):
 
     def __init__(self, radius, height,
                  sections=32,
@@ -99,19 +122,27 @@ class Cone(Link):
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        super(Cone, self).__init__(pos=pos, rot=rot, name=name)
+        self._radius = radius
+        self._height = height
+        self._sections = sections
+        self._vertex_colors = vertex_colors
+        self._face_colors = face_colors
+        self._set_mesh()
+
+    def _set_mesh(self):
         mesh = trimesh.creation.cone(
-            radius=radius,
-            height=height,
-            sections=sections,
-            vertex_colors=vertex_colors,
-            face_colors=face_colors,
+            radius=self._radius,
+            height=self._height,
+            sections=self._sections,
+            vertex_colors=self._vertex_colors,
+            face_colors=self._face_colors,
         )
-        super(Cone, self).__init__(pos=pos, rot=rot, name=name,
-                                   collision_mesh=mesh,
-                                   visual_mesh=mesh)
+        self._visual_mesh = mesh
+        self._collision_mesh = mesh
 
 
-class Cylinder(Link):
+class Cylinder(MeshSettable):
 
     def __init__(self, radius, height,
                  sections=32,
@@ -120,45 +151,60 @@ class Cylinder(Link):
         if name is None:
             name = 'cylinder_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        mesh = trimesh.creation.cylinder(
-            radius=radius,
-            height=height,
-            sections=sections,
-            vertex_colors=vertex_colors,
-            face_colors=face_colors,
-        )
-        super(Cylinder, self).__init__(pos=pos, rot=rot, name=name,
-                                       collision_mesh=mesh,
-                                       visual_mesh=mesh)
+        super(Cylinder, self).__init__(pos=pos, rot=rot, name=name)
+        self._radius = radius
+        self._height = height
+        self._sections = sections
+        self._vertex_colors = vertex_colors
+        self._face_colors = face_colors
+        self._set_mesh()
+
         if with_sdf:
             sdf = CylinderSDF(np.zeros(3), height, radius)
             self.assoc(sdf.coords, relative_coords="local")
             self.sdf = sdf
 
+    def _set_mesh(self):
+        mesh = trimesh.creation.cylinder(
+            radius=self._radius,
+            height=self._height,
+            sections=self._sections,
+            vertex_colors=self._vertex_colors,
+            face_colors=self._face_colors,
+        )
+        self._visual_mesh = mesh
+        self._collision_mesh = mesh
 
-class Sphere(Link):
+
+class Sphere(MeshSettable):
 
     def __init__(self, radius, subdivisions=3, color=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
         if name is None:
             name = 'sphere_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        mesh = trimesh.creation.icosphere(
-            radius=radius,
-            subdivisions=subdivisions,
-            color=color,
-        )
-        super(Sphere, self).__init__(pos=pos, rot=rot, name=name,
-                                     collision_mesh=mesh,
-                                     visual_mesh=mesh)
+        super(Sphere, self).__init__(pos=pos, rot=rot, name=name)
+        self._radius = radius
+        self._subdivisions = subdivisions
+        self._color = color
+        self._set_mesh()
 
         if with_sdf:
             sdf = SphereSDF(np.zeros(3), radius)
             self.assoc(sdf.coords, relative_coords="local")
             self.sdf = sdf
 
+    def _set_mesh(self):
+        mesh = trimesh.creation.icosphere(
+            radius=self._radius,
+            subdivisions=self._subdivisions,
+            color=self._color,
+        )
+        self._visual_mesh = mesh
+        self._collision_mesh = mesh
 
-class Annulus(Link):
+
+class Annulus(MeshSettable):
 
     def __init__(self, r_min, r_max, height,
                  vertex_colors=None, face_colors=None,
@@ -166,16 +212,25 @@ class Annulus(Link):
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        super(Annulus, self).__init__(pos=pos, rot=rot, name=name)
+        self._r_min = r_min
+        self._r_max = r_max
+        self._height = height
+        self._vertex_colors = vertex_colors
+        self._face_colors = face_colors
+        self._set_mesh()
+
+
+    def _set_mesh(self):
         mesh = trimesh.creation.annulus(
-            r_min=r_min,
-            r_max=r_max,
-            height=height,
-            vertex_colors=vertex_colors,
-            face_colors=face_colors
+            r_min=self._r_min,
+            r_max=self._r_max,
+            height=self._height,
+            vertex_colors=self._vertex_colors,
+            face_colors=self._face_colors
         )
-        super(Annulus, self).__init__(pos=pos, rot=rot, name=name,
-                                      collision_mesh=mesh,
-                                      visual_mesh=mesh)
+        self._visual_mesh = mesh
+        self._collision_mesh = mesh
 
 
 class LineString(Link):
