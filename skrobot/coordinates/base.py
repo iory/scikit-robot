@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import sys
 import warnings
 
 import numpy as np
@@ -1517,18 +1518,37 @@ class CascadedCoords(Coordinates):
         self._parent = c
 
     def __getstate__(self):
-        # NOTE: python3 can serialize instance method as member
-        # but python2 cannot. So we need to write custom serialization.
         assert self._worldcoords._hook == self.update
         d = self.__dict__.copy()
-        worldcoords = d["_worldcoords"]
-        worldcoords._hook = None
-        return d
+
+        is_python3 = sys.version_info.major > 2
+        if is_python3:
+            # NOTE: the following deepcopy is costly. For example,
+            # copying raw CascadedCoords with the following procedure
+            # makes pickling 2x slower. Thus, we don't do that if python3.
+            return d
+        else:
+            # NOTE: setting self._worldcoords._hook = None before deepcopy
+            # is important. Without this, infinite recursion will occur
+            # because self._worldcoords._hook is otherwise a method
+            # of CascadedCoords.
+            self._worldcoords._hook = None
+            d["_worldcoords"] = copy.deepcopy(self._worldcoords)
+            d["_worldcoords"].__setattr__("_hook", None)
+
+            # recover the original _hook
+            self._worldcoords._hook = self.update
+            return d
 
     def __setstate__(self, d):
         self.__dict__ = d
-        assert self._worldcoords._hook is None  # as we set in __getstate__
-        self._worldcoords._hook = self.update  # register again
+        is_python3 = sys.version_info.major > 2
+        if is_python3:
+            return
+        else:
+            assert self._worldcoords._hook is None  # as we set in __getstate__
+            self._worldcoords._hook = self.update  # register again
+            assert self._worldcoords._hook == self.update
 
 
 def coordinates_p(x):
