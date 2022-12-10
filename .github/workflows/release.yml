@@ -8,7 +8,7 @@ on:
 jobs:
   formatting:
     name: Check Formatting
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -29,7 +29,7 @@ jobs:
 
   requirements-formatting:
     name: Check Requirements Formatting
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
     - name: Check Formatting
@@ -42,7 +42,7 @@ jobs:
     strategy:
       matrix:
         python-version: [2.7, 3.6]
-        os: [ubuntu-latest]
+        os: [ubuntu-20.04]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -66,7 +66,7 @@ jobs:
   pypi:
     name: Release To PyPi
     needs: [formatting, requirements-formatting, tests]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python
