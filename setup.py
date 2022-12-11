@@ -92,8 +92,5 @@ setup(
             "visualize-urdf=skrobot.apps.visualize_urdf:main"
         ]
     },
-    extras_require={
-        'all': ['pybullet>=2.1.9;python_version>="3.0"',
-                'pybullet>=2.1.9, <=3.0.8;python_version<"3.0"'],
-    },
+    extras_require={'all': ['pybullet>=2.1.9']},
 )
