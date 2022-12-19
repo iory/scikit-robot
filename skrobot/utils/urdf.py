@@ -200,9 +200,9 @@ def configure_origin(value):
     if value is None:
         value = np.eye(4)
     elif isinstance(value, (list, tuple, np.ndarray)):
-        value = np.asanyarray(value).astype(np.float)
+        value = np.asanyarray(value).astype(np.float64)
         if value.shape == (6,):
-            value = np.eye(4).astype(np.float)
+            value = np.eye(4).astype(np.float64)
             value[:3, 3] = value[:3]
             roll, pitch, yaw = value[3:]
             value[:3, :3] = rpy_matrix(yaw, pitch, roll)
@@ -522,7 +522,7 @@ class Box(URDFType):
 
     @size.setter
     def size(self, value):
-        self._size = np.asanyarray(value).astype(np.float)
+        self._size = np.asanyarray(value).astype(np.float64)
         self._meshes = []
 
     @property
@@ -690,7 +690,7 @@ class Mesh(URDFType):
     @scale.setter
     def scale(self, value):
         if value is not None:
-            value = np.asanyarray(value).astype(np.float)
+            value = np.asanyarray(value).astype(np.float64)
         self._scale = value
 
     @property
@@ -984,7 +984,7 @@ class Material(URDFType):
     @color.setter
     def color(self, value):
         if value is not None:
-            value = np.asanyarray(value).astype(np.float)
+            value = np.asanyarray(value).astype(np.float64)
             value = np.clip(value, 0.0, 1.0)
             if value.shape != (4,):
                 raise ValueError('Color must be a (4,) float')
@@ -1247,7 +1247,7 @@ class Inertial(URDFType):
 
     @inertia.setter
     def inertia(self, value):
-        value = np.asanyarray(value).astype(np.float)
+        value = np.asanyarray(value).astype(np.float64)
         if not np.allclose(value, value.T):
             raise ValueError('Inertia must be a symmetric matrix')
         self._inertia = value
@@ -2048,7 +2048,7 @@ class Joint(URDFType):
         if value is None:
             value = np.array([1.0, 0.0, 0.0])
         else:
-            value = np.asanyarray(value).astype(np.float)
+            value = np.asanyarray(value).astype(np.float64)
             if value.shape != (3,):
                 raise ValueError('Invalid shape for axis, should be (3,)')
             value = normalize_vector(value)
@@ -2916,7 +2916,7 @@ class URDF(URDFType):
         elif isinstance(ct, dict):
             if len(ct) > 0:
                 for k in ct:
-                    val = np.asanyarray(ct[k]).astype(np.float)
+                    val = np.asanyarray(ct[k]).astype(np.float64)
                     if traj_len is None:
                         traj_len = len(val)
                     elif traj_len != len(val):
