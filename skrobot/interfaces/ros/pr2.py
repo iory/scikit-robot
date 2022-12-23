@@ -169,6 +169,10 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
                     .format(joint_name))
                 rospy.logwarn(
                     "angle_vector_sequence will be used as a workaround")
+
+                if time is None:
+                    default_duration = 3.0  # same as pr2eus
+                    time = default_duration
                 return self.angle_vector_sequence(
                     [av], [time],
                     controller_type=controller_type,
