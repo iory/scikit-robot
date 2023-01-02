@@ -15,7 +15,13 @@ Scikit-Robot is a lightweight pure-Python library for robotic kinematics,
 motion planning, visualization and control.
 
 ## Installation
+You may need to install some dependencies by apt-get install:
+```bash
+sudo apt-get update
+sudo apt-get install libspatialindex-dev freeglut3-dev libsuitesparse-dev libblas-dev liblapack-dev
+```
 
+Then,
 ```bash
 pip install scikit-robot
 ```
