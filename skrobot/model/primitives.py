@@ -42,7 +42,7 @@ class Axis(Link):
         link = cls(**kwargs)
         link.parent = cascoords.worldcoords()
         for cc in cascoords.descendants:
-            child_link = cls.from_cascoords(cc)
+            child_link = cls.from_cascoords(cc, **kwargs)
             link.add_child_link(child_link)
         return link
 
