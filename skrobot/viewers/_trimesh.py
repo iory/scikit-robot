@@ -121,14 +121,23 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             # TODO(someone) fix this at trimesh's scene.
             if (isinstance(mesh, list) or isinstance(mesh, tuple)) \
                and len(mesh) > 0:
-                mesh = trimesh.util.concatenate(mesh)
-            self.scene.add_geometry(
-                geometry=mesh,
-                node_name=link_id,
-                geom_name=link_id,
-                transform=transform,
-            )
-            self._links[link_id] = link
+                for m in mesh:
+                    link_mesh_id = link_id + str(id(m))
+                    self.scene.add_geometry(
+                        geometry=m,
+                        node_name=link_mesh_id,
+                        geom_name=link_mesh_id,
+                        transform=transform,
+                    )
+                    self._links[link_mesh_id] = link
+            else:
+                self.scene.add_geometry(
+                    geometry=mesh,
+                    node_name=link_id,
+                    geom_name=link_id,
+                    transform=transform,
+                )
+                self._links[link_id] = link
 
         for child_link in link._child_links:
             self._add_link(child_link)
