@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -44,14 +45,29 @@ with open('requirements.txt') as f:
         req = line.split('#')[0].strip()
         install_requires.append(req)
 
+
+def remove_from_requirements(install_requires, remove_req):
+    # If remove_req is "pyglet", requirement name with or without
+    # version specification will be removed.
+    # For example, either "pyglet" or "pyglet<2.0", "pyglet==1.4" will
+    # be removed.
+    delete_requirement = []
+    for req in install_requires:
+        req_without_version = re.split("[<>=]", req)[0]
+        if req_without_version == remove_req:
+            delete_requirement.append(req)
+    assert len(delete_requirement) == 1, "expect only one match"
+    install_requires.remove(delete_requirement.pop())
+
+
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
     lock = [('pyglet', '1.4.10'), ('cvxopt', '1.2.7')]
     for name, version in lock:
-        # remove version-free requirements
-        install_requires.remove(name)
+        remove_from_requirements(install_requires, name)
+
         # add working version locked requirements
         install_requires.append('{}=={}'.format(name, version))
 
