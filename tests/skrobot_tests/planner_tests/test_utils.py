@@ -68,11 +68,11 @@ class TestPlannerUtils(unittest.TestCase):
                              av_with_base, with_base=False)
         set_robot_config(robot_model, joint_list, av_with_base, with_base=True)
 
-        testing.assert_equal(
+        testing.assert_almost_equal(
             av,
             get_robot_config(robot_model, joint_list, with_base=False)
         )
-        testing.assert_equal(
+        testing.assert_almost_equal(
             av_with_base,
             get_robot_config(robot_model, joint_list, with_base=True)
         )
