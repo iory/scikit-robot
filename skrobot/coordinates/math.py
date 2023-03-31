@@ -143,7 +143,7 @@ def wxyz2xyzw(quat):
     """
     if isinstance(quat, list):
         quat = np.array(quat)
-    return np.roll(quat, -1)
+    return np.roll(quat, -1, axis=quat.ndim - 1)
 
 
 def xyzw2wxyz(quat):
@@ -167,7 +167,7 @@ def xyzw2wxyz(quat):
     """
     if isinstance(quat, list):
         quat = np.array(quat)
-    return np.roll(quat, 1)
+    return np.roll(quat, 1, axis=quat.ndim - 1)
 
 
 def triple_product(a, b, c):

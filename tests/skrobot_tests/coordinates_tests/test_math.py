@@ -63,11 +63,27 @@ class TestMath(unittest.TestCase):
         testing.assert_equal(
             wxyz, np.array([1, 0, 0, 0]))
 
+        # for batch
+        xyzw = np.array([[0, 0, 0, 1],
+                         [0, 0, 1, 0]])
+        wxyz = xyzw2wxyz(xyzw)
+        testing.assert_equal(
+            wxyz, np.array([[1, 0, 0, 0],
+                            [0, 0, 0, 1]]))
+
     def test_wxyz2xyzw(self):
         wxyz = np.array([1, 0, 0, 0])
         xyzw = wxyz2xyzw(wxyz)
         testing.assert_equal(
             xyzw, np.array([0, 0, 0, 1]))
+
+        # for batch
+        wxyz = np.array([[1, 0, 0, 0],
+                         [0, 1, 0, 0]])
+        xyzw = wxyz2xyzw(wxyz)
+        testing.assert_equal(
+            xyzw, np.array([[0, 0, 0, 1],
+                            [1, 0, 0, 0]]))
 
     def test_triple_product(self):
         a = np.array([1, 0, 3])
