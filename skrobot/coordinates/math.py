@@ -602,32 +602,73 @@ def matrix2quaternion(m):
     array([1., 0., 0., 0.])
     """
     m = np.array(m, dtype=np.float64)
-    tr = m[0, 0] + m[1, 1] + m[2, 2]
-    if tr > 0:
-        S = math.sqrt(tr + 1.0) * 2
-        qw = 0.25 * S
-        qx = (m[2, 1] - m[1, 2]) / S
-        qy = (m[0, 2] - m[2, 0]) / S
-        qz = (m[1, 0] - m[0, 1]) / S
-    elif (m[0, 0] > m[1, 1]) and (m[0, 0] > m[2, 2]):
-        S = math.sqrt(1. + m[0, 0] - m[1, 1] - m[2, 2]) * 2
-        qw = (m[2, 1] - m[1, 2]) / S
-        qx = 0.25 * S
-        qy = (m[0, 1] + m[1, 0]) / S
-        qz = (m[0, 2] + m[2, 0]) / S
-    elif m[1, 1] > m[2, 2]:
-        S = math.sqrt(1. + m[1, 1] - m[0, 0] - m[2, 2]) * 2
-        qw = (m[0, 2] - m[2, 0]) / S
-        qx = (m[0, 1] + m[1, 0]) / S
-        qy = 0.25 * S
-        qz = (m[1, 2] + m[2, 1]) / S
+    if m.ndim == 2:
+        tr = m[0, 0] + m[1, 1] + m[2, 2]
+        if tr > 0:
+            S = math.sqrt(tr + 1.0) * 2
+            qw = 0.25 * S
+            qx = (m[2, 1] - m[1, 2]) / S
+            qy = (m[0, 2] - m[2, 0]) / S
+            qz = (m[1, 0] - m[0, 1]) / S
+        elif (m[0, 0] > m[1, 1]) and (m[0, 0] > m[2, 2]):
+            S = math.sqrt(1. + m[0, 0] - m[1, 1] - m[2, 2]) * 2
+            qw = (m[2, 1] - m[1, 2]) / S
+            qx = 0.25 * S
+            qy = (m[0, 1] + m[1, 0]) / S
+            qz = (m[0, 2] + m[2, 0]) / S
+        elif m[1, 1] > m[2, 2]:
+            S = math.sqrt(1. + m[1, 1] - m[0, 0] - m[2, 2]) * 2
+            qw = (m[0, 2] - m[2, 0]) / S
+            qx = (m[0, 1] + m[1, 0]) / S
+            qy = 0.25 * S
+            qz = (m[1, 2] + m[2, 1]) / S
+        else:
+            S = math.sqrt(1. + m[2, 2] - m[0, 0] - m[1, 1]) * 2
+            qw = (m[1, 0] - m[0, 1]) / S
+            qx = (m[0, 2] + m[2, 0]) / S
+            qy = (m[1, 2] + m[2, 1]) / S
+            qz = 0.25 * S
+        return np.array([qw, qx, qy, qz])
+    elif m.ndim == 3:
+        r1, r2, r3 = m[:, 0, :], m[:, 1, :], m[:, 2, :]
+        r11, r12, r13 = r1[:, 0], r1[:, 1], r1[:, 2]
+        r21, r22, r23 = r2[:, 0], r2[:, 1], r2[:, 2]
+        r31, r32, r33 = r3[:, 0], r3[:, 1], r3[:, 2]
+
+        q0 = 0.25 * (r11 + r22 + r33 + 1)
+        q1 = 0.25 * (r11 - r22 - r33 + 1)
+        q2 = 0.25 * (-r11 + r22 - r33 + 1)
+        q3 = 0.25 * (-r11 - r22 + r33 + 1)
+
+        q0[np.where(q0 < 0.0)] = 0.
+        q1[np.where(q1 < 0.0)] = 0.
+        q2[np.where(q2 < 0.0)] = 0.
+        q3[np.where(q3 < 0.0)] = 0.
+
+        q0 = np.sqrt(q0)
+        q1 = np.sqrt(q1)
+        q2 = np.sqrt(q2)
+        q3 = np.sqrt(q3)
+
+        ones = np.ones_like(r11)
+        aranges = np.arange(ones.shape[0])
+        signs_array = np.array([
+            [ones, np.sign(r32 - r23), np.sign(r13 - r31), np.sign(r21 - r12)],
+            [np.sign(r32 - r23), ones, np.sign(r21 + r12), np.sign(r13 + r31)],
+            [np.sign(r13 - r31), np.sign(r21 + r12), ones, np.sign(r32 + r23)],
+            [np.sign(r21 - r12), np.sign(r31 + r13), np.sign(r32 + r23), ones],
+        ])
+
+        argmaxes = np.argmax(np.array([q0, q1, q2, q3]), axis=0)
+        signs = signs_array[:, argmaxes, aranges]
+
+        res = np.array([q0, q1, q2, q3]).T * signs.T
+        resq = res / np.linalg.norm(res, axis=1, keepdims=True)
+        return resq
     else:
-        S = math.sqrt(1. + m[2, 2] - m[0, 0] - m[1, 1]) * 2
-        qw = (m[1, 0] - m[0, 1]) / S
-        qx = (m[0, 2] + m[2, 0]) / S
-        qy = (m[1, 2] + m[2, 1]) / S
-        qz = 0.25 * S
-    return np.array([qw, qx, qy, qz])
+        raise ValueError(
+            'Unsupported rotation matrix shape. '
+            'Supports rotation matrices of (N, 3, 3) and (3, 3).')
 
 
 def quaternion2matrix(q, normalize=False):
