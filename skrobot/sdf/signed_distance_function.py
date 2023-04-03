@@ -461,7 +461,7 @@ class GridSDF(SignedDistanceFunction):
         return surface_points * self._resolution, surface_values
 
     @staticmethod
-    def from_file(filepath):
+    def from_file(filepath, **kwargs):
         """Return GridSDF instance from a .sdf file.
 
         Parameters
@@ -485,10 +485,10 @@ class GridSDF(SignedDistanceFunction):
             resolution = float(f.readline())
             sdf_data = np.fromstring(f.read(), dtype=float, sep='\n').reshape(
                 *dims).transpose(2, 1, 0)
-        return GridSDF(sdf_data, origin, resolution)
+        return GridSDF(sdf_data, origin, resolution, **kwargs)
 
     @staticmethod
-    def from_objfile(obj_filepath, dim_grid=100, padding_grid=5):
+    def from_objfile(obj_filepath, dim_grid=100, padding_grid=5, **kwargs):
         """Return GridSDF instance from an .obj file.
 
         In the initial call of this method for an .obj file,
@@ -526,7 +526,7 @@ class GridSDF(SignedDistanceFunction):
             pysdfgen.obj2sdf(str(obj_filepath), dim_grid, padding_grid,
                              output_filepath=sdf_cache_path)
             logger.info('finish pre-computation')
-        return GridSDF.from_file(sdf_cache_path)
+        return GridSDF.from_file(sdf_cache_path, **kwargs)
 
 
 def ray_marching(pts_starts, direction_arr, f_sdf, threshold):
