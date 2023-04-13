@@ -1,9 +1,14 @@
 # taken from https://github.com/mmatl/urdfpy/blob/master/urdfpy/urdf.py
 #        and https://github.com/mmatl/urdfpy/blob/master/urdfpy/utils.py
 
+import contextlib
 import copy
 import os
+import pickle
 import time
+
+from skrobot.data import get_cache_dir
+from skrobot.utils.checksum import checksum_md5
 
 
 try:
@@ -30,6 +35,16 @@ try:
     import rospkg
 except ImportError:
     rospkg = None
+
+
+_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf}
+
+
+@contextlib.contextmanager
+def mesh_simplify_factor(factor):
+    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = factor
+    yield
+    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = np.inf
 
 
 def parse_origin(node):
@@ -148,7 +163,56 @@ def get_filename(base_path, file_path, makedirs=False):
     return resolved_file_path
 
 
+def resolve_simplified_mesh_path(filename, simplify_factor):
+    hash_value = checksum_md5(filename)
+    cache_base_path = os.path.join(get_cache_dir(), "simplified_mesh")
+
+    if not os.path.exists(cache_base_path):
+        os.makedirs(cache_base_path)
+
+    rounded_simplify_factor = round(simplify_factor, 3)
+    cache_path = os.path.join(cache_base_path, "{}-{}.pkl".format(
+        hash_value, rounded_simplify_factor))
+    return cache_path
+
+
 def load_meshes(filename):
+    use_simplified_meshs = _CONFIGURABLE_VALUES["mesh_simplify_factor"] < 1.0
+
+    if use_simplified_meshs:
+        cache_path = resolve_simplified_mesh_path(
+            filename, _CONFIGURABLE_VALUES["mesh_simplify_factor"])
+
+        if os.path.exists(cache_path):
+            with open(cache_path, mode="rb") as f:
+                return pickle.load(f)
+        else:
+            meshes = _load_meshes(filename)
+
+            try:
+                import open3d  # noqa
+            except ImportError:
+                message = "to simplify mesh, you need to install open3d\n"
+                message += "run 'pip install open3d'"
+                raise ImportError(message)
+
+            mesh_simplified_list = []
+            for mesh in meshes:
+                n_face = len(mesh.faces)
+                n_face_reduced = int(
+                    n_face * _CONFIGURABLE_VALUES["mesh_simplify_factor"])
+                mesh_simplified = mesh.simplify_quadratic_decimation(
+                    n_face_reduced)
+                mesh_simplified_list.append(mesh_simplified)
+
+            with open(cache_path, mode="wb") as f:
+                pickle.dump(mesh_simplified_list, f)
+            return mesh_simplified_list
+    else:
+        return _load_meshes(filename)
+
+
+def _load_meshes(filename):
     """Loads triangular meshes from a file.
 
     Parameters
