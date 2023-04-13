@@ -1,4 +1,4 @@
-# scikit-robot: A Flexible Framework for Robot Control in Python
+# scikit-robot: A Flexible Framework for Robot Control in Python (dummy)
 
 [![Build Status](https://github.com/iory/scikit-robot/workflows/Run%20Tests/badge.svg?branch=master)](https://github.com/iory/scikit-robot/actions)
 
