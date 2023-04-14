@@ -5,6 +5,7 @@ import contextlib
 import copy
 import os
 import pickle
+import sys
 import time
 
 from skrobot.data import get_cache_dir
@@ -189,6 +190,7 @@ def load_meshes(filename):
         else:
             meshes = _load_meshes(filename)
 
+            assert sys.version_info.major > 2, "supported only for python3.x"
             try:
                 import open3d  # noqa
             except ImportError:

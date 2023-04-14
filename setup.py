@@ -76,6 +76,12 @@ if uname == 'Darwin':
     # python-fcl could not install.
     install_requires.remove('python-fcl')
 
+
+extra_all_requires = ['pybullet>=2.1.9']
+if (sys.version_info.major > 2):
+    extra_all_requires.append('open3d')
+
+
 setup(
     name='scikit-robot',
     version=version,
@@ -108,5 +114,5 @@ setup(
             "visualize-urdf=skrobot.apps.visualize_urdf:main"
         ]
     },
-    extras_require={'all': ['pybullet>=2.1.9', 'open3d']},
+    extras_require={'all': extra_all_requires},
 )
