@@ -26,7 +26,7 @@ Then,
 pip install scikit-robot
 ```
 
-If you would like to use `Pybullet Interface`,
+If you would like to use `Pybullet Interface` and `open3d` for mesh simplification,
 
 ```bash
 pip install scikit-robot[all]
