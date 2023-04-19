@@ -34,7 +34,7 @@ class TestInterpolator(unittest.TestCase):
                 midpoint((i - t0) / (t1 - t0), p1, p0))
             i += 0.02
 
-        assert(ip.is_interpolating is False)
+        assert ip.is_interpolating is False
 
     def test_minjerk_interpolator(self):
         ip = MinjerkInterpolator()
@@ -58,4 +58,4 @@ class TestInterpolator(unittest.TestCase):
             i += 0.02
         testing.assert_almost_equal(ip.position, p0)
 
-        assert(ip.is_interpolating is False)
+        assert ip.is_interpolating is False

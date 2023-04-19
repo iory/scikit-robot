@@ -927,8 +927,7 @@ class CascadedLink(CascadedCoords):
                              len(target_coords)))
             return False
 
-        if not(len(additional_jacobi)
-               == len(additional_vel)):
+        if len(additional_jacobi) != len(additional_vel):
             logger.error('list length differ : additional_jacobi {}, '
                          'additional_vel {}'.format(
                              len(additional_jacobi), len(additional_vel)))

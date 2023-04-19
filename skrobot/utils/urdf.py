@@ -451,7 +451,7 @@ class URDFType(object):
         return cls(**cls._parse(node, path))
 
     def _unparse_attrib(self, val_type, val):
-        """Convert a Python value into a string for storage in an XML attribute.
+        """Convert a value into a string for storage in an XML attribute.
 
         Parameters
         ----------

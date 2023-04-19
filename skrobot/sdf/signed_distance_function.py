@@ -177,7 +177,7 @@ class SignedDistanceFunction(object):
         return points_obj, dists
 
     def _transform_pts_obj_to_sdf(self, points_obj):
-        """Transform points from to an object coordinate to a sdf-specific coordinate.
+        """Transform points from to an object coords to a sdf-specific coords.
 
         Parameters
         ----------
@@ -197,7 +197,7 @@ class SignedDistanceFunction(object):
         return points_sdf
 
     def _transform_pts_sdf_to_obj(self, points_sdf):
-        """Transform points from to a sdf-specific coordinate to an object coordinate.
+        """Transform points from to a sdf-specific coords to an object coords.
 
         Parameters
         ----------
