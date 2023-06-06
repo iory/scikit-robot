@@ -141,7 +141,7 @@ def wxyz2xyzw(quat):
     >>> wxyz2xyzw([1, 2, 3, 4])
     array([2, 3, 4, 1])
     """
-    if isinstance(quat, list):
+    if isinstance(quat, (list, tuple)):
         quat = np.array(quat)
     return np.roll(quat, -1, axis=quat.ndim - 1)
 
@@ -165,7 +165,7 @@ def xyzw2wxyz(quat):
     >>> xyzw2wxyz([1, 2, 3, 4])
     array([4, 1, 2, 3])
     """
-    if isinstance(quat, list):
+    if isinstance(quat, (list, tuple)):
         quat = np.array(quat)
     return np.roll(quat, 1, axis=quat.ndim - 1)
 
