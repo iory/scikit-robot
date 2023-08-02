@@ -20,4 +20,4 @@ scipy<=1.2.3;python_version<"3.0"
 six
 sphinx>=1.8.2
 sphinx_rtd_theme
-trimesh>=3.9.0
+trimesh>=3.9.0,!=3.23.0
