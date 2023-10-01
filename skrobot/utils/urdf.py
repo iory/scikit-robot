@@ -3,6 +3,7 @@
 
 import contextlib
 import copy
+from logging import getLogger
 import os
 import pickle
 import sys
@@ -38,6 +39,7 @@ except ImportError:
     rospkg = None
 
 
+logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf}
 
 
@@ -227,7 +229,12 @@ def _load_meshes(filename):
     meshes : list of :class:`~trimesh.base.Trimesh`
         The meshes loaded from the file.
     """
-    meshes = trimesh.load(filename)
+    try:
+        meshes = trimesh.load(filename)
+    except Exception as e:
+        logger.error("Failed to load meshes from {}. Error: {}"
+                     .format(filename, e))
+        meshes = trimesh.creation.box((0.001, 0.001, 0.001))
 
     # If we got a scene, dump the meshes
     if isinstance(meshes, trimesh.Scene):
