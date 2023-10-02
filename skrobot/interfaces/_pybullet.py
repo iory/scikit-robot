@@ -268,7 +268,7 @@ class PybulletRobotInterface(Coordinates):
 
         return angle_vector
 
-    def wait_interpolation(self, thresh=0.05, timeout=60.0):
+    def wait_interpolation(self, thresh=0.05, timeout=60.0, callback=None):
         """Wait robot movement.
 
         This function usually called after self.angle_vector.
@@ -281,9 +281,12 @@ class PybulletRobotInterface(Coordinates):
             velocity threshold for detecting movement stop.
         timeout : float
             maximum time of timeout.
+        callback: None or function
+            callback function. This function is called in each step.
         """
         start = time.time()
         while True:
+
             p.stepSimulation()
             wait = False
             for idx in self.joint_ids:
@@ -297,6 +300,10 @@ class PybulletRobotInterface(Coordinates):
                 break
             if time.time() - start > timeout:
                 return False
+
+            if callback is not None:
+                callback(self)
+
         return True
 
     def sync(self):
