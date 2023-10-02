@@ -44,7 +44,7 @@ def main():
         stop=1000,
     )
     interface.angle_vector(robot.angle_vector(), realtime_simulation=True)
-    interface.wait_interpolation()
+    interface.wait_interpolation(callback=lambda self: time.sleep(0.05))
 
     # wait
     while pybullet.isConnected():
