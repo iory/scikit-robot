@@ -1,4 +1,7 @@
-import collections
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 
 import numpy as np
 import trimesh
@@ -107,7 +110,7 @@ class Link(CascadedCoords):
         """
         if not (mesh is None
                 or isinstance(mesh, trimesh.Trimesh)
-                or (isinstance(mesh, collections.Sequence)
+                or (isinstance(mesh, Sequence)
                     and all(isinstance(m, trimesh.Trimesh) for m in mesh))
                 or isinstance(mesh, trimesh.points.PointCloud)
                 or isinstance(mesh, str)):
