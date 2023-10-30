@@ -115,6 +115,7 @@ def get_path_with_cache(ros_package):
 
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
+    base_path = os.path.abspath(base_path)
 
     if rospkg and parsed_url.scheme == 'package':
         try:
@@ -128,11 +129,12 @@ def resolve_filepath(base_path, file_path):
 
     dirname = base_path
     file_path = parsed_url.netloc + parsed_url.path
-    while not dirname == '/':
+    while dirname and dirname != '/':
         resolved_filepath = os.path.join(dirname, file_path)
         if os.path.exists(resolved_filepath):
             return resolved_filepath
         dirname = os.path.dirname(dirname)
+    return None
 
 
 def get_filename(base_path, file_path, makedirs=False):

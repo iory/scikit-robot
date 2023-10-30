@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 
@@ -9,7 +10,13 @@ from skrobot.utils.urdf import mesh_simplify_factor
 class TestURDF(unittest.TestCase):
 
     def test_load_urdfmodel(self):
-        RobotModelFromURDF(urdf_file=fetch_urdfpath())
+        urdfpath = fetch_urdfpath()
+        # Absolute path
+        RobotModelFromURDF(urdf_file=urdfpath)
+        # Relative path
+        os.chdir(os.path.dirname(urdfpath))
+        RobotModelFromURDF(
+            urdf_file=os.path.basename(urdfpath))
 
     def test_load_urdfmodel_with_simplification(self):
         if sys.version_info.major < 3:
