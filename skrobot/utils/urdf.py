@@ -1978,7 +1978,10 @@ class Transmission(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        kwargs['trans_type'] = node.find('type').text
+        if node.find('type') is not None:
+            kwargs['trans_type'] = node.find('type').text
+        else:
+            kwargs['trans_type'] = 'transmission_interface/SimpleTransmission'
         return Transmission(**kwargs)
 
     def _to_xml(self, parent, path):
