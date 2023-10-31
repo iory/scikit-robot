@@ -970,6 +970,13 @@ class CascadedLink(CascadedCoords):
                                mv.difference_rotation(
                                    tc, rotation_axis=rot_axis),
                                move_target, target_coords, rotation_axis))
+            if loop == 1 and self.ik_convergence_check(
+                    dif_pos, dif_rot, rotation_axis, translation_axis,
+                    thre, rthre, centroid_thre, target_centroid_pos,
+                    centroid_offset_func, cog_translation_axis,
+            ):
+                success = 'ik-succeed'
+                break
 
             success = self.inverse_kinematics_loop(
                 dif_pos, dif_rot,
