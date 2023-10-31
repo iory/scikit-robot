@@ -147,6 +147,7 @@ class Joint(object):
         if max_joint_torque is None:
             max_joint_torque = _default_max_joint_torque
         self.max_joint_velocity = max_joint_velocity
+        self.max_joint_torque = max_joint_torque
         self.joint_min_max_table = joint_min_max_table
         self.joint_min_max_target = joint_min_max_target
         self.default_coords = self.child_link.copy_coords()
