@@ -232,7 +232,14 @@ def _load_meshes(filename):
         The meshes loaded from the file.
     """
     try:
-        meshes = trimesh.load(filename)
+        _, ext = os.path.splitext(filename)
+        # It seems that .3DXML files assume [mm] unit.
+        # Convert the mesh unit from [mm] to [m].
+        if ext.lower() in ['.3dxml']:
+            meshes = trimesh.load(filename)
+            meshes = meshes.scaled(0.001)
+        else:
+            meshes = trimesh.load(filename)
     except Exception as e:
         logger.error("Failed to load meshes from {}. Error: {}"
                      .format(filename, e))
