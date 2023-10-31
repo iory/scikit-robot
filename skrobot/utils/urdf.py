@@ -40,7 +40,9 @@ except ImportError:
 
 
 logger = getLogger(__name__)
-_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf}
+_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
+                        'no_mesh_load_mode': False,
+                        }
 
 
 @contextlib.contextmanager
@@ -48,6 +50,13 @@ def mesh_simplify_factor(factor):
     _CONFIGURABLE_VALUES["mesh_simplify_factor"] = factor
     yield
     _CONFIGURABLE_VALUES["mesh_simplify_factor"] = np.inf
+
+
+@contextlib.contextmanager
+def no_mesh_load_mode():
+    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
+    yield
+    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
 
 
 def parse_origin(node):
@@ -615,7 +624,8 @@ class Box(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.box(extents=self.size)]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.box(extents=self.size)]
         return self._meshes
 
 
@@ -674,9 +684,10 @@ class Cylinder(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.cylinder(
-                radius=self.radius, height=self.length
-            )]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.cylinder(
+                    radius=self.radius, height=self.length
+                )]
         return self._meshes
 
 
@@ -717,7 +728,8 @@ class Sphere(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
         return self._meshes
 
 
@@ -790,8 +802,6 @@ class Mesh(URDFType):
             value = load_meshes(value)
         elif isinstance(value, (list, tuple, set)):
             value = list(value)
-            if len(value) == 0:
-                raise ValueError('Mesh must have at least one trimesh.Trimesh')
             for m in value:
                 if not isinstance(m, trimesh.Trimesh):
                     raise TypeError('Mesh requires a trimesh.Trimesh or a '
@@ -810,12 +820,15 @@ class Mesh(URDFType):
         # visual ones separate to preserve colors and textures
         fn = get_filename(path, kwargs['filename'])
         combine = node.getparent().getparent().tag == Collision._TAG
-        meshes = load_meshes(fn)
-        if combine:
-            # Delete visuals for simplicity
-            for m in meshes:
-                m.visual = trimesh.visual.ColorVisuals(mesh=m)
-            meshes = [meshes[0] + meshes[1:]]
+        if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+            meshes = load_meshes(fn)
+            if combine:
+                # Delete visuals for simplicity
+                for m in meshes:
+                    m.visual = trimesh.visual.ColorVisuals(mesh=m)
+                meshes = [meshes[0] + meshes[1:]]
+        else:
+            meshes = []
         kwargs['meshes'] = meshes
 
         return Mesh(**kwargs)
