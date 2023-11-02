@@ -1100,18 +1100,26 @@ class Coordinates(object):
         """
         if pos is not None:
             if check_validity:
-                self.rotation = copy.deepcopy(c)
-                self.translation = copy.deepcopy(pos)
+                if id(self._rotation) != id(c):
+                    self.rotation = copy.deepcopy(c)
+                if id(self._translation) != id(pos):
+                    self.translation = copy.deepcopy(pos)
             else:
-                self._rotation = np.copy(c)
-                self._translation = np.copy(pos)
+                if id(self._rotation) != id(c):
+                    self._rotation = np.copy(c)
+                if id(self._translation) != id(pos):
+                    self._translation = np.copy(pos)
         else:
             if check_validity:
-                self.rotation = copy.deepcopy(c.rotation)
-                self.translation = copy.deepcopy(c.translation)
+                if id(self._rotation) != id(c._rotation):
+                    self.rotation = copy.deepcopy(c._rotation)
+                if id(self._translation) != id(c._translation):
+                    self.translation = copy.deepcopy(c._translation)
             else:
-                self._rotation = np.copy(c.rotation)
-                self._translation = np.copy(c.translation)
+                if id(self._rotation) != id(c._rotation):
+                    self._rotation = np.copy(c._rotation)
+                if id(self._translation) != id(c._translation):
+                    self._translation = np.copy(c._translation)
         return self
 
     def __mul__(self, other_c):
