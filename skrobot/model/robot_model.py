@@ -9,8 +9,8 @@ from ordered_set import OrderedSet
 import six
 import trimesh
 
-from skrobot.coordinates import _wrap_axis
 from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
@@ -1060,7 +1060,7 @@ class CascadedLink(CascadedCoords):
 
         translation_axis : list of axis
         rotation_axis : list of axis
-            see _wrap_axis
+            see convert_to_axis_vector
         """
         for i in range(len(dif_pos)):
             if LA.norm(dif_pos[i]) > thre[i]:
@@ -1532,7 +1532,7 @@ class CascadedLink(CascadedCoords):
 
                     if self._is_relevant(joint, move_target):
                         if joint.joint_dof <= 1:
-                            paxis = _wrap_axis(joint.axis)
+                            paxis = convert_to_axis_vector(joint.axis)
                         else:
                             paxis = joint.axis
                         child_link = joint.child_link

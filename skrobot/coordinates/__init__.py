@@ -6,7 +6,7 @@ from .base import Transform
 from .base import make_coords
 from .base import make_cascoords
 
-from .geo import _wrap_axis
+from .geo import convert_to_axis_vector
 from .geo import midcoords
 from .geo import midpoint
 from .geo import orient_coords_to_axis

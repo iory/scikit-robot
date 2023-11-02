@@ -7,15 +7,30 @@ from math import atan2
 from math import cos
 from math import pi
 from math import sin
+import warnings
 
 import numpy as np
 
 
 # epsilon for testing whether a number is close to zero
 _EPS = np.finfo(float).eps * 4.0
+_AXIS_VECTORS = {
+    'x': np.array([1, 0, 0]),
+    'y': np.array([0, 1, 0]),
+    'z': np.array([0, 0, 1]),
+    '-x': np.array([-1, 0, 0]),
+    '-y': np.array([0, -1, 0]),
+    '-z': np.array([0, 0, -1]),
+    'xy': np.array([1, 1, 0]),
+    'yx': np.array([1, 1, 0]),
+    'yz': np.array([0, 1, 1]),
+    'zy': np.array([0, 1, 1]),
+    'zx': np.array([1, 0, 1]),
+    'xz': np.array([1, 0, 1]),
+}
 
 
-def _wrap_axis(axis):
+def convert_to_axis_vector(axis):
     """Convert axis to float vector.
 
     Parameters
@@ -30,60 +45,52 @@ def _wrap_axis(axis):
 
     Examples
     --------
-    >>> from skrobot.coordinates.math import _wrap_axis
-    >>> _wrap_axis('x')
+    >>> from skrobot.coordinates.math import convert_to_axis_vector
+    >>> convert_to_axis_vector('x')
     array([1, 0, 0])
-    >>> _wrap_axis('y')
+    >>> convert_to_axis_vector('y')
     array([0, 1, 0])
-    >>> _wrap_axis('z')
+    >>> convert_to_axis_vector('z')
     array([0, 0, 1])
-    >>> _wrap_axis('xy')
+    >>> convert_to_axis_vector('xy')
     array([1, 1, 0])
-    >>> _wrap_axis([1, 1, 1])
+    >>> convert_to_axis_vector([1, 1, 1])
     array([1, 1, 1])
-    >>> _wrap_axis(True)
+    >>> convert_to_axis_vector(True)
     array([0, 0, 0])
-    >>> _wrap_axis(False)
+    >>> convert_to_axis_vector(False)
     array([1, 1, 1])
     """
     if isinstance(axis, str):
-        if axis in ['x', 'xx']:
-            axis = np.array([1, 0, 0])
-        elif axis in ['y', 'yy']:
-            axis = np.array([0, 1, 0])
-        elif axis in ['z', 'zz']:
-            axis = np.array([0, 0, 1])
-        elif axis == '-x':
-            axis = np.array([-1, 0, 0])
-        elif axis == '-y':
-            axis = np.array([0, -1, 0])
-        elif axis == '-z':
-            axis = np.array([0, 0, -1])
-        elif axis in ['xy', 'yx']:
-            axis = np.array([1, 1, 0])
-        elif axis in ['yz', 'zy']:
-            axis = np.array([0, 1, 1])
-        elif axis in ['zx', 'xz']:
-            axis = np.array([1, 0, 1])
-        else:
-            raise NotImplementedError
+        try:
+            return _AXIS_VECTORS[axis]
+        except KeyError:
+            raise NotImplementedError(
+                "Axis conversion for '{}' is not implemented.".format(axis))
     elif isinstance(axis, list):
-        if not len(axis) == 3:
-            raise ValueError
-        axis = np.array(axis)
+        if len(axis) != 3:
+            raise ValueError("Axis list must have exactly three elements.")
+        return np.array(axis)
     elif isinstance(axis, np.ndarray):
-        if not axis.shape == (3,):
-            raise ValueError
+        if axis.shape != (3,):
+            raise ValueError("Axis ndarray must be of shape (3,).")
+        return axis
     elif isinstance(axis, bool):
-        if axis is True:
-            return np.array([0, 0, 0])
-        else:
-            return np.array([1, 1, 1])
+        # If True, returns a zero vector; if False, returns a ones vector
+        return np.zeros(3) if axis else np.ones(3)
     elif axis is None:
-        return np.array([1, 1, 1])
+        return np.ones(3)
     else:
-        raise ValueError
-    return axis
+        raise ValueError("Invalid type for axis. "
+                         "Must be one of: str, list, ndarray, bool, None.")
+
+
+def _wrap_axis(axis):
+    warnings.warn(
+        'Function `_wrap_axis` is deprecated. '
+        'Please use `convert_to_axis_vector` instead',
+        DeprecationWarning)
+    return convert_to_axis_vector(axis)
 
 
 def _check_valid_rotation(rotation):
@@ -413,7 +420,7 @@ def rotation_matrix(theta, axis):
            [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
            [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
     """
-    axis = _wrap_axis(axis)
+    axis = convert_to_axis_vector(axis)
     axis = axis / np.sqrt(np.dot(axis, axis))
     a = np.cos(theta / 2.0)
     b, c, d = -axis * np.sin(theta / 2.0)

@@ -8,8 +8,8 @@ import numpy as np
 from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import _check_valid_translation
-from skrobot.coordinates.math import _wrap_axis
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import convert_to_axis_vector
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_log
@@ -763,7 +763,7 @@ class Coordinates(object):
         return rpy_angle(self.rotation)
 
     def axis(self, ax):
-        ax = _wrap_axis(ax)
+        ax = convert_to_axis_vector(ax)
         return self.rotate_vector(ax)
 
     def difference_position(self, coords,
@@ -802,7 +802,7 @@ class Coordinates(object):
         array([ 0.2, -0.5, -0.2])
         """
         dif_pos = self.inverse_transform_vector(coords.worldpos())
-        translation_axis = _wrap_axis(translation_axis)
+        translation_axis = convert_to_axis_vector(translation_axis)
         dif_pos[translation_axis == 1] = 0.0
         return dif_pos
 
