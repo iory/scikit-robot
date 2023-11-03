@@ -1,4 +1,3 @@
-import contextlib
 import copy
 import sys
 import warnings
@@ -227,14 +226,12 @@ class Coordinates(object):
         self.parent = None
         self._hook = hook
 
-    @contextlib.contextmanager
     def disable_hook(self):
-        hook = self._hook
-        self._hook = None
-        try:
-            yield
-        finally:
-            self._hook = hook
+        if self._hook is not None:
+            original_hook = self._hook
+            self._hook = None
+            return True, original_hook
+        return False, None
 
     def get_transform(self):
         """Return Transform object
@@ -1492,15 +1489,19 @@ class CascadedCoords(Coordinates):
     def update(self, force=False):
         if not force and not self._changed:
             return
-        with self.disable_hook():
-            if self.parent:
+        hook_disabled, original_hook = self.disable_hook()
+        try:
+            if self._parent:
                 transform_coords(
-                    self.parent.worldcoords(),
+                    self._parent.worldcoords(),
                     self,
                     self._worldcoords)
             else:
-                self._worldcoords._rotation = self.rotation
-                self._worldcoords._translation = self.translation
+                self._worldcoords._rotation = self._rotation
+                self._worldcoords._translation = self._translation
+        finally:
+            if hook_disabled:
+                self._hook = original_hook
         self._changed = False
 
     def worldcoords(self):
