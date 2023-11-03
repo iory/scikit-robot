@@ -2,7 +2,7 @@ from logging import getLogger
 
 import numpy as np
 
-from skrobot.coordinates import _wrap_axis
+from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates import normalize_vector
 
@@ -191,7 +191,7 @@ class RotationalJoint(Joint):
             max_joint_velocity=max_joint_velocity,
             max_joint_torque=max_joint_torque,
             *args, **kwargs)
-        self.axis = normalize_vector(_wrap_axis(axis))
+        self.axis = normalize_vector(convert_to_axis_vector(axis))
         self._joint_angle = 0.0
 
         if self.min_angle is None:
@@ -242,7 +242,8 @@ class RotationalJoint(Joint):
             v = self.min_angle
         diff_angle = v - self._joint_angle
         self._joint_angle = v
-        self.child_link.rotate(diff_angle, self.axis)
+        self.child_link.rotate(diff_angle, self.axis,
+                               skip_normalization=True)
         if enable_hook:
             for hook in self._hooks:
                 hook()
@@ -343,7 +344,7 @@ class LinearJoint(Joint):
                  max_joint_velocity=np.pi / 4,  # [m/s]
                  max_joint_torque=100,  # [N]
                  *args, **kwargs):
-        self.axis = normalize_vector(_wrap_axis(axis))
+        self.axis = normalize_vector(convert_to_axis_vector(axis))
         self._joint_angle = 0.0
         super(LinearJoint, self).__init__(
             max_joint_velocity=max_joint_velocity,
