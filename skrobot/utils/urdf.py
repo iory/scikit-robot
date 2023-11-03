@@ -249,6 +249,8 @@ def _load_meshes(filename):
             meshes = meshes.scaled(0.001)
         else:
             meshes = trimesh.load(filename)
+        if meshes.units is not None and meshes.units != 'meter':
+            meshes = meshes.convert_units('meter')
     except Exception as e:
         logger.error("Failed to load meshes from {}. Error: {}"
                      .format(filename, e))
