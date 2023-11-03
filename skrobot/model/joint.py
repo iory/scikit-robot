@@ -148,6 +148,7 @@ class Joint(object):
             max_joint_torque = _default_max_joint_torque
         self.max_joint_velocity = max_joint_velocity
         self.max_joint_torque = max_joint_torque
+        self._joint_torque = 0.0
         self.joint_min_max_table = joint_min_max_table
         self.joint_min_max_target = joint_min_max_target
         self.default_coords = self.child_link.copy_coords()
@@ -159,6 +160,11 @@ class Joint(object):
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         raise NotImplementedError
+
+    def joint_torque(self, torque=None):
+        if torque is None:
+            self._joint_torque = torque
+        return self._joint_torque
 
     def __repr__(self):
         return self.__str__()
