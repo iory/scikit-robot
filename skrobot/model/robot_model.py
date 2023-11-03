@@ -31,7 +31,6 @@ from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
-from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
 from skrobot.utils.urdf import URDF
@@ -1319,6 +1318,7 @@ class CascadedLink(CascadedCoords):
                          sym_proj=False,
                          solver='cvxopt',
                          *args, **kwargs):
+        from skrobot.optimizer import solve_qp
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
         n_target = len(target_coords)

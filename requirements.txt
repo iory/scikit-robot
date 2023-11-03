@@ -1,5 +1,4 @@
 cached-property
-cvxopt
 future
 gdown
 lxml
@@ -12,12 +11,9 @@ pyglet<2.0
 pysdfgen>=0.1.5
 python-fcl  # for collision check in trimesh module
 pyyaml
-quadprog
 repoze.lru;python_version<"3.2"
 scikit-learn
 scipy;python_version>="3.0"
 scipy<=1.2.3;python_version<"3.0"
 six
-sphinx>=1.8.2
-sphinx_rtd_theme
 trimesh>=3.9.0,!=3.23.0

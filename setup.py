@@ -45,6 +45,18 @@ with open('requirements.txt') as f:
         req = line.split('#')[0].strip()
         install_requires.append(req)
 
+docs_install_requires = []
+with open('requirements_docs.txt') as f:
+    for line in f:
+        req = line.split('#')[0].strip()
+        docs_install_requires.append(req)
+
+opt_install_requires = []
+with open('requirements_opt.txt') as f:
+    for line in f:
+        req = line.split('#')[0].strip()
+        opt_install_requires.append(req)
+
 
 def remove_from_requirements(install_requires, remove_req):
     # If remove_req is "pyglet", requirement name with or without
@@ -60,26 +72,28 @@ def remove_from_requirements(install_requires, remove_req):
     install_requires.remove(delete_requirement.pop())
 
 
-# Python 2.7 and 3.4 support has been dropped from packages
-# version lock those packages here so install succeeds
-if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
-    # packages that no longer support old Python
-    lock = [('pyglet', '1.4.10'), ('cvxopt', '1.2.7')]
-    for name, version in lock:
-        remove_from_requirements(install_requires, name)
-
-        # add working version locked requirements
-        install_requires.append('{}=={}'.format(name, version))
-
 uname = platform.uname()[0]
 if uname == 'Darwin':
     # python-fcl could not install.
     install_requires.remove('python-fcl')
 
-
 extra_all_requires = ['pybullet>=2.1.9']
 if (sys.version_info.major > 2):
     extra_all_requires.append('open3d')
+
+# Python 2.7 and 3.4 support has been dropped from packages
+# version lock those packages here so install succeeds
+if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
+    # packages that no longer support old Python
+    lock = [('pyglet', '1.4.10', install_requires),
+            ('cvxopt', '1.2.7', opt_install_requires)]
+    for name, version, requires in lock:
+        remove_from_requirements(requires, name)
+
+        # add working version locked requirements
+        requires.append('{}=={}'.format(name, version))
+
+extra_all_requires += docs_install_requires + opt_install_requires
 
 
 setup(
@@ -114,5 +128,9 @@ setup(
             "visualize-urdf=skrobot.apps.visualize_urdf:main"
         ]
     },
-    extras_require={'all': extra_all_requires},
+    extras_require={
+        'opt': opt_install_requires,
+        'docs': docs_install_requires,
+        'all': extra_all_requires,
+    },
 )
