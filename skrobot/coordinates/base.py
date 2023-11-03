@@ -70,8 +70,8 @@ def transform_coords(c1, c2, out=None):
         out = Coordinates(check_validity=False)
     elif not isinstance(out, Coordinates):
         raise TypeError("Input type should be skrobot.coordinates.Coordinates")
-    out._translation = c1.translation + np.dot(c1.rotation, c2.translation)
-    out._rotation = np.matmul(c1.rotation, c2.rotation)
+    out._translation = c1.translation + np.dot(c1._rotation, c2._translation)
+    out._rotation = np.matmul(c1._rotation, c2._rotation)
     return out
 
 
@@ -958,7 +958,7 @@ class Coordinates(object):
             raise ValueError('wrt {} is not supported'.format(wrt))
         return self
 
-    def rotate(self, theta, axis=None, wrt='local'):
+    def rotate(self, theta, axis=None, wrt='local', skip_normalization=False):
         """Rotate this coordinate by given theta and axis.
 
         This coordinate system is rotated relative to theta radians
@@ -976,6 +976,8 @@ class Coordinates(object):
             axis of rotation.
             The value of `axis` is represented as `wrt` frame.
         wrt : str or skrobot.coordinates.Coordinates
+        skip_normalization : bool
+            if `True`, skip normalization for axis.
 
         Returns
         -------
@@ -997,17 +999,23 @@ class Coordinates(object):
         """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             self.rotate_with_matrix(
-                rotation_matrix(theta, axis), wrt)
+                rotation_matrix(theta, axis,
+                                skip_normalization=skip_normalization), wrt)
         elif axis is None or axis is False:
             self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
-            self._rotation = rotate_matrix(self.rotation, theta, axis)
+            self._rotation = rotate_matrix(
+                self.rotation, theta, axis,
+                skip_normalization=skip_normalization)
         elif wrt == 'parent' or wrt == 'world':
-            self._rotation = rotate_matrix(self.rotation, theta,
-                                           axis, True)
+            self._rotation = rotate_matrix(
+                self.rotation, theta,
+                axis, True,
+                skip_normalization=skip_normalization)
         elif isinstance(wrt, Coordinates):  # C1'=C2*R*C2(-1)*C1
             self.rotate_with_matrix(
-                rotation_matrix(theta, axis), wrt)
+                rotation_matrix(theta, axis,
+                                skip_normalization=skip_normalization), wrt)
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
         return self.newcoords(self.rotation, self.translation,
@@ -1363,7 +1371,7 @@ class CascadedCoords(Coordinates):
             return self.newcoords(rotation, self.translation,
                                   check_validity=False)
 
-    def rotate(self, theta, axis, wrt='local'):
+    def rotate(self, theta, axis, wrt='local', skip_normalization=False):
         """Rotate this coordinate.
 
         Rotate this coordinate relative to axis by theta radians
@@ -1376,6 +1384,8 @@ class CascadedCoords(Coordinates):
         axis : str or numpy.ndarray
             'x', 'y', 'z' or vector
         wrt : str or Coordinates
+        skip_normalization : bool
+            if `True`, skip normalization for axis.
 
         Returns
         -------
@@ -1383,21 +1393,25 @@ class CascadedCoords(Coordinates):
         """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
             return self.rotate_with_matrix(
-                rotation_matrix(theta, axis), wrt)
+                rotation_matrix(theta, axis,
+                                skip_normalization=skip_normalization), wrt)
         if isinstance(axis, np.ndarray) and axis.shape == (3, 3):
             return self.rotate_with_matrix(theta, wrt)
 
         if wrt == 'local' or wrt == self:
-            rotation = rotate_matrix(self.rotation, theta, axis)
+            rotation = rotate_matrix(self.rotation, theta, axis,
+                                     skip_normalization=skip_normalization)
             return self.newcoords(rotation, self.translation,
                                   check_validity=False)
         elif wrt == 'parent' or wrt == self.parent:
-            rotation = rotate_matrix(self.rotation, theta, axis)
+            rotation = rotate_matrix(self.rotation, theta, axis,
+                                     skip_normalization=skip_normalization)
             return self.newcoords(rotation, self.translation,
                                   check_validity=False)
         else:
             return self.rotate_with_matrix(
-                rotation_matrix(theta, axis), wrt)
+                rotation_matrix(theta, axis,
+                                skip_normalization=skip_normalization), wrt)
 
     def orient_with_matrix(self, rotation_matrix, wrt='world'):
         """Force update this coordinate system's rotation.

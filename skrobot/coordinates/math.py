@@ -388,7 +388,7 @@ def transform(m, v):
     return np.matmul(m, v)
 
 
-def rotation_matrix(theta, axis):
+def rotation_matrix(theta, axis, skip_normalization=False):
     """Return the rotation matrix.
 
     Return the rotation matrix associated with counterclockwise rotation
@@ -401,6 +401,8 @@ def rotation_matrix(theta, axis):
     axis : str or list or numpy.ndarray
         rotation axis such that 'x', 'y', 'z'
         [0, 0, 1], [0, 1, 0], [1, 0, 0]
+    skip_normalization : bool
+        if `True`, skip normalization for axis.
 
     Returns
     -------
@@ -420,8 +422,9 @@ def rotation_matrix(theta, axis):
            [ 0.00000000e+00,  1.00000000e+00,  0.00000000e+00],
            [-1.00000000e+00,  0.00000000e+00,  2.22044605e-16]])
     """
-    axis = convert_to_axis_vector(axis)
-    axis = axis / np.sqrt(np.dot(axis, axis))
+    if not skip_normalization:
+        axis = convert_to_axis_vector(axis)
+        axis = axis / np.sqrt(np.dot(axis, axis))
     a = np.cos(theta / 2.0)
     b, c, d = -axis * np.sin(theta / 2.0)
     aa, bb, cc, dd = a * a, b * b, c * c, d * d
@@ -466,10 +469,15 @@ def rotate_vector(vec, theta, axis):
     return rotated_vec
 
 
-def rotate_matrix(matrix, theta, axis, world=None):
+def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
     if world is False or world is None:
-        return np.dot(matrix, rotation_matrix(theta, axis))
-    return np.dot(rotation_matrix(theta, axis), matrix)
+        return np.dot(
+            matrix,
+            rotation_matrix(theta, axis,
+                            skip_normalization=skip_normalization))
+    return np.dot(
+        rotation_matrix(theta, axis, skip_normalization=skip_normalization),
+        matrix)
 
 
 def rpy_matrix(az, ay, ax):
