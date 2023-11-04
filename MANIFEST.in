@@ -1,3 +1,3 @@
 include README.md
-include requirements.txt
+include requirements.txt requirements_docs.txt requirements_opt.txt
 recursive-include skrobot/data *
