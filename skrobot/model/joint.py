@@ -162,9 +162,26 @@ class Joint(object):
         raise NotImplementedError
 
     def joint_torque(self, torque=None):
+        print(torque)
         if torque is None:
             self._joint_torque = torque
         return self._joint_torque
+
+    def calc_spatial_velocity_jacobian(self, *args):
+        raise NotImplementedError(
+            "this should implement calc_spatial_velocity_jacobian")
+
+    def calc_angular_velocity_jacobian(self, *args):
+        raise NotImplementedError(
+            "this should implement calc_angular_velocity_jacobian")
+
+    def calc_spatial_acceleration_jacobian(self, *args):
+        raise NotImplementedError(
+            "this should implement calc_spatial_acceleration_jacobian")
+
+    def calc_angular_acceleration_jacobian(self, *args):
+        raise NotImplementedError(
+            "this should implement calc_angular_acceleration_jacobian")
 
     def __repr__(self):
         return self.__str__()
@@ -207,7 +224,6 @@ class RotationalJoint(Joint):
 
         self.joint_velocity = 0.0  # [rad/s]
         self.joint_acceleration = 0.0  # [rad/s^2]
-        self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint angle.
@@ -266,6 +282,19 @@ class RotationalJoint(Joint):
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
 
+    def calc_spacial_velocity_jacobian(self, axis):
+        return np.cross(self.child_link.worldpos(), axis)
+
+    def calc_angular_velocity_jacobian(self, axis):
+        return axis
+
+    def calc_spacial_acceleration_jacobian(self, svj, avj):
+        return np.cross(self.parent_link.angular_velocity, svj) \
+            + np.cross(self.parent_link.spacial_velocity, avj)
+
+    def calc_angular_acceleration_jacobian(self, avj):
+        return np.cross(self.parent_link.angular_velocity, avj)
+
 
 class FixedJoint(Joint):
 
@@ -281,7 +310,6 @@ class FixedJoint(Joint):
         self.max_angle = 0.0
         self.joint_velocity = 0.0  # [rad/s]
         self.joint_acceleration = 0.0  # [rad/s^2]
-        self.joint_torque = 0.0  # [Nm]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Joint angle method.
@@ -362,7 +390,6 @@ class LinearJoint(Joint):
             self.max_angle = np.pi / 2.0
         self.joint_velocity = 0.0  # [m/s]
         self.joint_acceleration = 0.0  # [m/s^2]
-        self.joint_torque = 0.0  # [N]
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return this joint's linear translation (joint angle).
@@ -414,6 +441,18 @@ class LinearJoint(Joint):
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_linear(*args, **kwargs)
 
+    def calc_spacial_velocity_jacobian(self, axis):
+        return axis
+
+    def calc_angular_velocity_jacobian(self, axis):
+        return np.zeros(3)
+
+    def calc_spacial_acceleration_jacobian(self, svj, avj):
+        return np.cross(self.parent_link.angular_velocity, svj)
+
+    def calc_angular_acceleration_jacobian(self, avj):
+        return np.zeros(3)
+
 
 class OmniWheelJoint(Joint):
 
@@ -435,7 +474,7 @@ class OmniWheelJoint(Joint):
             *args, **kwargs)
         self.joint_velocity = (0, 0, 0)
         self.joint_acceleration = (0, 0, 0)
-        self.joint_torque = (0, 0, 0)
+        self._joint_torque = (0, 0, 0)
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint-angle if v is not set, if v is given, set joint angle.

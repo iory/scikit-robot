@@ -1742,7 +1742,21 @@ class RobotModel(CascadedLink):
 
         links = []
         for urdf_link in self.urdf_robot_model.links:
-            link = Link(name=urdf_link.name)
+            # import ipdb
+            # ipdb.set_trace()
+            inertia_tensor = None
+            if urdf_link.inertial is not None and urdf_link.inertial.inertia is not None:
+                inertia_tensor = urdf_link.inertial.inertia
+            weight = 0.0
+            if urdf_link.inertial is not None and urdf_link.inertial.mass is not None:
+                weight = urdf_link.inertial.mass
+            centroid = [0, 0, 0]
+            if urdf_link.inertial is not None and urdf_link.inertial.origin is not None:
+                centroid = urdf_link.inertial.origin[:3, 3]
+            link = Link(centroid=centroid,
+                        inertia_tensor=inertia_tensor,
+                        weight=weight,
+                        name=urdf_link.name)
             link.collision_mesh = urdf_link.collision_mesh
             link.visual_mesh = self._meshes_from_urdf_visuals(
                 urdf_link.visuals)
