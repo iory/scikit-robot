@@ -1078,7 +1078,7 @@ def rodrigues(axis, theta=None):
     return mat
 
 
-def rotation_angle(mat):
+def rotation_angle(mat, return_angular_velocity=False):
     """Inverse Rodrigues formula Convert Rotation-Matirx to Axis-Angle.
 
     Return theta and axis.
@@ -1088,11 +1088,16 @@ def rotation_angle(mat):
     ----------
     mat : numpy.ndarray
         rotation matrix, shape (3, 3)
+    return_angular_velocity : bool, optional
+        If True, returns the angular velocity vector
+        instead of the axis-angle representation.
 
     Returns
     -------
-    theta, axis : tuple(float, numpy.ndarray)
-        rotation angle in radian and rotation axis
+    theta, axis or angular_velocity : tuple(float, numpy.ndarray)
+    or numpy.ndarray
+        Rotation angle in radian and rotation axis,
+        or angular velocity vector if `return_angular_velocity` is True.
 
     Examples
     --------
@@ -1105,7 +1110,10 @@ def rotation_angle(mat):
     """
     mat = _check_valid_rotation(mat)
     if np.array_equal(mat, np.eye(3)):
-        return None
+        if return_angular_velocity:
+            return None
+        else:
+            return None, None
     theta = np.arccos((np.trace(mat) - 1) / 2)
     if abs(theta) < _EPS:
         raise ValueError('Rotation Angle is too small. \nvalue : {}'.
@@ -1114,6 +1122,11 @@ def rotation_angle(mat):
         * np.array([mat[2, 1] - mat[1, 2],
                     mat[0, 2] - mat[2, 0],
                     mat[1, 0] - mat[0, 1]])
+
+    if return_angular_velocity:
+        angular_velocity = axis * theta
+        return angular_velocity
+
     return theta, axis
 
 
