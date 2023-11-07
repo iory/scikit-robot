@@ -282,18 +282,18 @@ class RotationalJoint(Joint):
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_rotational(*args, **kwargs)
 
-    def calc_spacial_velocity_jacobian(self, axis):
+    def calc_spatial_velocity_jacobian(self, axis):
         return np.cross(self.child_link.worldpos(), axis)
 
     def calc_angular_velocity_jacobian(self, axis):
         return axis
 
-    def calc_spacial_acceleration_jacobian(self, svj, avj):
-        return np.cross(self.parent_link.angular_velocity, svj) \
-            + np.cross(self.parent_link.spacial_velocity, avj)
+    def calc_spatial_acceleration_jacobian(self, svj, avj):
+        return np.cross(self.parent_link._angular_velocity, svj) \
+            + np.cross(self.parent_link._spatial_velocity, avj)
 
     def calc_angular_acceleration_jacobian(self, avj):
-        return np.cross(self.parent_link.angular_velocity, avj)
+        return np.cross(self.parent_link._angular_velocity, avj)
 
 
 class FixedJoint(Joint):
@@ -441,14 +441,14 @@ class LinearJoint(Joint):
     def calc_jacobian(self, *args, **kwargs):
         return calc_jacobian_linear(*args, **kwargs)
 
-    def calc_spacial_velocity_jacobian(self, axis):
+    def calc_spatial_velocity_jacobian(self, axis):
         return axis
 
     def calc_angular_velocity_jacobian(self, axis):
         return np.zeros(3)
 
-    def calc_spacial_acceleration_jacobian(self, svj, avj):
-        return np.cross(self.parent_link.angular_velocity, svj)
+    def calc_spatial_acceleration_jacobian(self, svj, avj):
+        return np.cross(self.parent_link._angular_velocity, svj)
 
     def calc_angular_acceleration_jacobian(self, avj):
         return np.zeros(3)

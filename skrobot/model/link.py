@@ -10,6 +10,9 @@ from scipy.constants import g
 import skrobot
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates.math import outer_product_matrix
+from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import convert_to_axis_vector
+from skrobot.coordinates.math import inverse_rodrigues
 
 
 class Link(CascadedCoords):
@@ -19,8 +22,8 @@ class Link(CascadedCoords):
                  collision_mesh=None,
                  visual_mesh=None,
                  weight=None,
-                 force=0.0,
-                 moment=0.0,
+                 force=None,
+                 moment=None,
                  *args, **kwargs):
         super(Link, self).__init__(*args, **kwargs)
         self._centroid = centroid
@@ -36,6 +39,19 @@ class Link(CascadedCoords):
         self._collision_mesh = collision_mesh
         self._visual_mesh = visual_mesh
         self._sdf = None
+
+        self._angular_velocity = np.zeros(3) # [rad/s]
+        self._angular_acceleration = np.zeros(3) # [rad/s^2]
+        self._spatial_velocity = np.zeros(3) # [m/s]
+        self._spatial_acceleration = np.zeros(3) # [m/s^2]
+        self._angular_momentum = np.zeros(3) # [kg m^2/s]
+        self._momentum = np.zeros(3) # [kg m/s]
+        self._angular_momentum_velocity = np.zeros(3) # [kg m^2/s^2]
+        self._momentum_velocity = np.zeros(3) # [kg m^2/s^2]
+        self._force = np.zeros(3) # [N] = [kg m/s^2]
+        self._moment = np.zeros(3) # [Nm] = [kg m^2/s^2]
+        self._ext_force = np.zeros(3) # [N] = [kg m/s^2]
+        self._ext_moment = np.zeros(3) # [Nm] = [kg m^2/s^2]
 
     @property
     def parent_link(self):
@@ -181,62 +197,170 @@ class Link(CascadedCoords):
         c_hat = outer_product_matrix(c)
         I = iner + m * c_hat @ c_hat.T  # [kg m^2]
 
-        self.angular_velocity = np.zeros(3)
-        self.angular_acceleration = np.zeros(3)
-        self.spatial_velocity = np.zeros(3)
-        self.spatial_acceleration = np.zeros(3)
-        momentum = np.zeros(3)
-        angular_momentum = np.zeros(3)
-        force = np.zeros(3)
-        moment = np.zeros(3)
-        self.spatial_velocity_jacobian = np.zeros(3)
-        self.angular_velocity_jacobian = np.zeros(3)
-        momentum += m * (self.spatial_velocity + np.cross(self.angular_velocity, c))
-        angular_momentum += (m * np.cross(c, self.spatial_velocity) +
-                             I @ self.angular_velocity)
-        force += (m * (self.spatial_acceleration + np.cross(self.angular_acceleration, c)) +
-                  np.cross(self.angular_velocity, momentum))
-        moment += (m * np.cross(c, self.spatial_acceleration) +
-                   I @ self.angular_acceleration +
-                   np.cross(self.spatial_velocity, momentum) +
-                   np.cross(self.angular_velocity, angular_momentum))
+        # import ipdb
+        # ipdb.set_trace()
+        self._momentum += m * (self._spatial_velocity + np.cross(self._angular_velocity, c))
+        self._angular_momentum += (m * np.cross(c, self._spatial_velocity) +
+                             I @ self._angular_velocity)
+        self._force += (m * (self._spatial_acceleration + np.cross(self._angular_acceleration, c)) +
+                        np.cross(self._angular_velocity, self._momentum))
+        self._moment += (m * np.cross(c, self._spatial_acceleration) +
+                   I @ self._angular_acceleration +
+                   np.cross(self._spatial_velocity, self._momentum) +
+                   np.cross(self._angular_velocity, self._angular_momentum))
 
         # use ext_force and ext_moment
-        force -= f_g # + self.ext_force
-        moment -= np.cross(c, f_g) # + self.ext_moment
+        self._force -= f_g # + self.ext_force
+        self._moment -= np.cross(c, f_g) # + self.ext_moment
 
         # propagation of force and moment from child-links
         for child in self.child_links:
             child.inverse_dynamics(tmp_va=tmp_va, tmp_vb=tmp_vb,
                                    tmp_vc=tmp_vc, tmp_ma=tmp_ma, tmp_mb=tmp_mb,
                                    tmp_mc=tmp_mc, tmp_md=tmp_md)
-            force += child._force
-            moment += child._moment
+            self._force += child._force
+            self._moment += child._moment
 
-        print(force, moment)
+        print(self._force, self._moment)
         # exclude if root-link
         if self.joint and self.parent_link and isinstance(self._parent, Link):
             joint_torque = (
-                self.spatial_velocity_jacobian @ force +
-                self.angular_velocity_jacobian @ moment)
+                self._spatial_velocity_jacobian @ self._force +
+                self.angular_velocity_jacobian @ self._moment)
             print(joint_torque)
-            # import ipdb
-            # ipdb.set_trace()
             self.joint.joint_torque(joint_torque)
 
-    def calc_torque_from_vel_acc(self, joint_list,
-                                 jvv, jav, root_spacial_velocity, root_angular_velocity, root_spacial_acceleration, root_angular_acceleration, calc_torque_buffer_args, debug_view=None):
-        torque_vector = np.zeros(len(joint_list))
-        analysis_level_org = [l.analysis_level for l in self.links]
+    def calc_torque_without_ext_wrench(
+            self, debug_view=None, calc_statics_p=True, dt=0.005, av=None, root_coords=None):
+        if av is None:
+            av = self.angle_vector()
+        if root_coords is None:
+            root_coords = self.links[0].copy_worldcoords()
+        kwargs = {}
+        if not calc_statics_p:
+            ret_rc = self.calc_root_coords_vel_acc_from_pos(dt, root_coords)
+            ret_av = self.calc_av_vel_acc_from_pos(dt, av)
+            kwargs = {
+                'jvv': ret_av.get('joint_velocity_vector'),
+                'jav': ret_av.get('joint_acceleration_vector'),
+                'root_spacial_velocity': ret_rc.get('root_spacial_velocity'),
+                'root_angular_velocity': ret_rc.get('root_angular_velocity'),
+                'root_spacial_acceleration': ret_rc.get('root_spacial_acceleration'),
+                'root_angular_acceleration': ret_rc.get('root_angular_acceleration')
+            }
+        return self.calc_torque_from_vel_acc(debug_view=debug_view, **kwargs)
 
-        for i, jnt in enumerate(joint_list):
+    def calc_root_coords_vel_acc_from_pos(self, dt, root_coords):
+        dt_inv = 1.0 / dt
+
+        if self.prev_root_coords is None:
+            self.prev_root_coords = root_coords
+
+        root_rot = root_coords.rotation_matrix()
+        prev_root_rot = self.prev_root_coords.rotation_matrix()
+        rw = dt_inv * self.prev_root_coords.rotate_vector(
+            inverse_rodrigues(prev_root_rot.T @ root_rot,
+                              return_angular_velocity=True)
+        )
+
+        root_pos = root_coords.translation_vector() * 1e-3
+        prev_root_pos = self.prev_root_coords.translation_vector() * 1e-3
+
+        if np.linalg.norm(rw) < 5e-3:
+            rv = dt_inv * (root_pos - prev_root_pos)
+        else:
+            # Implementation of the complex velocity calculation goes here
+
+        if self.prev_root_v is None:
+            self.prev_root_v = rv
+        if self.prev_root_w is None:
+            self.prev_root_w = rw
+
+        rwa = dt_inv * (rw - self.prev_root_w)
+        # First order approximation
+        sp_rva = (dt_inv * (rv - self.prev_root_v)) - np.cross(rwa, root_pos)
+
+        # Store the previous state
+        self.prev_root_coords = root_coords.copy()
+        self.prev_root_v = rv
+        self.prev_root_w = rw
+
+        return {
+            'root_spacial_velocity': rv - np.cross(rw, root_coords.translation_vector() * 1e-3),
+            'root_angular_velocity': rw,
+            'root_spacial_acceleration': sp_rva,
+            'root_angular_acceleration': rwa
+        }
+
+    def calc_torque_from_vel_acc(self, debug_view=None, jvv=None, jav=None,
+                                 root_spacial_velocity=np.zeros(3),
+                                 root_angular_velocity=np.zeros(3),
+                                 root_spacial_acceleration=np.zeros(3),
+                                 root_angular_acceleration=np.zeros(3),
+                                 calc_torque_buffer_args=None):
+        if jvv is None:
+            jvv = np.zeros(len(self.joint_list))
+        if jav is None:
+            jav = np.zeros(len(self.joint_list))
+
+        torque_vector = np.zeros(len(self.joint_list))
+
+        def all_child_links(link, func):
+            func(link)
+            for child in link.child_links:
+                all_child_links(child, func)
+
+        all_child_links(self.links[0], lambda l: l.set_spacial_and_angular_velocity_jacobian())
+
+        for i, jnt in enumerate(self.joint_list):
             jnt.joint_velocity = jvv[i]
             jnt.joint_acceleration = jav[i]
 
-        for i in range(len(torque_vector)):
-            torque_vector[i] = joint_list[i].joint_torque
+        self.links[0].spacial_acceleration = root_spacial_acceleration
+        self.links[0].angular_acceleration = root_angular_acceleration
+        self.links[0].spacial_velocity = root_spacial_velocity
+        self.links[0].angular_velocity = root_angular_velocity
+
+        # Recursive kinematics and dynamics computation
+        self.links[0].forward_all_kinematics(debug_view, *calc_torque_buffer_args[:2])
+        self.links[0].inverse_dynamics(debug_view, *calc_torque_buffer_args)
+
+        # Reset external forces and moments
+        all_child_links(self.links[0], lambda l: l.reset_external_forces_and_moments())
+
+        for i, jnt in enumerate(self.joint_list):
+            torque_vector[i] = jnt.joint_torque
 
         return torque_vector
+
+    def forward_all_kinematics(self):
+        if self.parent_link and isinstance(self.parent, Link) and self.joint.__class__.__name__ != 'FixedJoint':
+            paxis = self.joint.axis
+
+            world_coords = self.parent_link.copy_worldcoords().transform(self.joint.default_coords)
+            ax = normalize_vector(world_coords.rotate_vector(paxis))
+
+            svj = self.joint.calc_spatial_velocity_jacobian(ax)
+            avj = self.joint.calc_angular_velocity_jacobian(ax)
+
+            print(ax, svj, avj)
+
+            self._angular_velocity = self.parent_link._angular_velocity + svj * self.joint.joint_velocity
+            self._spatial_velocity = self.parent_link._spatial_velocity + avj * self.joint.joint_velocity
+
+            saj = self.joint.calc_spatial_acceleration_jacobian(svj, avj)
+            self._spatial_acceleration = (self.parent_link._spatial_acceleration +
+                                         saj * self.joint.joint_velocity +
+                                         svj * self.joint.joint_acceleration)
+
+            aaj = self.joint.calc_angular_acceleration_jacobian(avj)
+            self._angular_acceleration = (self.parent_link._angular_acceleration +
+                                          aaj * self.joint.joint_velocity +
+                                         avj * self.joint.joint_acceleration)
+            print(f'{self._angular_velocity} {self._angular_acceleration} {self._spatial_velocity} {self._spatial_acceleration}')
+
+        for child_link in self.child_links:
+            child_link.forward_all_kinematics()
 
 
 def _find_link_path(src_link, target_link, previous_link=None,
