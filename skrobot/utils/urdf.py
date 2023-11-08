@@ -26,6 +26,7 @@ import numpy as np
 import PIL
 import six
 import trimesh
+from trimesh.visual.material import PBRMaterial
 
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
@@ -57,6 +58,13 @@ def no_mesh_load_mode():
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
     yield
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
+
+
+def get_transparency(mesh):
+    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
+        material = mesh.visual.material
+        if hasattr(material, 'main_color'):
+            return material.main_color[3]
 
 
 def parse_origin(node):
@@ -249,6 +257,8 @@ def _load_meshes(filename):
             meshes = meshes.scaled(0.001)
         else:
             meshes = trimesh.load(filename)
+        if meshes.units is not None and meshes.units != 'meter':
+            meshes = meshes.convert_units('meter')
     except Exception as e:
         logger.error("Failed to load meshes from {}. Error: {}"
                      .format(filename, e))
@@ -271,6 +281,11 @@ def _load_meshes(filename):
     else:
         raise ValueError('Unable to load mesh from file')
 
+    for mesh in meshes:
+        transparency = get_transparency(mesh)
+        if transparency is not None and transparency == 0.0:
+            if isinstance(mesh.visual.material, PBRMaterial):
+                mesh.visual.material.baseColorFactor[3] = 255
     return meshes
 
 
