@@ -1223,7 +1223,8 @@ def quaternion_multiply(quaternion1, quaternion0):
             x1 * w0 + y1 * z0 - z1 * y0 + w1 * x0,
             -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
             x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0), dtype=np.float64)
-        return np.transpose(np.squeeze(result))
+        return np.transpose(np.squeeze(result)).reshape(
+            quaternion1.shape[0], 4)
     else:
         raise ValueError
 
