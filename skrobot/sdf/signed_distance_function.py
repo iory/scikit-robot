@@ -8,7 +8,7 @@ import numpy as np
 import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 
-from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import CascadedCoords, Coordinates
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import Transform
 from skrobot.data import get_cache_dir
@@ -119,6 +119,9 @@ class SignedDistanceFunction(object):
         self._origin = np.array(origin)
         self.use_abs = use_abs
 
+        self._tf_world_to_sdf_cached = None
+        self._tf_sdf_to_world_cached = None
+
     def __call__(self, points_obj):
         """Compute signed distances of input points to the implicit surface.
 
@@ -137,6 +140,21 @@ class SignedDistanceFunction(object):
         if self.use_abs:
             return np.abs(sd_vals)
         return sd_vals
+
+    def freeze(self):
+        """Freeze the coordinates of the sdf."""
+        # NOTE: Main purpose of freezing the coodinate is to cache the transforms
+        # for the sdf-specific coordinate. For the cache to be valid,
+        # the coordinate is not supposed to be moved after freezing.
+        # Make coords be a Coordinates instance helps to avoid the coordinate to be moved.
+
+        # NOTE: current solution is not perfect because the user can still
+        # manually change the coords. 
+        self.coords = self.coords.copy_worldcoords()
+
+    @property
+    def is_frozen(self):
+        return isinstance(self.coords, Coordinates)
 
     def on_surface(self, points_obj):
         """Check if points are on the surface.
@@ -189,10 +207,15 @@ class SignedDistanceFunction(object):
         points_sdf : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. a sdf-specific coordinate.
         """
-        tf_world_to_local =\
-            self.coords.get_transform().inverse_transformation()
-        tf_local_to_sdf = self.sdf_to_obj_transform.inverse_transformation()
-        tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
+        if self._tf_world_to_sdf_cached is None:
+            tf_world_to_local =\
+                self.coords.get_transform().inverse_transformation()
+            tf_local_to_sdf = self.sdf_to_obj_transform.inverse_transformation()
+            tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
+            if self.is_frozen:
+                self._tf_world_to_sdf_cached = tf_world_to_sdf
+        else:
+            tf_world_to_sdf = self._tf_world_to_sdf_cached
         points_sdf = tf_world_to_sdf.transform_vector(points_obj)
         return points_sdf
 
@@ -209,9 +232,14 @@ class SignedDistanceFunction(object):
         points_obj : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. an object coordinate.
         """
-        tf_local_to_world = self.coords.get_transform()
-        tf_sdf_to_local = self.sdf_to_obj_transform
-        tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
+        if self._tf_sdf_to_world_cached is None:
+            tf_local_to_world = self.coords.get_transform()
+            tf_sdf_to_local = self.sdf_to_obj_transform
+            tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
+            if self.is_frozen:
+                self._tf_sdf_to_world_cached = tf_sdf_to_world
+        else:
+            tf_sdf_to_world = self._tf_sdf_to_world_cached
         points_obj = tf_sdf_to_world.transform_vector(points_sdf)
         return points_obj
 
