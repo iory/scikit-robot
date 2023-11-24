@@ -43,7 +43,7 @@ class TestSDF(unittest.TestCase):
         cls.points_box_edge_sdf = \
             np.array([-0.5 * box_withds, 0.5 * box_withds])
 
-        # prepare SphereSDF
+        # prepare SphereSDF and CylinderSDF
         radius = 1.0
         height = 1.0
         cls.radius = radius
@@ -244,3 +244,22 @@ class TestSDF(unittest.TestCase):
         vertices = finger_link.transform_vector(coll_mesh.vertices)
         sd_vals = fetch_union_sdf(vertices)
         self.assertTrue(np.all(sd_vals < 1e-3))
+
+
+class TestSDFFrozen(TestSDF):
+
+    @classmethod
+    def setup_class(cls):
+        super(TestSDFFrozen, cls).setup_class()
+        cls.gridsdf.freeze()
+        cls.boxsdf.freeze()
+        cls.sphere_sdf.freeze()
+        cls.cylinder_sdf.freeze()
+        cls.unionsdf.freeze()
+
+    def test_frozen(self):
+        self.assertTrue(self.gridsdf.is_frozen)
+        self.assertTrue(self.boxsdf.is_frozen)
+        self.assertTrue(self.sphere_sdf.is_frozen)
+        self.assertTrue(self.cylinder_sdf.is_frozen)
+        self.assertTrue(self.unionsdf.is_frozen)
