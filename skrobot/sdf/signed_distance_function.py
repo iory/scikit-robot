@@ -8,7 +8,8 @@ import numpy as np
 import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 
-from skrobot.coordinates import CascadedCoords, Coordinates
+from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import Transform
 from skrobot.data import get_cache_dir
@@ -147,13 +148,14 @@ class SignedDistanceFunction(object):
 
     def freeze(self):
         """Freeze the coordinates of the sdf."""
-        # NOTE: Main purpose of freezing the coodinate is to cache the transforms
-        # for the transforms. For the cache to be valid,
+        # NOTE: Main purpose of freezing the coodinate is to cache the
+        # transforms for the transforms. For the cache to be valid,
         # the coordinate is not supposed to be moved after freezing.
-        # Make coords be a Coordinates instance helps to avoid the coordinate to be moved.
+        # Make coords be a Coordinates instance helps to avoid the
+        # coordinate to be moved.
 
         # NOTE: current solution is not perfect because the user can still
-        # manually change the coords. 
+        # manually change the coords.
         self.coords = self.coords.copy_worldcoords()
 
     @property
@@ -199,8 +201,7 @@ class SignedDistanceFunction(object):
         return points_world, dists
 
     def _transform_pts_world_to_local(self, points_world):
-        """Transform points from the world frame to the local frame
-        on which the sdf is defined.
+        """Transform points from the world frame to the local frame.
 
         Parameters
         ----------
@@ -215,7 +216,8 @@ class SignedDistanceFunction(object):
         if self._tf_world_to_local_cached is None:
             tf_world_to_local =\
                 self.coords.get_transform().inverse_transformation()
-            tf_local_to_sdf = self.local_to_world_transform.inverse_transformation()
+            tf_local_to_sdf =\
+                self.local_to_world_transform.inverse_transformation()
             tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
             if self.is_frozen:
                 self._tf_world_to_local_cached = tf_world_to_sdf
@@ -225,7 +227,7 @@ class SignedDistanceFunction(object):
         return points_local
 
     def _transform_pts_local_to_world(self, points_local):
-        """ Transform points from the sdf-defined local frame to the world frame.
+        """Transform points from the local to the world frame.
 
         Parameters
         ----------
@@ -460,7 +462,8 @@ class GridSDF(SignedDistanceFunction):
             If points is out of the interpolator's boundary,
             the correspoinding element of is_out_arr is True
         """
-        points_local = super(GridSDF, self)._transform_pts_world_to_local(points_world)
+        points_local = super(GridSDF, self)\
+            ._transform_pts_world_to_local(points_world)
         points_grid = np.array(points_local) / self._resolution
         is_out_arr = np.logical_or(
             (points_grid < 0).any(axis=1),
