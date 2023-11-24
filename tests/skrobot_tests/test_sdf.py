@@ -110,7 +110,7 @@ class TestSDF(unittest.TestCase):
     def test__transform_pts_obj_to_sdf_and_sdf_to_obj(self):
         sdf, trans = self.boxsdf, self.boxtrans
         points_obj = np.random.randn(100, 3)
-        points_sdf = sdf._transform_pts_obj_to_sdf(points_obj)
+        points_sdf = sdf._transform_pts_world_to_local(points_obj)
 
         # test transform_pts_obj_to_sdf
         points_sdf_should_be = points_obj - \
@@ -118,7 +118,7 @@ class TestSDF(unittest.TestCase):
         testing.assert_array_almost_equal(points_sdf, points_sdf_should_be)
 
         # test transform_pts_sdf_to_obj
-        points_obj_recreated = sdf._transform_pts_sdf_to_obj(points_sdf)
+        points_obj_recreated = sdf._transform_pts_local_to_world(points_sdf)
         testing.assert_array_almost_equal(points_obj_recreated, points_obj)
 
     def test___call__(self):
@@ -136,7 +136,7 @@ class TestSDF(unittest.TestCase):
 
     def test_on_surface(self):
         sdf = self.boxsdf
-        points_box_edge_obj = sdf._transform_pts_sdf_to_obj(
+        points_box_edge_obj = sdf._transform_pts_local_to_world(
             self.points_box_edge_sdf)
         logicals_positive, _ = sdf.on_surface(points_box_edge_obj)
         self.assertTrue(np.all(logicals_positive))
@@ -163,7 +163,7 @@ class TestSDF(unittest.TestCase):
     def test_gridsdf__signed_distance(self):
         sdf, mesh = self.gridsdf, self.bunnymesh
         vertices_obj = mesh.vertices
-        vertices_sdf = sdf._transform_pts_obj_to_sdf(vertices_obj)
+        vertices_sdf = sdf._transform_pts_world_to_local(vertices_obj)
         sd_vals = sdf._signed_distance(vertices_sdf)
         # all vertices of the mesh must be on the surface
         assert np.all(np.abs(sd_vals) < sdf._surface_threshold)

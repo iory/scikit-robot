@@ -97,17 +97,21 @@ def link2sdf(link, urdf_path, dim_grid=30):
 class SignedDistanceFunction(object):
     """A base class for signed distance functions (SDFs).
 
-    Suffixes `_obj` and `_sdf` (e.g. in points_sdf) indicate that
-    points are expressed in the sdf's object coordinate (`self.coords`)
-    and sdf-specfic coordinate respectively. Each SDF performs the
-    signed-distance computation in its own sdf-specific coordinate.
-    For example, the origin of GridSDF's sdf-specific coordinate is
-    the tip of the precomputed-gridded-box.
+    SDFs are used to represent and manipulate implicit surfaces.
+    SDFs provide a mathematical description of a surface in terms
+    of distances: a point's distance from the surface, with the
+    sign indicating whether the point is inside or outside the surface.
 
-    Usually, a child class implements the computation in the sdf-specific
-    coordinates and SignedDistanceFunction wraps them so that the user can
-    pass and get points and values expressed in an object coordinate. Thus,
-    it is less likely that a user directly calls a method in a child class.
+    Notes
+    -----
+    The SDF operates in two coordinate frames: the local frame and the
+    world frame. The local frame is the coordinate system defined by
+    the SDF itself, while the world frame is a global reference frame.
+    Variables and methods often use the prefixes 'local' or 'world' to
+    indicate the frame of reference. For example, `points_world` would
+    refer to points in the world frame, and `_transform_pts_world_to_local`
+    is a method to transform points from the world frame to the local frame
+    of the SDF.
     """
 
     def __init__(self, origin, coords=None, use_abs=False):
@@ -115,28 +119,28 @@ class SignedDistanceFunction(object):
             coords = CascadedCoords()
 
         self.coords = coords
-        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
+        self.local_to_world_transform = Transform(origin, np.eye(3))
         self._origin = np.array(origin)
         self.use_abs = use_abs
 
-        self._tf_world_to_sdf_cached = None
-        self._tf_sdf_to_world_cached = None
+        self._tf_world_to_local_cached = None
+        self._tf_local_to_world_cached = None
 
-    def __call__(self, points_obj):
+    def __call__(self, points_world):
         """Compute signed distances of input points to the implicit surface.
 
         Parameters
         -------
-        points_obj : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. object coordinate.
+        points_world : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. world flame.
 
         Returns
         -------
         signed_distances : numpy.ndarray[float]
             1 dim (n_point,) array of signed distance.
         """
-        points_sdf = self._transform_pts_obj_to_sdf(points_obj)
-        sd_vals = self._signed_distance(points_sdf)
+        points_local = self._transform_pts_world_to_local(points_world)
+        sd_vals = self._signed_distance(points_local)
         if self.use_abs:
             return np.abs(sd_vals)
         return sd_vals
@@ -144,7 +148,7 @@ class SignedDistanceFunction(object):
     def freeze(self):
         """Freeze the coordinates of the sdf."""
         # NOTE: Main purpose of freezing the coodinate is to cache the transforms
-        # for the sdf-specific coordinate. For the cache to be valid,
+        # for the transforms. For the cache to be valid,
         # the coordinate is not supposed to be moved after freezing.
         # Make coords be a Coordinates instance helps to avoid the coordinate to be moved.
 
@@ -156,22 +160,22 @@ class SignedDistanceFunction(object):
     def is_frozen(self):
         return isinstance(self.coords, Coordinates)
 
-    def on_surface(self, points_obj):
+    def on_surface(self, points_world):
         """Check if points are on the surface.
 
         Parameters
         ----------
-        points_obj : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. an object coordinate.
+        points_world : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. the world frame.
 
         Returns
         -------
         logicals : numpy.ndarray[bool](n_point,)
-            boolean vector of the on-surface predicate for `points_obj`.
+            boolean vector of the on-surface predicate for `points_world`.
         sd_vals : numpy.ndarray[float](n_point,)
             signed distances corresponding to `logicals`.
         """
-        sd_vals = self.__call__(points_obj)
+        sd_vals = self.__call__(points_world)
         logicals = np.abs(sd_vals) < self._surface_threshold
         return logicals, sd_vals
 
@@ -185,63 +189,64 @@ class SignedDistanceFunction(object):
 
         Returns
         -------
-        points_obj : numpy.ndarray[float](n_point, 3)
-            sampled points w.r.t object coordinate.
+        points_world : numpy.ndarray[float](n_point, 3)
+            sampled points w.r.t the world frame.
         dists : numpy.ndarray[float](n_point,)
-            signed distances corresponding to points_obj.
+            signed distances corresponding to points_world.
         """
         points_, dists = self._surface_points(n_sample=n_sample)
-        points_obj = self._transform_pts_sdf_to_obj(points_)
-        return points_obj, dists
+        points_world = self._transform_pts_local_to_world(points_)
+        return points_world, dists
 
-    def _transform_pts_obj_to_sdf(self, points_obj):
-        """Transform points from to an object coords to a sdf-specific coords.
+    def _transform_pts_world_to_local(self, points_world):
+        """Transform points from the world frame to the local frame
+        on which the sdf is defined.
 
         Parameters
         ----------
-        points_obj : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. an object coordinate.
+        points_world : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. the world frame.
 
         Returns
         -------
-        points_sdf : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. a sdf-specific coordinate.
+        points_local : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. the sdf-defined local frame.
         """
-        if self._tf_world_to_sdf_cached is None:
+        if self._tf_world_to_local_cached is None:
             tf_world_to_local =\
                 self.coords.get_transform().inverse_transformation()
-            tf_local_to_sdf = self.sdf_to_obj_transform.inverse_transformation()
+            tf_local_to_sdf = self.local_to_world_transform.inverse_transformation()
             tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
             if self.is_frozen:
-                self._tf_world_to_sdf_cached = tf_world_to_sdf
+                self._tf_world_to_local_cached = tf_world_to_sdf
         else:
-            tf_world_to_sdf = self._tf_world_to_sdf_cached
-        points_sdf = tf_world_to_sdf.transform_vector(points_obj)
-        return points_sdf
+            tf_world_to_sdf = self._tf_world_to_local_cached
+        points_local = tf_world_to_sdf.transform_vector(points_world)
+        return points_local
 
-    def _transform_pts_sdf_to_obj(self, points_sdf):
-        """Transform points from to a sdf-specific coords to an object coords.
+    def _transform_pts_local_to_world(self, points_local):
+        """ Transform points from the sdf-defined local frame to the world frame.
 
         Parameters
         ----------
-        points_sdf : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. a sdf-specific coordinate.
+        points_local : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. the sdf-defined local frame.
 
         Returns
         -------
-        points_obj : numpy.ndarray[float](n_point, 3)
-            2 dim point array w.r.t. an object coordinate.
+        points_world : numpy.ndarray[float](n_point, 3)
+            2 dim point array w.r.t. the world frame.
         """
-        if self._tf_sdf_to_world_cached is None:
+        if self._tf_local_to_world_cached is None:
             tf_local_to_world = self.coords.get_transform()
-            tf_sdf_to_local = self.sdf_to_obj_transform
+            tf_sdf_to_local = self.local_to_world_transform
             tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
             if self.is_frozen:
-                self._tf_sdf_to_world_cached = tf_sdf_to_world
+                self._tf_local_to_world_cached = tf_sdf_to_world
         else:
-            tf_sdf_to_world = self._tf_sdf_to_world_cached
-        points_obj = tf_sdf_to_world.transform_vector(points_sdf)
-        return points_obj
+            tf_sdf_to_world = self._tf_local_to_world_cached
+        points_world = tf_sdf_to_world.transform_vector(points_local)
+        return points_world
 
 
 class UnionSDF(SignedDistanceFunction):
@@ -265,8 +270,8 @@ class UnionSDF(SignedDistanceFunction):
         threshold_list = [sdf._surface_threshold for sdf in sdf_list]
         self._surface_threshold = max(threshold_list)
 
-    def _signed_distance(self, points_sdf):
-        sd_vals_list = np.array([sdf(points_sdf) for sdf in self.sdf_list])
+    def _signed_distance(self, points_local):
+        sd_vals_list = np.array([sdf(points_local) for sdf in self.sdf_list])
         sd_vals_union = np.min(sd_vals_list, axis=0)
         return sd_vals_union
 
@@ -314,11 +319,11 @@ class BoxSDF(SignedDistanceFunction):
         self._width = np.array(width)
         self._surface_threshold = np.min(self._width) * 1e-2
 
-    def _signed_distance(self, points_sdf):
-        n_pts, _ = points_sdf.shape
+    def _signed_distance(self, points_local):
+        n_pts, _ = points_local.shape
 
         half_extent = self._width * 0.5
-        pts_from_center = points_sdf - self._origin[None, :]
+        pts_from_center = points_local - self._origin[None, :]
         sd_vals_each_axis = np.abs(pts_from_center) - half_extent[None, :]
 
         positive_dists_each_axis = np.maximum(sd_vals_each_axis, 0.0)
@@ -347,11 +352,11 @@ class SphereSDF(SignedDistanceFunction):
         self._radius = radius
         self._surface_threshold = radius * 1e-2
 
-    def _signed_distance(self, points_sdf):
-        n_pts, _ = points_sdf.shape
+    def _signed_distance(self, points_local):
+        n_pts, _ = points_local.shape
         c = self._origin
 
-        diffs = points_sdf - c[None, :]
+        diffs = points_local - c[None, :]
         dists_from_origin = np.sqrt(np.sum(diffs**2, axis=1))
         sd_vals = dists_from_origin - self._radius
         return sd_vals
@@ -375,12 +380,12 @@ class CylinderSDF(SignedDistanceFunction):
         self._radius = radius
         self._surface_threshold = min(radius, height) * 1e-2
 
-    def _signed_distance(self, points_sdf):
-        n_pts, _ = points_sdf.shape
+    def _signed_distance(self, points_local):
+        n_pts, _ = points_local.shape
         c = self._origin
         height_half = 0.5 * self._height
 
-        pts_from_center_3d = points_sdf - c[None, :]
+        pts_from_center_3d = points_local - c[None, :]
         radius_from_center = np.sqrt(
             pts_from_center_3d[:, 0]**2 + pts_from_center_3d[:, 1]**2)
         height_from_center = pts_from_center_3d[:, 2]
@@ -436,9 +441,9 @@ class GridSDF(SignedDistanceFunction):
 
         spts, _ = self._surface_points()
 
-        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
+        self.local_to_world_transform = Transform(origin, np.eye(3))
 
-    def is_out_of_bounds(self, points_obj):
+    def is_out_of_bounds(self, points_world):
         """check if the the input points is out of bounds
 
         This method checks if the the input points is out of bounds
@@ -446,8 +451,8 @@ class GridSDF(SignedDistanceFunction):
 
         Parameters
         ----------
-        points_obj : numpy.ndarray[float](n_points, 3)
-            points w.r.t. object to be checked.
+        points_world : numpy.ndarray[float](n_points, 3)
+            points w.r.t. world to be checked.
 
         Returns
         -------
@@ -455,16 +460,16 @@ class GridSDF(SignedDistanceFunction):
             If points is out of the interpolator's boundary,
             the correspoinding element of is_out_arr is True
         """
-        points_sdf = super(GridSDF, self)._transform_pts_obj_to_sdf(points_obj)
-        points_grid = np.array(points_sdf) / self._resolution
+        points_local = super(GridSDF, self)._transform_pts_world_to_local(points_world)
+        points_grid = np.array(points_local) / self._resolution
         is_out_arr = np.logical_or(
             (points_grid < 0).any(axis=1),
             (points_grid >= np.array(self._dims)).any(axis=1))
         return is_out_arr
 
-    def _signed_distance(self, points_sdf):
-        points_sdf = np.array(points_sdf)
-        sd_vals = self.itp(points_sdf)
+    def _signed_distance(self, points_local):
+        points_local = np.array(points_local)
+        sd_vals = self.itp(points_local)
         return sd_vals
 
     def _surface_points(self, n_sample=None):
