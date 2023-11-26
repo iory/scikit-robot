@@ -398,3 +398,12 @@ class TestRobotModel(unittest.TestCase):
         testing.assert_almost_equal(
             joint_angle_limit_weight([j3]),
             0.0)
+
+    def test_joint_angle_finite_protection(self):
+        pr2 = copy.deepcopy(self.pr2)
+
+        for joint in pr2.joint_list:
+            with self.assertRaises(ValueError):
+                joint.joint_angle(np.nan)
+            with self.assertRaises(ValueError):
+                joint.joint_angle(np.inf)

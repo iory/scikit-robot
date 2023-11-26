@@ -158,6 +158,33 @@ class Joint(object):
         raise NotImplementedError
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
+        """Return joint angle (translation in LinearJoint) or set it
+
+        Return joint angle if v is not set, if v is given, set the value as
+        a joint angle.
+
+        Parameters
+        ----------
+        v : None or float
+            Joint angle in a radian.
+            If v is `None`, return this joint's joint angle.
+        relative : None or bool
+            If relative is `True`, an input `v` represents the relative
+            translation.
+
+        Parameters
+        ----------
+        self._joint_angle : float
+            Current joint_angle in a radian.
+        """
+        if v is not None:
+            if not np.isfinite(v):
+                raise ValueError(
+                    "({}) joint angle '{}' is not finite".format(self.name, v))
+        self._joint_angle_inner(
+            v=v, relative=relative, enable_hook=enable_hook)
+
+    def _joint_angle_inner(self, v=None, relative=None, enable_hook=True):
         raise NotImplementedError
 
     def __repr__(self):
@@ -178,7 +205,7 @@ class Joint(object):
     def register_mimic_joint(self, joint, multiplier, offset):
         self.register_hook(
             lambda: joint.joint_angle(
-                self.joint_angle() * multiplier + offset))
+                self._joint_angle_inner() * multiplier + offset))
 
 
 class RotationalJoint(Joint):
@@ -203,26 +230,7 @@ class RotationalJoint(Joint):
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
 
-    def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Return joint angle.
-
-        Return joint angle if v is not set, if v is given, set the value as
-        a joint angle.
-
-        Parameters
-        ----------
-        v : None or float
-            Joint angle in a radian.
-            If v is `None`, return this joint's joint angle.
-        relative : None or bool
-            If relative is `True`, an input `v` represents the relative
-            translation.
-
-        Parameters
-        ----------
-        self._joint_angle : float
-            Current joint_angle in a radian.
-        """
+    def _joint_angle_inner(self, v=None, relative=None, enable_hook=True):
         if v is None:
             return self._joint_angle
         if self.joint_min_max_table and self.joint_min_max_target:
@@ -277,11 +285,7 @@ class FixedJoint(Joint):
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
 
-    def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Joint angle method.
-
-        Return joint_angle
-        """
+    def _joint_angle_inner(self, v=None, relative=None, enable_hook=True):
         return self._joint_angle
 
     @property
@@ -358,23 +362,7 @@ class LinearJoint(Joint):
         self.joint_acceleration = 0.0  # [m/s^2]
         self.joint_torque = 0.0  # [N]
 
-    def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Return this joint's linear translation (joint angle).
-
-        Parameters
-        ----------
-        v : None or float
-            Linear translation (joint angle) in a meter.
-            If v is `None`, return current this joint's translation.
-        relative : None or bool
-            If relative is `True`, an input `v` represents the relative
-            translation.
-
-        Parameters
-        ----------
-        self._joint_angle : float
-            current linear translation (joint_angle).
-        """
+    def _joint_angle_inner(self, v=None, relative=None, enable_hook=True):
         if v is not None:
             if relative is not None:
                 v = v + self._joint_angle
@@ -431,10 +419,7 @@ class OmniWheelJoint(Joint):
         self.joint_acceleration = (0, 0, 0)
         self.joint_torque = (0, 0, 0)
 
-    def joint_angle(self, v=None, relative=None, enable_hook=True):
-        """Return joint-angle if v is not set, if v is given, set joint angle.
-
-        """
+    def _joint_angle_inner(self, v=None, relative=None, enable_hook=True):
         if v is not None:
             v = np.array(v, dtype=np.float64)
             # translation
