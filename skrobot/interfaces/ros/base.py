@@ -162,8 +162,9 @@ class ROSRobotInterfaceBase(object):
         else:
             initial_time = rospy.Time.now().to_nsec()
         while True:
-            if all(map(lambda ts: ts.to_nsec() > initial_time,
-                       self.robot_state['stamp_list'])):
+            if 'stamp_list' in self.robot_state \
+               and all(map(lambda ts: ts.to_nsec() > initial_time,
+                           self.robot_state['stamp_list'])):
                 return
 
     def set_robot_state(self, key, msg):
