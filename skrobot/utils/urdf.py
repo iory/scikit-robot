@@ -252,11 +252,9 @@ def _load_meshes(filename):
         _, ext = os.path.splitext(filename)
         # It seems that .3DXML files assume [mm] unit.
         # Convert the mesh unit from [mm] to [m].
-        if ext.lower() in ['.3dxml']:
-            meshes = trimesh.load(filename)
-            meshes = meshes.scaled(0.001)
-        else:
-            meshes = trimesh.load(filename)
+        # To convert the mesh unit from millimeters to meters,
+        # use the function meshes.convert_units('meter').
+        meshes = trimesh.load(filename)
         if meshes.units is not None and meshes.units != 'meter':
             meshes = meshes.convert_units('meter')
     except Exception as e:
