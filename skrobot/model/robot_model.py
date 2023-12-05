@@ -59,10 +59,15 @@ class CascadedLink(CascadedCoords):
         self._collision_manager = None
         self._relevance_predicate_table = None
 
-    def _compute_relevance_predicate_table(self):
+    def _compute_relevance_predicate_table(self, joint_list=None,
+                                           link_list=None):
+        if joint_list is None:
+            joint_list = self.joint_list
+        if link_list is None:
+            link_list = self.link_list
         relevance_predicate_table = {}
-        for joint in self.joint_list:
-            for link in self.link_list:
+        for joint in joint_list:
+            for link in link_list:
                 key = (joint, link)
                 relevance_predicate_table[key] = False
 
@@ -75,7 +80,7 @@ class CascadedLink(CascadedCoords):
             for clink in link._child_links:
                 inner_recursion(joint, clink)
 
-        for joint in self.joint_list:
+        for joint in joint_list:
             link = joint.child_link
             inner_recursion(joint, link)
         return relevance_predicate_table
