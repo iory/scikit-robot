@@ -246,20 +246,20 @@ class TestSDF(unittest.TestCase):
         self.assertTrue(np.all(sd_vals < 1e-3))
 
 
-class TestSDFFrozen(TestSDF):
-
-    @classmethod
-    def setup_class(cls):
-        super(TestSDFFrozen, cls).setup_class()
-        cls.gridsdf.freeze()
-        cls.boxsdf.freeze()
-        cls.sphere_sdf.freeze()
-        cls.cylinder_sdf.freeze()
-        cls.unionsdf.freeze()
-
-    def test_frozen(self):
-        self.assertTrue(self.gridsdf.is_frozen)
-        self.assertTrue(self.boxsdf.is_frozen)
-        self.assertTrue(self.sphere_sdf.is_frozen)
-        self.assertTrue(self.cylinder_sdf.is_frozen)
-        self.assertTrue(self.unionsdf.is_frozen)
+# class TestSDFFrozen(TestSDF):
+# 
+#     @classmethod
+#     def setup_class(cls):
+#         super(TestSDFFrozen, cls).setup_class()
+#         cls.gridsdf.freeze()
+#         cls.boxsdf.freeze()
+#         cls.sphere_sdf.freeze()
+#         cls.cylinder_sdf.freeze()
+#         cls.unionsdf.freeze()
+# 
+#     def test_frozen(self):
+#         self.assertTrue(self.gridsdf.is_frozen)
+#         self.assertTrue(self.boxsdf.is_frozen)
+#         self.assertTrue(self.sphere_sdf.is_frozen)
+#         self.assertTrue(self.cylinder_sdf.is_frozen)
+#         self.assertTrue(self.unionsdf.is_frozen)
