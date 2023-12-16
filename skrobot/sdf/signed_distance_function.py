@@ -10,7 +10,6 @@ from scipy.interpolate import RegularGridInterpolator
 
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_cascoords
-from skrobot.coordinates import Transform
 from skrobot.data import get_cache_dir
 from skrobot.utils import checksum_md5
 
@@ -50,14 +49,14 @@ def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
         shape = mesh.metadata['shape']
         if shape == 'box':
             extents = mesh.metadata['extents']
-            sdf = BoxSDF([0, 0, 0], extents)
+            sdf = BoxSDF(extents)
         elif shape == 'cylinder':
             height = mesh.metadata['height']
             radius = mesh.metadata['radius']
-            sdf = CylinderSDF([0, 0, 0], radius=radius, height=height)
+            sdf = CylinderSDF(radius=radius, height=height)
         elif shape == 'sphere':
             radius = mesh.metadata['radius']
-            sdf = SphereSDF([0, 0, 0], radius)
+            sdf = SphereSDF(radius)
         else:
             msg = "primtive type {0} is not supported".format(shape)
             raise ValueError(msg)
@@ -110,13 +109,11 @@ class SignedDistanceFunction(object):
     it is less likely that a user directly calls a method in a child class.
     """
 
-    def __init__(self, origin, coords=None, use_abs=False):
+    def __init__(self, coords=None, use_abs=False):
         if coords is None:
             coords = CascadedCoords()
 
         self.coords = coords
-        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
-        self._origin = np.array(origin)
         self.use_abs = use_abs
 
     def __call__(self, points_obj):
@@ -191,9 +188,7 @@ class SignedDistanceFunction(object):
         """
         tf_world_to_local =\
             self.coords.get_transform().inverse_transformation()
-        tf_local_to_sdf = self.sdf_to_obj_transform.inverse_transformation()
-        tf_world_to_sdf = tf_world_to_local * tf_local_to_sdf
-        points_sdf = tf_world_to_sdf.transform_vector(points_obj)
+        points_sdf = tf_world_to_local.transform_vector(points_obj)
         return points_sdf
 
     def _transform_pts_sdf_to_obj(self, points_sdf):
@@ -210,9 +205,7 @@ class SignedDistanceFunction(object):
             2 dim point array w.r.t. an object coordinate.
         """
         tf_local_to_world = self.coords.get_transform()
-        tf_sdf_to_local = self.sdf_to_obj_transform
-        tf_sdf_to_world = tf_sdf_to_local * tf_local_to_world
-        points_obj = tf_sdf_to_world.transform_vector(points_sdf)
+        points_obj = tf_local_to_world.transform_vector(points_sdf)
         return points_obj
 
 
@@ -224,9 +217,8 @@ class UnionSDF(SignedDistanceFunction):
     """
 
     def __init__(self, sdf_list, coords=None):
-        origin = np.zeros(3)
         use_abs = False
-        super(UnionSDF, self).__init__(origin, coords=coords, use_abs=use_abs)
+        super(UnionSDF, self).__init__(coords=coords, use_abs=use_abs)
 
         use_abs_list = [sdf.use_abs for sdf in sdf_list]
         all_false = np.all(~np.array(use_abs_list))
@@ -279,10 +271,10 @@ class UnionSDF(SignedDistanceFunction):
 
 
 class BoxSDF(SignedDistanceFunction):
-    """SDF for a box specified by `origin` and `width`."""
+    """SDF for a box specified by `width`."""
 
-    def __init__(self, origin, width, coords=None, use_abs=False):
-        super(BoxSDF, self).__init__(origin, coords=coords, use_abs=use_abs)
+    def __init__(self, width, coords=None, use_abs=False):
+        super(BoxSDF, self).__init__(coords=coords, use_abs=use_abs)
         self._width = np.array(width)
         self._surface_threshold = np.min(self._width) * 1e-2
 
@@ -290,8 +282,7 @@ class BoxSDF(SignedDistanceFunction):
         n_pts, _ = points_sdf.shape
 
         half_extent = self._width * 0.5
-        pts_from_center = points_sdf - self._origin[None, :]
-        sd_vals_each_axis = np.abs(pts_from_center) - half_extent[None, :]
+        sd_vals_each_axis = np.abs(points_sdf) - half_extent[None, :]
 
         positive_dists_each_axis = np.maximum(sd_vals_each_axis, 0.0)
         positive_dists = np.sqrt(np.sum(positive_dists_each_axis**2, axis=1))
@@ -312,19 +303,16 @@ class BoxSDF(SignedDistanceFunction):
 
 
 class SphereSDF(SignedDistanceFunction):
-    """SDF for a sphere specified by `origin` and `radius`."""
+    """SDF for a sphere specified by `radius`."""
 
-    def __init__(self, origin, radius, coords=None, use_abs=False):
-        super(SphereSDF, self).__init__(origin, coords=coords, use_abs=use_abs)
+    def __init__(self, radius, coords=None, use_abs=False):
+        super(SphereSDF, self).__init__(coords=coords, use_abs=use_abs)
         self._radius = radius
         self._surface_threshold = radius * 1e-2
 
     def _signed_distance(self, points_sdf):
         n_pts, _ = points_sdf.shape
-        c = self._origin
-
-        diffs = points_sdf - c[None, :]
-        dists_from_origin = np.sqrt(np.sum(diffs**2, axis=1))
+        dists_from_origin = np.sqrt(np.sum(points_sdf**2, axis=1))
         sd_vals = dists_from_origin - self._radius
         return sd_vals
 
@@ -338,24 +326,21 @@ class SphereSDF(SignedDistanceFunction):
 
 
 class CylinderSDF(SignedDistanceFunction):
-    """SDF for a cylinder specified by `origin`,`radius` and `height`"""
+    """SDF for a cylinder specified by `radius` and `height`"""
 
-    def __init__(self, origin, height, radius, coords=None, use_abs=False):
-        super(CylinderSDF, self).__init__(origin,
-                                          coords=coords, use_abs=use_abs)
+    def __init__(self, height, radius, coords=None, use_abs=False):
+        super(CylinderSDF, self).__init__(coords=coords, use_abs=use_abs)
         self._height = height
         self._radius = radius
         self._surface_threshold = min(radius, height) * 1e-2
 
     def _signed_distance(self, points_sdf):
         n_pts, _ = points_sdf.shape
-        c = self._origin
         height_half = 0.5 * self._height
 
-        pts_from_center_3d = points_sdf - c[None, :]
         radius_from_center = np.sqrt(
-            pts_from_center_3d[:, 0]**2 + pts_from_center_3d[:, 1]**2)
-        height_from_center = pts_from_center_3d[:, 2]
+            points_sdf[:, 0]**2 + points_sdf[:, 1]**2)
+        height_from_center = points_sdf[:, 2]
 
         # Now the problem is reduced to 2 dim [radius, height] box sdf
         # so the algorithm from now is the same as the box sdf computation
@@ -389,7 +374,7 @@ class GridSDF(SignedDistanceFunction):
     def __init__(self, sdf_data, origin, resolution,
                  fill_value=np.inf, coords=None, use_abs=False):
 
-        super(GridSDF, self).__init__(origin, coords=coords, use_abs=use_abs)
+        super(GridSDF, self).__init__(coords=coords, use_abs=use_abs)
         # optionally use only the absolute values
         # (useful for non-closed meshes in 3D)
         self._data = np.abs(sdf_data) if use_abs else sdf_data
@@ -405,10 +390,7 @@ class GridSDF(SignedDistanceFunction):
             self._data,
             bounds_error=False,
             fill_value=fill_value)
-
-        spts, _ = self._surface_points()
-
-        self.sdf_to_obj_transform = Transform(origin, np.eye(3))
+        self.origin = origin
 
     def is_out_of_bounds(self, points_obj):
         """check if the the input points is out of bounds
@@ -428,7 +410,8 @@ class GridSDF(SignedDistanceFunction):
             the correspoinding element of is_out_arr is True
         """
         points_sdf = super(GridSDF, self)._transform_pts_obj_to_sdf(points_obj)
-        points_grid = np.array(points_sdf) / self._resolution
+        points_sdf_offset = points_sdf - self.origin[None, :]
+        points_grid = np.array(points_sdf_offset) / self._resolution
         is_out_arr = np.logical_or(
             (points_grid < 0).any(axis=1),
             (points_grid >= np.array(self._dims)).any(axis=1))
@@ -436,29 +419,33 @@ class GridSDF(SignedDistanceFunction):
 
     def _signed_distance(self, points_sdf):
         points_sdf = np.array(points_sdf)
-        sd_vals = self.itp(points_sdf)
+        points_sdf_offset = points_sdf - self.origin[None, :]
+        sd_vals = self.itp(points_sdf_offset)
         return sd_vals
 
     def _surface_points(self, n_sample=None):
-        surface_points = np.where(np.abs(self._data) < self._surface_threshold)
-        x = surface_points[0]
-        y = surface_points[1]
-        z = surface_points[2]
-        surface_points = np.c_[x, np.c_[y, z]]
-        surface_values = self._data[surface_points[:, 0],
-                                    surface_points[:, 1],
-                                    surface_points[:, 2]]
+        surface_points_offset = np.where(
+            np.abs(self._data) < self._surface_threshold)
+        x = surface_points_offset[0]
+        y = surface_points_offset[1]
+        z = surface_points_offset[2]
+        surface_points_offset = np.c_[x, np.c_[y, z]]
+        surface_values = self._data[surface_points_offset[:, 0],
+                                    surface_points_offset[:, 1],
+                                    surface_points_offset[:, 2]]
         if n_sample is not None:
             # somple points WITHOUT duplication
-            n_pts = len(surface_points)
+            n_pts = len(surface_points_offset)
             n_sample = min(n_sample, n_pts)
             idxes = np.random.permutation(n_pts)[:n_sample]
 
             # update points and sds
-            surface_points = surface_points[idxes]
+            surface_points_offset = surface_points_offset[idxes]
             surface_values = surface_values[idxes]
+        surface_points = (surface_points_offset * self._resolution)\
+            + self.origin[None, :]
 
-        return surface_points * self._resolution, surface_values
+        return surface_points, surface_values
 
     @staticmethod
     def from_file(filepath, **kwargs):
