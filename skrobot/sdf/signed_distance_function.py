@@ -9,7 +9,7 @@ import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
 
 from skrobot.coordinates import CascadedCoords
-from skrobot.coordinates import make_cascoords
+from skrobot.coordinates import Coordinates
 from skrobot.data import get_cache_dir
 from skrobot.utils import checksum_md5
 
@@ -64,7 +64,7 @@ def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
     origin = mesh.metadata["origin"]
     rotation_matrix = origin[:3, :3]
     translation = origin[:3, 3]
-    sdf.coords = make_cascoords(pos=translation, rot=rotation_matrix)
+    sdf.newcoords(Coordinates(pos=translation, rot=rotation_matrix))
     return sdf
 
 
@@ -89,11 +89,11 @@ def link2sdf(link, urdf_path, dim_grid=30):
     """
 
     sdf = trimesh2sdf(link.collision_mesh, dim_grid=dim_grid)
-    link.assoc(sdf.coords, relative_coords=sdf.coords)
+    link.assoc(sdf, relative_coords=sdf)
     return sdf
 
 
-class SignedDistanceFunction(object):
+class SignedDistanceFunction(CascadedCoords):
     """A base class for signed distance functions (SDFs).
 
     SDFs are used to represent and manipulate implicit surfaces.
@@ -113,12 +113,28 @@ class SignedDistanceFunction(object):
     of the SDF.
     """
 
-    def __init__(self, coords=None, use_abs=False):
-        if coords is None:
-            coords = CascadedCoords()
+    def __init__(self, use_abs=False):
+        super(SignedDistanceFunction, self).__init__()
 
-        self.coords = coords
+        self.tf_sdf_to_world = self.get_transform()
+        self.tf_world_to_sdf =\
+            self.tf_sdf_to_world.inverse_transformation()
         self.use_abs = use_abs
+
+    def update(self, force=False):
+        # preserve the previous value of self._changed
+        # as it will changed to False by super().update()
+        changed = self._changed
+
+        super(SignedDistanceFunction, self).update(force=force)
+
+        if changed:
+            # this operation must come after super().update()
+            # otherwise, infinite recursion occurs
+            # because get_transform() internally calls update()
+            self.tf_sdf_to_world = self.get_transform()
+            self.tf_world_to_sdf =\
+                self.tf_sdf_to_world.inverse_transformation()
 
     def __call__(self, points_world):
         """Compute signed distances of input points to the implicit surface.
@@ -173,6 +189,7 @@ class SignedDistanceFunction(object):
         dists : numpy.ndarray[float](n_point,)
             signed distances corresponding to points_world.
         """
+        self.update()
         points_, dists = self._surface_points(n_sample=n_sample)
         points_world = self._transform_pts_sdf_to_world(points_)
         return points_world, dists
@@ -190,9 +207,8 @@ class SignedDistanceFunction(object):
         points_sdf : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. the sdf-defined sdf frame.
         """
-        tf_world_to_sdf =\
-            self.coords.get_transform().inverse_transformation()
-        points_sdf = tf_world_to_sdf.transform_vector(points_world)
+        self.update()
+        points_sdf = self.tf_world_to_sdf.transform_vector(points_world)
         return points_sdf
 
     def _transform_pts_sdf_to_world(self, points_sdf):
@@ -208,8 +224,7 @@ class SignedDistanceFunction(object):
         points_world : numpy.ndarray[float](n_point, 3)
             2 dim point array w.r.t. the world frame.
         """
-        tf_sdf_to_world = self.coords.get_transform()
-        points_world = tf_sdf_to_world.transform_vector(points_sdf)
+        points_world = self.tf_sdf_to_world.transform_vector(points_sdf)
         return points_world
 
 
@@ -220,9 +235,9 @@ class UnionSDF(SignedDistanceFunction):
     the all SDFs to be concated are with `use_abs=False`.
     """
 
-    def __init__(self, sdf_list, coords=None):
+    def __init__(self, sdf_list):
         use_abs = False
-        super(UnionSDF, self).__init__(coords=coords, use_abs=use_abs)
+        super(UnionSDF, self).__init__(use_abs=use_abs)
 
         use_abs_list = [sdf.use_abs for sdf in sdf_list]
         all_false = np.all(~np.array(use_abs_list))
@@ -277,8 +292,8 @@ class UnionSDF(SignedDistanceFunction):
 class BoxSDF(SignedDistanceFunction):
     """SDF for a box specified by `width`."""
 
-    def __init__(self, width, coords=None, use_abs=False):
-        super(BoxSDF, self).__init__(coords=coords, use_abs=use_abs)
+    def __init__(self, width, use_abs=False):
+        super(BoxSDF, self).__init__(use_abs=use_abs)
         self._width = np.array(width)
         self._surface_threshold = np.min(self._width) * 1e-2
 
@@ -309,8 +324,8 @@ class BoxSDF(SignedDistanceFunction):
 class SphereSDF(SignedDistanceFunction):
     """SDF for a sphere specified by `radius`."""
 
-    def __init__(self, radius, coords=None, use_abs=False):
-        super(SphereSDF, self).__init__(coords=coords, use_abs=use_abs)
+    def __init__(self, radius, use_abs=False):
+        super(SphereSDF, self).__init__(use_abs=use_abs)
         self._radius = radius
         self._surface_threshold = radius * 1e-2
 
@@ -332,8 +347,8 @@ class SphereSDF(SignedDistanceFunction):
 class CylinderSDF(SignedDistanceFunction):
     """SDF for a cylinder specified by `radius` and `height`"""
 
-    def __init__(self, height, radius, coords=None, use_abs=False):
-        super(CylinderSDF, self).__init__(coords=coords, use_abs=use_abs)
+    def __init__(self, height, radius, use_abs=False):
+        super(CylinderSDF, self).__init__(use_abs=use_abs)
         self._height = height
         self._radius = radius
         self._surface_threshold = min(radius, height) * 1e-2
@@ -375,9 +390,9 @@ class GridSDF(SignedDistanceFunction):
     """SDF using precopmuted signed distances for gridded points."""
 
     def __init__(self, sdf_data, origin, resolution,
-                 fill_value=np.inf, coords=None, use_abs=False):
+                 fill_value=np.inf, use_abs=False):
 
-        super(GridSDF, self).__init__(coords=coords, use_abs=use_abs)
+        super(GridSDF, self).__init__(use_abs=use_abs)
         # optionally use only the absolute values
         # (useful for non-closed meshes in 3D)
         self._data = np.abs(sdf_data) if use_abs else sdf_data

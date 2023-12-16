@@ -35,7 +35,7 @@ class TestSDF(unittest.TestCase):
         box_withds = np.array([0.05, 0.1, 0.05])
         boxsdf = BoxSDF(box_withds)
         boxtrans = np.array([0.0, 0.1, 0.0])
-        boxsdf.coords.translate(boxtrans)
+        boxsdf.translate(boxtrans)
 
         cls.box_withds = box_withds
         cls.boxsdf = boxsdf
@@ -128,6 +128,16 @@ class TestSDF(unittest.TestCase):
         testing.assert_array_almost_equal(
             sdf(points_box_edge_world), [0, 0])
 
+    def test_update(self):
+        origins = np.zeros((1, 3))
+        width = np.array([1, 1, 1])
+        sdf = BoxSDF(width)
+        testing.assert_almost_equal(sdf(origins)[0], -0.5)
+
+        # after translation, transformations must be updated
+        sdf.translate(0.5 * width)
+        testing.assert_almost_equal(sdf(origins)[0], 0.0)
+
     def test_surface_points(self):
         sdf = self.boxsdf
         surface_points_world, _ = sdf.surface_points(n_sample=20)
@@ -180,8 +190,8 @@ class TestSDF(unittest.TestCase):
         assert np.all(logicals)
 
     def test_unionsdf_assert_use_abs_false(self):
-        b1 = BoxSDF([1, 1, 1], [0, 0, 0], use_abs=True)
-        b2 = BoxSDF([1, 1, 1], [0, 0, 0], use_abs=False)
+        b1 = BoxSDF([1, 1, 1], use_abs=True)
+        b2 = BoxSDF([1, 1, 1], use_abs=False)
         with self.assertRaises(AssertionError):
             UnionSDF(sdf_list=[b1, b2])
 

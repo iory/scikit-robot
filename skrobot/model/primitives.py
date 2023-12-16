@@ -65,7 +65,7 @@ class Box(Link):
         self._extents = extents
         if with_sdf:
             sdf = BoxSDF(extents)
-            self.assoc(sdf.coords, relative_coords="local")
+            self.assoc(sdf, relative_coords="local")
             self.sdf = sdf
 
 
@@ -137,7 +137,7 @@ class Cylinder(Link):
                                        visual_mesh=mesh)
         if with_sdf:
             sdf = CylinderSDF(height, radius)
-            self.assoc(sdf.coords, relative_coords="local")
+            self.assoc(sdf, relative_coords="local")
             self.sdf = sdf
 
 
@@ -159,7 +159,7 @@ class Sphere(Link):
 
         if with_sdf:
             sdf = SphereSDF(radius)
-            self.assoc(sdf.coords, relative_coords="local")
+            self.assoc(sdf, relative_coords="local")
             self.sdf = sdf
 
 
@@ -238,7 +238,7 @@ class MeshLink(Link):
         if with_sdf:
             sdf = trimesh2sdf(self._collision_mesh, dim_grid=dim_grid,
                               padding_grid=padding_grid)
-            self.assoc(sdf.coords, relative_coords="local")
+            self.assoc(sdf, relative_coords="local")
             self.sdf = sdf
 
 
