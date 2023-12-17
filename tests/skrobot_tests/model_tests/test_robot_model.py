@@ -20,6 +20,7 @@ class TestRobotModel(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.pr2 = skrobot.models.PR2()
         cls.fetch = skrobot.models.Fetch()
         cls.kuka = skrobot.models.Kuka()
 
@@ -309,6 +310,33 @@ class TestRobotModel(unittest.TestCase):
             target_coords, True)
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
         self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+        # assoc coords
+        robot = self.pr2
+        assoc_coords = robot.larm.end_coords.copy_worldcoords().translate(
+            [0.3, 0, 0])
+        assoc_coords_axis = skrobot.model.Axis()
+        assoc_coords_axis.newcoords(assoc_coords.copy_worldcoords())
+        robot.larm.end_coords.parent.assoc(assoc_coords_axis, 'world')
+        robot.reset_pose()
+        ret = robot.larm.inverse_kinematics(
+            assoc_coords_axis, move_target=assoc_coords_axis)
+        self.assertIsNot(ret, False)
+        robot.reset_pose()
+        ret = robot.larm.inverse_kinematics(
+            assoc_coords_axis.copy_worldcoords(),
+            move_target=assoc_coords_axis)
+        self.assertIsNot(ret, False)
+        robot.reset_pose()
+        ret = robot.larm.inverse_kinematics(
+            assoc_coords_axis.copy_worldcoords(),
+            move_target=robot.larm.end_coords)
+        self.assertIsNot(ret, False)
+        robot.reset_pose()
+        ret = robot.larm.inverse_kinematics(
+            assoc_coords_axis.copy_worldcoords(),
+            move_target=robot.larm.end_coords.parent)
+        self.assertIsNot(ret, False)
 
     def test_calc_target_joint_dimension(self):
         fetch = self.fetch

@@ -72,7 +72,8 @@ class Box(Link):
 class CameraMarker(Link):
 
     def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
-                 marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3), name=None):
+                 marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3),
+                 without_axis=False, name=None):
         if name is None:
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
@@ -85,9 +86,13 @@ class CameraMarker(Link):
                                       z_near=z_near,
                                       z_far=z_far)
 
+        origin_size = None
+        if without_axis is True:
+            origin_size = 0.0
         self._visual_mesh = trimesh.creation.camera_marker(
             camera,
-            marker_height=marker_height)
+            marker_height=marker_height,
+            origin_size=origin_size)
 
 
 class Cone(Link):

@@ -1,8 +1,8 @@
 import numpy as np
 
 from skrobot.coordinates import make_coords
-from skrobot.coordinates.math import _wrap_axis
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import convert_to_axis_vector
 from skrobot.coordinates.math import midpoint
 from skrobot.coordinates.math import midrot
 from skrobot.coordinates.math import normalize_vector
@@ -50,7 +50,7 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     v : list or numpy.ndarray
         position of target [x, y, z]
     axis : list or string or numpy.ndarray
-        see _wrap_axis function
+        see convert_to_axis_vector function
     eps : float (optional)
         eps
 
@@ -91,7 +91,7 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     if np.linalg.norm(v) == 0.0:
         v = np.array([0, 0, 1], 'f')
     nv = normalize_vector(v)
-    axis = _wrap_axis(axis)
+    axis = convert_to_axis_vector(axis)
     ax = target_coords.rotate_vector(axis)
     rot_axis = np.cross(ax, nv)
     rot_angle_cos = np.clip(np.dot(nv, ax), -1.0, 1.0)

@@ -9,8 +9,8 @@ from ordered_set import OrderedSet
 import six
 import trimesh
 
-from skrobot.coordinates import _wrap_axis
 from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
@@ -31,7 +31,6 @@ from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
-from skrobot.optimizer import solve_qp
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
 from skrobot.utils.urdf import URDF
@@ -970,6 +969,13 @@ class CascadedLink(CascadedCoords):
                                mv.difference_rotation(
                                    tc, rotation_axis=rot_axis),
                                move_target, target_coords, rotation_axis))
+            if loop == 1 and self.ik_convergence_check(
+                    dif_pos, dif_rot, rotation_axis, translation_axis,
+                    thre, rthre, centroid_thre, target_centroid_pos,
+                    centroid_offset_func, cog_translation_axis,
+            ):
+                success = 'ik-succeed'
+                break
 
             success = self.inverse_kinematics_loop(
                 dif_pos, dif_rot,
@@ -1053,7 +1059,7 @@ class CascadedLink(CascadedCoords):
 
         translation_axis : list of axis
         rotation_axis : list of axis
-            see _wrap_axis
+            see convert_to_axis_vector
         """
         for i in range(len(dif_pos)):
             if LA.norm(dif_pos[i]) > thre[i]:
@@ -1312,6 +1318,7 @@ class CascadedLink(CascadedCoords):
                          sym_proj=False,
                          solver='cvxopt',
                          *args, **kwargs):
+        from skrobot.optimizer import solve_qp
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
         n_target = len(target_coords)
@@ -1525,7 +1532,7 @@ class CascadedLink(CascadedCoords):
 
                     if self._is_relevant(joint, move_target):
                         if joint.joint_dof <= 1:
-                            paxis = _wrap_axis(joint.axis)
+                            paxis = convert_to_axis_vector(joint.axis)
                         else:
                             paxis = joint.axis
                         child_link = joint.child_link
@@ -1731,6 +1738,7 @@ class RobotModel(CascadedLink):
         else:
             self.urdf_path = getattr(file_obj, 'name', None)
         self.urdf_robot_model = URDF.load(file_obj=file_obj)
+        self.name = self.urdf_robot_model.name
         root_link = self.urdf_robot_model.base_link
 
         links = []

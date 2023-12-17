@@ -26,6 +26,7 @@ import numpy as np
 import PIL
 import six
 import trimesh
+from trimesh.visual.material import PBRMaterial
 
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
@@ -40,7 +41,9 @@ except ImportError:
 
 
 logger = getLogger(__name__)
-_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf}
+_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
+                        'no_mesh_load_mode': False,
+                        }
 
 
 @contextlib.contextmanager
@@ -48,6 +51,20 @@ def mesh_simplify_factor(factor):
     _CONFIGURABLE_VALUES["mesh_simplify_factor"] = factor
     yield
     _CONFIGURABLE_VALUES["mesh_simplify_factor"] = np.inf
+
+
+@contextlib.contextmanager
+def no_mesh_load_mode():
+    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
+    yield
+    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
+
+
+def get_transparency(mesh):
+    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
+        material = mesh.visual.material
+        if hasattr(material, 'main_color'):
+            return material.main_color[3]
 
 
 def parse_origin(node):
@@ -115,6 +132,7 @@ def get_path_with_cache(ros_package):
 
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
+    base_path = os.path.abspath(base_path)
 
     if rospkg and parsed_url.scheme == 'package':
         try:
@@ -128,11 +146,12 @@ def resolve_filepath(base_path, file_path):
 
     dirname = base_path
     file_path = parsed_url.netloc + parsed_url.path
-    while not dirname == '/':
+    while dirname and dirname != '/':
         resolved_filepath = os.path.join(dirname, file_path)
         if os.path.exists(resolved_filepath):
             return resolved_filepath
         dirname = os.path.dirname(dirname)
+    return None
 
 
 def get_filename(base_path, file_path, makedirs=False):
@@ -230,7 +249,14 @@ def _load_meshes(filename):
         The meshes loaded from the file.
     """
     try:
+        _, ext = os.path.splitext(filename)
+        # It seems that .3DXML files assume [mm] unit.
+        # Convert the mesh unit from [mm] to [m].
+        # To convert the mesh unit from millimeters to meters,
+        # use the function meshes.convert_units('meter').
         meshes = trimesh.load(filename)
+        if meshes.units is not None and meshes.units != 'meter':
+            meshes = meshes.convert_units('meter')
     except Exception as e:
         logger.error("Failed to load meshes from {}. Error: {}"
                      .format(filename, e))
@@ -244,7 +270,7 @@ def _load_meshes(filename):
     if isinstance(meshes, (list, tuple, set)):
         meshes = list(meshes)
         if len(meshes) == 0:
-            raise ValueError('At least one mesh must be pmeshesent in file')
+            raise ValueError('At least one mesh must be present in file')
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
                 raise TypeError('Could not load meshes from file')
@@ -253,6 +279,11 @@ def _load_meshes(filename):
     else:
         raise ValueError('Unable to load mesh from file')
 
+    for mesh in meshes:
+        transparency = get_transparency(mesh)
+        if transparency is not None and transparency == 0.0:
+            if isinstance(mesh.visual.material, PBRMaterial):
+                mesh.visual.material.baseColorFactor[3] = 255
     return meshes
 
 
@@ -403,12 +434,12 @@ class URDFType(object):
             else:
                 vs = node.findall(t._TAG)
                 if len(vs) == 0 and r:
-                    raise ValueError(
-                        'Missing required subelement(s) of type {} when '
-                        'parsing an object of type {}'.format(
-                            t.__name__, cls.__name__
-                        )
-                    )
+                    logger.error(
+                        'Missing required {} tag for '
+                        '<{} name="{}"> in {}.'
+                        .format(t._TAG, node.tag,
+                                node.attrib['name'], cls.__name__
+                                ))
                 v = [t._from_xml(n, path) for n in vs]
             kwargs[a] = v
         return kwargs
@@ -606,7 +637,8 @@ class Box(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.box(extents=self.size)]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.box(extents=self.size)]
         return self._meshes
 
 
@@ -665,9 +697,10 @@ class Cylinder(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.cylinder(
-                radius=self.radius, height=self.length
-            )]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.cylinder(
+                    radius=self.radius, height=self.length
+                )]
         return self._meshes
 
 
@@ -708,7 +741,8 @@ class Sphere(URDFType):
         that represent this object.
         """
         if len(self._meshes) == 0:
-            self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
+            if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
         return self._meshes
 
 
@@ -781,8 +815,6 @@ class Mesh(URDFType):
             value = load_meshes(value)
         elif isinstance(value, (list, tuple, set)):
             value = list(value)
-            if len(value) == 0:
-                raise ValueError('Mesh must have at least one trimesh.Trimesh')
             for m in value:
                 if not isinstance(m, trimesh.Trimesh):
                     raise TypeError('Mesh requires a trimesh.Trimesh or a '
@@ -801,12 +833,15 @@ class Mesh(URDFType):
         # visual ones separate to preserve colors and textures
         fn = get_filename(path, kwargs['filename'])
         combine = node.getparent().getparent().tag == Collision._TAG
-        meshes = load_meshes(fn)
-        if combine:
-            # Delete visuals for simplicity
-            for m in meshes:
-                m.visual = trimesh.visual.ColorVisuals(mesh=m)
-            meshes = [meshes[0] + meshes[1:]]
+        if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+            meshes = load_meshes(fn)
+            if combine:
+                # Delete visuals for simplicity
+                for m in meshes:
+                    m.visual = trimesh.visual.ColorVisuals(mesh=m)
+                meshes = [meshes[0] + meshes[1:]]
+        else:
+            meshes = []
         kwargs['meshes'] = meshes
 
         return Mesh(**kwargs)
@@ -1978,7 +2013,10 @@ class Transmission(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        kwargs['trans_type'] = node.find('type').text
+        if node.find('type') is not None:
+            kwargs['trans_type'] = node.find('type').text
+        else:
+            kwargs['trans_type'] = 'transmission_interface/SimpleTransmission'
         return Transmission(**kwargs)
 
     def _to_xml(self, parent, path):

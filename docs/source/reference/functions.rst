@@ -10,7 +10,7 @@ Utilities functions
    :toctree: generated/
    :nosignatures:
 
-   skrobot.coordinates.math._wrap_axis
+   skrobot.coordinates.math.convert_to_axis_vector
    skrobot.coordinates.math._check_valid_rotation
    skrobot.coordinates.math._check_valid_translation
    skrobot.coordinates.math.triple_product

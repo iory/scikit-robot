@@ -206,7 +206,22 @@ class TestMath(unittest.TestCase):
         with self.assertRaises(ValueError):
             rotation_angle(rot)
 
-        self.assertEqual(rotation_angle(np.eye(3)), None)
+        # Coordinates().rotate(np.pi / 2.0, 'y').rotation
+        rot = [[0, 0, 1],
+               [0, 1, 0],
+               [-1, 0, 0]]
+        theta, axis = rotation_angle(rot)
+        testing.assert_array_almost_equal(theta, np.pi / 2.0)
+        testing.assert_array_almost_equal(axis, [0, 1, 0])
+        angular_velocity_vector = rotation_angle(
+            rot, return_angular_velocity=True)
+        testing.assert_array_almost_equal(
+            angular_velocity_vector, [0, np.pi / 2.0, 0])
+
+        self.assertEqual(rotation_angle(np.eye(3)), (None, None))
+        self.assertEqual(
+            rotation_angle(np.eye(3), return_angular_velocity=True),
+            None)
 
     def test_outer_product_matrix(self):
         testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
