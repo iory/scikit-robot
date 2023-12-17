@@ -107,38 +107,38 @@ class TestSDF(unittest.TestCase):
         testing.assert_array_equal(sdf._signed_distance(ray_tips), sd_vals)
         self.assertTrue(np.all(np.abs(sd_vals) < sdf._surface_threshold))
 
-    def test__transform_pts_obj_to_sdf_and_sdf_to_obj(self):
+    def test__transform_pts_world_to_sdf_and_sdf_to_world(self):
         sdf, trans = self.boxsdf, self.boxtrans
-        points_obj = np.random.randn(100, 3)
-        points_sdf = sdf._transform_pts_obj_to_sdf(points_obj)
+        points_world = np.random.randn(100, 3)
+        points_sdf = sdf._transform_pts_world_to_sdf(points_world)
 
-        # test transform_pts_obj_to_sdf
-        points_sdf_should_be = points_obj - \
+        # test transform_pts_world_to_sdf
+        points_sdf_should_be = points_world - \
             np.repeat(trans.reshape((1, -1)), 100, axis=0)
         testing.assert_array_almost_equal(points_sdf, points_sdf_should_be)
 
-        # test transform_pts_sdf_to_obj
-        points_obj_recreated = sdf._transform_pts_sdf_to_obj(points_sdf)
-        testing.assert_array_almost_equal(points_obj_recreated, points_obj)
+        # test transform_pts_sdf_to_world
+        points_world_recreated = sdf._transform_pts_sdf_to_world(points_sdf)
+        testing.assert_array_almost_equal(points_world_recreated, points_world)
 
     def test___call__(self):
         sdf, trans = self.boxsdf, self.boxtrans
-        points_box_edge_obj = np.array(
+        points_box_edge_world = np.array(
             [x + trans for x in self.points_box_edge_sdf])
         testing.assert_array_almost_equal(
-            sdf(points_box_edge_obj), [0, 0])
+            sdf(points_box_edge_world), [0, 0])
 
     def test_surface_points(self):
         sdf = self.boxsdf
-        surface_points_obj, _ = sdf.surface_points(n_sample=20)
-        sdf_vals = sdf(surface_points_obj)
+        surface_points_world, _ = sdf.surface_points(n_sample=20)
+        sdf_vals = sdf(surface_points_world)
         self.assertTrue(np.all(np.abs(sdf_vals) < sdf._surface_threshold))
 
     def test_on_surface(self):
         sdf = self.boxsdf
-        points_box_edge_obj = sdf._transform_pts_sdf_to_obj(
+        points_box_edge_world = sdf._transform_pts_sdf_to_world(
             self.points_box_edge_sdf)
-        logicals_positive, _ = sdf.on_surface(points_box_edge_obj)
+        logicals_positive, _ = sdf.on_surface(points_box_edge_world)
         self.assertTrue(np.all(logicals_positive))
 
         points_origin = np.zeros((1, 3))
@@ -147,9 +147,9 @@ class TestSDF(unittest.TestCase):
 
     def test_gridsdf_is_out_of_bounds(self):
         sdf, mesh = self.gridsdf, self.bunnymesh
-        vertices_obj = mesh.vertices
-        b_min = np.min(vertices_obj, axis=0)
-        b_max = np.max(vertices_obj, axis=0)
+        vertices_world = mesh.vertices
+        b_min = np.min(vertices_world, axis=0)
+        b_max = np.max(vertices_world, axis=0)
         center = 0.5 * (b_min + b_max)
         width = b_max - b_min
         points_outer_bbox = np.array([
@@ -158,12 +158,12 @@ class TestSDF(unittest.TestCase):
         ])
         # this condition maybe depends on the padding when creating sdf
         self.assertTrue(np.all(sdf.is_out_of_bounds(points_outer_bbox)))
-        self.assertTrue(np.all(~sdf.is_out_of_bounds(vertices_obj)))
+        self.assertTrue(np.all(~sdf.is_out_of_bounds(vertices_world)))
 
     def test_gridsdf__signed_distance(self):
         sdf, mesh = self.gridsdf, self.bunnymesh
-        vertices_obj = mesh.vertices
-        vertices_sdf = sdf._transform_pts_obj_to_sdf(vertices_obj)
+        vertices_world = mesh.vertices
+        vertices_sdf = sdf._transform_pts_world_to_sdf(vertices_world)
         sd_vals = sdf._signed_distance(vertices_sdf)
         # all vertices of the mesh must be on the surface
         assert np.all(np.abs(sd_vals) < sdf._surface_threshold)
@@ -175,8 +175,8 @@ class TestSDF(unittest.TestCase):
 
     def test_gridsdf_surface_points(self):
         sdf, _ = self.gridsdf, self.bunnymesh
-        surf_points_obj, _ = sdf.surface_points()
-        logicals, _ = sdf.on_surface(surf_points_obj)
+        surf_points_world, _ = sdf.surface_points()
+        logicals, _ = sdf.on_surface(surf_points_world)
         assert np.all(logicals)
 
     def test_unionsdf_assert_use_abs_false(self):
