@@ -77,7 +77,7 @@ class SweptSphereSdfCollisionChecker(object):
         self.coll_link_name_list.append(coll_link)
 
         col_mesh = coll_link.collision_mesh
-        assert type(col_mesh) == trimesh.base.Trimesh
+        assert type(col_mesh) is trimesh.base.Trimesh
 
         centers, R = compute_swept_sphere(col_mesh)
         sphere_list = []

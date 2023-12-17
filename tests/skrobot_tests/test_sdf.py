@@ -33,7 +33,7 @@ class TestSDF(unittest.TestCase):
 
         # prepare boxsdf
         box_withds = np.array([0.05, 0.1, 0.05])
-        boxsdf = BoxSDF([0, 0, 0], box_withds)
+        boxsdf = BoxSDF(box_withds)
         boxtrans = np.array([0.0, 0.1, 0.0])
         boxsdf.coords.translate(boxtrans)
 
@@ -48,8 +48,8 @@ class TestSDF(unittest.TestCase):
         height = 1.0
         cls.radius = radius
         cls.height = height
-        cls.sphere_sdf = SphereSDF([0, 0, 0], radius=radius)
-        cls.cylinder_sdf = CylinderSDF([0, 0, 0], radius=radius, height=height)
+        cls.sphere_sdf = SphereSDF(radius=radius)
+        cls.cylinder_sdf = CylinderSDF(radius=radius, height=height)
 
         # preapare UnionSDF
         unionsdf = UnionSDF(sdf_list=[boxsdf, gridsdf])

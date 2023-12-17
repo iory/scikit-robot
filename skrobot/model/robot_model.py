@@ -87,7 +87,7 @@ class CascadedLink(CascadedCoords):
         this method returns `True`. Otherwise returns `False`.
         """
 
-        assert isinstance(something, CascadedCoords),\
+        assert isinstance(something, CascadedCoords), \
             "input must be at least a cascaded coords"
 
         def find_nearest_ancestor_link(something):
@@ -1464,7 +1464,7 @@ class CascadedLink(CascadedCoords):
                                      additional_jacobi_dimension=0,
                                      n_joint_dimension=None,
                                      *args, **kwargs):
-        assert self._relevance_predicate_table is not None,\
+        assert self._relevance_predicate_table is not None, \
             "relevant table must be set beforehand"
 
         if link_list is None:
