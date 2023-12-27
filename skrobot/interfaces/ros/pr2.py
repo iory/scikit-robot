@@ -160,7 +160,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             controller_type = self.controller_type  # use default controller
 
         if av is not None:
-            av_diff = av - self.potentio_vector()
+            av_diff = av - self.angle_vector()
             diff_max, joint_name = self._continous_joint_largest_movement(
                 av_diff, controller_type)
             if diff_max > math.pi:
@@ -204,7 +204,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
         assert isinstance(times, list), 'times must be None or list'
         assert len(avs) == len(times), 'length of times and avs must be equal'
 
-        av_initial = self.potentio_vector()
+        av_initial = self.angle_vector()
         avs_with_initial = [av_initial] + avs
 
         avs_reformed = []
