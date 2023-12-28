@@ -7,6 +7,7 @@ import threading
 import pyglet
 from pyglet import compat_platform
 import trimesh
+from trimesh.transformations import euler_from_matrix
 import trimesh.viewer
 from trimesh.viewer.trackball import Trackball
 
@@ -176,6 +177,10 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._redraw = True
 
     def set_camera(self, *args, **kwargs):
+        if len(args) < 1 and 'angles' not in kwargs:
+            if hasattr(self, "view"):
+                kwargs['angles'] = euler_from_matrix(
+                    self.view["ball"].pose[:3, :3])
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
             if hasattr(self, "view"):
