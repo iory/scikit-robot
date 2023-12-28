@@ -8,6 +8,7 @@ import pyglet
 from pyglet import compat_platform
 import trimesh
 import trimesh.viewer
+from trimesh.viewer.trackball import Trackball
 
 from .. import model as model_module
 
@@ -177,6 +178,13 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     def set_camera(self, *args, **kwargs):
         with self.lock:
             self.scene.set_camera(*args, **kwargs)
+            if hasattr(self, "view"):
+                self.view["ball"] = Trackball(
+                    pose=self.scene.camera_transform,
+                    size=self.scene.camera.resolution,
+                    scale=self.scene.scale,
+                    target=self.scene.centroid
+                )
 
     def save_image(self, file_obj):
         self.switch_to()
