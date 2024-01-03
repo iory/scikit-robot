@@ -32,6 +32,7 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
 from skrobot.pycompat import lru_cache
+from skrobot.utils.mesh import split_mesh_by_face_color
 
 
 try:
@@ -43,7 +44,7 @@ except ImportError:
 logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
-                        }
+                        'export_mesh_format': None}
 
 
 @contextlib.contextmanager
@@ -58,6 +59,13 @@ def no_mesh_load_mode():
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
     yield
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
+
+
+@contextlib.contextmanager
+def export_mesh_format(mesh_format):
+    _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
+    yield
+    _CONFIGURABLE_VALUES["export_mesh_format"] = None
 
 
 def get_transparency(mesh):
@@ -832,14 +840,8 @@ class Mesh(URDFType):
         # Load the mesh, combining collision geometry meshes but keeping
         # visual ones separate to preserve colors and textures
         fn = get_filename(path, kwargs['filename'])
-        combine = node.getparent().getparent().tag == Collision._TAG
         if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
             meshes = load_meshes(fn)
-            if combine:
-                # Delete visuals for simplicity
-                for m in meshes:
-                    m.visual = trimesh.visual.ColorVisuals(mesh=m)
-                meshes = [meshes[0] + meshes[1:]]
         else:
             meshes = []
         kwargs['meshes'] = meshes
@@ -849,12 +851,25 @@ class Mesh(URDFType):
     def _to_xml(self, parent, path):
         # Get the filename
         fn = get_filename(path, self.filename, makedirs=True)
+        ext = _CONFIGURABLE_VALUES['export_mesh_format']
+        if ext is not None:
+            if not fn.endswith(ext):
+                name, _ = os.path.splitext(fn)
+                fn = name + _CONFIGURABLE_VALUES['export_mesh_format']
+                self.filename = os.path.splitext(self.filename)[0] + ext
 
         # Export the meshes as a single file
         meshes = self.meshes
-        if len(meshes) == 1:
-            meshes = meshes[0]
-        trimesh.exchange.export.export_mesh(meshes, fn)
+        if fn.endswith('.dae'):
+            export_meshes = []
+            for mesh in meshes:
+                export_meshes.extend(split_mesh_by_face_color(mesh))
+            meshes = export_meshes
+            dae_data = trimesh.exchange.dae.export_collada(meshes)
+            with open(fn, 'wb') as f:
+                f.write(dae_data)
+        else:
+            trimesh.exchange.export.export_mesh(meshes, fn)
 
         # Unparse the node
         node = self._unparse(path)
