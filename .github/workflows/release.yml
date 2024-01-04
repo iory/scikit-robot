@@ -98,11 +98,12 @@ jobs:
     - name: Install publishing dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install setuptools wheel twine
-    - name: Build and publish
-      env:
-        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        pip install setuptools wheel
+    - name: Build
       run: |
         python setup.py sdist
-        twine upload dist/*
+        python setup.py bdist_wheel
+    - name: Upload to PyPI
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        password: ${{ secrets.PYPI_TOKEN }}
