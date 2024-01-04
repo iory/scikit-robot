@@ -868,6 +868,9 @@ class Mesh(URDFType):
             dae_data = trimesh.exchange.dae.export_collada(meshes)
             with open(fn, 'wb') as f:
                 f.write(dae_data)
+        elif fn.endswith('.stl') or fn.endswith('.obj'):
+            meshes = trimesh.util.concatenate(meshes)
+            trimesh.exchange.export.export_mesh(meshes, fn)
         else:
             trimesh.exchange.export.export_mesh(meshes, fn)
 
