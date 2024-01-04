@@ -285,14 +285,18 @@ def _load_meshes(filename):
     if isinstance(meshes, (list, tuple, set)):
         meshes = list(meshes)
         if len(meshes) == 0:
-            raise ValueError('At least one mesh must be present in file')
+            logger.error('At least one mesh must be present in file.'
+                         ' Please check {} file'.format(filename))
+            meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
-                raise TypeError('Could not load meshes from file')
+                raise TypeError('Could not load meshes from file {}'.
+                                format(filename))
     elif isinstance(meshes, trimesh.Trimesh):
         meshes = [meshes]
     else:
-        raise ValueError('Unable to load mesh from file')
+        logger.error('Unable to load mesh from file {}'.format(filename))
+        meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
 
     for mesh in meshes:
         transparency = get_transparency(mesh)
