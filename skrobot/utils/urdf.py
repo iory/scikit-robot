@@ -32,6 +32,7 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
 from skrobot.pycompat import lru_cache
+from skrobot.utils.mesh import split_mesh_by_face_color
 
 
 try:
@@ -43,6 +44,8 @@ except ImportError:
 logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
+                        'export_mesh_format': None,
+                        'simplify_vertex_clustering_voxel_size': None,
                         }
 
 
@@ -58,6 +61,18 @@ def no_mesh_load_mode():
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
     yield
     _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
+
+
+@contextlib.contextmanager
+def export_mesh_format(
+        mesh_format,
+        simplify_vertex_clustering_voxel_size=None):
+    _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
+    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
+        simplify_vertex_clustering_voxel_size
+    yield
+    _CONFIGURABLE_VALUES["export_mesh_format"] = None
+    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
 
 
 def get_transparency(mesh):
@@ -270,14 +285,18 @@ def _load_meshes(filename):
     if isinstance(meshes, (list, tuple, set)):
         meshes = list(meshes)
         if len(meshes) == 0:
-            raise ValueError('At least one mesh must be present in file')
+            logger.error('At least one mesh must be present in file.'
+                         ' Please check {} file'.format(filename))
+            meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
-                raise TypeError('Could not load meshes from file')
+                raise TypeError('Could not load meshes from file {}'.
+                                format(filename))
     elif isinstance(meshes, trimesh.Trimesh):
         meshes = [meshes]
     else:
-        raise ValueError('Unable to load mesh from file')
+        logger.error('Unable to load mesh from file {}'.format(filename))
+        meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
 
     for mesh in meshes:
         transparency = get_transparency(mesh)
@@ -832,14 +851,8 @@ class Mesh(URDFType):
         # Load the mesh, combining collision geometry meshes but keeping
         # visual ones separate to preserve colors and textures
         fn = get_filename(path, kwargs['filename'])
-        combine = node.getparent().getparent().tag == Collision._TAG
         if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
             meshes = load_meshes(fn)
-            if combine:
-                # Delete visuals for simplicity
-                for m in meshes:
-                    m.visual = trimesh.visual.ColorVisuals(mesh=m)
-                meshes = [meshes[0] + meshes[1:]]
         else:
             meshes = []
         kwargs['meshes'] = meshes
@@ -849,12 +862,39 @@ class Mesh(URDFType):
     def _to_xml(self, parent, path):
         # Get the filename
         fn = get_filename(path, self.filename, makedirs=True)
+        ext = _CONFIGURABLE_VALUES['export_mesh_format']
+        if ext is not None:
+            if not fn.endswith(ext):
+                name, _ = os.path.splitext(fn)
+                fn = name + _CONFIGURABLE_VALUES['export_mesh_format']
+                self.filename = os.path.splitext(self.filename)[0] + ext
 
         # Export the meshes as a single file
         meshes = self.meshes
-        if len(meshes) == 1:
-            meshes = meshes[0]
-        trimesh.exchange.export.export_mesh(meshes, fn)
+        if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
+            from skrobot.utils.mesh import simplify_vertex_clustering
+            meshes = simplify_vertex_clustering(
+                meshes,
+                _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
+            )
+
+        if fn.endswith('.dae'):
+            export_meshes = []
+            has_texture_visual = False
+            for mesh in meshes:
+                has_texture_visual |= mesh.visual.kind == 'texture'
+                export_meshes.extend(split_mesh_by_face_color(mesh))
+            meshes = export_meshes
+            if not (os.path.exists(fn) and has_texture_visual):
+                # don't overwrite textured mesh.
+                dae_data = trimesh.exchange.dae.export_collada(meshes)
+                with open(fn, 'wb') as f:
+                    f.write(dae_data)
+        elif fn.endswith('.stl'):
+            meshes = trimesh.util.concatenate(meshes)
+            trimesh.exchange.export.export_mesh(meshes, fn)
+        else:
+            trimesh.exchange.export.export_mesh(meshes, fn)
 
         # Unparse the node
         node = self._unparse(path)

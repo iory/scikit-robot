@@ -96,6 +96,12 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
 extra_all_requires += docs_install_requires + opt_install_requires
 
 
+console_scripts = ["visualize-urdf=skrobot.apps.visualize_urdf:main"]
+if (sys.version_info.major, sys.version_info.minor) >= (3, 6):
+    console_scripts.append(
+        "convert-urdf-mesh=skrobot.apps.convert_urdf_mesh:main")
+
+
 setup(
     name='scikit-robot',
     version=version,
@@ -124,9 +130,7 @@ setup(
     setup_requires=setup_requires,
     install_requires=install_requires,
     entry_points={
-        "console_scripts": [
-            "visualize-urdf=skrobot.apps.visualize_urdf:main"
-        ]
+        "console_scripts": console_scripts,
     },
     extras_require={
         'opt': opt_install_requires,
