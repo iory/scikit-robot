@@ -20,6 +20,8 @@ def split_mesh_by_face_color(mesh):
     generate a list of submeshes, where each submesh contains
     faces of the same color.
     """
+    if mesh.visual.kind == 'texture':
+        return [mesh]
     face_colors = mesh.visual.face_colors
     unique_colors = np.unique(face_colors, axis=0)
     submeshes = []
