@@ -125,7 +125,8 @@ setup(
     install_requires=install_requires,
     entry_points={
         "console_scripts": [
-            "visualize-urdf=skrobot.apps.visualize_urdf:main"
+            "convert-urdf-mesh=skrobot.apps.convert_urdf_mesh:main",
+            "visualize-urdf=skrobot.apps.visualize_urdf:main",
         ]
     },
     extras_require={
