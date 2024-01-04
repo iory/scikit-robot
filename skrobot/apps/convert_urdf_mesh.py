@@ -15,11 +15,18 @@ def main():
                         help='Path to the input URDF file')
     parser.add_argument('--format', '-f',
                         default='dae',
-                        choices=['dae', 'obj', 'stl'],
+                        choices=['dae', 'stl'],
                         help='Mesh format for export. Default is dae.')
     parser.add_argument('--output', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
     parser.add_argument('--inplace', '-i', action='store_true',
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
+    parser.add_argument(
+        '--voxel-size', default=None, type=float,
+        help='Specifies the voxel size for the simplify_vertex_clustering'
+        ' function in open3d. When this value is provided, '
+        'it is used as the voxel size in the function to perform '
+        'mesh simplification. This process reduces the complexity'
+        ' of the mesh by clustering vertices within the specified voxel size.')
 
     args = parser.parse_args()
 
@@ -41,7 +48,9 @@ def main():
     with open(base_path / urdf_path) as f:
         r.load_urdf_file(f)
 
-    with export_mesh_format('.' + args.format):
+    with export_mesh_format(
+            '.' + args.format,
+            simplify_vertex_clustering_voxel_size=args.voxel_size):
         r.urdf_robot_model.save(str(base_path / output_path))
     if args.inplace:
         shutil.move(str(base_path / output_path),

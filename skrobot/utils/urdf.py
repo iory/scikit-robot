@@ -44,7 +44,9 @@ except ImportError:
 logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
-                        'export_mesh_format': None}
+                        'export_mesh_format': None,
+                        'simplify_vertex_clustering_voxel_size': None,
+                        }
 
 
 @contextlib.contextmanager
@@ -62,10 +64,15 @@ def no_mesh_load_mode():
 
 
 @contextlib.contextmanager
-def export_mesh_format(mesh_format):
+def export_mesh_format(
+        mesh_format,
+        simplify_vertex_clustering_voxel_size=None):
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
+    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
+        simplify_vertex_clustering_voxel_size
     yield
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
+    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
 
 
 def get_transparency(mesh):
@@ -860,15 +867,26 @@ class Mesh(URDFType):
 
         # Export the meshes as a single file
         meshes = self.meshes
+        if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
+            from skrobot.utils.mesh import simplify_vertex_clustering
+            meshes = simplify_vertex_clustering(
+                meshes,
+                _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
+            )
+
         if fn.endswith('.dae'):
             export_meshes = []
+            has_texture_visual = False
             for mesh in meshes:
+                has_texture_visual |= mesh.visual.kind == 'texture'
                 export_meshes.extend(split_mesh_by_face_color(mesh))
             meshes = export_meshes
-            dae_data = trimesh.exchange.dae.export_collada(meshes)
-            with open(fn, 'wb') as f:
-                f.write(dae_data)
-        elif fn.endswith('.stl') or fn.endswith('.obj'):
+            if not (os.path.exists(fn) and has_texture_visual):
+                # don't overwrite textured mesh.
+                dae_data = trimesh.exchange.dae.export_collada(meshes)
+                with open(fn, 'wb') as f:
+                    f.write(dae_data)
+        elif fn.endswith('.stl'):
             meshes = trimesh.util.concatenate(meshes)
             trimesh.exchange.export.export_mesh(meshes, fn)
         else:
