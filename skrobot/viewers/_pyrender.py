@@ -1,10 +1,13 @@
 from __future__ import division
 
 import collections
+import threading
 
-import pyglet
+import numpy as np
 import pyrender
 from pyrender.trackball import Trackball
+from trimesh.scene import cameras
+from trimesh import transformations
 
 from skrobot.coordinates import Coordinates
 
@@ -13,31 +16,30 @@ from .. import model as model_module
 
 class PyrenderViewer(pyrender.Viewer):
 
-    def __init__(self, resolution=None, update_interval=1.0):
+    def __init__(self, resolution=None):
         if resolution is None:
             resolution = (640, 480)
 
         self._visual_mesh_map = collections.OrderedDict()
 
         self._redraw = True
-        pyglet.clock.schedule_interval(self.on_update, update_interval)
 
         self._kwargs = dict(
             scene=pyrender.Scene(),
             viewport_size=resolution,
-            run_in_thread=True,
+            run_in_thread=False,
             use_raymond_lighting=True,
+            auto_start=False,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
 
     def show(self):
-        pass
+        self.thread = threading.Thread(target=self._init_and_start_app)
+        self.thread.daemon = True  # terminate when main thread exit
+        self.thread.start()
 
     def redraw(self):
         self._redraw = True
-
-    def on_update(self, dt):
-        self.on_draw()
 
     def on_draw(self):
         if not self._redraw:
@@ -134,11 +136,17 @@ class PyrenderViewer(pyrender.Viewer):
                 all_links.extend(link.child_links)
         self._redraw = True
 
-    def set_camera(self, angles=None, distance=None, coords_or_transform=None):
+    def set_camera(self, angles=None, distance=None, center=None,
+                   resolution=None, fov=None, coords_or_transform=None):
         if angles is None and coords_or_transform is None:
             return
         if angles is not None:
-            return
+            if fov is None:
+                fov = np.array([60, 45])
+            rotation = transformations.euler_matrix(*angles)
+            pose = cameras.look_at(
+                self.scene.bounds, fov=fov, rotation=rotation,
+                distance=distance, center=center)
         else:
             if isinstance(coords_or_transform, Coordinates):
                 pose = coords_or_transform.worldcoords().T()
