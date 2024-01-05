@@ -85,8 +85,7 @@ if (sys.version_info.major > 2):
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
-    lock = [('pyglet', '1.4.0a1', install_requires),
-            # for pyrender and trimesh
+    lock = [('pyglet', '1.4.10', install_requires),
             ('cvxopt', '1.2.7', opt_install_requires)]
     for name, version, requires in lock:
         remove_from_requirements(requires, name)
