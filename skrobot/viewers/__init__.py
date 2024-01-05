@@ -10,4 +10,9 @@ except TypeError:
                                'This issue happens when the X window system '
                                'is not running.')
 
-from ._pyrender import PyrenderViewer
+try:
+    from ._pyrender import PyrenderViewer
+except ModuleNotFoundError:
+    class PyrenderViewer(object):
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError('PyrenderViewer is not installed.')

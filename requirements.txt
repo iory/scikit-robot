@@ -8,7 +8,6 @@ ordered_set
 pillow
 pycollada!=0.7  # required for robot model using collada
 pyglet<2.0
-pyrender @ git+https://github.com/mmatl/pyrender.git
 pysdfgen>=0.1.5
 python-fcl  # for collision check in trimesh module
 pyyaml
