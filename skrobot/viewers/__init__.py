@@ -12,7 +12,7 @@ except TypeError:
 
 try:
     from ._pyrender import PyrenderViewer
-except ModuleNotFoundError:
+except ImportError:
     class PyrenderViewer(object):
         def __init__(self, *args, **kwargs):
             raise RuntimeError('PyrenderViewer is not installed.')
