@@ -92,6 +92,9 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
 
         # add working version locked requirements
         requires.append('{}=={}'.format(name, version))
+if sys.version_info.major >= 3:
+    install_requires.append(
+        'pyrender @ git+https://github.com/mmatl/pyrender.git')
 
 extra_all_requires += docs_install_requires + opt_install_requires
 

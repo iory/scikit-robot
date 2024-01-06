@@ -4,6 +4,7 @@ import collections
 import logging
 import threading
 
+import numpy as np
 import pyglet
 from pyglet import compat_platform
 import trimesh
@@ -49,6 +50,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.lock = threading.Lock()
 
     def show(self):
+        self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
         if compat_platform == 'darwin':
             super(TrimeshSceneViewer, self).__init__(**self._kwargs)
             init_loop = 30

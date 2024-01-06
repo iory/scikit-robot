@@ -9,3 +9,10 @@ except TypeError:
             raise RuntimeError('TrimeshSceneViewer cannot be initialized. '
                                'This issue happens when the X window system '
                                'is not running.')
+
+try:
+    from ._pyrender import PyrenderViewer
+except ImportError:
+    class PyrenderViewer(object):
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError('PyrenderViewer is not installed.')

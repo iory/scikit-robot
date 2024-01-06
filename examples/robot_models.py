@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import time
 
 import numpy as np
@@ -18,7 +19,18 @@ def _get_tile_shape(num, hw_ratio=1):
 
 
 def main():
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    parser = argparse.ArgumentParser(
+        description='Set viewer for skrobot.')
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender'], default='trimesh',
+        help='Choose the viewer type: trimesh or pyrender')
+    args = parser.parse_args()
+
+    if args.viewer == 'trimesh':
+        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    elif args.viewer == 'pyrender':
+        viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
 
     robots = [
         skrobot.models.Kuka(),
