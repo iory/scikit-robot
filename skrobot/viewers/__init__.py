@@ -15,7 +15,8 @@ except TypeError:
 
 try:
     from ._pyrender import PyrenderViewer
-    args = inspect.getfullargspec(PyrenderViewer.__init__).args
+    import pyrender
+    args = inspect.getfullargspec(pyrender.Viewer.__init__).args
     if 'auto_start' not in args:
         class PyrenderViewer(object):
             def __init__(self, *args, **kwargs):
