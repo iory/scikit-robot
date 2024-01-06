@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import argparse
 import time
 
 import skrobot
@@ -13,7 +14,19 @@ except:  # noqa
     robot_model = skrobot.models.PR2()
     table = Box(extents=[0.7, 1.0, 0.05], with_sdf=True)
     table.translate([0.8, 0.0, 0.655])
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+
+    parser = argparse.ArgumentParser(
+        description='Swept spheres visualization.')
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender'], default='trimesh',
+        help='Choose the viewer type: trimesh or pyrender')
+    args = parser.parse_args()
+
+    if args.viewer == 'trimesh':
+        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    elif args.viewer == 'pyrender':
+        viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
 
     link_idx_table = {}
     for link_idx in range(len(robot_model.link_list)):

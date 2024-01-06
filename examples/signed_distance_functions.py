@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import argparse
+
 import numpy as np
 
 import skrobot
@@ -15,7 +17,19 @@ m = MeshLink(visual_mesh=skrobot.data.bunny_objpath(), with_sdf=True)
 b.translate([0, 0.1, 0])
 u = UnionSDF([b.sdf, m.sdf])
 axis = Axis(axis_radius=0.001, axis_length=0.3)
-viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+parser = argparse.ArgumentParser(
+    description='Visualization signed distance function.')
+parser.add_argument(
+    '--viewer', type=str,
+    choices=['trimesh', 'pyrender'], default='trimesh',
+    help='Choose the viewer type: trimesh or pyrender')
+args = parser.parse_args()
+
+if args.viewer == 'trimesh':
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+elif args.viewer == 'pyrender':
+    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
+
 viewer.add(b)
 viewer.add(m)
 viewer.show()
