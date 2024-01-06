@@ -6,6 +6,7 @@ import threading
 import numpy as np
 import pyrender
 from pyrender.trackball import Trackball
+import trimesh
 from trimesh.scene import cameras
 from trimesh import transformations
 
@@ -34,6 +35,7 @@ class PyrenderViewer(pyrender.Viewer):
         super(PyrenderViewer, self).__init__(**self._kwargs)
 
     def show(self):
+        self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
         self.thread = threading.Thread(target=self._init_and_start_app)
         self.thread.daemon = True  # terminate when main thread exit
         self.thread.start()
@@ -90,9 +92,16 @@ class PyrenderViewer(pyrender.Viewer):
                 mesh_id = str(id(m))
                 if mesh_id in self._visual_mesh_map:
                     continue
-                pyrender_mesh = pyrender.Mesh.from_trimesh(
-                    m, smooth=False)
-                node = self.scene.add(pyrender_mesh, pose=transform)
+                if isinstance(m, trimesh.path.Path3D):
+                    pyrender_mesh = pyrender.Mesh(
+                        primitives=[pyrender.Primitive(
+                            m.vertices[m.vertex_nodes].reshape(-1, 3),
+                            mode=pyrender.constants.GLTF.LINE_STRIP,
+                            color_0=m.colors)])
+                    node = self.scene.add(pyrender_mesh)
+                else:
+                    pyrender_mesh = pyrender.Mesh.from_trimesh(m, smooth=False)
+                    node = self.scene.add(pyrender_mesh, pose=transform)
                 self._visual_mesh_map[mesh_id] = (node, link)
 
         for child_link in link._child_links:
