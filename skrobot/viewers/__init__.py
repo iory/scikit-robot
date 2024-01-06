@@ -1,5 +1,8 @@
 # flake8: noqa
 
+import inspect
+
+
 try:
     from ._trimesh import TrimeshSceneViewer
 except TypeError:
@@ -12,6 +15,15 @@ except TypeError:
 
 try:
     from ._pyrender import PyrenderViewer
+    args = inspect.getfullargspec(PyrenderViewer.__init__).args
+    if 'auto_start' not in args:
+        class PyrenderViewer(object):
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(
+                    'The correct version of pyrender is not installed.\n'
+                    'To install the appropriate version of pyrender, '
+                    'please execute the following command:\n'
+                    'pip install git+https://github.com/mmatl/pyrender.git')
 except ImportError:
     class PyrenderViewer(object):
         def __init__(self, *args, **kwargs):
