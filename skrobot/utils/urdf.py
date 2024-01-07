@@ -890,6 +890,10 @@ class Mesh(URDFType):
                 name, _ = os.path.splitext(fn)
                 fn = name + _CONFIGURABLE_VALUES['export_mesh_format']
                 self.filename = os.path.splitext(self.filename)[0] + ext
+                if os.path.exists(fn):
+                    # skip mesh save process.
+                    node = self._unparse(path)
+                    return node
 
         # Export the meshes as a single file
         meshes = self.meshes
