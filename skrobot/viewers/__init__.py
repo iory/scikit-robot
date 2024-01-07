@@ -24,7 +24,8 @@ try:
                     'The correct version of pyrender is not installed.\n'
                     'To install the appropriate version of pyrender, '
                     'please execute the following command:\n'
-                    'pip install git+https://github.com/mmatl/pyrender.git')
+                    'pip uninstall -y pyrender && pip install git+https://github.com/mmatl/pyrender.git --no-cache-dir'
+                )
 except ImportError:
     class PyrenderViewer(object):
         def __init__(self, *args, **kwargs):
