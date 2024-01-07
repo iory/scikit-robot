@@ -1,6 +1,8 @@
 import io
 import itertools
 from logging import getLogger
+import os
+import tempfile
 import warnings
 
 import numpy as np
@@ -1726,6 +1728,23 @@ class RobotModel(CascadedLink):
             mesh.metadata["origin"] = visual.origin
             meshes.append(mesh)
         return meshes
+
+    def load_urdf_from_robot_description(
+            self, param_name='/robot_description'):
+        import rospy
+        rate = rospy.Rate(1)
+        while not rospy.is_shutdown():
+            urdf = rospy.get_param(param_name, None)
+            if urdf is not None:
+                urdf = rospy.get_param("/robot_description")
+                tmp_file = tempfile.mktemp()
+                with open(tmp_file, "w") as f:
+                    f.write(urdf)
+                self.load_urdf_file(file_obj=tmp_file)
+                os.remove(tmp_file)
+                break
+            rate.sleep()
+            rospy.logwarn('Waiting {} set.'.format(param_name))
 
     def load_urdf(self, urdf):
         f = io.StringIO()
