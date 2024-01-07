@@ -203,6 +203,13 @@ class RotationalJoint(Joint):
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
 
+        if max_joint_velocity <= 0:
+            message = '[WARN] Joint "{}" '.format(self.name)
+            message += "max_joint_velocity cannot be zero. "
+            message += 'Setting to default value np.deg2rad(5).'
+            logger.warning(message)
+            self.max_joint_velocity = np.deg2rad(5)
+
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint angle.
 
@@ -357,6 +364,13 @@ class LinearJoint(Joint):
         self.joint_velocity = 0.0  # [m/s]
         self.joint_acceleration = 0.0  # [m/s^2]
         self.joint_torque = 0.0  # [N]
+
+        if max_joint_velocity <= 0:
+            message = '[WARN] Joint "{}" '.format(self.name)
+            message += "max_joint_velocity cannot be zero. "
+            message += 'Setting to default value np.pi / 4.0.'
+            logger.warning(message)
+            self.max_joint_velocity = np.pi / 4.0
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return this joint's linear translation (joint angle).
