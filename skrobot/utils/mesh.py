@@ -1,5 +1,6 @@
 import numpy as np
 import trimesh
+from trimesh.proximity import closest_point
 
 
 def split_mesh_by_face_color(mesh):
@@ -64,3 +65,37 @@ def simplify_vertex_clustering(
             vertex_colors=simple.vertex_colors)
         simplify_meshes.append(mesh)
     return simplify_meshes
+
+
+def auto_simplify_quadric_decimation(meshes, area_ratio_threshold=0.98):
+    if not isinstance(meshes, list):
+        meshes = [meshes]
+
+    mesh_simplified_list = []
+    for mesh in meshes:
+        n_face = len(mesh.faces)
+        for f in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+            n_face_reduced = int(n_face * f)
+            mesh_simplified = mesh.simplify_quadric_decimation(
+                n_face_reduced)
+            ratio = mesh_simplified.area / mesh.area
+            if ratio > area_ratio_threshold:
+                break
+        if len(mesh_simplified.faces) == 0 or ratio <= area_ratio_threshold:
+            mesh_simplified_list.append(mesh)
+            continue
+
+        _, _, indices = closest_point(mesh, mesh_simplified.vertices)
+        visual = mesh.visual
+        if visual.kind == 'texture':
+            visual = visual.to_color()
+            visual.mesh = mesh
+        face_colors = None
+        vertex_colors = visual.face_colors[indices][:, :3]
+        mesh_simplified._visual = trimesh.visual.ColorVisuals(
+            mesh=mesh_simplified,
+            vertex_colors=vertex_colors,
+            face_colors=face_colors,
+        )
+        mesh_simplified_list.append(mesh_simplified)
+    return mesh_simplified_list

@@ -32,6 +32,7 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
 from skrobot.pycompat import lru_cache
+from skrobot.utils.mesh import auto_simplify_quadric_decimation
 from skrobot.utils.mesh import split_mesh_by_face_color
 
 
@@ -45,6 +46,7 @@ logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
                         'export_mesh_format': None,
+                        'decimation_area_ratio_threshold': None,
                         'simplify_vertex_clustering_voxel_size': None,
                         }
 
@@ -66,12 +68,16 @@ def no_mesh_load_mode():
 @contextlib.contextmanager
 def export_mesh_format(
         mesh_format,
+        decimation_area_ratio_threshold=None,
         simplify_vertex_clustering_voxel_size=None):
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
+    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
+        decimation_area_ratio_threshold
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
         simplify_vertex_clustering_voxel_size
     yield
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
+    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
 
 
@@ -871,6 +877,11 @@ class Mesh(URDFType):
 
         # Export the meshes as a single file
         meshes = self.meshes
+        if _CONFIGURABLE_VALUES[
+                "decimation_area_ratio_threshold"] is not None:
+            meshes = auto_simplify_quadric_decimation(
+                meshes, area_ratio_threshold=_CONFIGURABLE_VALUES[
+                    "decimation_area_ratio_threshold"])
         if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
             from skrobot.utils.mesh import simplify_vertex_clustering
             meshes = simplify_vertex_clustering(
