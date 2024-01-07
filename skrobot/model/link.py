@@ -25,7 +25,13 @@ class Link(CascadedCoords):
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
         self._collision_mesh = collision_mesh
-        self._visual_mesh = visual_mesh
+        self.visual_mesh = visual_mesh
+        if visual_mesh is not None:
+            self._concatenated_visual_mesh = trimesh.util.concatenate(
+                self._visual_mesh)
+        else:
+            self._concatenated_visual_mesh = None
+        self._visual_mesh_changed = False
         self._sdf = None
 
     @property
@@ -113,6 +119,7 @@ class Link(CascadedCoords):
                 or (isinstance(mesh, Sequence)
                     and all(isinstance(m, trimesh.Trimesh) for m in mesh))
                 or isinstance(mesh, trimesh.points.PointCloud)
+                or isinstance(mesh, trimesh.path.path.Path3D)
                 or isinstance(mesh, str)):
             raise TypeError(
                 'mesh must be None, trimesh.Trimesh, sequence of '
@@ -121,6 +128,48 @@ class Link(CascadedCoords):
         if isinstance(mesh, str):
             mesh = trimesh.load(mesh)
         self._visual_mesh = mesh
+        self._concatenated_visual_mesh = trimesh.util.concatenate(mesh)
+        self._visual_mesh_changed = True
+
+    @property
+    def concatenated_visual_mesh(self):
+        """Concatenated visual mesh for visualization.
+
+        Returns
+        -------
+        self._concatenated_visual_mesh : None, trimesh.base.Trimesh
+            A concatenated visual meshes for the link in the link frame.
+        """
+        return self._concatenated_visual_mesh
+
+    @property
+    def visual_mesh_changed(self):
+        return self._visual_mesh_changed
+
+    @property
+    def colors(self):
+        if self._concatenated_visual_mesh is not None:
+            return self._concatenated_visual_mesh.visual.face_colors
+        else:
+            return None
+
+    def set_color(self, color):
+        mesh = self._concatenated_visual_mesh
+        if mesh is None:
+            return
+        color = np.array(color)
+        if color.ndim == 2:
+            mesh.visual.face_colors = color
+        else:
+            n_facet = len(mesh.visual.face_colors)
+            mesh.visual.face_colors = np.array([color] * n_facet)
+        self._visual_mesh_changed = True
+
+    def reset_color(self):
+        concat_mesh = trimesh.util.concatenate(self._visual_mesh)
+        self._concatenated_visual_mesh.visual.face_colors = \
+            concat_mesh.visual.face_colors
+        self._visual_mesh_changed = True
 
     @property
     def sdf(self):

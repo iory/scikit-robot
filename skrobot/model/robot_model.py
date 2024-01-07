@@ -33,6 +33,7 @@ from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
 from skrobot.utils.listify import listify
 from skrobot.utils import urdf
+from skrobot.utils.urdf import enable_mesh_cache
 from skrobot.utils.urdf import URDF
 
 
@@ -1737,7 +1738,8 @@ class RobotModel(CascadedLink):
             self.urdf_path = file_obj
         else:
             self.urdf_path = getattr(file_obj, 'name', None)
-        self.urdf_robot_model = URDF.load(file_obj=file_obj)
+        with enable_mesh_cache():
+            self.urdf_robot_model = URDF.load(file_obj=file_obj)
         self.name = self.urdf_robot_model.name
         root_link = self.urdf_robot_model.base_link
 

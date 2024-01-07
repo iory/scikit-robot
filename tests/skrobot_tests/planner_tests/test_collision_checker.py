@@ -82,7 +82,7 @@ class TestCollisionChecker(unittest.TestCase):
         color_collide = self.coll_checker.color_collision_sphere
         for idx in idxes_colliding:
             sphere = self.coll_checker.coll_sphere_list[idx]
-            color_actual = sphere._visual_mesh.visual.face_colors[0]
+            color_actual = sphere.colors[0]
             testing.assert_equal(color_actual, color_collide)
 
     def test_coll_batch_forward_kinematics(self):

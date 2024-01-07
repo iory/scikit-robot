@@ -22,12 +22,11 @@ class Axis(Link):
         if name is None:
             name = 'axis_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(Axis, self).__init__(pos=pos, rot=rot, name=name)
-        self._visual_mesh = trimesh.creation.axis(
-            origin_size=0.00000001,
-            axis_radius=axis_radius,
-            axis_length=axis_length,
-        )
+        super(Axis, self).__init__(pos=pos, rot=rot, name=name,
+                                   visual_mesh=trimesh.creation.axis(
+                                       origin_size=0.00000001,
+                                       axis_radius=axis_radius,
+                                       axis_length=axis_length))
 
     @classmethod
     def from_coords(cls, coords, **kwargs):
@@ -78,8 +77,6 @@ class CameraMarker(Link):
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
 
-        super(CameraMarker, self).__init__(
-            pos=pos, rot=rot, name=name)
         camera = trimesh.scene.Camera(name=name,
                                       focal=focal,
                                       fov=fov,
@@ -89,10 +86,12 @@ class CameraMarker(Link):
         origin_size = None
         if without_axis is True:
             origin_size = 0.0
-        self._visual_mesh = trimesh.creation.camera_marker(
-            camera,
-            marker_height=marker_height,
-            origin_size=origin_size)
+        super(CameraMarker, self).__init__(
+            pos=pos, rot=rot, name=name,
+            visual_mesh=trimesh.creation.camera_marker(
+                camera,
+                marker_height=marker_height,
+                origin_size=origin_size))
 
 
 class Cone(Link):
@@ -225,8 +224,8 @@ class MeshLink(Link):
         if name is None:
             name = 'meshlink_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
-        super(MeshLink, self).__init__(pos=pos, rot=rot, name=name)
-        self.visual_mesh = visual_mesh
+        super(MeshLink, self).__init__(pos=pos, rot=rot, name=name,
+                                       visual_mesh=visual_mesh)
         if self.visual_mesh is not None:
             if isinstance(self.visual_mesh, list):
                 self._collision_mesh = \
@@ -264,5 +263,5 @@ class PointCloudLink(Link):
             name = 'pointcloudlink_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
 
-        super(PointCloudLink, self).__init__(pos=pos, rot=rot, name=name)
-        self.visual_mesh = pcloud_mesh
+        super(PointCloudLink, self).__init__(pos=pos, rot=rot, name=name,
+                                             visual_mesh=pcloud_mesh)
