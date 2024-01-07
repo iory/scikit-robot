@@ -48,7 +48,9 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'export_mesh_format': None,
                         'decimation_area_ratio_threshold': None,
                         'simplify_vertex_clustering_voxel_size': None,
+                        'enable_mesh_cache': False,
                         }
+_MESH_CACHE = {}
 
 
 @contextlib.contextmanager
@@ -79,6 +81,13 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
+
+
+@contextlib.contextmanager
+def enable_mesh_cache():
+    _CONFIGURABLE_VALUES['enable_mesh_cache'] = True
+    yield
+    _CONFIGURABLE_VALUES['enable_mesh_cache'] = False
 
 
 def get_transparency(mesh):
@@ -220,6 +229,10 @@ def resolve_simplified_mesh_path(filename, simplify_factor):
 
 
 def load_meshes(filename):
+    enable_mesh_cache = _CONFIGURABLE_VALUES['enable_mesh_cache']
+    if enable_mesh_cache:
+        if filename in _MESH_CACHE:
+            return _MESH_CACHE[filename]
     use_simplified_meshs = _CONFIGURABLE_VALUES["mesh_simplify_factor"] < 1.0
 
     if use_simplified_meshs:
@@ -253,7 +266,10 @@ def load_meshes(filename):
                 pickle.dump(mesh_simplified_list, f)
             return mesh_simplified_list
     else:
-        return _load_meshes(filename)
+        meshes = _load_meshes(filename)
+        if enable_mesh_cache:
+            _MESH_CACHE[filename] = meshes
+        return meshes
 
 
 def _load_meshes(filename):
