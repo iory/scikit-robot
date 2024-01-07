@@ -51,10 +51,19 @@ class PyrenderViewer(pyrender.Viewer):
 
         with self._render_lock:
             # apply latest angle-vector
-            for _, (node, link) in self._visual_mesh_map.items():
+            for link_id, (node, link) in self._visual_mesh_map.items():
                 link.update(force=True)
                 transform = link.worldcoords().T()
-                node.matrix = transform
+                if link.visual_mesh_changed:
+                    mesh = link.concatenated_visual_mesh
+                    pyrender_mesh = pyrender.Mesh.from_trimesh(
+                        mesh, smooth=False)
+                    self.scene.remove_node(node)
+                    node = self.scene.add(pyrender_mesh, pose=transform)
+                    self._visual_mesh_map[link_id] = (node, link)
+                    link._visual_mesh_changed = False
+                else:
+                    node.matrix = transform
             super(PyrenderViewer, self).on_draw()
 
         self._redraw = False
@@ -84,25 +93,22 @@ class PyrenderViewer(pyrender.Viewer):
 
         with self._render_lock:
             transform = link.worldcoords().T()
-            mesh = link.visual_mesh
+            link_id = str(id(link))
+            mesh = link.concatenated_visual_mesh
 
-            if not (isinstance(mesh, list) or isinstance(mesh, tuple)):
-                mesh = [mesh]
-            for m in mesh:
-                mesh_id = str(id(m))
-                if mesh_id in self._visual_mesh_map:
-                    continue
-                if isinstance(m, trimesh.path.Path3D):
+            if link_id not in self._visual_mesh_map and mesh:
+                if isinstance(mesh, trimesh.path.Path3D):
                     pyrender_mesh = pyrender.Mesh(
                         primitives=[pyrender.Primitive(
-                            m.vertices[m.vertex_nodes].reshape(-1, 3),
+                            mesh.vertices[mesh.vertex_nodes].reshape(-1, 3),
                             mode=pyrender.constants.GLTF.LINE_STRIP,
-                            color_0=m.colors)])
+                            color_0=mesh.colors)])
                     node = self.scene.add(pyrender_mesh)
                 else:
-                    pyrender_mesh = pyrender.Mesh.from_trimesh(m, smooth=False)
+                    pyrender_mesh = pyrender.Mesh.from_trimesh(
+                        mesh, smooth=False)
                     node = self.scene.add(pyrender_mesh, pose=transform)
-                self._visual_mesh_map[mesh_id] = (node, link)
+                self._visual_mesh_map[link_id] = (node, link)
 
         for child_link in link._child_links:
             self._add_link(child_link)
@@ -132,15 +138,10 @@ class PyrenderViewer(pyrender.Viewer):
             all_links = links
             while all_links:
                 link = all_links[0]
-                mesh = link.visual_mesh
-                if not (isinstance(mesh, list) or isinstance(mesh, tuple)):
-                    mesh = [mesh]
-                for m in mesh:
-                    mesh_id = str(id(m))
-                    if mesh_id not in self._visual_mesh_map:
-                        continue
-                    self.scene.remove_node(self._visual_mesh_map[mesh_id][0])
-                    self._visual_mesh_map.pop(mesh_id)
+                link_id = str(id(link))
+                if link_id in self._visual_mesh_map:
+                    self.scene.remove_node(self._visual_mesh_map[link_id][0])
+                    self._visual_mesh_map.pop(link_id)
                 all_links = all_links[1:]
                 all_links.extend(link.child_links)
         self._redraw = True

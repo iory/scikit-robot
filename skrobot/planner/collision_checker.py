@@ -159,12 +159,9 @@ class SweptSphereSdfCollisionChecker(object):
 
         for idx in range(self.n_feature):
             sphere = self.coll_sphere_list[idx]
-            n_facet = len(sphere._visual_mesh.visual.face_colors)
-
             color = self.color_collision_sphere if idx in idxes_collide \
                 else self.color_normal_sphere
-            sphere._visual_mesh.visual.face_colors = np.array(
-                [color] * n_facet)
+            sphere.set_color(color)
         return dists
 
     def compute_batch_sd_vals(self,

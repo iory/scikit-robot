@@ -121,7 +121,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             if link_id in self._links:
                 return
             transform = link.worldcoords().T()
-            mesh = link.visual_mesh
+            mesh = link.concatenated_visual_mesh
             # TODO(someone) fix this at trimesh's scene.
             if (isinstance(mesh, list) or isinstance(mesh, tuple)) \
                and len(mesh) > 0:
@@ -134,7 +134,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                         transform=transform,
                     )
                     self._links[link_mesh_id] = link
-            else:
+            elif mesh is not None:
                 self.scene.add_geometry(
                     geometry=mesh,
                     node_name=link_id,
