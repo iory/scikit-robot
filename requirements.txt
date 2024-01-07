@@ -16,4 +16,4 @@ scikit-learn
 scipy;python_version>="3.0"
 scipy<=1.2.3;python_version<"3.0"
 six
-trimesh>=3.9.0,!=3.23.0
+trimesh[easy]>=3.9.0,!=3.23.0  # need rtree for simplify_quadric_decimation

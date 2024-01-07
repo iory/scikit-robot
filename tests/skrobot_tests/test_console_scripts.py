@@ -28,6 +28,7 @@ class TestConsoleScripts(unittest.TestCase):
                     out_urdfpath,
                     out_stl_urdfpath),
                 'convert-urdf-mesh {} --voxel-size 0.001'.format(urdfpath),
+                'convert-urdf-mesh {} -d 0.98'.format(urdfpath),
                 ]
         kwargs = {}
         kwargs["stdout"] = subprocess.PIPE
