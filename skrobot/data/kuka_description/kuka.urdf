@@ -62,7 +62,7 @@
     <axis xyz="0  0  1"/>
     <limit effort="300.0" lower="-3.05433" upper="3.05433" velocity="10.0"/>
   </joint>
-  <joint name="lbr_iiwa_with_wsg50__gripper_to_arm" type="continuous">
+  <joint name="lbr_iiwa_with_wsg50__gripper_to_arm" type="fixed">
     <parent link="lbr_iiwa_with_wsg50__lbr_iiwa_link_7"/>
     <child link="lbr_iiwa_with_wsg50__base_link"/>
     <origin rpy="0  0  0" xyz="0     0     0.044"/>
@@ -74,7 +74,7 @@
     <child link="lbr_iiwa_with_wsg50__left_finger"/>
     <origin rpy="0   -0.05  0" xyz="0     0.024  0.045"/>
     <axis xyz="0  1  0"/>
-    <limit effort="100.0" lower="-10.4" upper="10.01" velocity="0.0"/>
+    <limit effort="100.0" lower="-10.4" upper="10.01" velocity="1.0"/>
   </joint>
   <joint name="lbr_iiwa_with_wsg50__left_finger_base_joint" type="fixed">
     <parent link="lbr_iiwa_with_wsg50__left_finger"/>
@@ -88,14 +88,14 @@
     <child link="lbr_iiwa_with_wsg50__left_finger_tip"/>
     <origin rpy="0   0.5  0" xyz="0.0034   0       0.06175"/>
     <axis xyz="0  1  0"/>
-    <limit effort="0.0" lower="-10.1" upper="10.3" velocity="0.0"/>
+    <limit effort="0.0" lower="-10.1" upper="10.3" velocity="1.0"/>
   </joint>
   <joint name="lbr_iiwa_with_wsg50__base_right_finger_joint" type="revolute">
     <parent link="lbr_iiwa_with_wsg50__base_link"/>
     <child link="lbr_iiwa_with_wsg50__right_finger"/>
     <origin rpy="0    0.05  0" xyz="0     0.024  0.045"/>
     <axis xyz="0  1  0"/>
-    <limit effort="100.0" lower="-10.01" upper="10.4" velocity="0.0"/>
+    <limit effort="100.0" lower="-10.01" upper="10.4" velocity="1.0"/>
   </joint>
   <joint name="lbr_iiwa_with_wsg50__right_finger_base_joint" type="fixed">
     <parent link="lbr_iiwa_with_wsg50__right_finger"/>
@@ -109,7 +109,7 @@
     <child link="lbr_iiwa_with_wsg50__right_finger_tip"/>
     <origin rpy="0  -0.5  0" xyz="-0.0034   0       0.06175"/>
     <axis xyz="0  1  0"/>
-    <limit effort="0.0" lower="-10.3" upper="10.1" velocity="0.0"/>
+    <limit effort="0.0" lower="-10.3" upper="10.1" velocity="1.0"/>
   </joint>
   <link name="lbr_iiwa_with_wsg50__lbr_iiwa_link_0">
     <inertial>
