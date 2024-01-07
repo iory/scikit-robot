@@ -53,7 +53,7 @@ def pr2_urdfpath():
     gdown.cached_download(
         url='https://github.com/iory/scikit-robot-models/raw/master/pr2_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'pr2_description.tar.gz'),
-        md5='e4fb915accdb3568a5524c92e9c35c9a',
+        md5='6e6e2d4f38e2c5c0a93f44b67962b98a',
         postprocess=gdown.extractall,
         quiet=True,
     )
