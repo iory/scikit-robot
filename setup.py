@@ -26,6 +26,14 @@ if sys.argv[-1] == 'release':
     sys.exit(0)
 
 
+def get_os_and_architecture():
+    uname = platform.uname()
+    # In Python 2, uname is a tuple, in Python 3, it's a named tuple.
+    os_type = uname[0] if isinstance(uname, tuple) else uname.system
+    architecture = uname[4] if isinstance(uname, tuple) else uname.machine
+    return os_type, architecture
+
+
 def listup_package_data():
     data_files = []
     for root, _, files in os.walk('skrobot/data'):
@@ -72,9 +80,8 @@ def remove_from_requirements(install_requires, remove_req):
     install_requires.remove(delete_requirement.pop())
 
 
-uname = platform.uname()[0]
-if uname == 'Darwin':
-    # python-fcl could not install.
+os_type, architecture = get_os_and_architecture()
+if os_type == 'Darwin' or architecture == 'aarch64':
     install_requires.remove('python-fcl')
 
 extra_all_requires = ['pybullet>=2.1.9']
