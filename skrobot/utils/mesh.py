@@ -1,6 +1,6 @@
 import numpy as np
 import trimesh
-from trimesh.proximity import closest_point
+from trimesh.proximity import nearby_faces
 
 
 def split_mesh_by_face_color(mesh):
@@ -85,13 +85,25 @@ def auto_simplify_quadric_decimation(meshes, area_ratio_threshold=0.98):
             mesh_simplified_list.append(mesh)
             continue
 
-        _, _, indices = closest_point(mesh, mesh_simplified.vertices)
+        simplified_face_vertices = mesh_simplified.vertices[
+            mesh_simplified.faces].reshape(-1, 3)
+        org_indices_list = nearby_faces(mesh, simplified_face_vertices)
+        org_indices_list = [np.concatenate(org_indices_list[i:i + 3])
+                            for i in range(0, len(org_indices_list), 3)]
+        vertex_colors = None
+        face_colors = []
+        for i in range(len(org_indices_list)):
+            org_normals = mesh.face_normals[org_indices_list[i]]
+            simplified_normal = mesh_simplified.face_normals[i]
+            # Calculate cosine distance to get similar face.
+            indices = np.argsort(1.0 - np.dot(org_normals, simplified_normal))
+            face_colors.append(mesh.visual.face_colors[
+                org_indices_list[i][indices[0]]])
+
         visual = mesh.visual
         if visual.kind == 'texture':
             visual = visual.to_color()
             visual.mesh = mesh
-        face_colors = None
-        vertex_colors = visual.face_colors[indices][:, :3]
         mesh_simplified._visual = trimesh.visual.ColorVisuals(
             mesh=mesh_simplified,
             vertex_colors=vertex_colors,
