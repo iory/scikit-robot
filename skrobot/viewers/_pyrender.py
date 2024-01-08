@@ -17,7 +17,8 @@ from .. import model as model_module
 
 class PyrenderViewer(pyrender.Viewer):
 
-    def __init__(self, resolution=None):
+    def __init__(self, resolution=None, render_flags=None):
+
         if resolution is None:
             resolution = (640, 480)
 
@@ -31,6 +32,7 @@ class PyrenderViewer(pyrender.Viewer):
             run_in_thread=False,
             use_raymond_lighting=True,
             auto_start=False,
+            render_flags=render_flags,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
 
@@ -102,6 +104,13 @@ class PyrenderViewer(pyrender.Viewer):
                         primitives=[pyrender.Primitive(
                             mesh.vertices[mesh.vertex_nodes].reshape(-1, 3),
                             mode=pyrender.constants.GLTF.LINE_STRIP,
+                            color_0=mesh.colors)])
+                    node = self.scene.add(pyrender_mesh)
+                elif isinstance(mesh, trimesh.PointCloud):
+                    pyrender_mesh = pyrender.Mesh(
+                        primitives=[pyrender.Primitive(
+                            mesh.vertices,
+                            mode=pyrender.constants.GLTF.POINTS,
                             color_0=mesh.colors)])
                     node = self.scene.add(pyrender_mesh)
                 else:
