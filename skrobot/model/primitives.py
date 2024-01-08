@@ -245,6 +245,7 @@ class PointCloudLink(Link):
 
     def __init__(self,
                  point_cloud_like=None,
+                 colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
 
         accep_types = (type(None), np.ndarray, PointCloud)
@@ -255,7 +256,7 @@ class PointCloudLink(Link):
         if isinstance(point_cloud_like, np.ndarray):
             assert point_cloud_like.ndim == 2
             assert point_cloud_like.shape[1] == 3
-            pcloud_mesh = PointCloud(point_cloud_like)
+            pcloud_mesh = PointCloud(point_cloud_like, colors)
         else:
             pcloud_mesh = point_cloud_like
 
