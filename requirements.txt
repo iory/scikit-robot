@@ -12,8 +12,9 @@ pysdfgen>=0.1.5
 python-fcl  # for collision check in trimesh module
 pyyaml
 repoze.lru;python_version<"3.2"
+rtree # need rtree for simplify_quadric_decimation
 scikit-learn
 scipy;python_version>="3.0"
 scipy<=1.2.3;python_version<"3.0"
 six
-trimesh[easy]>=3.9.0,!=3.23.0  # need rtree for simplify_quadric_decimation
+trimesh>=3.9.0,!=3.23.0
