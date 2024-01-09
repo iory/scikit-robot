@@ -1736,7 +1736,6 @@ class RobotModel(CascadedLink):
         while not rospy.is_shutdown():
             urdf = rospy.get_param(param_name, None)
             if urdf is not None:
-                urdf = rospy.get_param("/robot_description")
                 tmp_file = tempfile.mktemp()
                 with open(tmp_file, "w") as f:
                     f.write(urdf)
