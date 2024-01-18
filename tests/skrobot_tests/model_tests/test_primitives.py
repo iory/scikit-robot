@@ -117,6 +117,13 @@ class TestMeshLink(unittest.TestCase):
         is_all_vertices_on_surface = np.all(booleans)
         self.assertTrue(is_all_vertices_on_surface)
 
+        # test: check if kwargs are passed
+        mesh = trimesh.load(bunny_obj_path)
+        m_custom = skrobot.model.MeshLink(
+            mesh, with_sdf=True, fill_value=123456, dim_grid=30)
+        self.assertEqual(m_custom.sdf.itp.fill_value, 123456)
+        self.assertEqual(len(m_custom.sdf.itp.values.flatten()), 30 ** 3)
+
 
 class TestPointCloudLink(unittest.TestCase):
 

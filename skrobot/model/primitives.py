@@ -220,7 +220,7 @@ class MeshLink(Link):
     def __init__(self,
                  visual_mesh=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False,
-                 dim_grid=100, padding_grid=5):
+                 **gridsdf_kwargs):
         if name is None:
             name = 'meshlink_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -235,8 +235,7 @@ class MeshLink(Link):
             self._collision_mesh.metadata['origin'] = np.eye(4)
 
         if with_sdf:
-            sdf = trimesh2sdf(self._collision_mesh, dim_grid=dim_grid,
-                              padding_grid=padding_grid)
+            sdf = trimesh2sdf(self._collision_mesh, **gridsdf_kwargs)
             self.assoc(sdf, relative_coords="local")
             self.sdf = sdf
 

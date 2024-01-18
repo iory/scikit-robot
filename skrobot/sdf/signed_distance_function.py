@@ -17,18 +17,15 @@ from skrobot.utils import checksum_md5
 logger = getLogger(__name__)
 
 
-def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
+def trimesh2sdf(mesh, **gridsdf_kwargs):
     """Convert trimesh to signed distance function.
 
     Parameters
     ----------
     mesh : trimesh.base.Trimesh
         mesh object.
-    dim_grid : int
-        dimension of the GridSDF.
-        This value is used for a not primitive mesh.
-    padding_grid : int
-        number of padding.
+    gridsdf_kwargs : dict
+        keyword args for skrobot.sdf.GridSDF.from_objfile
 
     Returns
     -------
@@ -42,8 +39,7 @@ def trimesh2sdf(mesh, dim_grid=100, padding_grid=5):
     is_loaded_mesh = 'file_path' in mesh.metadata
     if is_loaded_mesh:
         file_path = mesh.metadata['file_path']
-        sdf = GridSDF.from_objfile(file_path, dim_grid=dim_grid,
-                                   padding_grid=padding_grid)
+        sdf = GridSDF.from_objfile(file_path, **gridsdf_kwargs)
     else:
         # process primtives
         shape = mesh.metadata['shape']
