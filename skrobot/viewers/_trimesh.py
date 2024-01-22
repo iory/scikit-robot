@@ -45,6 +45,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             resolution=resolution,
             offset_lines=False,
             start_loop=False,
+            caption='scikit-robot TrimeshSceneViewer',
         )
 
         self.lock = threading.Lock()

@@ -35,6 +35,7 @@ class PyrenderViewer(pyrender.Viewer):
             render_flags=render_flags,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
+        self.viewer_flags['window_title'] = 'scikit-robot PyrenderViewer'
 
     def show(self):
         self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
