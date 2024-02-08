@@ -439,6 +439,11 @@ class TestMath(unittest.TestCase):
         self.assertEqual(quaternion_distance(np.ones(4), np.ones(4)),
                          0.0)
 
+        # batch
+        testing.assert_equal(
+            quaternion_distance(np.ones((10, 4)),
+                                np.ones((10, 4))), np.zeros(10))
+
     def test_quaternion_norm(self):
         q = np.array([1, 0, 0, 0])
         self.assertEqual(quaternion_norm(q), 1.0)
