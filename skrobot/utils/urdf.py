@@ -296,7 +296,7 @@ def _load_meshes(filename):
     except Exception as e:
         logger.error("Failed to load meshes from {}. Error: {}"
                      .format(filename, e))
-        meshes = trimesh.creation.box((0.001, 0.001, 0.001))
+        meshes = []
 
     # If we got a scene, dump the meshes
     if isinstance(meshes, trimesh.Scene):
@@ -308,7 +308,7 @@ def _load_meshes(filename):
         if len(meshes) == 0:
             logger.error('At least one mesh must be present in file.'
                          ' Please check {} file'.format(filename))
-            meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
+            meshes = []
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
                 raise TypeError('Could not load meshes from file {}'.
@@ -317,7 +317,7 @@ def _load_meshes(filename):
         meshes = [meshes]
     else:
         logger.error('Unable to load mesh from file {}'.format(filename))
-        meshes = [trimesh.creation.box((0.001, 0.001, 0.001))]
+        meshes = []
 
     for mesh in meshes:
         transparency = get_transparency(mesh)
