@@ -1281,6 +1281,11 @@ class CascadedCoords(Coordinates):
                 DeprecationWarning)
             relative_coords = kwargs['c']
 
+        if self == child:
+            msg = "Cannot associate a coordinate system with itself. " \
+                  "A coordinate system cannot be both parent and child. " \
+                  "Please ensure 'child' is a distinct object from 'self'."
+            raise ValueError(msg)
         is_invalid_assoc = (child.parent is not None) and (not force)
         if is_invalid_assoc:
             msg = "child already has an assoc relation with '{0}'."\
