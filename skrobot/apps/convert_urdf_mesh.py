@@ -17,7 +17,7 @@ def main():
                         default='dae',
                         choices=['dae', 'stl'],
                         help='Mesh format for export. Default is dae.')
-    parser.add_argument('--output', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
+    parser.add_argument('--output', '-o', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
     parser.add_argument('--inplace', '-i', action='store_true',
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
     decimation_help = """
