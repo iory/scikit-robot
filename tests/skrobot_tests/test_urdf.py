@@ -17,6 +17,9 @@ class TestURDF(unittest.TestCase):
         os.chdir(os.path.dirname(urdfpath))
         RobotModelFromURDF(
             urdf_file=os.path.basename(urdfpath))
+        # String
+        with open(urdfpath, 'r') as f:
+            RobotModelFromURDF(urdf=f.read())
 
     def test_load_urdfmodel_with_simplification(self):
         if sys.version_info.major < 3:

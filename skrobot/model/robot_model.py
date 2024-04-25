@@ -2,6 +2,7 @@ import io
 import itertools
 from logging import getLogger
 import os
+import sys
 import tempfile
 import warnings
 
@@ -1751,9 +1752,14 @@ class RobotModel(CascadedLink):
             rospy.logwarn('Waiting {} set.'.format(param_name))
 
     def load_urdf(self, urdf):
+        is_python3 = sys.version_info.major > 2
         f = io.StringIO()
-        f.write(urdf)
+        if is_python3:
+            f.write(urdf)
+        else:
+            f.write(urdf.decode('utf-8'))
         f.seek(0)
+        f.name = "dummy"
         self.load_urdf_file(file_obj=f)
 
     def load_urdf_file(self, file_obj):
