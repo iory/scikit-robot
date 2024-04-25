@@ -1754,6 +1754,7 @@ class RobotModel(CascadedLink):
         f = io.StringIO()
         f.write(urdf)
         f.seek(0)
+        f.name = "dummy"
         self.load_urdf_file(file_obj=f)
 
     def load_urdf_file(self, file_obj):
