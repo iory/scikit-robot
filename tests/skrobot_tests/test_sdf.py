@@ -254,3 +254,30 @@ class TestSDF(unittest.TestCase):
         vertices = finger_link.transform_vector(coll_mesh.vertices)
         sd_vals = fetch_union_sdf(vertices)
         self.assertTrue(np.all(sd_vals < 1e-3))
+
+    def test_trimesh2sdf(self):
+        # non-primitive mesh with file_path
+        mesh = self.bunnymesh
+        assert "file_path" in mesh.metadata
+        sdf = skrobot.sdf.trimesh2sdf(mesh)
+        assert isinstance(sdf, GridSDF)
+
+        # non-primitive mesh without file_path
+        mesh.metadata.pop("file_path")
+        sdf = skrobot.sdf.trimesh2sdf(mesh)
+        assert isinstance(sdf, GridSDF)
+
+        # primitive mesh (box)
+        mesh = trimesh.creation.box([1, 1, 1])
+        sdf = skrobot.sdf.trimesh2sdf(mesh)
+        assert isinstance(sdf, BoxSDF)
+
+        # primitive mesh (sphere)
+        mesh = trimesh.creation.icosphere(subdivisions=3)
+        sdf = skrobot.sdf.trimesh2sdf(mesh)
+        assert isinstance(sdf, SphereSDF)
+
+        # primitive mesh (cylinder)
+        mesh = trimesh.creation.cylinder(radius=1.0, height=1.0)
+        sdf = skrobot.sdf.trimesh2sdf(mesh)
+        assert isinstance(sdf, CylinderSDF)

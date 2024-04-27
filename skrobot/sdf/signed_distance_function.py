@@ -3,6 +3,8 @@ from __future__ import division
 from logging import getLogger
 from math import floor
 import os
+import shutil
+import tempfile
 
 import numpy as np
 import pysdfgen
@@ -32,16 +34,10 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
     sdf : skrobot.sdf.SignedDistanceFunction
         converted signed distance function.
     """
-    if not ('file_path' in mesh.metadata
-            or 'shape' in mesh.metadata):
-        raise ValueError("Input mesh doesn't contain valid metadata"
-                         " for converting SDF.")
-    is_loaded_mesh = 'file_path' in mesh.metadata
-    if is_loaded_mesh:
+    if 'file_path' in mesh.metadata:
         file_path = mesh.metadata['file_path']
         sdf = GridSDF.from_objfile(file_path, **gridsdf_kwargs)
-    else:
-        # process primtives
+    elif 'shape' in mesh.metadata:
         shape = mesh.metadata['shape']
         if shape == 'box':
             extents = mesh.metadata['extents']
@@ -56,11 +52,17 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
         else:
             msg = "primtive type {0} is not supported".format(shape)
             raise ValueError(msg)
-
-    origin = mesh.metadata["origin"]
-    rotation_matrix = origin[:3, :3]
-    translation = origin[:3, 3]
-    sdf.newcoords(Coordinates(pos=translation, rot=rotation_matrix))
+    else:
+        tmpdir = tempfile.mkdtemp()
+        tmpfile = os.path.join(tmpdir, 'tmp.obj')
+        mesh.export(tmpfile)
+        sdf = GridSDF.from_objfile(tmpfile, **gridsdf_kwargs)
+        shutil.rmtree(tmpdir)
+    if "origin" in mesh.metadata:
+        origin = mesh.metadata["origin"]
+        rotation_matrix = origin[:3, :3]
+        translation = origin[:3, 3]
+        sdf.newcoords(Coordinates(pos=translation, rot=rotation_matrix))
     return sdf
 
 
