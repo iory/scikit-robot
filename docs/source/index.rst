@@ -1,6 +1,6 @@
-================================================================
-Scikit-Robot -- A Flexible Framework for Robot Control in Python
-================================================================
+======================================================================================
+Scikit-Robot -- A Flexible Framework for Robot visualization and programming in Python
+======================================================================================
 
 Scikit-Robot is a simple pure-Python library for loading, manipulating, and visualizing
 URDF files and robot specifications. For example, here's a rendering of a PR2
