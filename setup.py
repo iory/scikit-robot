@@ -18,7 +18,7 @@ if sys.argv[-1] == 'release':
     # Release via github-actions.
     commands = [
         'git tag v{:s}'.format(version),
-        'git push origin master --tag',
+        'git push origin main --tag',
     ]
     for cmd in commands:
         print('+ {}'.format(cmd))
