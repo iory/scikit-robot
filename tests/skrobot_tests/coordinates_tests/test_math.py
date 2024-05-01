@@ -17,6 +17,7 @@ from skrobot.coordinates.math import midrot
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import outer_product_matrix
 from skrobot.coordinates.math import quaternion2matrix
+from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_conjugate
 from skrobot.coordinates.math import quaternion_distance
 from skrobot.coordinates.math import quaternion_from_axis_angle
@@ -467,6 +468,42 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             q,
             matrix2quaternion(rotation_matrix(0.1, [1, 0, 0])))
+
+    def test_quaternion2rpy(self):
+        # Test with a known simple quaternion representing no rotation
+        q = np.array([1, 0, 0, 0])  # Identity quaternion
+        expected_rpy = np.array([0, 0, 0])  # No rotation expected
+        rpy, _ = quaternion2rpy(q)
+        testing.assert_almost_equal(rpy, expected_rpy, decimal=5)
+
+        # Test with a quaternion representing a 180 degree
+        # rotation around the z-axis
+        # Quaternion for 180 degree rotation around z
+        q = np.array([0, 0, 0, 1])
+        # 180 degrees yaw, no pitch or roll
+        expected_rpy = np.array([np.pi, 0, 0])
+        rpy, _ = quaternion2rpy(q)
+        testing.assert_almost_equal(rpy, expected_rpy, decimal=5)
+
+        # Test with an array of quaternions
+        qs = np.array([
+            [1, 0, 0, 0],  # No rotation
+            [0, 1, 0, 0],  # 180 degree rotation around x
+            [0, 0, 1, 0]   # 180 degree rotation around y
+        ])
+        expected_rpys = np.array([
+            [0, 0, 0],
+            [0, 0, np.pi],
+            [np.pi, 0, np.pi],
+        ])
+        rpys, _ = quaternion2rpy(qs)
+        testing.assert_array_almost_equal(rpys, expected_rpys, decimal=5)
+
+        # Normalized quaternion edge case, 90 degrees rotation about x
+        q = np.array([np.cos(np.pi / 4), np.sin(np.pi / 4), 0, 0])
+        expected_rpy = np.array([0, 0, np.pi / 2])  # 90 degrees pitch
+        rpy, _ = quaternion2rpy(q)
+        testing.assert_almost_equal(rpy, expected_rpy, decimal=5)
 
     def test_rotation_vector_to_quaternion(self):
         testing.assert_almost_equal(
