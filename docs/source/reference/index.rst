@@ -14,3 +14,4 @@ API Reference
    interfaces
    sdfs
    planner
+   viewers

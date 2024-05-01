@@ -11,14 +11,14 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.0.38'
+version = '0.0.39'
 
 
 if sys.argv[-1] == 'release':
     # Release via github-actions.
     commands = [
         'git tag v{:s}'.format(version),
-        'git push origin master --tag',
+        'git push origin main --tag',
     ]
     for cmd in commands:
         print('+ {}'.format(cmd))

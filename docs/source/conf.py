@@ -27,7 +27,7 @@ import _docstring_check
 
 __version__ = pkg_resources.get_distribution('scikit-robot').version
 on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
-tag = 'master'
+tag = 'main'
 
 # -- Project information -----------------------------------------------------
 
@@ -78,7 +78,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -213,7 +213,7 @@ epub_exclude_files = ['search.html']
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
-    'trimesh': ('https://trimsh.org/', None),
+    'trimesh': ('https://trimesh.org/', None),
     'numpy': ('https://docs.scipy.org/doc/numpy/', None),
 }
 
@@ -250,6 +250,10 @@ def _is_git_root(path):
     return os.path.isdir(os.path.join(path, '.git'))
 
 
+def _is_site_packages(path):
+    return 'site-packages' in path or 'dist-packages' in path
+
+
 _source_root = None
 
 
@@ -260,7 +264,7 @@ def _find_source_root(source_abs_path):
     if _source_root is None:
         dir = os.path.dirname(source_abs_path)
         while True:
-            if _is_egg_directory(dir) or _is_git_root(dir):
+            if _is_egg_directory(dir) or _is_git_root(dir) or _is_site_packages(dir):
                 # Reached the root directory
                 _source_root = dir
                 break
