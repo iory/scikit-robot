@@ -77,3 +77,14 @@ PyrenderViewer
 
 - **Camera Management:**
   Offers detailed camera setup options, including angle adjustments, distance settings, center positioning, and field of view configuration, providing flexibility in viewing angles for complex scenes.
+
+
+.. caution::
+
+  To speed up the rendering cycle in **TrimeshSceneViewer** and **PyrenderViewer**, adjust the ``update_interval`` to the reciprocal of the desired frequency. For example, to achieve updates at 30 Hz, set the ``update_interval`` to 1/30. This change will increase the frequency at which the ``redraw()`` function is called, making the rendering process faster.
+
+  Example usage:
+
+  .. code-block:: python
+
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # Set update interval for 30 Hz
