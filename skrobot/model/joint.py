@@ -249,8 +249,9 @@ class RotationalJoint(Joint):
             v = self.min_angle
         diff_angle = v - self._joint_angle
         self._joint_angle = v
-        self.child_link.rotate(diff_angle, self.axis,
-                               skip_normalization=True)
+        if diff_angle:
+            self.child_link.rotate(diff_angle, self.axis,
+                                   skip_normalization=True)
         if enable_hook:
             for hook in self._hooks:
                 hook()
@@ -404,7 +405,8 @@ class LinearJoint(Joint):
                 v = self.min_angle
             diff_translation = v - self._joint_angle
             self._joint_angle = v
-            self.child_link.translate(diff_translation * self.axis)
+            if diff_translation:
+                self.child_link.translate(diff_translation * self.axis)
 
             if enable_hook:
                 for hook in self._hooks:
