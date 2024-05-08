@@ -251,7 +251,7 @@ def _is_git_root(path):
 
 
 def _is_site_packages(path):
-    return 'site-packages' in path or 'dist-packages' in path
+    return os.path.basename(path) in ['site-packages', 'dist-packages']
 
 
 _source_root = None
