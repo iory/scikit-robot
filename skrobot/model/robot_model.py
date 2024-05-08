@@ -2048,3 +2048,45 @@ class RobotModel(CascadedLink):
             self.head_end_coords,
             coords.worldpos(),
             self.head.link_list)
+
+    @staticmethod
+    def sanitize_joint_limits(min_angles, max_angles, joint_limit_eps=0.001):
+        """Sanitize joint limits.
+
+        Sanitize joint limits, replacing infinities and ensuring the range
+        is non-zero.
+
+        """
+        min_angles = np.array(min_angles)
+        max_angles = np.array(max_angles)
+        min_angles = np.where(min_angles == -np.inf, -np.pi, min_angles)
+        max_angles = np.where(max_angles == np.inf, np.pi, max_angles)
+        if np.any((max_angles - min_angles) < joint_limit_eps):
+            raise ValueError(
+                'Joint limits are too narrow, '
+                'leading to zero standard deviation in samples.')
+        return min_angles, max_angles
+
+    @staticmethod
+    def joint_list_from_link_list(link_list, ignore_fixed_joint=True):
+        """Generate a list of joints from a list of links.
+
+        Generate a list of joints from a list of links, optionally ignoring
+        fixed joints.
+
+        """
+        if ignore_fixed_joint:
+            return [l.joint for l in link_list if hasattr(l, 'joint')
+                    and l.joint.__class__.__name__ != 'FixedJoint']
+        else:
+            return [l.joint for l in link_list if hasattr(l, 'joint')]
+
+    @staticmethod
+    def joint_limits_from_joint_list(joint_list):
+        """Compute joint limits from a list of joints.
+
+        """
+        return RobotModel.sanitize_joint_limits(
+            [j.min_angle for j in joint_list],
+            [j.max_angle for j in joint_list],
+            joint_limit_eps=0.001)
