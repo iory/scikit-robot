@@ -1050,7 +1050,7 @@ def rotation_matrix_from_axis(
     return np.vstack([e1, e2, e3])[np.argsort(indices)].T
 
 
-def rodrigues(axis, theta=None):
+def rodrigues(axis, theta=None, skip_normalization=False):
     """Rodrigues formula.
 
     See: `Rodrigues' rotation formula - Wikipedia
@@ -1062,15 +1062,19 @@ def rodrigues(axis, theta=None):
     Parameters
     ----------
     axis : numpy.ndarray or list
-        [x, y, z] vector.
+        If single axis, it should be [x, y, z] vector.
+        If multiple axes, it should be an Nx3 matrix where each row is an axis.
         You can give axis-angle representation to `axis` if `theta` is None.
-    theta: float or None (optional)
-        radian. If None is given, calculate theta from axis.
+    theta: float, numpy.ndarray, or None (optional)
+        If single theta, it is a float. For multiple rotations,
+        it should be an Nx1 vector.
+        If None is given, calculate theta from the norm of each axis.
 
     Returns
     -------
     mat : numpy.ndarray
-        3x3 rotation matrix
+        Rotation matrix or matrices. 3x3 if single axis,
+        Nx3x3 if multiple axes.
 
     Examples
     --------
@@ -1080,24 +1084,48 @@ def rodrigues(axis, theta=None):
     array([[1., 0., 0.],
            [0., 1., 0.],
            [0., 0., 1.]])
-    >>> rodrigues([1, 1, 1], numpy.pi)
-    array([[-0.33333333,  0.66666667,  0.66666667],
-           [ 0.66666667, -0.33333333,  0.66666667],
-           [ 0.66666667,  0.66666667, -0.33333333]])
+    >>> rodrigues([[1, 1, 1], [0, 1, 0]], [np.pi, np.pi/2])
+    array([[[ -0.33333333,  0.66666667,  0.66666667],
+            [  0.66666667, -0.33333333,  0.66666667],
+            [  0.66666667,  0.66666667, -0.33333333]],
+           [[  0. ,  0. ,  1. ],
+            [  0. ,  1. ,  0. ],
+            [ -1. ,  0. ,  0. ]]])
     """
-    axis = np.array(axis, dtype=np.float64)
+    axis = np.asarray(axis, dtype=np.float64)
+    if axis.ndim == 1:
+        axis = axis[np.newaxis, :]  # Convert to 1x3 for single axis
+
     if theta is None:
-        theta = np.sqrt(np.sum(axis ** 2))
-    a = axis / np.linalg.norm(axis)
-    cross_prod = np.array([[0, -a[2], a[1]],
-                           [a[2], 0, -a[0]],
-                           [-a[1], a[0], 0]])
+        theta = np.linalg.norm(axis, axis=1)
+    elif np.isscalar(theta):
+        theta = np.full(axis.shape[0], theta, dtype=np.float64)
+
+    # Normalize the axes
+    norm = axis / np.linalg.norm(axis, axis=1)[:, np.newaxis]
+
+    # Cross-product matrix construction
+    zeros = np.zeros(norm.shape[0])
+    cross_prod = np.array([
+        [zeros, -norm[:, 2], norm[:, 1]],
+        [norm[:, 2], zeros, -norm[:, 0]],
+        [-norm[:, 1], norm[:, 0], zeros]
+    ]).transpose((2, 0, 1))  # Shape Nx3x3
+
+    # Compute cosines and sines
     ctheta = np.cos(theta)
     stheta = np.sin(theta)
-    mat = np.eye(3) + \
-        cross_prod * stheta + \
-        np.matmul(cross_prod, cross_prod) * (1 - ctheta)
-    return mat
+
+    # Eye matrix and cross-product terms
+    eye_matrix = np.eye(3).reshape((1, 3, 3))
+    cross_prod_stheta = cross_prod * stheta[:, np.newaxis, np.newaxis]
+    cross_prod_squared = np.matmul(cross_prod, cross_prod)
+    cross_prod_squared_ctheta = cross_prod_squared * (1 - ctheta)[
+        :, np.newaxis, np.newaxis]
+
+    # Sum the components
+    mat = eye_matrix + cross_prod_stheta + cross_prod_squared_ctheta
+    return mat.squeeze()  # Remove single-dimensional entries from the shape
 
 
 def rotation_angle(mat, return_angular_velocity=False):
