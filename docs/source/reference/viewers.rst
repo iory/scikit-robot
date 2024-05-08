@@ -88,3 +88,46 @@ PyrenderViewer
   .. code-block:: python
 
     viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # Set update interval for 30 Hz
+
+
+Color Management
+----------------
+
+**Changing Colors:**
+
+To enhance the visibility and distinction of different components in a robot model, users can change the colors of individual links or the entire robot. This can be done using the ``set_color`` method, which applies a specified RGBA color to the link. The ``reset_color`` method restores the original color of the link, allowing for easy toggling between custom and default visualizations.
+
+
+.. code-block:: python
+
+    import time
+    from skrobot.viewers import TrimeshSceneViewer
+    from skrobot.models import PR2
+    import numpy as np
+
+    viewer = TrimeshSceneViewer()
+    robot_model = PR2()
+    viewer.add(robot_model)
+    viewer.show()
+
+    # Setting the color to red with some transparency
+    color = [255, 0, 0, 200]
+    for link in robot_model.find_link_path(robot_model.rarm_root_link, robot_model.r_gripper_l_finger_tip_link) + robot_model.find_link_path(robot_model.rarm_root_link, robot_model.r_gripper_r_finger_tip_link):
+        link.set_color(color)
+
+
+.. figure:: ../../image/change-link-color.jpg
+    :scale: 100%
+    :align: center
+
+
+.. code-block:: python
+
+    # Resetting the color to default
+    for link in robot_model.find_link_path(robot_model.rarm_root_link, robot_model.r_gripper_l_finger_tip_link) + robot_model.find_link_path(robot_model.rarm_root_link, robot_model.r_gripper_r_finger_tip_link):
+        link.reset_color()
+
+
+.. figure:: ../../image/reset-link-color.jpg
+    :scale: 100%
+    :align: center
