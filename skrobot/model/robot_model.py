@@ -17,13 +17,12 @@ from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
-from skrobot.coordinates import manipulability
+from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates import rpy_angle
-from skrobot.coordinates import sr_inverse
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
@@ -1159,14 +1158,8 @@ class CascadedLink(CascadedCoords):
                               manipulability_gain=0.001,
                               weight=None,
                               *args, **kwargs):
-        # m : manipulability
-        m = manipulability(jacobi)
-        k = 0
-        if m < manipulability_limit:
-            k = manipulability_gain * ((1.0 - m / manipulability_limit) ** 2)
-        # calc weighted SR-inverse
-        j_sharp = sr_inverse(jacobi, k, weight)
-        return j_sharp
+        return jacobian_inverse(jacobi, manipulability_limit,
+                                manipulability_gain, weight)
 
     def calc_joint_angle_speed_gain(self, union_link_list,
                                     dav,

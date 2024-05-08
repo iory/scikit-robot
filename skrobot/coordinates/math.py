@@ -244,6 +244,8 @@ def sr_inverse(J, k=1.0, weight_vector=None):
     ret : numpy.ndarray
         result of SR-inverse
     """
+    if J.ndim == 3:
+        return batch_sr_inverse(J, k, weight_vector=weight_vector)
     r, _ = J.shape
 
     # without weight
@@ -289,8 +291,94 @@ def sr_inverse_org(J, k=1.0):
                      np.linalg.inv(np.matmul(J, J.T) + k * np.eye(r)))
 
 
+def batch_sr_inverse(J_batch, k_values, weight_vector=None):
+    """Compute the SR-inverse for a batch of Jacobian matrices.
+
+    This function computes the SR-inverse for each matrix in a batch by
+    applying a regularization term scaled by `k_values` and optionally
+    using a weighted pseudo-inverse if `weight_vector` is provided.
+
+    Parameters
+    ----------
+    J_batch : ndarray
+        A 3D numpy array of shape (batch_size, r, c) where each
+        slice (J_batch[i]) represents a Jacobian matrix.
+    k_values : ndarray
+        A 1D numpy array of length batch_size, where each element
+        k_values[i] represents the regularization parameter
+        for the i-th matrix in the batch.
+    weight_vector : ndarray, optional
+        A 1D numpy array of length c (the number of columns in
+        each Jacobian matrix), which is used to create a diagonal
+        weight matrix W. If None, the identity matrix is used as
+        the weight matrix (default is None).
+
+    Returns
+    -------
+    ndarray
+        A 3D numpy array of shape (batch_size, c, r), where each slice
+        is the SR-inverse of the corresponding Jacobian matrix in the
+        input batch.
+
+    Notes
+    -----
+    The SR-inverse is computed using the formula:
+        (W*J^T*(J*W*J^T + k*I)^-1),
+    where J is the Jacobian matrix, W is the weight matrix
+    (either identity or derived from `weight_vector`),
+    J^T is the transpose of J, I is the identity matrix, and k
+    is the regularization parameter.
+    """
+    batch_size, r, c = J_batch.shape
+    I = np.eye(r)
+    # Adjust k_values to be shape (batch_size, r, r) for broadcasting
+    k_matrix = k_values[:, np.newaxis, np.newaxis] * np.tile(
+        I, (batch_size, 1, 1))
+    if weight_vector is None:
+        W = np.eye(c)
+    else:
+        W = np.diag(weight_vector)
+    W = W.reshape((c, c))
+    J_T = J_batch.transpose(0, 2, 1)
+    weighted_J_T = np.matmul(W, J_T)
+    umat = np.matmul(J_batch, weighted_J_T) + k_matrix
+    umat_inv = np.linalg.inv(umat)
+    sr_inverse = np.matmul(weighted_J_T, umat_inv)
+    return sr_inverse
+
+
+def jacobian_inverse(J, manipulability_limit=0.1,
+                     manipulability_gain=0.001,
+                     weight=None):
+    """Calculate the pseudo-inverse or SR-inverse depending on manipulability.
+
+    """
+    if J.ndim == 2:  # Single Jacobian matrix
+        J = J[np.newaxis, :]  # Make it a batch of one for uniform processing
+
+    batch_size, r, c = J.shape
+    # Calculate manipulability for each Jacobian
+    m = manipulability(J)
+
+    # Calculate k values for the entire batch based on manipulability
+    k_values = np.zeros(batch_size)
+    low_manipulability_mask = m < manipulability_limit
+    if np.any(low_manipulability_mask):
+        k_values[low_manipulability_mask] = manipulability_gain * (
+            (1.0 - m[low_manipulability_mask] / manipulability_limit) ** 2)
+
+    # Compute SR-inverse for the entire batch using calculated k values
+    sr_inverses = batch_sr_inverse(J, k_values, weight)
+    # Return single matrix or batch depending on input
+    return sr_inverses[0] if sr_inverses.shape[0] == 1 else sr_inverses
+
+
 def manipulability(J):
-    """Return manipulability of given matrix.
+    """Compute manipulability for a single matrix or each matrix in a batch.
+
+    This function can handle both a single Jacobian matrix and a batch of
+    Jacobian matrices. For a single matrix, it returns the manipulability
+    as a float. For a batch, it returns an array of manipulability values.
 
     Definition of manipulability is following.
 
@@ -299,14 +387,25 @@ def manipulability(J):
     Parameters
     ----------
     J : numpy.ndarray
-        jacobian
+        Jacobian matrix or batch of Jacobian matrices. It should be of
+        shape (n, m) for a single matrix or (batch_size, n, m) for a batch.
 
     Returns
     -------
     w : float
-        manipulability
+        Manipulability or array of manipulability values.
     """
-    return np.sqrt(max(0.0, np.linalg.det(np.matmul(J, J.T))))
+    if J.ndim == 2:  # Single matrix case
+        return np.sqrt(max(0.0, np.linalg.det(np.matmul(J, J.T))))
+    elif J.ndim == 3:  # Batch of matrices
+        batch_size, _, _ = J.shape
+        JJT = np.matmul(J, np.transpose(J, axes=(0, 2, 1)))
+        det_JJT = np.linalg.det(JJT)
+        det_JJT = np.maximum(0.0, det_JJT)  # Ensure non-negative before sqrt
+        w = np.sqrt(det_JJT)
+        return w
+    else:
+        raise ValueError("Input must be a 2D or 3D numpy array")
 
 
 def midpoint(p, a, b):
