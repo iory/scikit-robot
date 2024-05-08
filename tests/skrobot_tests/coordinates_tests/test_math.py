@@ -187,6 +187,30 @@ class TestMath(unittest.TestCase):
         testing.assert_array_almost_equal(
             rpy_angle(rec_mat)[0], np.array([0.0, 0.0, -np.pi], 'f'))
 
+    def test_rodrigues_batch(self):
+        # Creating batch matrices and angles
+        angles = [pi / 6, -pi / 6, pi / 5, -pi / 5]
+        axes = [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0]]
+        mats = [rpy_matrix(angle, angle, angle) for angle in angles]
+        thetas, axis_list = zip(*(rotation_angle(mat) for mat in mats))
+
+        rec_mats = rodrigues(axis_list, thetas)
+        testing.assert_array_almost_equal(mats, rec_mats)
+
+        # Test case where theta is None
+        axes = np.array([[pi, 0, 0], [0, pi, 0]], dtype='float32')
+        rec_mats = rodrigues(axes)
+
+        # Expected rotations are around x and y axis by pi respectively
+        expected_mats = [
+            rpy_matrix(0, 0, pi),  # Rotation by pi around x-axis
+            rpy_matrix(0, pi, 0)   # Rotation by pi around y-axis
+        ]
+
+        # Check that reconstructed matrices match expected results
+        for rec_mat, expected_mat in zip(rec_mats, expected_mats):
+            testing.assert_array_almost_equal(rec_mat, expected_mat)
+
     def test_rotate_vector(self):
         testing.assert_array_almost_equal(
             rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0]),
