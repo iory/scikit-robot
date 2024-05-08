@@ -100,6 +100,7 @@ class PyrenderViewer(pyrender.Viewer):
             mesh = link.concatenated_visual_mesh
 
             if link_id not in self._visual_mesh_map and mesh:
+                node = None
                 if isinstance(mesh, trimesh.path.Path3D):
                     pyrender_mesh = pyrender.Mesh(
                         primitives=[pyrender.Primitive(
@@ -117,8 +118,14 @@ class PyrenderViewer(pyrender.Viewer):
                 else:
                     pyrender_mesh = pyrender.Mesh.from_trimesh(
                         mesh, smooth=False)
-                    node = self.scene.add(pyrender_mesh, pose=transform)
-                self._visual_mesh_map[link_id] = (node, link)
+                    # Check if the mesh has vertices
+                    # before adding it to the scene
+                    if len(mesh.vertices) != 0:
+                        node = self.scene.add(pyrender_mesh, pose=transform)
+                # Add the node and link to the
+                # visual mesh map only if the node is successfully created
+                if node is not None:
+                    self._visual_mesh_map[link_id] = (node, link)
 
         for child_link in link._child_links:
             self._add_link(child_link)
