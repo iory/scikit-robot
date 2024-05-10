@@ -1,4 +1,5 @@
 import uuid
+import warnings
 
 import numpy as np
 import trimesh
@@ -72,7 +73,13 @@ class CameraMarker(Link):
 
     def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
                  marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3),
-                 without_axis=False, name=None):
+                 without_axis=False, name=None, color=None):
+        if without_axis:
+            warnings.warn(
+                "The 'without_axis' parameter is deprecated "
+                "and will be removed in future versions.",
+                DeprecationWarning, stacklevel=2)
+
         if name is None:
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
@@ -83,15 +90,39 @@ class CameraMarker(Link):
                                       z_near=z_near,
                                       z_far=z_far)
 
-        origin_size = None
-        if without_axis is True:
-            origin_size = 0.0
+        # calculate vertices from camera FOV angles
+        x = marker_height * np.tan(np.deg2rad(camera.fov[0]) / 2.0)
+        y = marker_height * np.tan(np.deg2rad(camera.fov[1]) / 2.0)
+        z = marker_height
+
+        # combine the points into the vertices of an FOV visualization
+        points = np.array(
+            [(0, 0, 0), (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)],
+            dtype=float)
+
+        segments = []
+        for p in points[1:]:
+            segments.append([points[0], p])
+        segments = np.array(segments)
+
+        outer_edges = points[1:]
+        loop_edges = np.vstack((outer_edges, outer_edges[0]))
+        loop_segments = np.stack((loop_edges[:-1], loop_edges[1:]), axis=1)
+
+        all_segments = np.vstack((segments, loop_segments))
+
+        if color is not None:
+            assert len(color) in (3, 4), "color must be RGB or RGBA"
+            colors = np.array([color])
+        else:
+            colors = None
+        mesh = trimesh.load_path(all_segments)
+        if colors is not None:
+            colors = np.tile(colors, (mesh.entities.shape[0], 1))
+            mesh.colors = colors
         super(CameraMarker, self).__init__(
             pos=pos, rot=rot, name=name,
-            visual_mesh=trimesh.creation.camera_marker(
-                camera,
-                marker_height=marker_height,
-                origin_size=origin_size))
+            visual_mesh=mesh)
 
 
 class Cone(Link):

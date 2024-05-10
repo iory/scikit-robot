@@ -120,7 +120,8 @@ class Link(CascadedCoords):
                     and all(isinstance(m, trimesh.Trimesh) for m in mesh))
                 or isinstance(mesh, trimesh.points.PointCloud)
                 or isinstance(mesh, trimesh.path.path.Path3D)
-                or isinstance(mesh, str)):
+                or isinstance(mesh, str)
+                or isinstance(mesh, list)):
             raise TypeError(
                 'mesh must be None, trimesh.Trimesh, sequence of '
                 'trimesh.Trimesh, trimesh.points.PointCloud '
@@ -149,6 +150,8 @@ class Link(CascadedCoords):
     @property
     def colors(self):
         if self._concatenated_visual_mesh is not None:
+            if isinstance(self._concatenated_visual_mesh, trimesh.path.Path3D):
+                return self._concatenated_visual_mesh.colors
             return self._concatenated_visual_mesh.visual.face_colors
         else:
             return None
@@ -158,17 +161,27 @@ class Link(CascadedCoords):
         if mesh is None:
             return
         color = np.array(color)
-        if color.ndim == 2:
-            mesh.visual.face_colors = color
+        if isinstance(mesh, trimesh.path.Path3D):
+            if color.ndim == 2:
+                mesh.colors = color
+            else:
+                mesh.colors = np.tile(
+                    color, (len(mesh.colors), 1))
         else:
-            n_facet = len(mesh.visual.face_colors)
-            mesh.visual.face_colors = np.array([color] * n_facet)
+            if color.ndim == 2:
+                mesh.visual.face_colors = color
+            else:
+                n_facet = len(mesh.visual.face_colors)
+                mesh.visual.face_colors = np.array([color] * n_facet)
         self._visual_mesh_changed = True
 
     def reset_color(self):
         concat_mesh = trimesh.util.concatenate(self._visual_mesh)
-        self._concatenated_visual_mesh.visual.face_colors = \
-            concat_mesh.visual.face_colors
+        if isinstance(concat_mesh, trimesh.path.Path3D):
+            self._concatenated_visual_mesh.colors = concat_mesh.colors
+        else:
+            self._concatenated_visual_mesh.visual.face_colors = \
+                concat_mesh.visual.face_colors
         self._visual_mesh_changed = True
 
     @property
