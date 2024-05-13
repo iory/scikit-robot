@@ -354,7 +354,12 @@ def jacobian_inverse(J, manipulability_limit=0.1,
 
     """
     if J.ndim == 2:  # Single Jacobian matrix
-        J = J[np.newaxis, :]  # Make it a batch of one for uniform processing
+        m = manipulability(J)
+        if m < manipulability_limit:
+            k = manipulability_gain * ((1.0 - m / manipulability_limit) ** 2)
+        else:
+            k = 0
+        return sr_inverse(J, k, weight)
 
     batch_size, r, c = J.shape
     # Calculate manipulability for each Jacobian
@@ -370,7 +375,7 @@ def jacobian_inverse(J, manipulability_limit=0.1,
     # Compute SR-inverse for the entire batch using calculated k values
     sr_inverses = batch_sr_inverse(J, k_values, weight)
     # Return single matrix or batch depending on input
-    return sr_inverses[0] if sr_inverses.shape[0] == 1 else sr_inverses
+    return sr_inverses
 
 
 def manipulability(J):
