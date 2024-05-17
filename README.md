@@ -1,6 +1,6 @@
 # scikit-robot: A Flexible Framework for Robot visualization and programming in Python
 
-[![Build Status](https://github.com/iory/scikit-robot/workflows/Run%20Tests/badge.svg?branch=master)](https://github.com/iory/scikit-robot/actions)
+[![Build Status](https://github.com/iory/scikit-robot/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/iory/scikit-robot/actions)
 
 
 <h4>
