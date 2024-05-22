@@ -66,15 +66,13 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
     return sdf
 
 
-def link2sdf(link, urdf_path, dim_grid=30):
+def link2sdf(link, dim_grid=30):
     """Convert Link to corresponding sdf
 
     Parameters
     ----------
     link : skrobot.model.Link
         link object
-    urdf_path : str
-        urdf path of the robot model that the link belongs to
     dim_grid : int
         dimension of the GridSDF
 
@@ -282,7 +280,7 @@ class UnionSDF(SignedDistanceFunction):
         sdf_list = []
         for link in robot_model.link_list:
             if link.collision_mesh is not None:
-                sdf = link2sdf(link, robot_model.urdf_path, dim_grid=dim_grid)
+                sdf = link2sdf(link, dim_grid=dim_grid)
                 sdf_list.append(sdf)
         return cls(sdf_list)
 
