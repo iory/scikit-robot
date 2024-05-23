@@ -67,3 +67,6 @@ class TestURDF(unittest.TestCase):
         rot = origin[:3, :3]
         determinant = np.linalg.det(rot)
         self.assertAlmostEqual(determinant, 1.0, places=5)
+        # TODO(HiroIshida): check if trans is correctly scaled
+        # however, to check this, we must fix the issue:
+        # https://github.com/mmatl/urdfpy/issues/17
