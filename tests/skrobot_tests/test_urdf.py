@@ -1,7 +1,12 @@
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
+import numpy as np
+
+from skrobot.data import bunny_objpath
 from skrobot.data import fetch_urdfpath
 from skrobot.models.urdf import RobotModelFromURDF
 from skrobot.utils.urdf import mesh_simplify_factor
@@ -32,3 +37,33 @@ class TestURDF(unittest.TestCase):
         # load using existing cache
         with mesh_simplify_factor(0.1):
             RobotModelFromURDF(urdf_file=fetch_urdfpath())
+
+    def test_load_urdfmodel_with_scale_parameter(self):
+        td = tempfile.mkdtemp()
+        urdf_file = """
+        <robot name="myfirst">
+          <link name="base_link">
+            <visual>
+              <geometry>
+                <mesh filename="./bunny.obj" scale="10 10 10" />
+              </geometry>
+            </visual>
+            <collision>
+              <geometry>
+                <mesh filename="./bunny.obj" scale="10 10 10" />
+              </geometry>
+            </collision>
+          </link>
+        </robot>
+        """
+        # write urdf file
+        with open(os.path.join(td, 'temp.urdf'), 'w') as f:
+            f.write(urdf_file)
+
+        shutil.copy(bunny_objpath(), os.path.join(td, 'bunny.obj'))
+        urdf_file = os.path.join(td, 'temp.urdf')
+        dummy_robot = RobotModelFromURDF(urdf_file=urdf_file)
+        origin = dummy_robot.base_link.collision_mesh.metadata["origin"]
+        rot = origin[:3, :3]
+        determinant = np.linalg.det(rot)
+        self.assertAlmostEqual(determinant, 1.0, places=5)
