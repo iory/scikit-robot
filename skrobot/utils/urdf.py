@@ -2513,15 +2513,6 @@ class Link(URDFType):
         """list of :class:`.Visual` : The visual properties of this link.
 
         """
-        visuals = []
-        for v in self._visuals:
-            # this copy might be heavy but this must be called only once
-            # so it should be fine
-            vc = copy.deepcopy(v)
-            # if geometry is a mesh, apply the pose
-            if vc.geometry.mesh is not None:
-
-
         return self._visuals
 
     @visuals.setter
@@ -2572,8 +2563,8 @@ class Link(URDFType):
                     if c.geometry.mesh is not None:
                         if c.geometry.mesh.scale is not None:
                             m.vertices *= c.geometry.mesh.scale
-                            pose[:3, 3] *= c.geometry.mesh.scale
                     m.apply_transform(pose)
+                    # because we already applied the pose, origin should be identity
                     m.metadata["origin"] = np.eye(4)
                     meshes.append(m)
             if len(meshes) == 0:

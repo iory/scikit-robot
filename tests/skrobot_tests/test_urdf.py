@@ -80,24 +80,15 @@ class TestURDF(unittest.TestCase):
         bunny_verts = bunny_mesh.vertices
         bunny_verts_scaled = bunny_verts * 10
         rotmat = rpy_matrix(0.3, 0.2, 0.1)  # skrobot uses reversed order
-        trans = np.array([10, 20, 30])
+        trans = np.array([1., 2., 3.])
         bunny_verts_deformed_gt = np.dot(bunny_verts_scaled, rotmat.T) + trans
 
         for attr in ['visual_mesh', 'collision_mesh', 'visual_mesh']:
             mesh = getattr(dummy_robot.base_link, attr)
             if isinstance(mesh, list):
                 mesh =mesh[0]
-
-            # check if mesh verts are properly deformed
             self.assertTrue(np.allclose(mesh.vertices, bunny_verts_deformed_gt))
 
-            # check if origin is properly parsed considering scale
-            origin = mesh.metadata["origin"]
-            rot = origin[:3, :3]
-            determinant = np.linalg.det(rot)
-            self.assertAlmostEqual(determinant, 1.0, places=5)
-            rpy = rpy_angle(rot)[0][::-1]
-            self.assertTrue(np.allclose(rpy, [0.1, 0.2, 0.3]))
-
-            trans = origin[:3, 3]
-            self.assertTrue(np.allclose(trans, [10, 20, 30]))
+            # origin must be np.eye(4) because the transformation is already applied
+            origin = mesh.metadata['origin']
+            self.assertTrue(np.allclose(origin, np.eye(4)))
