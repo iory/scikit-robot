@@ -2,11 +2,13 @@ import os
 import shutil
 import sys
 import tempfile
+import trimesh
 import unittest
 
 import numpy as np
 
 from skrobot.coordinates.math import rpy_angle
+from skrobot.coordinates.math import rpy_matrix
 from skrobot.data import bunny_objpath
 from skrobot.data import fetch_urdfpath
 from skrobot.models.urdf import RobotModelFromURDF
@@ -73,12 +75,24 @@ class TestURDF(unittest.TestCase):
         urdf_file = os.path.join(self.temp_urdf_dir, 'temp.urdf')
         dummy_robot = RobotModelFromURDF(urdf_file=urdf_file)
 
-        for attr in ['collision_mesh', 'visual_mesh']:
+        # create ground truth bunny vertices
+        bunny_mesh = trimesh.load_mesh(bunny_objpath())
+        bunny_verts = bunny_mesh.vertices
+        bunny_verts_scaled = bunny_verts * 10
+        rotmat = rpy_matrix(0.3, 0.2, 0.1)  # skrobot uses reversed order
+        trans = np.array([10, 20, 30])
+        bunny_verts_deformed_gt = np.dot(bunny_verts_scaled, rotmat.T) + trans
+
+        for attr in ['visual_mesh', 'collision_mesh', 'visual_mesh']:
             mesh = getattr(dummy_robot.base_link, attr)
             if isinstance(mesh, list):
-                origin = mesh[0].metadata["origin"]
-            else:
-                origin = mesh.metadata["origin"]
+                mesh =mesh[0]
+
+            # check if mesh verts are properly deformed
+            self.assertTrue(np.allclose(mesh.vertices, bunny_verts_deformed_gt))
+
+            # check if origin is properly parsed considering scale
+            origin = mesh.metadata["origin"]
             rot = origin[:3, :3]
             determinant = np.linalg.det(rot)
             self.assertAlmostEqual(determinant, 1.0, places=5)
