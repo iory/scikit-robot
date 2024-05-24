@@ -1699,6 +1699,7 @@ class RobotModel(CascadedLink):
             if visual.geometry.mesh is not None:
                 if visual.geometry.mesh.scale is not None:
                     mesh.vertices = mesh.vertices * visual.geometry.mesh.scale
+                    visual.origin[:3, 3] *= visual.geometry.mesh.scale
 
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
