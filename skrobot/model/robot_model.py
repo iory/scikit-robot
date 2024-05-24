@@ -1724,7 +1724,7 @@ class RobotModel(CascadedLink):
                     mesh.visual.face_colors = visual.material.color
 
             mesh.apply_transform(visual.origin)
-            mesh.metadata["origin"] = visual.origin
+            mesh.metadata["origin"] = np.eye(4)  # because already applied
             meshes.append(mesh)
         return meshes
 

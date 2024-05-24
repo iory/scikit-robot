@@ -1283,7 +1283,9 @@ class Collision(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        kwargs['origin'] = parse_origin(node)
+        geometry_node = [n for n in node.getchildren()
+                         if n.tag == 'geometry'][0]
+        kwargs['origin'] = parse_origin(geometry_node)
         return Collision(**kwargs)
 
     def _to_xml(self, parent, path):
@@ -1376,7 +1378,9 @@ class Visual(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        kwargs['origin'] = parse_origin(node)
+        geometry_node = [n for n in node.getchildren()
+                         if n.tag == 'geometry'][0]
+        kwargs['origin'] = parse_origin(geometry_node)
         return Visual(**kwargs)
 
     def _to_xml(self, parent, path):
@@ -2558,9 +2562,10 @@ class Link(URDFType):
                     pose = c.origin
                     if c.geometry.mesh is not None:
                         if c.geometry.mesh.scale is not None:
-                            pose[3, :3] *= c.geometry.mesh.scale
+                            m.vertices *= c.geometry.mesh.scale
                     m.apply_transform(pose)
-                    m.metadata["origin"] = pose
+                    # because we already applied the pose, origin should be identity
+                    m.metadata["origin"] = np.eye(4)
                     meshes.append(m)
             if len(meshes) == 0:
                 return None
