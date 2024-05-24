@@ -1283,7 +1283,8 @@ class Collision(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        geometry_node = [n for n in node.getchildren() if n.tag == 'geometry'][0]
+        geometry_node = [n for n in node.getchildren()
+                         if n.tag == 'geometry'][0]
         kwargs['origin'] = parse_origin(geometry_node)
         return Collision(**kwargs)
 
@@ -1377,7 +1378,8 @@ class Visual(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         kwargs = cls._parse(node, path)
-        geometry_node = [n for n in node.getchildren() if n.tag == 'geometry'][0]
+        geometry_node = [n for n in node.getchildren()
+                         if n.tag == 'geometry'][0]
         kwargs['origin'] = parse_origin(geometry_node)
         return Visual(**kwargs)
 
