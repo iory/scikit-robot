@@ -34,10 +34,7 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
     sdf : skrobot.sdf.SignedDistanceFunction
         converted signed distance function.
     """
-    if 'file_path' in mesh.metadata:
-        file_path = mesh.metadata['file_path']
-        sdf = GridSDF.from_objfile(file_path, **gridsdf_kwargs)
-    elif 'shape' in mesh.metadata:
+    if 'shape' in mesh.metadata:
         shape = mesh.metadata['shape']
         if shape == 'box':
             extents = mesh.metadata['extents']
