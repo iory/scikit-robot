@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 import unittest
 
 import numpy as np
@@ -7,7 +8,9 @@ from numpy import testing
 import trimesh
 
 import skrobot
+from skrobot.data import bunny_objpath
 from skrobot.data import get_cache_dir
+from skrobot.models.urdf import RobotModelFromURDF
 from skrobot.sdf import BoxSDF
 from skrobot.sdf import CylinderSDF
 from skrobot.sdf import GridSDF
@@ -254,6 +257,43 @@ class TestSDF(unittest.TestCase):
         vertices = finger_link.transform_vector(coll_mesh.vertices)
         sd_vals = fetch_union_sdf(vertices)
         self.assertTrue(np.all(sd_vals < 1e-3))
+
+    def test_sdf_from_robot_with_scale_parameter(self):
+        td = tempfile.mkdtemp()
+        urdf_file = """
+        <robot name="myfirst">
+          <link name="base_link">
+            <visual>
+              <geometry>
+                <mesh filename="./bunny.obj" scale="10 10 10" />
+              </geometry>
+            </visual>
+            <collision>
+              <geometry>
+                <mesh filename="./bunny.obj" scale="10 10 10" />
+              </geometry>
+            </collision>
+          </link>
+        </robot>
+        """
+        # write urdf file
+        with open(os.path.join(td, 'temp.urdf'), 'w') as f:
+            f.write(urdf_file)
+
+        shutil.copy(bunny_objpath(), os.path.join(td, 'bunny.obj'))
+        urdf_file = os.path.join(td, 'temp.urdf')
+        dummy_robot = RobotModelFromURDF(urdf_file=urdf_file)
+        robot_sdf = UnionSDF.from_robot_model(dummy_robot, dim_grid=100)
+
+        bunny_mesh = trimesh.load_mesh(bunny_objpath())
+        vertices = bunny_mesh.vertices * 10.0
+        sd_vals = robot_sdf(vertices)
+
+        # If sdf is properly computed, abs(sdf) for all vertices
+        # must be small enough
+        lb, lu = np.min(vertices, axis=0), np.max(vertices, axis=0)
+        eps = np.min(lu - lb) * 1e-2
+        self.assertTrue(np.all(np.abs(sd_vals) < eps))
 
     def test_trimesh2sdf(self):
         # non-primitive mesh with file_path
