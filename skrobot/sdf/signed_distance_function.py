@@ -52,17 +52,19 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
         else:
             msg = "primtive type {0} is not supported".format(shape)
             raise ValueError(msg)
+
+        if "original_primitive_origin_for_sdf" in mesh.metadata:
+            # this value is set when loading a mesh from a URDF file
+            origin = mesh.metadata["original_primitive_origin_for_sdf"]
+            rotation_matrix = origin[:3, :3]
+            translation = origin[:3, 3]
+            sdf.newcoords(Coordinates(pos=translation, rot=rotation_matrix))
     else:
         tmpdir = tempfile.mkdtemp()
         tmpfile = os.path.join(tmpdir, 'tmp.obj')
         mesh.export(tmpfile)
         sdf = GridSDF.from_objfile(tmpfile, **gridsdf_kwargs)
         shutil.rmtree(tmpdir)
-    if "origin" in mesh.metadata:
-        origin = mesh.metadata["origin"]
-        rotation_matrix = origin[:3, :3]
-        translation = origin[:3, 3]
-        sdf.newcoords(Coordinates(pos=translation, rot=rotation_matrix))
     return sdf
 
 
