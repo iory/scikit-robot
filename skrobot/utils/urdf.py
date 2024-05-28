@@ -2558,7 +2558,9 @@ class Link(URDFType):
                     pose = c.origin
                     if c.geometry.mesh is not None:
                         if c.geometry.mesh.scale is not None:
-                            pose[3, :3] *= c.geometry.mesh.scale
+                            S = np.eye(4)
+                            S[:3, :3] = np.diag(c.geometry.mesh.scale)
+                            pose = pose.dot(S)
                     m.apply_transform(pose)
                     m.metadata["origin"] = pose
                     meshes.append(m)
