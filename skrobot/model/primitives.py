@@ -232,7 +232,6 @@ class MeshLink(Link):
                     self.visual_mesh[0] + self.visual_mesh[1:]
             else:
                 self._collision_mesh = self.visual_mesh
-            self._collision_mesh.metadata['origin'] = np.eye(4)
 
         if with_sdf:
             sdf = trimesh2sdf(self._collision_mesh, **gridsdf_kwargs)

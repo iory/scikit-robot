@@ -2555,12 +2555,15 @@ class Link(URDFType):
             for c in self.collisions:
                 for m in c.geometry.meshes:
                     m = m.copy()
+                    if c.geometry.mesh is None:
+                        m.metadata["original_primitive_origin_for_sdf"] = c.origin.copy()  # noqa: E501
                     pose = c.origin
                     if c.geometry.mesh is not None:
                         if c.geometry.mesh.scale is not None:
-                            pose[3, :3] *= c.geometry.mesh.scale
+                            S = np.eye(4)
+                            S[:3, :3] = np.diag(c.geometry.mesh.scale)
+                            pose = pose.dot(S)
                     m.apply_transform(pose)
-                    m.metadata["origin"] = pose
                     meshes.append(m)
             if len(meshes) == 0:
                 return None
