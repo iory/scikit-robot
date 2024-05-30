@@ -249,7 +249,7 @@ class UnionSDF(SignedDistanceFunction):
         return sd_vals_union
 
     def _surface_points(self, n_sample=1000):
-        # equaly asign sample number to each sdf.surface_points()
+        # equaly assign sample number to each sdf.surface_points()
         n_list = len(self.sdf_list)
         n_sample_each = int(floor(n_sample / n_list))
         n_sample_last = n_sample - n_sample_each * (n_list - 1)

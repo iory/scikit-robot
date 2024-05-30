@@ -165,7 +165,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
                 av_diff, controller_type)
             if diff_max > math.pi:
                 rospy.logwarn(
-                    "continous joint {} movement over 180 degree detected"
+                    "continuous joint {} movement over 180 degree detected"
                     .format(joint_name))
                 rospy.logwarn(
                     "angle_vector_sequence will be used as a workaround")
@@ -218,9 +218,9 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
                 av_diff, controller_type)
             if diff_max > math.pi:
                 rospy.logwarn(
-                    "continous joint {} movement over 180 degree detected"
+                    "continuous joint {} movement over 180 degree detected"
                     .format(joint_name))
-                rospy.logwarn('inverval will be splitted')
+                rospy.logwarn('inverval will be split')
                 n_split = int(math.ceil(diff_max / (math.pi * 2 / 3)))
                 av_diff_partial = av_diff / n_split
                 for j in range(n_split):
