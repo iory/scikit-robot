@@ -23,7 +23,9 @@ jobs:
         python-version: 3.8
     - name: Install Formatting
       run: |
-        python -m pip install --upgrade pip
+        # python -m pip install --upgrade pip
+        # https://github.com/pytorch/pytorch/issues/104598#issuecomment-1662871612
+        python -m pip install pip==20.0.2
         pip install hacking isort
     - name: Check Formatting
       run: |
@@ -62,6 +64,9 @@ jobs:
     - name: Install Pytest
       run: |
         python -m pip install --upgrade pip setuptools wheel
+        # python -m pip install --upgrade pip
+        # https://github.com/pytorch/pytorch/issues/104598#issuecomment-1662871612
+        python -m pip install pip==20.0.2
         pip install Cython
         pip install pytest hacking
     - name: Install scikit-robot
@@ -84,6 +89,9 @@ jobs:
     - name: Install Pytest
       run: |
         python -m pip install --upgrade pip setuptools wheel
+        # python -m pip install --upgrade pip
+        # https://github.com/pytorch/pytorch/issues/104598#issuecomment-1662871612
+        python -m pip install pip==20.0.2
         pip install Cython
         pip install pytest hacking
     - name: Install scikit-robot
