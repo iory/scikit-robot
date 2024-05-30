@@ -65,7 +65,7 @@ jobs:
         pip install Cython
         pip install pytest hacking
     - name: Install scikit-robot
-      run: pip install .[all]
+      run: pip install --no-cache-dir .[all]
     - name: Run Pytest
       run: pytest -v tests
 
@@ -87,6 +87,6 @@ jobs:
         pip install Cython
         pip install pytest hacking
     - name: Install scikit-robot
-      run: pip install .[all]
+      run: pip install --no-cache-dir .[all]
     - name: Run Pytest
       run: sudo pytest -v tests  # require sudo to access /tmp dir
