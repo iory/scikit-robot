@@ -88,9 +88,9 @@ class CascadedLink(CascadedCoords):
     def _is_relevant(self, joint, something):
         """check if `joint` affects `something`
 
-        `somthing` must be at least CascadedCoords and must be
+        `something` must be at least CascadedCoords and must be
         connected to this CascadedLink. Otherwirse, this method
-        raise AssertionError. If `something` is a decendant of `joint`,
+        raise AssertionError. If `something` is a descendant of `joint`,
         which means movement of `joint` affects `something`, thus
         this method returns `True`. Otherwise returns `False`.
         """
@@ -835,7 +835,7 @@ class CascadedLink(CascadedCoords):
             rotation_axis = []
         c = self.calc_target_joint_dimension(
             union_link_list)
-        # add dimensions of additonal-jacobi
+        # add dimensions of additional-jacobi
         r = self.calc_target_axis_dimension(
             rotation_axis, translation_axis) + additional_jacobi_dimension
 

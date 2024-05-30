@@ -59,7 +59,7 @@ coll_link_list = [
 with_base = not args.without_base
 av_start = np.array([0.564, 0.35, -0.74, -0.7, -0.7, -0.17, -0.63])
 if with_base:
-    # base pose is sepcified by [x, y, theta]
+    # base pose is specified by [x, y, theta]
     base_pose_start = [-0.5, 0.8, 0]
     av_start = np.hstack([av_start, base_pose_start])
 

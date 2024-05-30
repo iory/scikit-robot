@@ -41,7 +41,7 @@ def convert_to_axis_vector(axis):
     Returns
     -------
     axis : numpy.ndarray
-        conveted axis
+        converted axis
 
     Examples
     --------

@@ -188,7 +188,7 @@ class SweptSphereSdfCollisionChecker(object):
         Let :math:`c : \\mathbb{R}^3 \\ni x \\mapsto sd \\in \\mathbb{R}`
         be the signd distance function.
 
-        Then, this fucntion is defined as
+        Then, this function is defined as
         :math:`F : \\mathbb{R}^{n_{wp} n_{dof}} \\ni \\xi \\mapsto
         [
         [f_{1, 1}(q_1), \\ldots, f_{1, n_{f}}(q_1)]^T,

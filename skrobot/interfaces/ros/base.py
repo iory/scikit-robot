@@ -281,7 +281,7 @@ class ROSRobotInterfaceBase(object):
                 if self.controller_timeout is None:
                     rospy.logwarn(
                         'Waiting for actionlib interface forever '
-                        'because controler-timeout is None')
+                        'because controller-timeout is None')
                 if not (
                     self.joint_action_enable and action.wait_for_server(
                         rospy.Duration(
@@ -363,7 +363,7 @@ class ROSRobotInterfaceBase(object):
                      velocities=None):
         """Send joint angle to robot
 
-        Send joint angle to robot. this method retuns immediately, so use
+        Send joint angle to robot. this method returns immediately, so use
         self.wait_interpolation to block until the motion stops.
 
         Parameters
@@ -425,7 +425,7 @@ class ROSRobotInterfaceBase(object):
         return av
 
     def potentio_vector(self):
-        """Retuns current robot angle vector, This method uses caced data."""
+        """Returns current robot angle vector, This method uses caced data."""
         return self.robot.angle_vector()
 
     def send_ros_controller(
@@ -488,7 +488,7 @@ class ROSRobotInterfaceBase(object):
                               time_scale=5.0):
         """Send sequence of joint angles to robot
 
-        Send sequence of joint angle to robot, this method retuns
+        Send sequence of joint angle to robot, this method returns
         immediately, so use self.wait_interpolation to block until the motion
         stops.
 

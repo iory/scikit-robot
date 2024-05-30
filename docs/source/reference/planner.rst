@@ -19,7 +19,7 @@ SQP-based trajectory planner
 
    skrobot.planner.sqp_plan_trajectory
 
-Swept sphere generater 
+Swept sphere generator
 ----------------------
 
 .. autosummary::
