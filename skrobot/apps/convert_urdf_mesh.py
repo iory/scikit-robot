@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 import argparse
+from distutils.version import StrictVersion
 import os.path as osp
 from pathlib import Path
 import shutil
+
+import pkg_resources
 
 from skrobot.model import RobotModel
 from skrobot.utils.urdf import export_mesh_format
@@ -62,7 +65,14 @@ resulting in less simplification. Default is None."""
             '.' + args.format,
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
             simplify_vertex_clustering_voxel_size=args.voxel_size):
+        trimesh_version = pkg_resources.get_distribution("trimesh").version
+        if StrictVersion(trimesh_version) < StrictVersion("4.0.10"):
+            print(
+                '[Error] With `trimesh` < 4.0.10, the output dae is not '
+                'colored. Please `pip install trimesh -U`')
+            print('Convert failed.')
         r.urdf_robot_model.save(str(base_path / output_path))
+
     if args.inplace:
         shutil.move(str(base_path / output_path),
                     base_path / urdf_path)
