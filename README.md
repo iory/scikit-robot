@@ -1,5 +1,6 @@
 # scikit-robot: A Flexible Framework for Robot visualization and programming in Python
 
+![PyPI](https://img.shields.io/pypi/v/scikit-robot.svg)
 [![Build Status](https://github.com/iory/scikit-robot/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/iory/scikit-robot/actions)
 
 
