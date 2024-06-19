@@ -67,7 +67,7 @@ jobs:
     - name: Install scikit-robot
       run: |
         pip cache purge
-        pip install --no-cache-dir .[all]
+        pip install --no-cache-dir .[all] "numpy<2.0"
     - name: Run Pytest
       run: pytest -v tests
 
