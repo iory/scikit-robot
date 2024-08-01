@@ -1035,7 +1035,7 @@ class CascadedLink(CascadedCoords):
         self.reset_joint_angle_limit_weight(union_link_list)
 
         # TODO(add collision check)
-        if success:
+        if success or not revert_if_fail:
             return self.angle_vector()
 
         # reset angle vector
