@@ -147,9 +147,19 @@ class ROSRobotInterfaceBase(object):
         if isinstance(time, Number):
             # Normal Number disgnated Mode
             if time < fastest_time:
+                rospy.logwarn(
+                    'Time has been changed from {} to {} '
+                    'due to joint velocity limit. '
+                    'Make sure that joint limit is correctly set in urdf'.
+                    format(time, fastest_time))
                 time = fastest_time
         elif time is None:
             time = time_scale * fastest_time
+            rospy.logwarn(
+                'Time of send angle vector is set to {}. '
+                'If the speed seems slow, check if '
+                'joint velocity limit is correctly set in urdf'.
+                format(time))
         else:
             raise ValueError(
                 'time is invalid type. {}'.format(time))
