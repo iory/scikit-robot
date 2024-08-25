@@ -594,8 +594,8 @@ class ROSRobotInterfaceBase(object):
 
         Returns
         -------
+        list[bool]
             return values are a list of is_interpolating for all controllers.
-            if all interpolation has stopped, return True.
         """
         if controller_type:
             controller_actions = self.controller_table[controller_type]
@@ -604,8 +604,9 @@ class ROSRobotInterfaceBase(object):
         for action in controller_actions:
             # TODO(simultaneously wait_for_result)
             action.wait_for_result(timeout=rospy.Duration(timeout))
-        # TODO(Fix return value)
-        return True
+        is_interpolatings = map(
+            lambda action: action.is_interpolating(), controller_actions)
+        return list(is_interpolatings)
 
     def angle_vector_duration(self, start_av, end_av, controller_type=None):
         """Calculate maximum time to reach goal for all joint.
