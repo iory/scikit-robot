@@ -661,4 +661,4 @@ class ControllerActionClient(actionlib.SimpleActionClient):
         self.last_feedback_msg_stamp = msg.header.stamp
 
     def is_interpolating(self):
-        return self.time_sequence is None
+        return not self.simple_state == actionlib.SimpleGoalState.DONE
