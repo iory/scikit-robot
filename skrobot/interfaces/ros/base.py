@@ -647,6 +647,13 @@ class ROSRobotInterfaceBase(object):
             time_list.append(time)
         return max(time_list)
 
+    def cancel_angle_vector(self):
+        """Stop motion via follow joint trajectory cancel
+
+        """
+        for action in self.controller_actions:
+            action.cancel_all_goals()
+
 
 class ControllerActionClient(actionlib.SimpleActionClient):
 
