@@ -27,7 +27,8 @@ class TestAxis(unittest.TestCase):
 class TestBox(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Box(extents=(1, 1, 1))
+        box = skrobot.model.Box(extents=(1, 1, 1))
+        assert np.allclose(box.extents, [1, 1, 1])
         skrobot.model.Box(extents=(1, 1, 1), with_sdf=True)
 
     def test_init_with_sdf(self):
@@ -41,19 +42,24 @@ class TestBox(unittest.TestCase):
 class TestCone(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Cone(radius=0.5, height=1)
+        cone = skrobot.model.Cone(radius=0.5, height=1)
+        assert cone.radius == 0.5
+        assert cone.height == 1
 
 
 class TestCylinder(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Cylinder(radius=0.5, height=1)
+        cylinder = skrobot.model.Cylinder(radius=0.5, height=1)
+        assert cylinder.radius == 0.5
+        assert cylinder.height == 1
 
 
 class TestSphere(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Sphere(radius=1)
+        sphere = skrobot.model.Sphere(radius=1)
+        assert sphere.radius == 1
 
     def test_init_with_sdf(self):
         pos = np.ones(3)
@@ -66,7 +72,10 @@ class TestSphere(unittest.TestCase):
 class TestAnnulus(unittest.TestCase):
 
     def test_init(self):
-        skrobot.model.Annulus(r_min=0.2, r_max=0.5, height=1)
+        annulus = skrobot.model.Annulus(r_min=0.2, r_max=0.5, height=1)
+        assert annulus.r_min == 0.2
+        assert annulus.r_max == 0.5
+        assert annulus.height == 1
 
 
 class TestLineString(unittest.TestCase):

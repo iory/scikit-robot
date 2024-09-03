@@ -61,7 +61,8 @@ class Box(Link):
         super(Box, self).__init__(pos=pos, rot=rot, name=name,
                                   collision_mesh=mesh,
                                   visual_mesh=mesh)
-        self._extents = extents
+        self.extents = extents
+        self._extents = extents  # for backward compatibility
         if with_sdf:
             sdf = BoxSDF(extents)
             self.assoc(sdf, relative_coords="local")
@@ -103,6 +104,8 @@ class Cone(Link):
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        self.radius = radius
+        self.height = height
         mesh = trimesh.creation.cone(
             radius=radius,
             height=height,
@@ -134,6 +137,8 @@ class Cylinder(Link):
         super(Cylinder, self).__init__(pos=pos, rot=rot, name=name,
                                        collision_mesh=mesh,
                                        visual_mesh=mesh)
+        self.radius = radius
+        self.height = height
         if with_sdf:
             sdf = CylinderSDF(height, radius)
             self.assoc(sdf, relative_coords="local")
@@ -156,6 +161,7 @@ class Sphere(Link):
                                      collision_mesh=mesh,
                                      visual_mesh=mesh)
 
+        self.radius = radius
         if with_sdf:
             sdf = SphereSDF(radius)
             self.assoc(sdf, relative_coords="local")
@@ -170,6 +176,9 @@ class Annulus(Link):
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        self.r_min = r_min
+        self.r_max = r_max
+        self.height = height
         mesh = trimesh.creation.annulus(
             r_min=r_min,
             r_max=r_max,
