@@ -22,6 +22,8 @@ from skrobot.coordinates.math import rotation_angle
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
+from skrobot.coordinates.math import wxyz2xyzw
+from skrobot.coordinates.math import xyzw2wxyz
 
 
 def transform_coords(c1, c2, out=None):
@@ -196,7 +198,8 @@ class Coordinates(object):
                  rot=None,
                  name=None,
                  hook=None,
-                 check_validity=True):
+                 check_validity=True,
+                 input_quaternion_order='wxyz'):
         if check_validity:
             if (isinstance(pos, list) or isinstance(pos, np.ndarray)):
                 T = np.array(pos, dtype=np.float64)
@@ -206,6 +209,16 @@ class Coordinates(object):
             if rot is None:
                 self._rotation = np.eye(3)
             else:
+                if input_quaternion_order == 'wxyz':
+                    pass
+                elif input_quaternion_order == 'xyzw':
+                    if np.array(rot).shape == (4,):
+                        rot = xyzw2wxyz(rot)
+                else:
+                    msg = "Invalid input_quaternion_order: "
+                    msg += "{}. Must be 'wxyz' or 'xyzw'.".format(
+                        input_quaternion_order)
+                    raise ValueError(msg)
                 self.rotation = rot
             if pos is None:
                 self._translation = np.array([0, 0, 0])
@@ -602,7 +615,7 @@ class Coordinates(object):
 
     @property
     def quaternion(self):
-        """Property of quaternion
+        """Property of quaternion in [w, x, y, z] format
 
         Returns
         -------
@@ -621,6 +634,39 @@ class Coordinates(object):
         array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
         return matrix2quaternion(self._rotation)
+
+    @property
+    def quaternion_wxyz(self):
+        """Property of quaternion in [w, x, y, z] format
+
+        Returns
+        -------
+        q : numpy.ndarray
+            [w, x, y, z] quaternion
+        """
+        return matrix2quaternion(self._rotation)
+
+    @property
+    def quaternion_xyzw(self):
+        """Property of quaternion in [x, y, z, w] format
+
+        Returns
+        -------
+        q : numpy.ndarray
+            [x, y, z, w] quaternion
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.quaternion_xyzw
+        array([0., 0., 0., 1.])
+        >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        >>> c.quaternion_xyzw
+        array([0.1545085 , 0.47552826, 0.26761657, 0.8236391 ])
+        """
+        return wxyz2xyzw(matrix2quaternion(self._rotation))
 
     @property
     def dual_quaternion(self):
