@@ -4,7 +4,6 @@ import time
 import numpy as np
 
 from skrobot.coordinates import Coordinates
-from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
@@ -85,7 +84,7 @@ class PybulletRobotInterface(Coordinates):
             except Exception as e:
                 print(e)
         self.robot_id = p.loadURDF(urdf_path, self.translation,
-                                   wxyz2xyzw(self.quaternion),
+                                   self.quaternion_xyzw,
                                    useFixedBase=use_fixed_base)
 
         self.load_bullet()
@@ -125,7 +124,7 @@ class PybulletRobotInterface(Coordinates):
         This function is wrapper of pybullet.resetBasePositionAndOrientation.
         """
         p.resetBasePositionAndOrientation(self.robot_id, self.translation,
-                                          wxyz2xyzw(self.quaternion))
+                                          self.quaternion_xyzw)
 
     def translate(self, vec, wrt='local'):
         """Translate robot in simulator.

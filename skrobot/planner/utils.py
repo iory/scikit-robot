@@ -169,7 +169,7 @@ def _forward_kinematics(robot_model,
     link_list = [joint.child_link for joint in joint_list]
 
     ef_pos_wrt_world = move_target.worldpos()
-    ef_quat_wrt_world = move_target.worldcoords().quaternion
+    ef_quat_wrt_world = move_target.worldcoords().quaternion_wxyz
     world_coordinate = CascadedCoords()
 
     def quaternion_kinematic_matrix(q):

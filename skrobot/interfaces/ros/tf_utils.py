@@ -20,7 +20,7 @@ def coords_to_geometry_pose(coords):
     pose.position.x = coords.translation[0]
     pose.position.y = coords.translation[1]
     pose.position.z = coords.translation[2]
-    q = coords.quaternion
+    q = coords.quaternion_wxyz
     pose.orientation.w = q[0]
     pose.orientation.x = q[1]
     pose.orientation.y = q[2]
@@ -45,7 +45,7 @@ def coords_to_tf_pose(coords):
     pose.translation.x = coords.translation[0]
     pose.translation.y = coords.translation[1]
     pose.translation.z = coords.translation[2]
-    q = coords.quaternion
+    q = coords.quaternion_wxyz
     pose.rotation.w = q[0]
     pose.rotation.x = q[1]
     pose.rotation.y = q[2]
