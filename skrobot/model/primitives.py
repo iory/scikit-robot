@@ -13,6 +13,15 @@ from skrobot.sdf import SphereSDF
 from skrobot.sdf import trimesh2sdf
 
 
+class SDFImplemented:
+    @property
+    def sdf(self):
+        if self._sdf is None:
+            msg = "This link does not have SDF. Please set with_sdf=True"
+            raise AttributeError(msg)
+        return self._sdf
+
+
 class Axis(Link):
 
     def __init__(self,
@@ -46,7 +55,7 @@ class Axis(Link):
         return link
 
 
-class Box(Link):
+class Box(Link, SDFImplemented):
 
     def __init__(self, extents, vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
@@ -61,11 +70,14 @@ class Box(Link):
         super(Box, self).__init__(pos=pos, rot=rot, name=name,
                                   collision_mesh=mesh,
                                   visual_mesh=mesh)
-        self._extents = extents
+        self.extents = extents
+        self._extents = extents  # for backward compatibility
         if with_sdf:
             sdf = BoxSDF(extents)
             self.assoc(sdf, relative_coords="local")
-            self.sdf = sdf
+            self._sdf = sdf
+        else:
+            self._sdf = None
 
 
 class CameraMarker(Link):
@@ -103,6 +115,8 @@ class Cone(Link):
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        self.radius = radius
+        self.height = height
         mesh = trimesh.creation.cone(
             radius=radius,
             height=height,
@@ -115,7 +129,7 @@ class Cone(Link):
                                    visual_mesh=mesh)
 
 
-class Cylinder(Link):
+class Cylinder(Link, SDFImplemented):
 
     def __init__(self, radius, height,
                  sections=32,
@@ -134,13 +148,17 @@ class Cylinder(Link):
         super(Cylinder, self).__init__(pos=pos, rot=rot, name=name,
                                        collision_mesh=mesh,
                                        visual_mesh=mesh)
+        self.radius = radius
+        self.height = height
         if with_sdf:
             sdf = CylinderSDF(height, radius)
             self.assoc(sdf, relative_coords="local")
-            self.sdf = sdf
+            self._sdf = sdf
+        else:
+            self._sdf = None
 
 
-class Sphere(Link):
+class Sphere(Link, SDFImplemented):
 
     def __init__(self, radius, subdivisions=3, color=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
@@ -156,10 +174,13 @@ class Sphere(Link):
                                      collision_mesh=mesh,
                                      visual_mesh=mesh)
 
+        self.radius = radius
         if with_sdf:
             sdf = SphereSDF(radius)
             self.assoc(sdf, relative_coords="local")
-            self.sdf = sdf
+            self._sdf = sdf
+        else:
+            self._sdf = None
 
 
 class Annulus(Link):
@@ -170,6 +191,9 @@ class Annulus(Link):
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
+        self.r_min = r_min
+        self.r_max = r_max
+        self.height = height
         mesh = trimesh.creation.annulus(
             r_min=r_min,
             r_max=r_max,
@@ -215,7 +239,7 @@ class LineString(Link):
             visual_mesh=mesh)
 
 
-class MeshLink(Link):
+class MeshLink(Link, SDFImplemented):
 
     def __init__(self,
                  visual_mesh=None,
@@ -236,7 +260,9 @@ class MeshLink(Link):
         if with_sdf:
             sdf = trimesh2sdf(self._collision_mesh, **gridsdf_kwargs)
             self.assoc(sdf, relative_coords="local")
-            self.sdf = sdf
+            self._sdf = sdf
+        else:
+            self._sdf = None
 
 
 class PointCloudLink(Link):
