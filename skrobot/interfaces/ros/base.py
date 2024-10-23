@@ -608,6 +608,15 @@ class ROSRobotInterfaceBase(object):
             lambda action: action.is_interpolating(), controller_actions)
         return list(is_interpolatings)
 
+    def is_interpolating(self, controller_type=None):
+        if controller_type:
+            controller_actions = self.controller_table[controller_type]
+        else:
+            controller_actions = self.controller_table[self.controller_type]
+        is_interpolatings = map(
+            lambda action: action.is_interpolating(), controller_actions)
+        return any(list(is_interpolatings))
+
     def angle_vector_duration(self, start_av, end_av, controller_type=None):
         """Calculate maximum time to reach goal for all joint.
 
