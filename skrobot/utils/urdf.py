@@ -506,7 +506,8 @@ class URDFType(object):
             and elements in the class arrays.
         """
         kwargs = cls._parse_simple_attribs(node)
-        kwargs.update(cls._parse_simple_elements(node, path))
+        if node is not None:
+            kwargs.update(cls._parse_simple_elements(node, path))
         return kwargs
 
     @classmethod
@@ -958,9 +959,9 @@ class Geometry(URDFType):
     _TAG = 'geometry'
 
     def __init__(self, box=None, cylinder=None, sphere=None, mesh=None):
-        if (box is None and cylinder is None
-                and sphere is None and mesh is None):
-            raise ValueError('At least one geometry element must be set')
+        # if (box is None and cylinder is None
+        #         and sphere is None and mesh is None):
+        #     raise ValueError('At least one geometry element must be set')
         self.box = box
         self.cylinder = cylinder
         self.sphere = sphere
@@ -1042,7 +1043,10 @@ class Geometry(URDFType):
         list of :class:`~trimesh.base.Trimesh` : The geometry's triangular
         mesh representation(s).
         """
-        return self.geometry.meshes
+        geo = self.geometry
+        if geo is None:
+            return []
+        return geo.meshes
 
 
 class Texture(URDFType):
