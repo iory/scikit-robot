@@ -15,3 +15,4 @@ API Reference
    sdfs
    planner
    viewers
+   robot_model_tips
