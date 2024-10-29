@@ -77,7 +77,7 @@ def auto_simplify_quadric_decimation(meshes, area_ratio_threshold=0.98):
         for f in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
             n_face_reduced = int(n_face * f)
             mesh_simplified = mesh.simplify_quadric_decimation(
-                n_face_reduced)
+                face_count=n_face_reduced)
             ratio = mesh_simplified.area / mesh.area
             if ratio > area_ratio_threshold:
                 break
