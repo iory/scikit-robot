@@ -33,6 +33,27 @@ If you would like to use `Pybullet Interface`, `open3d` and `fast-simplification
 pip install scikit-robot[all]
 ```
 
+## Command Line Tools
+
+### Visualize URDF
+
+To visualize a URDF model and inspect your robot's configuration, you can use the `visualize-urdf` command as follows:
+
+```bash
+visualize-urdf ~/.skrobot/pr2_description/pr2.urdf
+```
+
+If you experience performance issues with the default viewer, try pyrender for smoother visualization:
+
+```bash
+visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer pyrender
+```
+
+Running these commands should open a viewer displaying your robot’s 3D model. Below is a sample image of what you should expect.
+
+![Viewer Example](docs/image/viewer.jpg)
+
+
 ## Features
 
 - [x] Loading robot model from URDF ([examples/robot_models.py](examples/robot_models.py))
