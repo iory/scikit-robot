@@ -2,7 +2,7 @@ Robot Model Tips
 ================
 
 Loading the Robot Model Without Mesh Data
----------------------------------------
+-----------------------------------------
 
 Sometimes, loading a robot model with full mesh data can be slow and resource-intensive. If mesh data is not necessary for your use case, you can improve the loading speed by disabling mesh data loading as shown below:
 
