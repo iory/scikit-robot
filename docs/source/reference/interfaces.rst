@@ -13,7 +13,7 @@ You can use a Pybullet interface using skrobot.
    :toctree: generated/
    :nosignatures:
 
-   skrobot.interfaces._pybullet.PybulletRobotInterface
+   PybulletRobotInterface
 
 >>> from skrobot.models import PR2
 >>> from skrobot.interfaces import PybulletRobotInterface

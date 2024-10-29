@@ -11,7 +11,7 @@ Robot Model class
    :toctree: generated/
    :nosignatures:
 
-   skrobot.model.RobotModel
+   RobotModel
 
 
 Robot Model classes
@@ -28,7 +28,7 @@ Fetch
    :toctree: generated/
    :nosignatures:
 
-   skrobot.models.fetch.Fetch
+   fetch.Fetch
 
 .. figure:: ../../image/fetch.png
     :scale: 40%
@@ -42,7 +42,7 @@ Kuka
    :toctree: generated/
    :nosignatures:
 
-   skrobot.models.kuka.Kuka
+   kuka.Kuka
 
 .. figure:: ../../image/kuka.png
     :scale: 40%
@@ -55,7 +55,7 @@ PR2
    :toctree: generated/
    :nosignatures:
 
-   skrobot.models.pr2.PR2
+   pr2.PR2
 
 .. figure:: ../../image/pr2.png
     :scale: 40%
