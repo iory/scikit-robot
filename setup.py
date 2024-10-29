@@ -87,6 +87,7 @@ if os_type == 'Darwin' or architecture == 'aarch64':
 extra_all_requires = ['pybullet>=2.1.9']
 if (sys.version_info.major > 2):
     extra_all_requires.append('open3d')
+    extra_all_requires.append('fast-simplification')
 
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds
