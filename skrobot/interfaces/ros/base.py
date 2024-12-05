@@ -292,6 +292,8 @@ class ROSRobotInterfaceBase(object):
                     rospy.logwarn(
                         'Waiting for actionlib interface forever '
                         'because controller-timeout is None')
+                rospy.loginfo('Waiting for actionlib interface {}'
+                              .format(action_name))
                 if not (
                     self.joint_action_enable and action.wait_for_server(
                         rospy.Duration(
@@ -299,12 +301,15 @@ class ROSRobotInterfaceBase(object):
                     rospy.logwarn('{} is not respond, {}_interface is disable'.
                                   format(action, self.robot.name))
                     rospy.logwarn('make sure that you can run '
-                                  "'rostopic echo /{0}/status' "
-                                  "and 'rostopic info /{0}/status'".
+                                  "'rostopic echo {0}/status' "
+                                  "and 'rostopic info {0}/status'".
                                   format(action_name))
                     if joint_enable_check:
                         self.joint_action_enable = False
                         return []
+                else:
+                    rospy.loginfo('Actionlib interface {} is enabled'
+                                  .format(action_name))
             for param in self.default_controller():
                 controller_state = param['controller_state']
                 if self.namespace is not None:
