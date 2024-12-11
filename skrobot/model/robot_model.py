@@ -898,6 +898,9 @@ class CascadedLink(CascadedCoords):
         # store current angle vector
         joint_list = list(
             set([l.joint for l in union_link_list] + self.joint_list))
+        if None in joint_list:
+            logger.error('All links in link_list must have a parent joint')
+            return True
         av0 = [j.joint_angle() for j in joint_list]
         c0 = None
         if self.parent is None:
