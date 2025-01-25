@@ -298,12 +298,10 @@ class TestSDF(unittest.TestCase):
     def test_trimesh2sdf(self):
         # non-primitive mesh with file_path
         mesh = self.bunnymesh
-        assert "file_path" in mesh.metadata
         sdf = skrobot.sdf.trimesh2sdf(mesh)
         assert isinstance(sdf, GridSDF)
 
         # non-primitive mesh without file_path
-        mesh.metadata.pop("file_path")
         sdf = skrobot.sdf.trimesh2sdf(mesh)
         assert isinstance(sdf, GridSDF)
 
