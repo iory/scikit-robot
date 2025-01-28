@@ -1,5 +1,6 @@
 from __future__ import division
 
+import filelock
 from logging import getLogger
 from math import floor
 import os
@@ -520,13 +521,18 @@ class GridSDF(SignedDistanceFunction):
             checksum_md5(obj_filepath), dim_grid, padding_grid)
 
         sdf_cache_path = os.path.join(sdf_cache_dir, hashed_filename + '.sdf')
-        if not os.path.exists(sdf_cache_path):
-            logger.info(
-                'pre-computing sdf and making a cache at {0}.'
-                .format(sdf_cache_path))
-            pysdfgen.obj2sdf(str(obj_filepath), dim_grid, padding_grid,
-                             output_filepath=sdf_cache_path)
-            logger.info('finish pre-computation')
+        lock = filelock.FileLock(sdf_cache_path + '.lock')
+        with lock:
+            if not os.path.exists(sdf_cache_path):
+                logger.info(
+                     'trying to acquire lock for {0}...'
+                     .format(sdf_cache_path))
+                logger.info(
+                    'pre-computing sdf and making a cache at {0}.'
+                    .format(sdf_cache_path))
+                pysdfgen.obj2sdf(str(obj_filepath), dim_grid, padding_grid,
+                                 output_filepath=sdf_cache_path)
+                logger.info('finish pre-computation')
         return GridSDF.from_file(sdf_cache_path, **kwargs)
 
 
