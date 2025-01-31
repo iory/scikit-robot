@@ -1,12 +1,12 @@
 from __future__ import division
 
-import filelock
 from logging import getLogger
 from math import floor
 import os
 import shutil
 import tempfile
 
+import filelock
 import numpy as np
 import pysdfgen
 from scipy.interpolate import RegularGridInterpolator
@@ -525,8 +525,8 @@ class GridSDF(SignedDistanceFunction):
         with lock:
             if not os.path.exists(sdf_cache_path):
                 logger.info(
-                     'trying to acquire lock for {0}...'
-                     .format(sdf_cache_path))
+                    'trying to acquire lock for {0}...'
+                    .format(sdf_cache_path))
                 logger.info(
                     'pre-computing sdf and making a cache at {0}.'
                     .format(sdf_cache_path))
