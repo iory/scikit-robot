@@ -1,5 +1,6 @@
 cached-property;python_version>="3.0"
 cached-property<=1.5.2;python_version<"3.0"
+filelock
 future
 gdown
 lxml
