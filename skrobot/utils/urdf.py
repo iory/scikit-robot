@@ -48,6 +48,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'decimation_area_ratio_threshold': None,
                         'simplify_vertex_clustering_voxel_size': None,
                         'enable_mesh_cache': False,
+                        'force_visual_mesh_origin_to_zero': False,
                         }
 _MESH_CACHE = {}
 
@@ -87,6 +88,13 @@ def enable_mesh_cache():
     _CONFIGURABLE_VALUES['enable_mesh_cache'] = True
     yield
     _CONFIGURABLE_VALUES['enable_mesh_cache'] = False
+
+
+@contextlib.contextmanager
+def force_visual_mesh_origin_to_zero():
+    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = True
+    yield
+    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = False
 
 
 def get_transparency(mesh):
@@ -1325,6 +1333,16 @@ class Visual(URDFType):
         self.name = name
         self.origin = origin
         self.material = material
+
+        if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
+            if self.geometry.mesh is not None:
+                new_mesh = []
+                for mesh in self.geometry.meshes:
+                    mesh.apply_transform(self.origin)
+                    new_mesh.append(mesh)
+                self.geometry.mesh.meshes = new_mesh
+                self.origin = np.eye(4)
+                del new_mesh
 
     @property
     def geometry(self):

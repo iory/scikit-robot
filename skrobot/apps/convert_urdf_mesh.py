@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import contextlib
 from distutils.version import StrictVersion
 import os.path as osp
 from pathlib import Path
@@ -11,6 +12,7 @@ import pkg_resources
 from skrobot.model import RobotModel
 from skrobot.utils.package import is_package_installed
 from skrobot.utils.urdf import export_mesh_format
+from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
 
 
 def main():
@@ -24,6 +26,8 @@ def main():
     parser.add_argument('--output', '-o', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
     parser.add_argument('--inplace', '-i', action='store_true',
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
+    parser.add_argument('--force-zero-origin', action='store_true',
+                        help='Force the visual mesh origin to zero.')
     decimation_help = """
 Specifies the minimum area ratio threshold for the mesh simplification process.
 This threshold determines the minimum proportion of the original mesh area
@@ -78,9 +82,16 @@ resulting in less simplification. Default is None."""
         args.output = outfile
     output_path = Path(args.output)
 
+    if args.force_zero_origin:
+        force_visual_mesh_origin_to_zero_or_not = \
+            force_visual_mesh_origin_to_zero
+    else:
+        force_visual_mesh_origin_to_zero_or_not = contextlib.nullcontext
+
     r = RobotModel()
     with open(base_path / urdf_path) as f:
-        r.load_urdf_file(f)
+        with force_visual_mesh_origin_to_zero_or_not():
+            r.load_urdf_file(f)
 
     with export_mesh_format(
             '.' + args.format,
