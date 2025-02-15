@@ -110,4 +110,6 @@ jobs:
     - name: Install scikit-robot
       run: pip install --no-cache-dir .[all]
     - name: Run Pytest
-      run: sudo pytest -v tests  # require sudo to access /tmp dir
+      run: |
+        sudo pytest -v tests/skrobot_tests  # require sudo to access /tmp dir
+        sudo pytest -v tests/tests/skrobot_test_console/  # require sudo to access /tmp dir
