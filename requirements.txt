@@ -8,7 +8,8 @@ networkx>=2.2.0
 numpy>=1.16.0
 ordered_set
 pillow
-pycollada!=0.7  # required for robot model using collada
+pycollada!=0.7;python_version>="3.2"  # required for robot model using collada
+pycollada<0.9;python_version<"3.2"  # required for robot model using collada
 pyglet<2.0
 pysdfgen>=0.1.5
 python-fcl  # for collision check in trimesh module
