@@ -1256,7 +1256,13 @@ class Collision(URDFType):
         self.origin = origin
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
             if self.geometry.mesh is not None:
+                new_mesh = []
+                for mesh in self.geometry.meshes:
+                    mesh.apply_transform(self.origin)
+                    new_mesh.append(mesh)
+                self.geometry.mesh.meshes = new_mesh
                 self.origin = np.eye(4)
+                del new_mesh
 
     @property
     def geometry(self):
