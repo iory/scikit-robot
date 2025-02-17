@@ -23,12 +23,13 @@ class TestConsoleScripts(unittest.TestCase):
         out_stl_urdfpath = osp.join(osp.dirname(urdfpath), 'fetch_stl.urdf')
 
         cmds = ['convert-urdf-mesh {}'.format(urdfpath),
-                'convert-urdf-mesh {} --inplace'.format(out_urdfpath),
                 'convert-urdf-mesh {} --output {} -f stl'.format(
                     out_urdfpath,
                     out_stl_urdfpath),
                 'convert-urdf-mesh {} --voxel-size 0.001'.format(urdfpath),
                 'convert-urdf-mesh {} -d 0.98'.format(urdfpath),
+                # inplace option should be used at last
+                'convert-urdf-mesh {} --inplace'.format(out_urdfpath),
                 ]
         kwargs = {}
         kwargs["stdout"] = subprocess.PIPE
