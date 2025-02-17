@@ -86,7 +86,14 @@ resulting in less simplification. Default is None."""
         force_visual_mesh_origin_to_zero_or_not = \
             force_visual_mesh_origin_to_zero
     else:
-        force_visual_mesh_origin_to_zero_or_not = contextlib.nullcontext
+        try:
+            from contextlib import nullcontext
+        except ImportError:
+            # for python3.6
+            @contextlib.contextmanager
+            def nullcontext(enter_result=None):
+                yield enter_result
+        force_visual_mesh_origin_to_zero_or_not = nullcontext
 
     r = RobotModel()
     with open(base_path / urdf_path) as f:
