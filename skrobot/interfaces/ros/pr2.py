@@ -276,9 +276,6 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
         if wait:
             for action_client in action_clients:
                 results.append(action_client.wait_for_result())
-        else:
-            for action_client in action_clients:
-                results.append(action_client.wait_for_result())
         return results
 
     def pr2_gripper_state_callback(self, arm, msg):
