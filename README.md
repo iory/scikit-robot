@@ -53,6 +53,12 @@ Running these commands should open a viewer displaying your robot’s 3D model. 
 
 ![Viewer Example](docs/image/viewer.jpg)
 
+## Create Your Own Robot Model (URDF)
+
+If you want to build your own robot from scratch, you can refer to the [How to Create URDF from CAD Software](https://scikit-robot.readthedocs.io/en/latest/reference/how_to_create_urdf_from_cad.html) documentation.
+
+![Create URDF from Solidworks](docs/image/urdf-from-solidworks.png)
+
 
 ## Features
 
