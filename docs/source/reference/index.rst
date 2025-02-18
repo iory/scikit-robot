@@ -16,3 +16,4 @@ API Reference
    planner
    viewers
    robot_model_tips
+   how_to_create_urdf_from_cad.rst
