@@ -32,12 +32,35 @@ class TestConsoleScripts(unittest.TestCase):
                 'convert-urdf-mesh {} --inplace'.format(out_urdfpath),
             ]
 
-            kwargs = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+            failures = []
+            env = os.environ.copy()
 
             for cmd in cmds:
-                print('Executing {}'.format(cmd))
-                result = subprocess.run(cmd, shell=True, **kwargs)
+                print("Executing: {}".format(cmd))
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env
+                )
+
                 if result.returncode != 0:
-                    print(result.stdout.decode())
-                    print(result.stderr.decode())
-                assert result.returncode == 0
+                    failures.append(
+                        (
+                            cmd,
+                            result.returncode,
+                            result.stdout.decode(),
+                            result.stderr.decode(),
+                        )
+                    )
+
+            if failures:
+                messages = []
+                for cmd, code, stdout, stderr in failures:
+                    messages.append(
+                        "Command '{}' failed with exit code ".format(cmd)
+                        + "{}\nstdout:\n{}\nstderr:\n{}".format(
+                            code, stdout, stderr)
+                    )
+                self.fail("\n\n".join(messages))
