@@ -78,7 +78,8 @@ jobs:
       run: |
         sudo apt-get update -qq -y
         sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev libsuitesparse-dev libblas-dev liblapack-dev
-    - name: Install Pytest
+        sudo apt-get install -qq -y xvfb # for headless testing
+    - name: Install Pytestp
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install Cython
@@ -88,7 +89,8 @@ jobs:
         pip cache purge
         pip install --no-cache-dir .[all] "numpy<2.0"
     - name: Run Pytest
-      run: pytest -v tests
+      # Normally, users would run `pytest -v tests`, but this test uses xvfb to test the GUI scripts in the examples/ directory.
+      run: xvfb-run pytest -v tests
 
   tests-2x:
     name: Run Unit Tests

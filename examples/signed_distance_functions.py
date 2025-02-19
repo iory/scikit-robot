@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import time
 
 import numpy as np
 
@@ -23,6 +24,11 @@ parser.add_argument(
     '--viewer', type=str,
     choices=['trimesh', 'pyrender'], default='trimesh',
     help='Choose the viewer type: trimesh or pyrender')
+parser.add_argument(
+    '--no-interactive',
+    action='store_true',
+    help="Run in non-interactive mode (do not wait for user input)"
+)
 args = parser.parse_args()
 
 if args.viewer == 'trimesh':
@@ -40,3 +46,9 @@ for _ in range(100):
     rot = rotation_matrix_from_axis(np.random.random(3), np.random.random(3))
     ax = Axis(axis_radius=0.001, axis_length=0.01, pos=pts[idx], rot=rot)
     viewer.add(ax)
+
+print('==> Press [q] to close window')
+if not args.no_interactive:
+    while not viewer.has_exit:
+        time.sleep(0.1)
+        viewer.redraw()

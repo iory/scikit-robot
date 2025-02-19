@@ -25,6 +25,11 @@ def main():
         '--viewer', type=str,
         choices=['trimesh', 'pyrender'], default='trimesh',
         help='Choose the viewer type: trimesh or pyrender')
+    parser.add_argument(
+        '--no-interactive',
+        action='store_true',
+        help="Run in non-interactive mode (do not wait for user input)"
+    )
     args = parser.parse_args()
 
     if args.viewer == 'trimesh':
@@ -56,10 +61,11 @@ def main():
     viewer.set_camera(angles=[np.deg2rad(30), 0, 0])
     viewer.show()
 
-    print('==> Press [q] to close window')
-    while not viewer.has_exit:
-        time.sleep(0.1)
-        viewer.redraw()
+    if not args.no_interactive:
+        print('==> Press [q] to close window')
+        while not viewer.has_exit:
+            time.sleep(0.1)
+            viewer.redraw()
 
 
 if __name__ == '__main__':
