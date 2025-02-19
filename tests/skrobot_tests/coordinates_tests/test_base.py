@@ -118,6 +118,32 @@ class TestCoordinates(unittest.TestCase):
         z_axis[0] = 10
         testing.assert_array_equal(coord.z_axis, [0, 0, 1])
 
+    def test_newcoords_relative_coords(self):
+        # Test Coordinates.newcoords with relative_coords parameter
+        coord = make_coords(pos=[1, 0, 0])
+
+        # Test relative_coords='world'
+        new_coord = make_coords(pos=[2, 3, 4])
+        coord.newcoords(new_coord, relative_coords='world')
+        testing.assert_array_equal(coord.translation, [2, 3, 4])
+
+        # Test relative_coords='local'
+        coord = make_coords(pos=[1, 0, 0]).rotate(pi / 2.0, 'z')
+        local_coord = make_coords(pos=[1, 0, 0])
+        coord.newcoords(local_coord, relative_coords='local')
+        # relative_coords='local' means the input is already in local frame
+        # So it should directly set the local coordinates
+        testing.assert_almost_equal(coord.translation, [1, 0, 0])
+
+        # Test with Coordinates reference frame
+        ref_coord = make_coords(pos=[5, 5, 5])
+        coord = make_coords(pos=[1, 1, 1])
+        new_coord = make_coords(pos=[2, 2, 2])
+        coord.newcoords(new_coord, relative_coords=ref_coord)
+        # This should apply the transformation: ref_coord * new_coord
+        expected_pos = ref_coord.transform_vector([2, 2, 2])
+        testing.assert_array_equal(coord.translation, expected_pos)
+
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
@@ -587,3 +613,48 @@ class TestCascadedCoordinates(unittest.TestCase):
         coords.orient_with_matrix(rotation_matrix, wrt='world')
         wrt = make_coords().rotate(np.pi / 2.0, 'z')
         coords.orient_with_matrix(rotation_matrix, wrt=wrt)
+
+    def test_newcoords_cascaded_relative_coords(self):
+        # Test CascadedCoords.newcoords with relative_coords parameter
+        from skrobot.coordinates import make_cascoords
+
+        # Create parent and child coordinates
+        parent = make_cascoords(pos=[1, 0, 0])
+        child = make_cascoords(pos=[0, 1, 0])
+        parent.assoc(child)
+
+        # Test default behavior (relative_coords='local')
+        new_local_coord = make_cascoords(pos=[5, 5, 5])
+        child.newcoords(new_local_coord)
+        # Child's local position should be [5, 5, 5]
+        testing.assert_array_equal(child.translation, [5, 5, 5])
+
+        # Test relative_coords='world'
+        parent = make_cascoords(pos=[1, 0, 0])
+        child = make_cascoords(pos=[0, 1, 0])
+        parent.assoc(child)
+
+        new_world_coord = make_cascoords(pos=[5, 5, 5])
+        child.newcoords(new_world_coord, relative_coords='world')
+        # Child's world position should be [5, 5, 5]
+        testing.assert_array_equal(child.worldpos(), [5, 5, 5])
+
+        # Test relative_coords='local'
+        parent = make_cascoords(pos=[2, 0, 0])
+        child = make_cascoords(pos=[0, 2, 0])
+        parent.assoc(child)
+
+        local_coord = make_cascoords(pos=[1, 1, 1])
+        child.newcoords(local_coord, relative_coords='local')
+        # Child's local translation should be [1, 1, 1]
+        testing.assert_array_equal(child.translation, [1, 1, 1])
+
+        # Test relative_coords='parent'
+        parent = make_cascoords(pos=[3, 0, 0])
+        child = make_cascoords(pos=[0, 3, 0])
+        parent.assoc(child)
+
+        parent_rel_coord = make_cascoords(pos=[2, 2, 2])
+        child.newcoords(parent_rel_coord, relative_coords='parent')
+        # Child's translation relative to parent should be [2, 2, 2]
+        testing.assert_array_equal(child.translation, [2, 2, 2])
