@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import time
 
 import numpy as np
@@ -82,6 +83,16 @@ def pull_box(box):
         time.sleep(0.1)
 
 
+parser = argparse.ArgumentParser(
+    description='Scikit-robot grasp and pull box example.')
+parser.add_argument(
+    '--no-interactive',
+    action='store_true',
+    help="Run in non-interactive mode (do not wait for user input)"
+)
+args = parser.parse_args()
+
+
 # Create robot model
 robot_model = skrobot.models.PR2()
 link_list = [
@@ -112,3 +123,9 @@ box = add_box(box_center)
 move_to_box(box)
 grasp_box(box)
 pull_box(box)
+
+if not args.no_interactive:
+    print('==> Press [q] to close window')
+    while not viewer.has_exit:
+        time.sleep(0.1)
+        viewer.redraw()

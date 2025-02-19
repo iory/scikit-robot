@@ -30,6 +30,11 @@ parser.add_argument(
     '--viewer', type=str,
     choices=['trimesh', 'pyrender'], default='trimesh',
     help='Choose the viewer type: trimesh or pyrender')
+parser.add_argument(
+    '--no-interactive',
+    action='store_true',
+    help="Run in non-interactive mode (do not wait for user input)"
+)
 args = parser.parse_args()
 
 # initialization stuff
@@ -122,7 +127,8 @@ for av in av_seq:
     viewer.redraw()
     time.sleep(1.0)
 
-print('==> Press [q] to close window')
-while not viewer.has_exit:
-    time.sleep(0.1)
-    viewer.redraw()
+if not args.no_interactive:
+    print('==> Press [q] to close window')
+    while not viewer.has_exit:
+        time.sleep(0.1)
+        viewer.redraw()

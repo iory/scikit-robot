@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import time
 
 import numpy as np
@@ -9,6 +10,14 @@ import skrobot
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description='Scikit-robot pybullet interface example.')
+    parser.add_argument(
+        '--no-interactive',
+        action='store_true',
+        help="Run in non-interactive mode (do not wait for user input)"
+    )
+    args = parser.parse_args()
     # initialize robot
     robot = skrobot.models.Kuka()
     interface = skrobot.interfaces.PybulletRobotInterface(robot)
@@ -46,9 +55,10 @@ def main():
     interface.angle_vector(robot.angle_vector(), realtime_simulation=True)
     interface.wait_interpolation()
 
-    # wait
-    while pybullet.isConnected():
-        time.sleep(0.01)
+    if not args.no_interactive:
+        # wait
+        while pybullet.isConnected():
+            time.sleep(0.01)
 
 
 if __name__ == '__main__':
