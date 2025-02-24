@@ -64,7 +64,11 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def _init_and_start_app(self):
         with self.lock:
-            super(TrimeshSceneViewer, self).__init__(**self._kwargs)
+            try:
+                super(TrimeshSceneViewer, self).__init__(**self._kwargs)
+            except pyglet.canvas.xlib.NoSuchDisplayException:
+                print('No display found. Viewer is disabled.')
+                return
         pyglet.app.run()
 
     def redraw(self):
