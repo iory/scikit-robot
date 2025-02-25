@@ -17,11 +17,36 @@ from .. import model as model_module
 
 class PyrenderViewer(pyrender.Viewer):
 
-    def __init__(self, resolution=None, render_flags=None):
+    """PyrenderViewer class implemented as a Singleton.
 
+    This ensures that only one instance of the viewer
+    is created throughout the program. Any subsequent attempts to create a new
+    instance will return the existing one.
+
+    Parameters
+    ----------
+    resolution : tuple, optional
+        The resolution of the viewer. Default is (640, 480).
+    update_interval : float, optional
+        The update interval (in seconds) for the viewer. Default is
+        1.0 seconds.
+
+    Notes
+    -----
+    Since this is a singleton, the __init__ method might be called
+    multiple times, but only one instance is actually used.
+    """
+
+    # Class variable to hold the single instance of the class.
+    _instance = None
+
+    def __init__(self, resolution=None, render_flags=None):
+        if getattr(self, '_initialized', False):
+            return
         if resolution is None:
             resolution = (640, 480)
 
+        self.thread = None
         self._visual_mesh_map = collections.OrderedDict()
 
         self._redraw = True
@@ -36,8 +61,16 @@ class PyrenderViewer(pyrender.Viewer):
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
         self.viewer_flags['window_title'] = 'scikit-robot PyrenderViewer'
+        self._initialized = True
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(PyrenderViewer, cls).__new__(cls)
+        return cls._instance
 
     def show(self):
+        if self.thread is not None and self.thread.is_alive():
+            return
         self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
         self.thread = threading.Thread(target=self._init_and_start_app)
         self.thread.daemon = True  # terminate when main thread exit
