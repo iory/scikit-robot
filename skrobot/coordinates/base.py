@@ -117,7 +117,7 @@ class Transform(object):
         Parameters
         ----------
         vec : numpy.ndarray(3,) or numpy.ndarray(3, n_points)
-            vector (or vectors) to be roated
+            vector (or vectors) to be rotated
 
         Returns
         -------
@@ -252,7 +252,7 @@ class Coordinates(object):
         Returns
         -------
         transform : skrobot.coordinates.base.Transform
-            corrensponding Transform to this coordinates
+            corresponding Transform to this coordinates
         """
         return Transform(self.worldpos(), self.worldrot())
 
@@ -288,7 +288,7 @@ class Coordinates(object):
     def rotation(self, rotation):
         """Set rotation of this coordinate
 
-        This setter checkes the given rotation and set it this coordinate.
+        This setter checks the given rotation and set it this coordinate.
 
         Parameters
         ----------
@@ -345,7 +345,7 @@ class Coordinates(object):
     def translation(self, translation):
         """Set translation of this coordinate
 
-        This setter checkes the given translation and set it this coordinate.
+        This setter checks the given translation and set it this coordinate.
 
         Parameters
         ----------
@@ -811,7 +811,7 @@ class Coordinates(object):
 
     def difference_position(self, coords,
                             translation_axis=True):
-        """Return differences in positoin of given coords.
+        """Return differences in position of given coords.
 
         Parameters
         ----------

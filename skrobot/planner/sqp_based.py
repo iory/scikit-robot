@@ -18,7 +18,7 @@ def sqp_plan_trajectory(collision_checker,
                         ):
     """Gradient based trajectory optimization using scipy's SLSQP.
 
-    Collision constraint is considered in an inequality constraits.
+    Collision constraint is considered in an inequality constraints.
     Terminal constraint (start and end) is considered as an
     equality constraint.
 
@@ -42,7 +42,7 @@ def sqp_plan_trajectory(collision_checker,
         high cost compared to others. If set to `None` it's automatically
         determined.
     initial_trajectory : numpy.ndarray(n_wp, n_dof) or None
-        initial solution in the trajectory optimization specifeid by a
+        initial solution in the trajectory optimization specified by a
         angle vector sequence. If None, initial trajectory is
         automatically generated.
     slsqp_option: dict or None

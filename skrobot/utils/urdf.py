@@ -2488,7 +2488,7 @@ class Link(URDFType):
         The inertial properties of the link.
     visuals : list of :class:`.Visual`, optional
         The visual properties of the link.
-    collsions : list of :class:`.Collision`, optional
+    collisions : list of :class:`.Collision`, optional
         The collision properties of the link.
     """
 
@@ -2532,7 +2532,7 @@ class Link(URDFType):
     @inertial.setter
     def inertial(self, value):
         if value is not None and not isinstance(value, Inertial):
-            raise TypeError('Expected Intertial object')
+            raise TypeError('Expected Inertial object')
         self._inertial = value
 
     @property

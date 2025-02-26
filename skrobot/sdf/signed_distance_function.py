@@ -48,7 +48,7 @@ def trimesh2sdf(mesh, **gridsdf_kwargs):
             radius = mesh.metadata['radius']
             sdf = SphereSDF(radius)
         else:
-            msg = "primtive type {0} is not supported".format(shape)
+            msg = "primitive type {0} is not supported".format(shape)
             raise ValueError(msg)
 
         if "original_primitive_origin_for_sdf" in mesh.metadata:
@@ -250,7 +250,7 @@ class UnionSDF(SignedDistanceFunction):
         return sd_vals_union
 
     def _surface_points(self, n_sample=1000):
-        # equaly assign sample number to each sdf.surface_points()
+        # equally assign sample number to each sdf.surface_points()
         n_list = len(self.sdf_list)
         n_sample_each = int(floor(n_sample / n_list))
         n_sample_last = n_sample - n_sample_each * (n_list - 1)
@@ -421,7 +421,7 @@ class GridSDF(SignedDistanceFunction):
         -------
         is_out_arr : numpy.ndarray[bool](n_points,)
             If points is out of the interpolator's boundary,
-            the correspoinding element of is_out_arr is True
+            the corresponding element of is_out_arr is True
         """
         points_sdf \
             = super(GridSDF, self)._transform_pts_world_to_sdf(points_world)

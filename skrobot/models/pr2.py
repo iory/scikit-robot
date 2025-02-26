@@ -169,7 +169,7 @@ class PR2(RobotModelFromURDF):
         dist : None or float
             gripper distance.
             If dist is None, return gripper distance.
-            If flaot value is given, change joint angle.
+            If float value is given, change joint angle.
         arm : str
             Specify target arm.  You can specify 'larm', 'rarm', 'arms'.
 

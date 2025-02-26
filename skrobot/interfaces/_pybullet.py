@@ -104,14 +104,14 @@ class PybulletRobotInterface(Coordinates):
 
     @property
     def pose(self):
-        """Getter of Pose in pybullet phsyics simulator.
+        """Getter of Pose in pybullet physics simulator.
 
         Wrapper of pybullet.getBasePositionAndOrientation.
 
         Returns
         -------
         pose : skrobot.coordinates.Coordinates
-            pose of this robot in the phsyics simulator.
+            pose of this robot in the physics simulator.
         """
         pos, q_xyzw = p.getBasePositionAndOrientation(
             self.robot_id)
@@ -221,7 +221,7 @@ class PybulletRobotInterface(Coordinates):
         self.velocity_gain = 0.1
 
     def angle_vector(self, angle_vector=None, realtime_simulation=None):
-        """Send a angle vector to pybullet's phsyics engine.
+        """Send a angle vector to pybullet's physics engine.
 
         Parameters
         ----------

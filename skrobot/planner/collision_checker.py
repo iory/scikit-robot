@@ -214,7 +214,7 @@ class SweptSphereSdfCollisionChecker(object):
         Returns
         -------
         sd_vals : numpy.ndarray[float](n_wp * n_feature,)
-            signed distnaces for all feature points through the trajectory
+            signed distances for all feature points through the trajectory
         sd_vals_jacobi : numpy.ndarray[float](n_wp * n_feature, n_wp * n_dof)
             jacobain of sd_vals with respect to DOF (i.e. n_wp * n_dof) of the
             trajectory
@@ -242,7 +242,7 @@ class SweptSphereSdfCollisionChecker(object):
         -------
         sd_vals_batch_flatten_sphere :
         numpy.ndarray[float](n_wp * n_feature,)
-            signed distnaces for all feature points through the trajectory
+            signed distances for all feature points through the trajectory
         jac_whole : numpy.ndarray[float](n_wp * n_feature, n_wp * n_dof)
             jacobain of sd_vals with respect to DOF (i.e. n_wp * n_dof) of the
             trajectory. If `jac_batch = None`, `jac_whole = None`.
@@ -258,7 +258,7 @@ class SweptSphereSdfCollisionChecker(object):
         pts_batch_flatten = pts_batch.reshape((n_total_feature, 3))
         sd_vals_batch_flatten = self.sdf(pts_batch_flatten)
 
-        # we must convert it to sphere's signed distnace
+        # we must convert it to sphere's signed distance
         radius_arr_traj = np.array(self.coll_radius_list * n_wp)
         sd_vals_batch_flatten_sphere = sd_vals_batch_flatten - radius_arr_traj
 

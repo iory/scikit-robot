@@ -19,7 +19,7 @@ class Interpolator(object):
                 list of control point
             time-list:
                 list of time from start for each control point,
-                time in fisrt contrall point is zero, so length
+                time in first control point is zero, so length
                 of this list is length of control point minus 1
         """
         if position_list is None:

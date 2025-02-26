@@ -435,7 +435,7 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
 
         trajectory-points [ list of #f(x y yaw) ([m] for x, y; [rad] for yaw) ]
         time-list [list of time span [sec] ]
-        stop [ stop after msec moveing ]
+        stop [ stop after msec moving ]
         start-time [ robot will move at start-time [sec or ros::Time] ]
         send-action [ send message to action server, it means robot will move ]
 
