@@ -118,7 +118,7 @@ class TestRobotModel(unittest.TestCase):
         with self.assertRaises(AssertionError):
             fetch._is_relevant(fetch.shoulder_pan_joint, co)
 
-        # if it's not connceted to the robot,
+        # if it's not connected to the robot,
         casco = CascadedCoords()
         with self.assertRaises(AssertionError):
             fetch._is_relevant(fetch.shoulder_pan_joint, casco)
@@ -129,7 +129,7 @@ class TestRobotModel(unittest.TestCase):
             fetch.shoulder_pan_joint, casco))
 
     def test_calc_jacobian_from_link_list(self):
-        # must be coinside with the one computed via numerical method
+        # must be coincide with the one computed via numerical method
         fetch = self.fetch
         link_list = [fetch.torso_lift_link] + fetch.rarm.link_list
         joint_list = [l.joint for l in link_list]

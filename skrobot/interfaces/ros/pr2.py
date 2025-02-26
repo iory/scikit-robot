@@ -123,7 +123,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
             joint_names=['torso_lift_joint'])
 
-    def _continous_joint_largest_movement(self, av_diff, controller_type):
+    def _continuous_joint_largest_movement(self, av_diff, controller_type):
         assert isinstance(controller_type, str)
 
         controller_params = self.controller_param_table[controller_type]
@@ -161,7 +161,7 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
 
         if av is not None:
             av_diff = av - self.angle_vector()
-            diff_max, joint_name = self._continous_joint_largest_movement(
+            diff_max, joint_name = self._continuous_joint_largest_movement(
                 av_diff, controller_type)
             if diff_max > math.pi:
                 rospy.logwarn(
@@ -214,13 +214,13 @@ class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):
             av_next = avs_with_initial[i + 1]
             av_diff = av_next - av_here
 
-            diff_max, joint_name = self._continous_joint_largest_movement(
+            diff_max, joint_name = self._continuous_joint_largest_movement(
                 av_diff, controller_type)
             if diff_max > math.pi:
                 rospy.logwarn(
                     "continuous joint {} movement over 180 degree detected"
                     .format(joint_name))
-                rospy.logwarn('inverval will be split')
+                rospy.logwarn('interval will be split')
                 n_split = int(math.ceil(diff_max / (math.pi * 2 / 3)))
                 av_diff_partial = av_diff / n_split
                 for j in range(n_split):

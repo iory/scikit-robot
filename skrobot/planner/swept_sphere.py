@@ -15,7 +15,7 @@ def compute_swept_sphere(collision_mesh,
         number of sphere to approximate the mesh. If it's set to `None`,
         the number of sphere is automatically determined.
     tol : float
-        tolerance determins how much mesh jutting-out from the swept-spheres
+        tolerance determines how much mesh jutting-out from the swept-spheres
         are accepted. Let `max_jut` be the maximum jut-distance. Then the
         setting `tol` enforces `max_jut / radius < max_jut`. If some integer
         is set to `n_sphere`, `tol` does not affects the result.
@@ -67,7 +67,8 @@ def compute_swept_sphere(collision_mesh,
     radius = determine_radius(verts_mapped[:, plane_axes]) * margin_factor
 
     # compute the maximum and minimum heights (h_center_max, h_center_min)
-    # of the sphere centers. Here, hight is defined in the principle direction.
+    # of the sphere centers.
+    # Here, height is defined in the principle direction.
     squared_radius_arr = np.sum(verts_mapped[:, plane_axes] ** 2, axis=1)
     h_center_arr = verts_mapped[:, principle_axis]
 

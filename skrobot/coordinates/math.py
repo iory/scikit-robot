@@ -1233,7 +1233,7 @@ def rodrigues(axis, theta=None, skip_normalization=False):
 
 
 def rotation_angle(mat, return_angular_velocity=False):
-    """Inverse Rodrigues formula Convert Rotation-Matirx to Axis-Angle.
+    """Inverse Rodrigues formula Convert Rotation-Matrix to Axis-Angle.
 
     Return theta and axis.
     If given unit matrix, return None.

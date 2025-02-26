@@ -37,9 +37,9 @@ def _flatten(xlst):
 
 class ROSRobotInterfaceBase(object):
 
-    """ROSRobotInterface is class for interacting real robot.
+    """ROSRobotInterface is a class for interacting with a real robot.
 
-    RobotInterface is class for interacting real robot thorugh
+    ROSRobotInterface is a class for interacting with a real robot through
     JointTrajectoryAction servers and JointState topics.
 
     """

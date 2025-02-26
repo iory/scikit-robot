@@ -301,7 +301,7 @@ class CascadedLink(CascadedCoords):
         # a : avoid-collision-joint-gain
         # b : avoid-collision-null-gain
         #
-        # implimentation issue:
+        # implementation issue:
         # when link and object are collide,
         # p = (nearestpoint_on_object_surface - center_of_link )
         # else
