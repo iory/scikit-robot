@@ -1,0 +1,10 @@
+[tool.typos]
+default.extend-ignore-re = [
+    "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",  # spellchecker:disable-line
+    "(?s)(#|//)\\s*spellchecker:off.*?\\n\\s*(#|//)\\s*spellchecker:on",  # spellchecker:<on|off>
+    "thre",  # TODO(iory) delete thre by using threshold
+]
+
+default.extend-ignore-identifiers-re = [
+    # Add individual words here to ignore them
+]
