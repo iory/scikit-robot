@@ -6,6 +6,7 @@ from numbers import Number
 import sys
 
 import actionlib
+import actionlib_msgs.msg
 import control_msgs.msg
 import numpy as np
 import rospy
@@ -102,6 +103,8 @@ class ROSRobotInterfaceBase(object):
 
         self.robot = copy.deepcopy(robot)
         self.robot_state = dict()
+        self.moving_status = dict()
+        self.prev_moving_status = dict()
         self.controller_timeout = controller_timeout
         self.joint_action_enable = True
         self.namespace = namespace
@@ -179,6 +182,28 @@ class ROSRobotInterfaceBase(object):
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
+
+    def set_moving_status(self, key, msg):
+        """Update the moving status based on follow_joint_trajectory.
+
+        While the robot is moving, the latest goal status is ACTIVE (1).
+        When the goal is achieved, its status changes to SUCCEEDED (3).
+        """
+        moving = any(
+            goal_status.status in (actionlib_msgs.msg.GoalStatus.ACTIVE,
+                                   actionlib_msgs.msg.GoalStatus.PREEMPTING)
+            for goal_status in msg.status_list
+        )
+        if moving:
+            self.moving_status[key] = True
+            self.prev_moving_status[key] = True
+        elif self.prev_moving_status.get(key, False):
+            # If all goals are completed, the status stays True
+            # for one more cycle in case a new goal is added immediately.
+            self.moving_status[key] = True
+            self.prev_moving_status[key] = False
+        else:
+            self.moving_status[key] = False
 
     def update_robot_state(self, wait_until_update=False):
         """Update robot state.
@@ -312,16 +337,27 @@ class ROSRobotInterfaceBase(object):
                                   .format(action_name))
             for param in self.default_controller():
                 controller_state = param['controller_state']
+                trajectory_status = '{}/status'.format(
+                    param['controller_action'])
                 if self.namespace is not None:
-                    topic_name = '{}/{}'.format(
+                    controller_state_topic_name = '{}/{}'.format(
                         self.namespace,
                         controller_state)
+                    trajectory_status_topic_name = '{}/{}'.format(
+                        self.namespace,
+                        trajectory_status)
                 else:
-                    topic_name = controller_state
+                    controller_state_topic_name = controller_state
+                    trajectory_status_topic_name = trajectory_status
                 rospy.Subscriber(
-                    topic_name,
+                    controller_state_topic_name,
                     control_msgs.msg.JointTrajectoryControllerState,
                     lambda msg: self.set_robot_state(controller_state, msg))
+                rospy.Subscriber(
+                    trajectory_status_topic_name,
+                    actionlib_msgs.msg.GoalStatusArray,
+                    lambda msg: self.set_moving_status(
+                        param['controller_type'], msg))
         else:  # not creating actions, just search
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
@@ -621,6 +657,17 @@ class ROSRobotInterfaceBase(object):
         is_interpolatings = map(
             lambda action: action.is_interpolating(), controller_actions)
         return any(list(is_interpolatings))
+
+    def is_moving(self, controller_type=None):
+        """"Check whether the robot is moving due to follow_joint_trajectory.
+
+        This is not limited to goals sent from the same instance.
+        """
+        if controller_type is None or controller_type == self.controller_type:
+            is_movings = list(self.moving_status.values())
+        else:
+            is_movings = [self.moving_status[controller_type]]
+        return any(is_movings)
 
     def angle_vector_duration(self, start_av, end_av, controller_type=None):
         """Calculate maximum time to reach goal for all joint.
