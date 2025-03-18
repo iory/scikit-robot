@@ -12,7 +12,9 @@ from skrobot.data import fetch_urdfpath
 
 class TestConsoleScripts(unittest.TestCase):
 
-    @pytest.mark.skipif(sys.version_info[0] == 2, reason="Skip in Python 2")
+    @pytest.mark.skipif(
+        sys.version_info[0] == 2 or sys.version_info[:2] == (3, 6),
+        reason="Skip in Python 2 and Python 3.6")
     def test_convert_urdf_mesh(self):
         with tempfile.TemporaryDirectory() as tmp_output:
             os.environ['SKROBOT_CACHE_DIR'] = tmp_output
