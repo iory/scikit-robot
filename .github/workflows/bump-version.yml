@@ -1,0 +1,36 @@
+name: Bump Version and Create PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type (major, minor, patch)'
+        required: true
+        default: 'patch'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump Version
+        id: bump
+        uses: iory/github-action-bump-version@v1.0.0
+        with:
+          bump_type: ${{ github.event.inputs.bump_type }}
+          github_token: ${{ secrets.AUTO_MERGE_PAT }}
+          base_branch: 'main'
+          labels: 'auto-merge-ok,release'
+
+      - name: Print Versions
+        run: |
+          echo "Current Version: ${{ steps.bump.outputs.current_version }}"
+          echo "New Version: ${{ steps.bump.outputs.new_version }}"
