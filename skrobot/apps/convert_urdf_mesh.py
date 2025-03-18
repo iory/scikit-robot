@@ -6,6 +6,7 @@ from distutils.version import StrictVersion
 import os.path as osp
 from pathlib import Path
 import shutil
+import sys
 
 import pkg_resources
 
@@ -53,6 +54,7 @@ resulting in less simplification. Default is None."""
         print(
             '[WARNING] With `trimesh` < 4.0.10, the output dae is not '
             + 'colored. Please `pip install trimesh -U`')
+        sys.exit(1)
     if args.decimation_area_ratio_threshold:
         disable_decimation = False
         if is_package_installed('open3d') is False:
@@ -65,8 +67,7 @@ resulting in less simplification. Default is None."""
                   + "Please install it with 'pip install fast-simplification'")
             disable_decimation = True
         if disable_decimation:
-            print("Disable --decimation-area-ratio-threshold arguments.")
-            args.decimation_area_ratio_threshold = None
+            sys.exit(1)
 
     base_path = Path(args.urdf).parent
     urdf_path = Path(args.urdf)
