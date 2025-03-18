@@ -11,7 +11,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.0.49'
+version = '0.0.50'
 
 
 if sys.argv[-1] == 'release':
