@@ -159,6 +159,12 @@ jobs:
         with:
           python-version: '3.9'
 
+      - name: Install APT On Linux
+        run: |
+          sudo apt-get update -qq -y
+          sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev libsuitesparse-dev libblas-dev liblapack-dev
+          sudo apt-get install -qq -y xvfb # for headless testing
+
       - name: Install package
         run: |
           python -m pip install --upgrade pip setuptools wheel
@@ -178,7 +184,7 @@ jobs:
 
   pypi:
     name: Release To PyPi
-    needs: auto-merge
+    needs: tag-release
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
