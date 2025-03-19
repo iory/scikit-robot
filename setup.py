@@ -3,8 +3,6 @@ from __future__ import print_function
 import os
 import platform
 import re
-import shlex
-import subprocess
 import sys
 
 from setuptools import find_packages
@@ -12,18 +10,6 @@ from setuptools import setup
 
 
 version = '0.0.52'
-
-
-if sys.argv[-1] == 'release':
-    # Release via github-actions.
-    commands = [
-        'git tag v{:s}'.format(version),
-        'git push origin main --tag',
-    ]
-    for cmd in commands:
-        print('+ {}'.format(cmd))
-        subprocess.check_call(shlex.split(cmd))
-    sys.exit(0)
 
 
 def get_os_and_architecture():
