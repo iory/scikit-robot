@@ -9,7 +9,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.0.52'
+version = '0.0.53'
 
 
 def get_os_and_architecture():
