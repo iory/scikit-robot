@@ -41,6 +41,7 @@ except ImportError:
     rospkg = None
 
 
+mesh_filenames_cache = {}
 logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
@@ -1255,14 +1256,16 @@ class Collision(URDFType):
         self.name = name
         self.origin = origin
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh is not None:
-                new_mesh = []
-                for mesh in self.geometry.meshes:
-                    mesh.apply_transform(self.origin)
-                    new_mesh.append(mesh)
-                self.geometry.mesh.meshes = new_mesh
-                self.origin = np.eye(4)
-                del new_mesh
+            if self.geometry.mesh.filename not in mesh_filenames_cache:
+                mesh_filenames_cache[self.geometry.mesh.filename] = True
+                if self.geometry.mesh is not None:
+                    new_mesh = []
+                    for mesh in self.geometry.meshes:
+                        mesh.apply_transform(self.origin)
+                        new_mesh.append(mesh)
+                    self.geometry.mesh.meshes = new_mesh
+                    self.origin = np.eye(4)
+                    del new_mesh
 
     @property
     def geometry(self):
@@ -1344,14 +1347,16 @@ class Visual(URDFType):
         self.material = material
 
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh is not None:
-                new_mesh = []
-                for mesh in self.geometry.meshes:
-                    mesh.apply_transform(self.origin)
-                    new_mesh.append(mesh)
-                self.geometry.mesh.meshes = new_mesh
-                self.origin = np.eye(4)
-                del new_mesh
+            if self.geometry.mesh.filename not in mesh_filenames_cache:
+                mesh_filenames_cache[self.geometry.mesh.filename] = True
+                if self.geometry.mesh is not None:
+                    new_mesh = []
+                    for mesh in self.geometry.meshes:
+                        mesh.apply_transform(self.origin)
+                        new_mesh.append(mesh)
+                    self.geometry.mesh.meshes = new_mesh
+                    self.origin = np.eye(4)
+                    del new_mesh
 
     @property
     def geometry(self):
