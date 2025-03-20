@@ -24,15 +24,12 @@ import networkx as nx
 import numpy as np
 import PIL
 import six
-import trimesh
-from trimesh.visual.material import PBRMaterial
 
+from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
 from skrobot.pycompat import lru_cache
-from skrobot.utils.mesh import auto_simplify_quadric_decimation
-from skrobot.utils.mesh import split_mesh_by_face_color
 
 
 try:
@@ -293,6 +290,7 @@ def _load_meshes(filename):
     meshes : list of :class:`~trimesh.base.Trimesh`
         The meshes loaded from the file.
     """
+    trimesh = _lazy_trimesh()
     try:
         _, ext = os.path.splitext(filename)
         # It seems that .3DXML files assume [mm] unit.
@@ -331,7 +329,8 @@ def _load_meshes(filename):
     for mesh in meshes:
         transparency = get_transparency(mesh)
         if transparency is not None and transparency == 0.0:
-            if isinstance(mesh.visual.material, PBRMaterial):
+            if isinstance(mesh.visual.material,
+                          trimesh.visual.material.PBRMaterial):
                 mesh.visual.material.baseColorFactor[3] = 255
     return meshes
 
@@ -688,6 +687,7 @@ class Box(URDFType):
         """
         if len(self._meshes) == 0:
             if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                trimesh = _lazy_trimesh()
                 self._meshes = [trimesh.creation.box(extents=self.size)]
         return self._meshes
 
@@ -748,6 +748,7 @@ class Cylinder(URDFType):
         """
         if len(self._meshes) == 0:
             if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                trimesh = _lazy_trimesh()
                 self._meshes = [trimesh.creation.cylinder(
                     radius=self.radius, height=self.length
                 )]
@@ -792,6 +793,7 @@ class Sphere(URDFType):
         """
         if len(self._meshes) == 0:
             if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+                trimesh = _lazy_trimesh()
                 self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
         return self._meshes
 
@@ -861,6 +863,7 @@ class Mesh(URDFType):
 
     @meshes.setter
     def meshes(self, value):
+        trimesh = _lazy_trimesh()
         if isinstance(value, six.string_types):
             value = load_meshes(value)
         elif isinstance(value, (list, tuple, set)):
@@ -908,6 +911,7 @@ class Mesh(URDFType):
         meshes = self.meshes
         if _CONFIGURABLE_VALUES[
                 "decimation_area_ratio_threshold"] is not None:
+            from skrobot.utils.mesh import auto_simplify_quadric_decimation
             meshes = auto_simplify_quadric_decimation(
                 meshes, area_ratio_threshold=_CONFIGURABLE_VALUES[
                     "decimation_area_ratio_threshold"])
@@ -918,7 +922,9 @@ class Mesh(URDFType):
                 _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
             )
 
+        trimesh = _lazy_trimesh()
         if fn.endswith('.dae'):
+            from skrobot.utils.mesh import split_mesh_by_face_color
             export_meshes = []
             has_texture_visual = False
             for mesh in meshes:
@@ -2419,6 +2425,7 @@ class Joint(URDFType):
                 cfg = 0.0
             else:
                 cfg = float(cfg)
+            trimesh = _lazy_trimesh()
             R = trimesh.transformations.rotation_matrix(cfg, self.axis)
             return self.origin.dot(R)
         elif self.joint_type == 'prismatic':

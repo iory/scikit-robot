@@ -4,9 +4,9 @@ except ImportError:
     from collections import Sequence
 
 import numpy as np
-import trimesh
 
 import skrobot
+from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import CascadedCoords
 
 
@@ -27,6 +27,7 @@ class Link(CascadedCoords):
         self._collision_mesh = collision_mesh
         self.visual_mesh = visual_mesh
         if visual_mesh is not None:
+            trimesh = _lazy_trimesh()
             self._concatenated_visual_mesh = trimesh.util.concatenate(
                 self._visual_mesh)
         else:
@@ -86,6 +87,7 @@ class Link(CascadedCoords):
             specified in the link frame,
             or None if there is not one.
         """
+        trimesh = _lazy_trimesh()
         if mesh is not None and \
            not isinstance(mesh, trimesh.base.Trimesh):
             raise TypeError('input mesh is should be trimesh.base.Trimesh, '
@@ -114,6 +116,7 @@ class Link(CascadedCoords):
                trimesh.points.PointCloud or str
             A set of visual meshes for the link in the link frame.
         """
+        trimesh = _lazy_trimesh()
         if not (mesh is None
                 or isinstance(mesh, trimesh.Trimesh)
                 or (isinstance(mesh, Sequence)
@@ -166,6 +169,7 @@ class Link(CascadedCoords):
         self._visual_mesh_changed = True
 
     def reset_color(self):
+        trimesh = _lazy_trimesh()
         concat_mesh = trimesh.util.concatenate(self._visual_mesh)
         self._concatenated_visual_mesh.visual.face_colors = \
             concat_mesh.visual.face_colors

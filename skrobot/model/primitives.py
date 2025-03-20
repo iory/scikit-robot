@@ -1,9 +1,8 @@
 import uuid
 
 import numpy as np
-import trimesh
-from trimesh import PointCloud
 
+from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates.base import CascadedCoords
 from skrobot.coordinates.base import Coordinates
 from skrobot.model import Link
@@ -28,9 +27,9 @@ class Axis(Link):
                  axis_radius=0.01,
                  axis_length=0.1,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'axis_{}'.format(str(uuid.uuid1()).replace('-', '_'))
-
         super(Axis, self).__init__(pos=pos, rot=rot, name=name,
                                    visual_mesh=trimesh.creation.axis(
                                        origin_size=0.00000001,
@@ -59,6 +58,7 @@ class Box(Link, SDFImplemented):
 
     def __init__(self, extents, vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'box_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -85,6 +85,7 @@ class CameraMarker(Link):
     def __init__(self, focal=None, fov=(70, 40), z_near=0.01, z_far=1000.0,
                  marker_height=0.4, pos=(0, 0, 0), rot=np.eye(3),
                  without_axis=False, name=None):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'camera_marker_{}'.format(
                 str(uuid.uuid1()).replace('-', '_'))
@@ -112,6 +113,7 @@ class Cone(Link):
                  sections=32,
                  vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'cone_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -135,6 +137,7 @@ class Cylinder(Link, SDFImplemented):
                  sections=32,
                  vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'cylinder_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -162,6 +165,7 @@ class Sphere(Link, SDFImplemented):
 
     def __init__(self, radius, subdivisions=3, color=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None, with_sdf=False):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'sphere_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -188,6 +192,7 @@ class Annulus(Link):
     def __init__(self, r_min, r_max, height,
                  vertex_colors=None, face_colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
+        trimesh = _lazy_trimesh()
         if name is None:
             name = 'annulus_{}'.format(str(uuid.uuid1()).replace('-', '_'))
 
@@ -214,7 +219,7 @@ class LineString(Link):
                  pos=(0, 0, 0),
                  rot=np.eye(3),
                  name=None):
-
+        trimesh = _lazy_trimesh()
         if not isinstance(points, np.ndarray):
             raise TypeError("points must be np.ndarray")
 
@@ -271,8 +276,8 @@ class PointCloudLink(Link):
                  point_cloud_like=None,
                  colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
-
-        accep_types = (type(None), np.ndarray, PointCloud)
+        trimesh = _lazy_trimesh()
+        accep_types = (type(None), np.ndarray, trimesh.PointCloud)
         if not isinstance(point_cloud_like, accep_types):
             message = "point cloud must be either of {}".format(accep_types)
             raise TypeError(message)
@@ -280,7 +285,7 @@ class PointCloudLink(Link):
         if isinstance(point_cloud_like, np.ndarray):
             assert point_cloud_like.ndim == 2
             assert point_cloud_like.shape[1] == 3
-            pcloud_mesh = PointCloud(point_cloud_like, colors)
+            pcloud_mesh = trimesh.PointCloud(point_cloud_like, colors)
         else:
             pcloud_mesh = point_cloud_like
 
