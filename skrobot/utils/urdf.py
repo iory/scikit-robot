@@ -893,8 +893,8 @@ class Mesh(URDFType):
 
         # Load the mesh, combining collision geometry meshes but keeping
         # visual ones separate to preserve colors and textures
-        fn = get_filename(path, kwargs['filename'])
         if _CONFIGURABLE_VALUES['no_mesh_load_mode'] is False:
+            fn = get_filename(path, kwargs['filename'])
             meshes = load_meshes(fn)
         else:
             meshes = []
