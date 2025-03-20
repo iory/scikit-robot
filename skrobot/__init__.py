@@ -1,7 +1,5 @@
 import importlib
-import pkg_resources
 
-__version__ = pkg_resources.get_distribution('scikit-robot').version
 
 _SUBMODULES = [
     "coordinates",
@@ -16,6 +14,16 @@ _SUBMODULES = [
     "sdf"
 ]
 __all__ = _SUBMODULES
+_pkg_resources = None
+_version = None
+
+
+def _lazy_pkg_resources():
+    global _pkg_resources
+    if _pkg_resources is None:
+        import pkg_resources
+        _pkg_resources = pkg_resources
+    return _pkg_resources
 
 
 class LazyModule(object):
@@ -41,6 +49,13 @@ for submodule in _SUBMODULES:
 
 
 def __getattr__(name):
+    global _version
+    if name == "__version__":
+        if _version is None:
+            pkg_resources = _lazy_pkg_resources()
+            _version = pkg_resources.get_distribution(
+                'scikit-robot').version
+        return _version
     if name in _SUBMODULES:
         return _module_cache[name]
     raise AttributeError(
