@@ -10,8 +10,8 @@ import numpy as np
 import numpy.linalg as LA
 from ordered_set import OrderedSet
 import six
-import trimesh
 
+from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
@@ -1639,6 +1639,7 @@ class CascadedLink(CascadedCoords):
             that the two corresponding objects are in collision.
         """
         if self._collision_manager is None:
+            trimesh = _lazy_trimesh()
             self._collision_manager = trimesh.collision.CollisionManager()
             for link in self.link_list:
                 transform = link.worldcoords().T()
@@ -1699,8 +1700,11 @@ class RobotModel(CascadedLink):
             raise TypeError('visual must be urdf.Visual, but got: {}'
                             .format(type(visual)))
 
+        trimesh = None
         meshes = []
         for mesh in visual.geometry.meshes:
+            if trimesh is None:
+                trimesh = _lazy_trimesh()
             mesh = mesh.copy()
 
             # rescale
