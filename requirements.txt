@@ -5,7 +5,8 @@ future
 gdown
 lxml
 networkx>=2.2.0
-numpy>=1.16.0
+numpy>=1.16.0;python_version<="3.7"
+numpy>=1.21.0;python_version>="3.8"
 ordered_set
 pillow
 pycollada!=0.7;python_version>="3.2"  # required for robot model using collada
@@ -17,5 +18,6 @@ rtree # need rtree for simplify_quadric_decimation
 scikit-learn
 scipy;python_version>="3.0"
 scipy<=1.2.3;python_version<"3.0"
+scipy>=1.6.3;python_version>="3.8"
 six
 trimesh>=3.9.0,!=3.23.0
