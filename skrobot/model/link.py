@@ -87,6 +87,9 @@ class Link(CascadedCoords):
             specified in the link frame,
             or None if there is not one.
         """
+        if mesh is None or (isinstance(mesh, Sequence) and len(mesh) == 0):
+            self._collision_mesh = None
+            return
         trimesh = _lazy_trimesh()
         if mesh is not None and \
            not isinstance(mesh, trimesh.base.Trimesh):
@@ -116,9 +119,13 @@ class Link(CascadedCoords):
                trimesh.points.PointCloud or str
             A set of visual meshes for the link in the link frame.
         """
+        if mesh is None or (isinstance(mesh, Sequence) and len(mesh) == 0):
+            self._visual_mesh = mesh
+            self._concatenated_visual_mesh = None
+            self._visual_mesh_changed = True
+            return
         trimesh = _lazy_trimesh()
-        if not (mesh is None
-                or isinstance(mesh, trimesh.Trimesh)
+        if not (isinstance(mesh, trimesh.Trimesh)
                 or (isinstance(mesh, Sequence)
                     and all(isinstance(m, trimesh.Trimesh) for m in mesh))
                 or isinstance(mesh, trimesh.points.PointCloud)

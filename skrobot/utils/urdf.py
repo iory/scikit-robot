@@ -863,20 +863,29 @@ class Mesh(URDFType):
 
     @meshes.setter
     def meshes(self, value):
-        trimesh = _lazy_trimesh()
         if isinstance(value, six.string_types):
             value = load_meshes(value)
-        elif isinstance(value, (list, tuple, set)):
+            self._meshes = value
+            return
+
+        if isinstance(value, (list, tuple, set)):
             value = list(value)
-            for m in value:
-                if not isinstance(m, trimesh.Trimesh):
-                    raise TypeError('Mesh requires a trimesh.Trimesh or a '
-                                    'list of them')
-        elif isinstance(value, trimesh.Trimesh):
-            value = [value]
-        else:
-            raise TypeError('Mesh requires a trimesh.Trimesh')
-        self._meshes = value
+            trimesh = None
+            for i, m in enumerate(value):
+                if not hasattr(m, '__module__') or m.__module__ != 'trimesh':
+                    if trimesh is None:
+                        trimesh = _lazy_trimesh()
+                    if not isinstance(m, trimesh.Trimesh):
+                        raise TypeError('Mesh requires a trimesh.Trimesh or a '
+                                        'list of them')
+            self._meshes = value
+            return
+
+        trimesh = _lazy_trimesh()
+        if isinstance(value, trimesh.Trimesh):
+            self._meshes = [value]
+            return
+        raise TypeError('Mesh requires a trimesh.Trimesh')
 
     @classmethod
     def _from_xml(cls, node, path):

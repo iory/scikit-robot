@@ -1700,9 +1700,11 @@ class RobotModel(CascadedLink):
             raise TypeError('visual must be urdf.Visual, but got: {}'
                             .format(type(visual)))
 
-        trimesh = _lazy_trimesh()
+        trimesh = None
         meshes = []
         for mesh in visual.geometry.meshes:
+            if trimesh is None:
+                trimesh = _lazy_trimesh()
             mesh = mesh.copy()
 
             # rescale
