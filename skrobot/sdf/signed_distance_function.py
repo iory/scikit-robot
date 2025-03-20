@@ -9,8 +9,8 @@ import tempfile
 import filelock
 import numpy as np
 import pysdfgen
-from scipy.interpolate import RegularGridInterpolator
 
+from skrobot._lazy_imports import _lazy_scipy
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
 from skrobot.data import get_cache_dir
@@ -399,7 +399,8 @@ class GridSDF(SignedDistanceFunction):
         # create regular grid interpolator
         xlin, ylin, zlin = [
             np.array(range(d)) * resolution for d in self._data.shape]
-        self.itp = RegularGridInterpolator(
+        scipy = _lazy_scipy()
+        self.itp = scipy.interpolate.RegularGridInterpolator(
             (xlin, ylin, zlin),
             self._data,
             bounds_error=False,

@@ -7,3 +7,14 @@ def _lazy_trimesh():
         import trimesh
         _trimesh = trimesh
     return _trimesh
+
+
+_scipy = None
+
+
+def _lazy_scipy():
+    global _scipy
+    if _scipy is None:
+        import scipy
+        _scipy = scipy
+    return _scipy
