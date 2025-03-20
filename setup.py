@@ -1,7 +1,6 @@
 from __future__ import print_function
 
 import os
-import platform
 import re
 import sys
 
@@ -10,14 +9,6 @@ from setuptools import setup
 
 
 version = '0.0.53'
-
-
-def get_os_and_architecture():
-    uname = platform.uname()
-    # In Python 2, uname is a tuple, in Python 3, it's a named tuple.
-    os_type = uname[0] if isinstance(uname, tuple) else uname.system
-    architecture = uname[4] if isinstance(uname, tuple) else uname.machine
-    return os_type, architecture
 
 
 def listup_package_data():
@@ -65,10 +56,6 @@ def remove_from_requirements(install_requires, remove_req):
     assert len(delete_requirement) == 1, "expect only one match"
     install_requires.remove(delete_requirement.pop())
 
-
-os_type, architecture = get_os_and_architecture()
-if os_type == 'Darwin' or architecture == 'aarch64':
-    install_requires.remove('python-fcl')
 
 extra_all_requires = ['pybullet>=2.1.9']
 if (sys.version_info.major > 2):
