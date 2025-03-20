@@ -1,11 +1,9 @@
-# flake8: noqa
+from skrobot._lazy_imports import LazyImportClass
 
-try:
-    from .panda import PandaROSRobotInterface
-except ImportError:
-    pass
 
-try:
-    from .pr2 import PR2ROSRobotInterface
-except ImportError:
-    pass
+PandaROSRobotInterface = LazyImportClass(
+    ".panda", "PandaROSRobotInterface", "skrobot.interfaces.ros")
+PR2ROSRobotInterface = LazyImportClass(
+    ".pr2", "PR2ROSRobotInterface", "skrobot.interfaces.ros")
+
+__all__ = ["PandaROSRobotInterface", "PR2ROSRobotInterface"]
