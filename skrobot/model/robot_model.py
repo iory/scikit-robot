@@ -1623,6 +1623,11 @@ class CascadedLink(CascadedCoords):
     def self_collision_check(self):
         """Return collision link pair
 
+        Note: This function uses trimesh.collision.CollisionManager internally.
+        We need to install python-fcl to use this function.
+        If you want to use this function, please install python-fcl by
+        `pip install python-fcl`.
+
         Returns
         -------
         is_collision : bool
