@@ -22,7 +22,7 @@ except ImportError:
 from lxml import etree as ET
 import networkx as nx
 import numpy as np
-import PIL
+import PIL.Image
 import six
 
 from skrobot._lazy_imports import _lazy_trimesh
