@@ -1,11 +1,18 @@
 import os
 import os.path as osp
 
-import gdown
-
-
 data_dir = osp.abspath(osp.dirname(__file__))
 _default_cache_dir = osp.expanduser('~/.skrobot')
+
+_gdown = None
+
+
+def _lazy_gdown():
+    global _gdown
+    if _gdown is None:
+        import gdown
+        _gdown = gdown
+    return _gdown
 
 
 def get_cache_dir():
@@ -13,6 +20,7 @@ def get_cache_dir():
 
 
 def bunny_objpath():
+    gdown = _lazy_gdown()
     target_path = osp.join(get_cache_dir(), 'mesh', 'bunny.obj')
     gdown.cached_download(
         url='https://raw.githubusercontent.com/iory/scikit-robot-models/master/data/bunny.obj',  # NOQA
@@ -24,6 +32,7 @@ def bunny_objpath():
 
 
 def fetch_urdfpath():
+    gdown = _lazy_gdown()
     gdown.cached_download(
         url='https://github.com/iory/scikit-robot-models/raw/master/fetch_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'fetch_description.tar.gz'),
@@ -39,6 +48,7 @@ def kuka_urdfpath():
 
 
 def panda_urdfpath():
+    gdown = _lazy_gdown()
     gdown.cached_download(
         url='https://github.com/iory/scikit-robot-models/raw/master/franka_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'franka_description.tar.gz'),
@@ -50,6 +60,7 @@ def panda_urdfpath():
 
 
 def pr2_urdfpath():
+    gdown = _lazy_gdown()
     gdown.cached_download(
         url='https://github.com/iory/scikit-robot-models/raw/master/pr2_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'pr2_description.tar.gz'),
