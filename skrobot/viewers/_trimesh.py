@@ -102,6 +102,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 super(TrimeshSceneViewer, self).__init__(**self._kwargs)
             except pyglet.canvas.xlib.NoSuchDisplayException:
                 print('No display found. Viewer is disabled.')
+                self.has_exit = True
                 return
         pyglet.app.run()
 
