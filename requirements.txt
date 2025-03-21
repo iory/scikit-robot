@@ -4,8 +4,10 @@ filelock
 future
 gdown
 lxml
-networkx>=2.2.0
-numpy>=1.16.0
+networkx>=2.2.0;python_version<"3.8"
+networkx>=2.5;python_version>="3.8"
+numpy>=1.16.0;python_version<"3.8"
+numpy>=1.21.0;python_version>="3.8"
 ordered_set
 pillow
 pycollada!=0.7;python_version>="3.2"  # required for robot model using collada
@@ -14,8 +16,10 @@ pyglet<2.0
 pysdfgen>=0.2.0
 repoze.lru;python_version<"3.2"
 rtree # need rtree for simplify_quadric_decimation
-scikit-learn
-scipy;python_version>="3.0"
+scikit-learn;python_version<"3.8"
+scikit-learn>=0.24.0;python_version>="3.8"
+scipy;python_version>="3.0" and python_version<"3.8"
 scipy<=1.2.3;python_version<"3.0"
+scipy>=1.6.3;python_version>="3.8"
 six
 trimesh>=3.9.0,!=3.23.0

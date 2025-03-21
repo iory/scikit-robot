@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 
 import argparse
+import sys
 import time
 
 import numpy as np
-import pybullet
 
 import skrobot
+from skrobot.interfaces._pybullet import _check_available
 
 
 def main():
+    if _check_available() is False:
+        sys.exit(0)
+    import pybullet
     parser = argparse.ArgumentParser(
         description='Scikit-robot pybullet interface example.')
     parser.add_argument(

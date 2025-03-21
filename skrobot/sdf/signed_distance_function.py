@@ -400,7 +400,13 @@ class GridSDF(SignedDistanceFunction):
         xlin, ylin, zlin = [
             np.array(range(d)) * resolution for d in self._data.shape]
         scipy = _lazy_scipy()
-        self.itp = scipy.interpolate.RegularGridInterpolator(
+        try:
+            interpolator = scipy.interpolate.RegularGridInterpolator
+        except AttributeError:
+            # scipy<=1.8.0
+            from scipy.interpolate import \
+                RegularGridInterpolator as interpolator
+        self.itp = interpolator(
             (xlin, ylin, zlin),
             self._data,
             bounds_error=False,

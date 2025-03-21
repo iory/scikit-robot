@@ -379,7 +379,7 @@ class TestRobotModel(unittest.TestCase):
         j1.joint_angle(np.deg2rad(-60.0))
         testing.assert_almost_equal(
             joint_angle_limit_weight([j1]),
-            3.1019381e-01)
+            np.float32(3.1019381e-01))
 
         j2 = RotationalJoint(
             child_link=make_coords(),
@@ -388,7 +388,7 @@ class TestRobotModel(unittest.TestCase):
         j2.joint_angle(np.deg2rad(74.0))
         testing.assert_almost_equal(
             joint_angle_limit_weight([j2]),
-            1.3539208e+03)
+            np.float32(1.3539208e+03))
 
         j3 = RotationalJoint(
             child_link=make_coords(),
@@ -397,4 +397,4 @@ class TestRobotModel(unittest.TestCase):
         j3.joint_angle(np.deg2rad(-20.0))
         testing.assert_almost_equal(
             joint_angle_limit_weight([j3]),
-            0.0)
+            np.float32(0.0))
