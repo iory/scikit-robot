@@ -4,6 +4,7 @@ import collections
 import threading
 
 import numpy as np
+import pyglet
 import pyrender
 from pyrender.trackball import Trackball
 import trimesh
@@ -75,6 +76,13 @@ class PyrenderViewer(pyrender.Viewer):
         self.thread = threading.Thread(target=self._init_and_start_app)
         self.thread.daemon = True  # terminate when main thread exit
         self.thread.start()
+
+    def _init_and_start_app(self):
+        try:
+            super(PyrenderViewer, self)._init_and_start_app()
+        except pyglet.canvas.xlib.NoSuchDisplayException:
+            print('No display found. Viewer is disabled.')
+            self.has_exit = True
 
     def redraw(self):
         self._redraw = True

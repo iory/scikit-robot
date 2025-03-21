@@ -3,6 +3,32 @@
 import inspect
 
 
+def warn_gl(error_log):
+    if 'Library "GL" not found.' in str(error_log):
+        print(
+            '\x1b[31m'  # red
+            + 'Library "GL" not found. Please install it by running:\n'
+            + 'sudo apt-get install freeglut3-dev'
+            + '\x1b[39m'  # reset
+        )
+
+
+class DummyViewer(object):
+    def __init__(self, *args, **kwargs):
+        self.has_exit = True
+    def redraw(self):
+        pass
+    def show(self):
+        pass
+    def add(self, *args, **kwargs):
+        pass
+    def delete(self, *args, **kwargs):
+        pass
+    def set_camera(self, *args, **kwargs):
+        pass
+    def save_image(self, file_obj):
+        pass
+
 try:
     from ._trimesh import TrimeshSceneViewer
 except TypeError:
@@ -12,6 +38,10 @@ except TypeError:
             raise RuntimeError('TrimeshSceneViewer cannot be initialized. '
                                'This issue happens when the X window system '
                                'is not running.')
+except ImportError as error_log:
+    warn_gl(error_log)
+    class TrimeshSceneViewer(DummyViewer):
+        pass
 
 try:
     from ._pyrender import PyrenderViewer
@@ -26,7 +56,7 @@ try:
                     'please execute the following command:\n'
                     'pip uninstall -y pyrender && pip install git+https://github.com/mmatl/pyrender.git --no-cache-dir'
                 )
-except ImportError:
-    class PyrenderViewer(object):
-        def __init__(self, *args, **kwargs):
-            raise RuntimeError('PyrenderViewer is not installed.')
+except ImportError as error_log:
+    warn_gl(error_log)
+    class PyrenderViewer(DummyViewer):
+        pass
