@@ -21,16 +21,32 @@ def _check_available():
     if not _import_checked:
         try:
             p = importlib.import_module('pybullet')
-        except (ImportError, TypeError):
+        except ImportError as e:
+            if 'numpy.core.multiarray' in str(e):
+                print('Failed to import pybullet due to a NumPy compatibility issue '  # NOQA
+                      + '(numpy.core.multiarray failed to import). '
+                      + 'This may be caused by an incompatible NumPy version.\n'  # NOQA
+                      + 'Please try installing a different NumPy version, e.g., 1.20.3:\n\n'  # NOQA
+                      + '  $ pip install numpy==1.20.3\n'
+                      + 'Then reinstall pybullet:\n'
+                      + '  $ pip install pybullet\n')
+            else:
+                _available = False
+                print('pybullet is not installed on your environment, '
+                      'so nothing will be drawn at this time. '
+                      'Please install pybullet.\n\n'
+                      '  $ pip install pybullet\n')
+        except TypeError:
             _available = False
+            print('Unexpected TypeError occurred while importing pybullet.')
         finally:
             _import_checked = True
-            _available = True
+            if p is not None:
+                _available = True
     if not _available:
-        raise ImportError('pybullet is not installed on your environment, '
-                          'so nothing will be drawn at this time. '
-                          'Please install pybullet.\n\n'
-                          '  $ pip install pybullet\n')
+        print('pybullet is unavailable. '
+              'No drawing will occur until the issue is resolved.')
+    return _available
 
 
 class PybulletRobotInterface(Coordinates):
@@ -68,7 +84,8 @@ class PybulletRobotInterface(Coordinates):
 
     def __init__(self, robot, urdf_path=None, use_fixed_base=False,
                  connect=1, *args, **kwargs):
-        _check_available()
+        if _check_available() is False:
+            raise ImportError('pybullet is not available.')
         super(PybulletRobotInterface, self).__init__(*args, **kwargs)
         if urdf_path is None:
             if robot.urdf_path is not None:
