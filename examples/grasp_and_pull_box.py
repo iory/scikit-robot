@@ -90,6 +90,10 @@ parser.add_argument(
     action='store_true',
     help="Run in non-interactive mode (do not wait for user input)"
 )
+parser.add_argument(
+    '--viewer', type=str,
+    choices=['trimesh', 'pyrender'], default='trimesh',
+    help='Choose the viewer type: trimesh or pyrender')
 args = parser.parse_args()
 
 
@@ -109,8 +113,12 @@ rarm_end_coords = skrobot.coordinates.CascadedCoords(
 move_target = rarm_end_coords
 
 # Create viewer
-viewer = skrobot.viewers.TrimeshSceneViewer(
-    resolution=(640, 480), update_interval=0.1)
+if args.viewer == 'trimesh':
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480),
+                                                update_interval=0.1)
+elif args.viewer == 'pyrender':
+    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480),
+                                            update_interval=0.1)
 viewer.add(robot_model)
 viewer.show()
 viewer.set_camera([np.deg2rad(45), -np.deg2rad(0),
