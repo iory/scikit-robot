@@ -154,6 +154,10 @@ class Joint(object):
         self._hooks = hooks
 
     @property
+    def type(self):
+        raise NotImplementedError('Joint type must be defined')
+
+    @property
     def joint_dof(self):
         raise NotImplementedError
 
@@ -209,6 +213,12 @@ class RotationalJoint(Joint):
             message += 'Setting to default value np.deg2rad(5).'
             logger.warning(message)
             self.max_joint_velocity = np.deg2rad(5)
+
+    @property
+    def type(self):
+        if np.isinf(self.min_angle) or np.isinf(self.max_angle):
+            return 'continuous'
+        return 'revolute'
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint angle.
@@ -284,6 +294,10 @@ class FixedJoint(Joint):
         self.joint_velocity = 0.0  # [rad/s]
         self.joint_acceleration = 0.0  # [rad/s^2]
         self.joint_torque = 0.0  # [Nm]
+
+    @property
+    def type(self):
+        return 'fixed'
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Joint angle method.
@@ -372,6 +386,10 @@ class LinearJoint(Joint):
             message += 'Setting to default value np.pi / 4.0.'
             logger.warning(message)
             self.max_joint_velocity = np.pi / 4.0
+
+    @property
+    def type(self):
+        return 'prismatic'
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return this joint's linear translation (joint angle).
