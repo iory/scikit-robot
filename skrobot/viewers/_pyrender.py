@@ -54,7 +54,8 @@ class PyrenderViewer(pyrender.Viewer):
     # Class variable to hold the single instance of the class.
     _instance = None
 
-    def __init__(self, resolution=None, render_flags=None):
+    def __init__(self, resolution=None, update_interval=1.0,
+                 render_flags=None):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
@@ -72,6 +73,7 @@ class PyrenderViewer(pyrender.Viewer):
             use_raymond_lighting=True,
             auto_start=False,
             render_flags=render_flags,
+            refresh_rate=update_interval,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
         self.viewer_flags['window_title'] = 'scikit-robot PyrenderViewer'
