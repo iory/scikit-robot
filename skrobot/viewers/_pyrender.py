@@ -5,6 +5,7 @@ import threading
 
 import numpy as np
 import pyglet
+from pyglet import compat_platform
 import pyrender
 from pyrender.trackball import Trackball
 import trimesh
@@ -14,6 +15,18 @@ from trimesh import transformations
 from skrobot.coordinates import Coordinates
 
 from .. import model as model_module
+
+
+def _redraw_all_windows():
+    try:
+        for window in pyglet.app.windows:
+            window.switch_to()
+            window.dispatch_events()
+            window.dispatch_event('on_draw')
+            window.flip()
+            window._legacy_invalid = False
+    except RuntimeError:
+        pass
 
 
 class PyrenderViewer(pyrender.Viewer):
@@ -73,19 +86,72 @@ class PyrenderViewer(pyrender.Viewer):
         if self.thread is not None and self.thread.is_alive():
             return
         self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
-        self.thread = threading.Thread(target=self._init_and_start_app)
-        self.thread.daemon = True  # terminate when main thread exit
-        self.thread.start()
+        if compat_platform == 'darwin':
+            self._init_and_start_app()
+            init_loop = 30
+            for _ in range(init_loop):
+                _redraw_all_windows()
+        else:
+            self.thread = threading.Thread(target=self._init_and_start_app)
+            self.thread.daemon = True  # terminate when main thread exit
+            self.thread.start()
 
     def _init_and_start_app(self):
-        try:
-            super(PyrenderViewer, self)._init_and_start_app()
-        except pyglet.canvas.xlib.NoSuchDisplayException:
-            print('No display found. Viewer is disabled.')
-            self.has_exit = True
+        # Try multiple configs starting with target OpenGL version
+        # and multisampling and removing these options if exception
+        # Note: multisampling not available on all hardware
+        from pyglet import clock
+        from pyglet.gl import Config
+        from pyrender.constants import MIN_OPEN_GL_MAJOR
+        from pyrender.constants import MIN_OPEN_GL_MINOR
+        from pyrender.constants import TARGET_OPEN_GL_MAJOR
+        from pyrender.constants import TARGET_OPEN_GL_MINOR
+        from pyrender.viewer import Viewer
+        confs = [Config(sample_buffers=1, samples=4,
+                        depth_size=24,
+                        double_buffer=True,
+                        major_version=TARGET_OPEN_GL_MAJOR,
+                        minor_version=TARGET_OPEN_GL_MINOR),
+                 Config(depth_size=24,
+                        double_buffer=True,
+                        major_version=TARGET_OPEN_GL_MAJOR,
+                        minor_version=TARGET_OPEN_GL_MINOR),
+                 Config(sample_buffers=1, samples=4,
+                        depth_size=24,
+                        double_buffer=True,
+                        major_version=MIN_OPEN_GL_MAJOR,
+                        minor_version=MIN_OPEN_GL_MINOR),
+                 Config(depth_size=24,
+                        double_buffer=True,
+                        major_version=MIN_OPEN_GL_MAJOR,
+                        minor_version=MIN_OPEN_GL_MINOR)]
+        for conf in confs:
+            try:
+                super(Viewer, self).__init__(config=conf, resizable=True,
+                                             width=self._viewport_size[0],
+                                             height=self._viewport_size[1])
+                break
+            except pyglet.window.NoSuchConfigException:
+                pass
+            except pyglet.canvas.xlib.NoSuchDisplayException:
+                print('No display found. Viewer is disabled.')
+                self.has_exit = True
+                return
+
+        if not self.context:
+            raise ValueError('Unable to initialize an OpenGL 3+ context')
+        clock.schedule_interval(
+            Viewer._time_event, 1.0 / self.viewer_flags['refresh_rate'], self
+        )
+        self.switch_to()
+        self.set_caption(self.viewer_flags['window_title'])
+        if compat_platform != 'darwin':
+            pyglet.app.run()
 
     def redraw(self):
         self._redraw = True
+        if compat_platform == 'darwin':
+            _redraw_all_windows()
 
     def on_draw(self):
         if not self._redraw:
