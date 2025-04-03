@@ -86,3 +86,6 @@ else:
     from skrobot import viewers
     from skrobot import utils
     from skrobot import sdf
+
+    def _lazy_pkg_resources():
+        return pkg_resources
