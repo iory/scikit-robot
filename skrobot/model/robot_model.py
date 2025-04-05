@@ -1687,7 +1687,11 @@ class RobotModel(CascadedLink):
         raise NotImplementedError()
 
     def init_pose(self):
-        return self.angle_vector(np.zeros_like(self.angle_vector()))
+        target_angles = np.zeros_like(self.joint_min_angles)
+        target_angles = np.clip(target_angles,
+                                self.joint_min_angles,
+                                self.joint_max_angles)
+        return self.angle_vector(target_angles)
 
     def _meshes_from_urdf_visuals(self, visuals):
         meshes = []
