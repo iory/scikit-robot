@@ -175,8 +175,11 @@ class PR2(RobotModelFromURDF):
 
         Returns
         -------
-        dist : float
-            Result of gripper distance in meter.
+        dist : float or list of float
+            The current gripper distance in meters.
+            - If arm is 'larm' or 'rarm', returns a single float.
+            - If arm is 'arms', returns a list of two floats
+            [right_dist, left_dist].
         """
         if arm == 'larm':
             joints = [self.l_gripper_l_finger_joint]
@@ -203,5 +206,7 @@ class PR2(RobotModelFromURDF):
                 / (5 * (20000 * d + 199)))
             for joint in joints:
                 joint.joint_angle(angle)
-        angle = joints[0].joint_angle()
-        return _dist(angle)
+        if arm == 'arms':
+            return [_dist(joint.joint_angle()) for joint in joints]
+        else:
+            return _dist(joints[0].joint_angle())

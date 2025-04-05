@@ -25,22 +25,22 @@ def init_pose():
 
 
 def open_right_gripper():
-    robot_model.r_gripper_l_finger_joint.joint_angle(0.548)
+    robot_model.gripper_distance(0.093, arm='rarm')
     viewer.redraw()
 
 
 def close_right_gripper():
-    robot_model.r_gripper_l_finger_joint.joint_angle(0.0)
+    robot_model.gripper_distance(0.0, arm='rarm')
     viewer.redraw()
 
 
 def open_left_gripper():
-    robot_model.l_gripper_l_finger_joint.joint_angle(0.548)
+    robot_model.gripper_distance(0.093, arm='larm')
     viewer.redraw()
 
 
 def close_left_gripper():
-    robot_model.l_gripper_l_finger_joint.joint_angle(0.0)
+    robot_model.gripper_distance(0.0, arm='larm')
     viewer.redraw()
 
 
@@ -65,7 +65,7 @@ def move_to_box(box):
 
 
 def grasp_box(box):
-    robot_model.r_gripper_l_finger_joint.joint_angle(0.2)
+    robot_model.gripper_distance(0.036, arm='rarm')
     move_target.assoc(box)
     viewer.redraw()
 
