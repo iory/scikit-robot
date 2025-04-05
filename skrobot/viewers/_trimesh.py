@@ -3,6 +3,7 @@ from __future__ import division
 import collections
 import logging
 import threading
+import warnings
 
 import numpy as np
 import pyglet
@@ -17,6 +18,19 @@ from .. import model as model_module
 
 logger = logging.getLogger('trimesh')
 logger.setLevel(logging.ERROR)
+
+
+def _check_trimesh_version():
+    trimesh_version = tuple(map(int, trimesh.__version__.split('.')))
+    if (4, 6, 1) < trimesh_version < (4, 6, 6):
+        warnings.warn(
+            "\033[31m"
+            + "Trimesh version {} detected. ".format(trimesh.__version__)
+            + "Versions >= 4.6.1 and <= 4.6.5 may cause models to "
+            + "appear completely black."
+            + "\033[0m",
+            category=RuntimeWarning
+        )
 
 
 def _redraw_all_windows():
@@ -51,6 +65,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     # Class variable to hold the single instance of the class.
     _instance = None
+    _version_warning_issued = False
 
     def __init__(self, resolution=None, update_interval=1.0):
         if getattr(self, '_initialized', False):
@@ -80,6 +95,11 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(TrimeshSceneViewer, cls).__new__(cls)
+
+            if not cls._version_warning_issued:
+                _check_trimesh_version()
+                cls._version_warning_issued = True
+
         return cls._instance
 
     def show(self):
