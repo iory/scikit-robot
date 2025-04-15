@@ -1284,8 +1284,9 @@ class Collision(URDFType):
                         mesh.apply_transform(self.origin)
                         new_mesh.append(mesh)
                     self.geometry.mesh.meshes = new_mesh
-                    self.origin = np.eye(4)
                     del new_mesh
+            # force the origin to be zero
+            self.origin = np.eye(4)
 
     @property
     def geometry(self):
@@ -1375,8 +1376,9 @@ class Visual(URDFType):
                         mesh.apply_transform(self.origin)
                         new_mesh.append(mesh)
                     self.geometry.mesh.meshes = new_mesh
-                    self.origin = np.eye(4)
                     del new_mesh
+            # force the origin to be zero
+            self.origin = np.eye(4)
 
     @property
     def geometry(self):
