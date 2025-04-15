@@ -951,10 +951,14 @@ class Mesh(URDFType):
                 with open(fn, 'wb') as f:
                     f.write(dae_data)
         elif fn.endswith('.stl'):
-            meshes = trimesh.util.concatenate(meshes)
-            trimesh.exchange.export.export_mesh(meshes, fn)
+            if _CONFIGURABLE_VALUES['overwrite_mesh'] \
+                    or not os.path.exists(fn):
+                meshes = trimesh.util.concatenate(meshes)
+                trimesh.exchange.export.export_mesh(meshes, fn)
         else:
-            trimesh.exchange.export.export_mesh(meshes, fn)
+            if _CONFIGURABLE_VALUES['overwrite_mesh'] \
+                    or not os.path.exists(fn):
+                trimesh.exchange.export.export_mesh(meshes, fn)
 
         # Unparse the node
         node = self._unparse(path)
@@ -1284,8 +1288,9 @@ class Collision(URDFType):
                         mesh.apply_transform(self.origin)
                         new_mesh.append(mesh)
                     self.geometry.mesh.meshes = new_mesh
-                    self.origin = np.eye(4)
                     del new_mesh
+            # force the origin to be zero
+            self.origin = np.eye(4)
 
     @property
     def geometry(self):
@@ -1375,8 +1380,9 @@ class Visual(URDFType):
                         mesh.apply_transform(self.origin)
                         new_mesh.append(mesh)
                     self.geometry.mesh.meshes = new_mesh
-                    self.origin = np.eye(4)
                     del new_mesh
+            # force the origin to be zero
+            self.origin = np.eye(4)
 
     @property
     def geometry(self):
