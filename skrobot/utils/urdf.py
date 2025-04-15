@@ -951,10 +951,14 @@ class Mesh(URDFType):
                 with open(fn, 'wb') as f:
                     f.write(dae_data)
         elif fn.endswith('.stl'):
-            meshes = trimesh.util.concatenate(meshes)
-            trimesh.exchange.export.export_mesh(meshes, fn)
+            if _CONFIGURABLE_VALUES['overwrite_mesh'] \
+                    or not os.path.exists(fn):
+                meshes = trimesh.util.concatenate(meshes)
+                trimesh.exchange.export.export_mesh(meshes, fn)
         else:
-            trimesh.exchange.export.export_mesh(meshes, fn)
+            if _CONFIGURABLE_VALUES['overwrite_mesh'] \
+                    or not os.path.exists(fn):
+                trimesh.exchange.export.export_mesh(meshes, fn)
 
         # Unparse the node
         node = self._unparse(path)
