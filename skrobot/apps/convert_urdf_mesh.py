@@ -29,6 +29,11 @@ def main():
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
     parser.add_argument('--force-zero-origin', action='store_true',
                         help='Force the visual mesh origin to zero.')
+    parser.add_argument(
+        '--overwrite-mesh',
+        action='store_true',
+        help='Overwrite existing mesh files during export. '
+             + 'If not specified, existing files are preserved.')
     decimation_help = """
 Specifies the minimum area ratio threshold for the mesh simplification process.
 This threshold determines the minimum proportion of the original mesh area
@@ -104,7 +109,8 @@ resulting in less simplification. Default is None."""
     with export_mesh_format(
             '.' + args.format,
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
-            simplify_vertex_clustering_voxel_size=args.voxel_size):
+            simplify_vertex_clustering_voxel_size=args.voxel_size,
+            overwrite_mesh=args.overwrite_mesh):
         r.urdf_robot_model.save(str(base_path / output_path))
 
     if args.inplace:
