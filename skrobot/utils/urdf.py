@@ -47,6 +47,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'simplify_vertex_clustering_voxel_size': None,
                         'enable_mesh_cache': False,
                         'force_visual_mesh_origin_to_zero': False,
+                        'overwrite_mesh': False,
                         }
 _MESH_CACHE = {}
 
@@ -69,16 +70,19 @@ def no_mesh_load_mode():
 def export_mesh_format(
         mesh_format,
         decimation_area_ratio_threshold=None,
-        simplify_vertex_clustering_voxel_size=None):
+        simplify_vertex_clustering_voxel_size=None,
+        overwrite_mesh=False):
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
         decimation_area_ratio_threshold
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
         simplify_vertex_clustering_voxel_size
+    _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
     yield
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
+    _CONFIGURABLE_VALUES["overwrite_mesh"] = False
 
 
 @contextlib.contextmanager
@@ -940,7 +944,8 @@ class Mesh(URDFType):
                 has_texture_visual |= mesh.visual.kind == 'texture'
                 export_meshes.extend(split_mesh_by_face_color(mesh))
             meshes = export_meshes
-            if not (os.path.exists(fn) and has_texture_visual):
+            if _CONFIGURABLE_VALUES['overwrite_mesh'] is True \
+                    or not (os.path.exists(fn) and has_texture_visual):
                 # don't overwrite textured mesh.
                 dae_data = trimesh.exchange.dae.export_collada(meshes)
                 with open(fn, 'wb') as f:
