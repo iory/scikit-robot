@@ -169,6 +169,18 @@ def get_path_with_cache(ros_package):
     return rospack.get_path(ros_package)
 
 
+def search_up(start_dir, relative_path):
+    current_dir = start_dir
+    while True:
+        candidate = os.path.join(current_dir, relative_path)
+        if os.path.exists(candidate):
+            return candidate
+        parent = os.path.dirname(current_dir)
+        if parent == current_dir:
+            return None
+        current_dir = parent
+
+
 def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
     base_path = os.path.abspath(base_path)
@@ -177,19 +189,21 @@ def resolve_filepath(base_path, file_path):
         try:
             ros_package = parsed_url.netloc
             package_path = get_path_with_cache(ros_package)
-            resolve_filepath = package_path + parsed_url.path
-            if os.path.exists(resolve_filepath):
-                return resolve_filepath
+            pkg_relative_path = parsed_url.path.lstrip("/")
+            resolved_filepath = os.path.join(package_path, pkg_relative_path)
+            if os.path.exists(resolved_filepath):
+                return resolved_filepath
         except rospkg.common.ResourceNotFound:
             pass
 
-    dirname = base_path
-    file_path = parsed_url.netloc + parsed_url.path
-    while dirname and dirname != '/':
-        resolved_filepath = os.path.join(dirname, file_path)
-        if os.path.exists(resolved_filepath):
-            return resolved_filepath
-        dirname = os.path.dirname(dirname)
+    rel_paths = [
+        os.path.join(parsed_url.netloc, parsed_url.path.lstrip('/')),
+        parsed_url.path.lstrip('/')
+    ]
+    for rel in rel_paths:
+        found_path = search_up(base_path, rel)
+        if found_path:
+            return found_path
     return None
 
 
