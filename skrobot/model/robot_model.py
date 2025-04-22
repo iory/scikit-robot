@@ -1885,6 +1885,10 @@ class RobotModel(CascadedLink):
 
         self._relevance_predicate_table = \
             self._compute_relevance_predicate_table()
+        # Some models do not include 0 degrees within the valid joint limits,
+        # so we call `init_pose` to round joint angles within the
+        # limits internally.
+        self.init_pose()
 
     def move_end_pos(self, pos, wrt='local', *args, **kwargs):
         pos = np.array(pos, dtype=np.float64)
