@@ -2068,6 +2068,14 @@ class RobotModel(CascadedLink):
             coords.worldpos(),
             self.head.link_list)
 
+    def look_at(self, coords, target=None, link_list=None):
+        if target is None:
+            target = self.head_end_coords
+        if link_list is None:
+            link_list = self.head.link_list
+        return self.inverse_kinematics_loop_for_look_at(
+            target, coords.worldpos(), link_list)
+
     @staticmethod
     def sanitize_joint_limits(min_angles, max_angles, joint_limit_eps=0.001):
         """Sanitize joint limits.
