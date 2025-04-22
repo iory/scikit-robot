@@ -8,7 +8,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.1.11'
+version = '0.1.12'
 
 
 def listup_package_data():
