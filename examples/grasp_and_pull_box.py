@@ -52,6 +52,7 @@ def add_box(box_center):
 
 
 def move_to_box(box):
+    robot_model.look_at(box)
     start_coords = move_target.copy_worldcoords()
     target_coords = box.copy_worldcoords()
 
@@ -79,6 +80,7 @@ def pull_box(box):
             midcoords(i / 20.0, start_coords, target_coords),
             link_list=link_list,
             move_target=move_target)
+        robot_model.look_at(box)
         viewer.redraw()
         time.sleep(0.1)
 
