@@ -1744,7 +1744,23 @@ class RobotModel(CascadedLink):
         return meshes
 
     def load_urdf_from_robot_description(
-            self, param_name='/robot_description'):
+            self, param_name='/robot_description',
+            include_mimic_joints=True):
+        """Load URDF from ROS parameter server and initialize the model.
+
+        Waits until the specified ROS parameter is available, reads the URDF
+        content, saves it to a temporary file, and then loads it using
+        `load_urdf_file`. Requires `rospy` to be available.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            The name of the ROS parameter containing the URDF XML string.
+            Defaults to '/robot_description'.
+        include_mimic_joints : bool, optional
+            If True, mimic joints are included in the `self.joint_list`.
+            Passed directly to `load_urdf_file`.
+        """
         import rospy
         rate = rospy.Rate(1)
         while not rospy.is_shutdown():
@@ -1753,20 +1769,25 @@ class RobotModel(CascadedLink):
                 tmp_file = tempfile.mktemp()
                 with open(tmp_file, "w") as f:
                     f.write(urdf)
-                self.load_urdf_file(file_obj=tmp_file)
+                self.load_urdf_file(file_obj=tmp_file,
+                                    include_mimic_joints=include_mimic_joints)
                 os.remove(tmp_file)
                 break
             rate.sleep()
             rospy.logwarn('Waiting {} set.'.format(param_name))
 
     @staticmethod
-    def from_robot_description(param_name='/robot_description'):
+    def from_robot_description(param_name='/robot_description',
+                               include_mimic_joints=True):
         """Load URDF from ROS parameter server.
 
         Parameters
         ----------
         param_name : str
             Parameter name in the parameter server.
+        include_mimic_joints : bool, optional
+            If True, mimic joints are included in the resulting
+            `RobotModel`'s `joint_list`.
 
         Returns
         -------
@@ -1774,11 +1795,13 @@ class RobotModel(CascadedLink):
             Robot model loaded from URDF.
         """
         robot_model = RobotModel()
-        robot_model.load_urdf_from_robot_description(param_name)
+        robot_model.load_urdf_from_robot_description(
+            param_name,
+            include_mimic_joints=include_mimic_joints)
         return robot_model
 
     @staticmethod
-    def from_urdf(urdf_string):
+    def from_urdf(urdf_input, include_mimic_joints=True):
         """Load URDF from a string or a file path.
 
         Automatically detects if the input is a URDF string or a file path.
@@ -1788,29 +1811,33 @@ class RobotModel(CascadedLink):
         urdf_string : str
             Either the URDF model description as a string, or the path to a
             URDF file.
+        include_mimic_joints : bool, optional
+            If True, mimic joints are included in the resulting
+            `RobotModel`'s `joint_list`.
 
         Returns
         -------
         RobotModel
             Robot model loaded from the URDF.
         """
-        import os
-
         robot_model = RobotModel()
-        if os.path.isfile(urdf_string):
+        if os.path.isfile(urdf_input):
             try:
-                with open(urdf_string, 'r') as f:
-                    robot_model.load_urdf_file(file_obj=f)
+                with open(urdf_input, 'r') as f:
+                    robot_model.load_urdf_file(
+                        file_obj=f, include_mimic_joints=include_mimic_joints)
             except Exception as e:
                 logger.error("Failed to load URDF from file: {}. Error: {}"
-                             .format(urdf_string, e))
+                             .format(urdf_input, e))
                 logger.error("Attempting to load as URDF string instead.")
-                robot_model.load_urdf(urdf_string)
+                robot_model.load_urdf(
+                    urdf_input, include_mimic_joints=include_mimic_joints)
         else:
-            robot_model.load_urdf(urdf_string)
+            robot_model.load_urdf(urdf_input,
+                                  include_mimic_joints=include_mimic_joints)
         return robot_model
 
-    def load_urdf(self, urdf):
+    def load_urdf(self, urdf, include_mimic_joints=True):
         is_python3 = sys.version_info.major > 2
         f = io.StringIO()
         if is_python3:
@@ -1819,9 +1846,26 @@ class RobotModel(CascadedLink):
             f.write(urdf.decode('utf-8'))
         f.seek(0)
         f.name = "dummy"
-        self.load_urdf_file(file_obj=f)
+        self.load_urdf_file(file_obj=f,
+                            include_mimic_joints=include_mimic_joints)
 
-    def load_urdf_file(self, file_obj):
+    def load_urdf_file(self, file_obj, include_mimic_joints=True):
+        """Load robot model from URDF file.
+
+        This method parses a URDF file, creates the corresponding
+        link and joint objects, and sets up the robot's kinematic tree
+        structure. It also loads visual and collision meshes.
+
+        Parameters
+        ----------
+        file_obj : str or file-like object
+            Path to the URDF file or a file-like object containing URDF data.
+        include_mimic_joints : bool, optional
+            If True, mimic joints are included in the `self.joint_list`.
+            If False, mimic joints are excluded from `self.joint_list`,
+            although their mimic definitions are still processed and applied
+            to the joints they mimic.
+        """
         if isinstance(file_obj, six.string_types):
             self.urdf_path = file_obj
         else:
@@ -1842,6 +1886,9 @@ class RobotModel(CascadedLink):
 
         joint_list = []
         whole_joint_list = []
+        mimic_joint_names = {j.name for j in self.urdf_robot_model.joints
+                             if j.mimic is not None}
+
         for j in self.urdf_robot_model.joints:
             if j.limit is None:
                 j.limit = urdf.JointLimit(0, 0)
@@ -1885,8 +1932,10 @@ class RobotModel(CascadedLink):
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=j.limit.velocity)
 
-            if j.joint_type not in ['fixed']:
-                joint_list.append(joint)
+            is_mimic = j.name in mimic_joint_names
+            if j.joint_type != 'fixed':
+                if include_mimic_joints or not is_mimic:
+                    joint_list.append(joint)
             whole_joint_list.append(joint)
 
             # TODO(make clear the difference between assoc and add_child_link)
