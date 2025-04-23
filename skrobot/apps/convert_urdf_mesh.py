@@ -101,10 +101,8 @@ resulting in less simplification. Default is None."""
                 yield enter_result
         force_visual_mesh_origin_to_zero_or_not = nullcontext
 
-    r = RobotModel()
-    with open(base_path / urdf_path) as f:
-        with force_visual_mesh_origin_to_zero_or_not():
-            r.load_urdf_file(f)
+    with force_visual_mesh_origin_to_zero_or_not():
+        r = RobotModel.from_urdf(base_path / urdf_path)
 
     with export_mesh_format(
             '.' + args.format,

@@ -1759,6 +1759,57 @@ class RobotModel(CascadedLink):
             rate.sleep()
             rospy.logwarn('Waiting {} set.'.format(param_name))
 
+    @staticmethod
+    def from_robot_description(param_name='/robot_description'):
+        """Load URDF from ROS parameter server.
+
+        Parameters
+        ----------
+        param_name : str
+            Parameter name in the parameter server.
+
+        Returns
+        -------
+        RobotModel
+            Robot model loaded from URDF.
+        """
+        robot_model = RobotModel()
+        robot_model.load_urdf_from_robot_description(param_name)
+        return robot_model
+
+    @staticmethod
+    def from_urdf(urdf_string):
+        """Load URDF from a string or a file path.
+
+        Automatically detects if the input is a URDF string or a file path.
+
+        Parameters
+        ----------
+        urdf_string : str
+            Either the URDF model description as a string, or the path to a
+            URDF file.
+
+        Returns
+        -------
+        RobotModel
+            Robot model loaded from the URDF.
+        """
+        import os
+
+        robot_model = RobotModel()
+        if os.path.isfile(urdf_string):
+            try:
+                with open(urdf_string, 'r') as f:
+                    robot_model.load_urdf_file(file_obj=f)
+            except Exception as e:
+                logger.error("Failed to load URDF from file: {}. Error: {}"
+                             .format(urdf_string, e))
+                logger.error("Attempting to load as URDF string instead.")
+                robot_model.load_urdf(urdf_string)
+        else:
+            robot_model.load_urdf(urdf_string)
+        return robot_model
+
     def load_urdf(self, urdf):
         is_python3 = sys.version_info.major > 2
         f = io.StringIO()

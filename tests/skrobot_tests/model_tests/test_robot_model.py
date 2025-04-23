@@ -1,8 +1,11 @@
 import copy
+import os
+import sys
 import unittest
 
 import numpy as np
 from numpy import testing
+import pytest
 import trimesh
 
 import skrobot
@@ -398,3 +401,57 @@ class TestRobotModel(unittest.TestCase):
         testing.assert_almost_equal(
             joint_angle_limit_weight([j3]),
             np.float32(0.0))
+
+    @pytest.mark.skipif(sys.version_info[0] == 2, reason="Skip in Python 2")
+    def test_from_urdf(self):
+        import tempfile
+
+        # Load from URDF string
+        urdf_string = """
+<robot name="test_robot">
+  <link name="base_link"/>
+  <joint name="joint1" type="fixed">
+    <parent link="base_link"/>
+    <child link="link1"/>
+  </joint>
+  <link name="link1"/>
+</robot>
+"""
+        robot_from_string = skrobot.model.RobotModel.from_urdf(urdf_string)
+        self.assertEqual(robot_from_string.name, "test_robot")
+        self.assertIn("base_link", robot_from_string.__dict__)
+        self.assertIn("link1", robot_from_string.__dict__)
+        self.assertIn("joint1", robot_from_string.__dict__)
+
+        # Create a temporary URDF file
+        with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.urdf', delete=False) as tmp_file:
+            tmp_file.write(urdf_string)
+            urdf_path = tmp_file.name
+
+        # Load from URDF file path
+        robot_from_path = skrobot.model.RobotModel.from_urdf(urdf_path)
+        self.assertEqual(robot_from_path.name, "test_robot")
+        self.assertIn("base_link", robot_from_path.__dict__)
+        self.assertIn("link1", robot_from_path.__dict__)
+        self.assertIn("joint1", robot_from_path.__dict__)
+
+        # Clean up the temporary file
+        os.remove(urdf_path)
+
+        # Test with a valid file path but different content
+        urdf_string_2 = """
+<robot name="another_robot">
+  <link name="base"/>
+</robot>
+"""
+        with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.urdf', delete=False) as tmp_file_2:
+            tmp_file_2.write(urdf_string_2)
+            urdf_path_2 = tmp_file_2.name
+
+        robot_from_path_2 = skrobot.model.RobotModel.from_urdf(urdf_path_2)
+        self.assertEqual(robot_from_path_2.name, "another_robot")
+        self.assertIn("base", robot_from_path_2.__dict__)
+
+        os.remove(urdf_path_2)
