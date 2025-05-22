@@ -131,7 +131,7 @@ class ROSRobotInterfaceBase(object):
 
         Parameters
         ----------
-        time : float or None
+        time : float or None or list of tuple
             time of send angle vector.
         fastest_time : float
             fastest time
@@ -148,7 +148,23 @@ class ROSRobotInterfaceBase(object):
             raise ValueError(
                 'time_scale must be >=1, but given: {}'.format(time_scale))
         if isinstance(time, Number):
-            # Normal Number disgnated Mode
+            if isinstance(fastest_time, list) and len(fastest_time) > 0:
+                joints_violating_minimum_time = []
+                org_time = time
+                for fastest_time_each_joint, joint_name in fastest_time:
+                    if time < fastest_time_each_joint:
+                        joints_violating_minimum_time.append(joint_name)
+                        time = max(time, fastest_time_each_joint)
+                if len(joints_violating_minimum_time) > 0:
+                    rospy.logwarn(
+                        'Time has been changed from {} to {} '.format(
+                            org_time, time)
+                        + 'due to joint velocity limit. '
+                        + 'Make sure that joint limit is correctly set in urdf'
+                        + ' and the following joints had requested times'
+                        + ' shorter than the minimum allowed: {}'.format(
+                            joints_violating_minimum_time))
+                return time
             if time < fastest_time:
                 rospy.logwarn(
                     'Time has been changed from {} to {} '
@@ -157,6 +173,8 @@ class ROSRobotInterfaceBase(object):
                     format(time, fastest_time))
                 time = fastest_time
         elif time is None:
+            if isinstance(fastest_time, list) and len(fastest_time) > 0:
+                fastest_time = max([t for t, _ in fastest_time])
             time = time_scale * fastest_time
             rospy.logwarn(
                 'Time of send angle vector is set to {}. '
@@ -454,7 +472,8 @@ class ROSRobotInterfaceBase(object):
         fastest_time = self.angle_vector_duration(
             self.angle_vector(),
             av,
-            controller_type)
+            controller_type,
+            return_joint_names=True)
         time = self._check_time(time, fastest_time, time_scale=time_scale)
 
         self.robot.angle_vector(av)
@@ -591,7 +610,8 @@ class ROSRobotInterfaceBase(object):
         for i_step in range(total_steps):
             av = avs[i_step]
             fastest_time = self.angle_vector_duration(
-                prev_av, av, controller_type)
+                prev_av, av, controller_type,
+                return_joint_names=True)
             time = times[i_step]
             time = self._check_time(time, fastest_time, time_scale=time_scale)
 
@@ -600,7 +620,8 @@ class ROSRobotInterfaceBase(object):
                 next_time = times[i_step + 1]
                 next_av = avs[i_step + 1]
                 fastest_next_time = self.angle_vector_duration(
-                    av, next_av, controller_type)
+                    av, next_av, controller_type,
+                    return_joint_names=True)
                 next_time = self._check_time(
                     next_time, fastest_next_time, time_scale=time_scale)
                 if time > 0.0 and next_time > 0.0:
@@ -669,7 +690,8 @@ class ROSRobotInterfaceBase(object):
             is_movings = [self.moving_status[controller_type]]
         return any(is_movings)
 
-    def angle_vector_duration(self, start_av, end_av, controller_type=None):
+    def angle_vector_duration(self, start_av, end_av, controller_type=None,
+                              return_joint_names=False):
         """Calculate maximum time to reach goal for all joint.
 
         Parameters
@@ -680,11 +702,18 @@ class ROSRobotInterfaceBase(object):
             end angle-vector (target position)
         controller_type : None or string
             type of controller
+        return_joint_names : bool
+            if True, return list of tuple (time, joint_name)
 
         Returns
         -------
-        av_duration : float
-            time of angle vector.
+        av_duration : float or list of tuple
+            if return_joint_names is False,
+                return max time of angle vector.
+            if return_joint_names is True,
+                return list of tuple (time, joint_name)
+                where time is the time to reach goal for each joint
+                and joint_name is the name of the joint at the same
         """
         if controller_type is None:
             controller_type = self.controller_type
@@ -705,7 +734,12 @@ class ROSRobotInterfaceBase(object):
                     time = 1. * abs(diff_angle) / joint.max_joint_velocity
             else:
                 time = 0
-            time_list.append(time)
+            if return_joint_names:
+                time_list.append((time, joint.name))
+            else:
+                time_list.append(time)
+        if return_joint_names:
+            return time_list
         return max(time_list)
 
     def cancel_angle_vector(self):
