@@ -66,6 +66,7 @@ class PyrenderViewer(pyrender.Viewer):
 
         self._redraw = True
 
+        refresh_rate = 1.0 / update_interval
         self._kwargs = dict(
             scene=pyrender.Scene(),
             viewport_size=resolution,
@@ -73,7 +74,7 @@ class PyrenderViewer(pyrender.Viewer):
             use_raymond_lighting=True,
             auto_start=False,
             render_flags=render_flags,
-            refresh_rate=update_interval,
+            refresh_rate=refresh_rate,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
         self.viewer_flags['window_title'] = 'scikit-robot PyrenderViewer'
