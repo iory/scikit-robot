@@ -125,6 +125,19 @@ def calc_dif_with_axis(dif, axis):
     return ret
 
 
+class _MimicJointHook(object):
+
+    def __init__(self, this, other, multiplier, offset):
+        self.this_joint = this
+        self.other_joint = other
+        self.multiplier = multiplier
+        self.offset = offset
+
+    def __call__(self):
+        self.other_joint.joint_angle(
+            self.this_joint.joint_angle() * self.multiplier + self.offset)
+
+
 class Joint(object):
 
     def __init__(self, name=None, child_link=None,
@@ -180,9 +193,11 @@ class Joint(object):
         self._hooks.append(hook)
 
     def register_mimic_joint(self, joint, multiplier, offset):
-        self.register_hook(
-            lambda: joint.joint_angle(
-                self.joint_angle() * multiplier + offset))
+        # NOTE: use _MimicJointHook callable to avoid using lambda function.
+        # Otherwise, lambda function will not be pickled and will not
+        # be deepcopied correctly.
+        mimic_joint_hook = _MimicJointHook(self, joint, multiplier, offset)
+        self.register_hook(mimic_joint_hook)
 
 
 class RotationalJoint(Joint):
