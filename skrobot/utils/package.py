@@ -1,10 +1,11 @@
 def is_package_installed(package_name):
     try:
-        import pkg_resources
+        from importlib.metadata import distribution
+        from importlib.metadata import PackageNotFoundError
         try:
-            pkg_resources.get_distribution(package_name)
+            distribution(package_name)
             return True
-        except pkg_resources.DistributionNotFound:
+        except PackageNotFoundError:
             return False
     except ImportError:
         import imp

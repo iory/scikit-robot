@@ -2,14 +2,14 @@
 
 import argparse
 import contextlib
-from distutils.version import StrictVersion
 import os.path as osp
 from pathlib import Path
 import shutil
 import sys
 
-import pkg_resources
+from packaging.version import Version
 
+from skrobot import determine_version
 from skrobot.model import RobotModel
 from skrobot.utils.package import is_package_installed
 from skrobot.utils.urdf import export_mesh_format
@@ -54,8 +54,8 @@ resulting in less simplification. Default is None."""
 
     args = parser.parse_args()
 
-    trimesh_version = pkg_resources.get_distribution("trimesh").version
-    if StrictVersion(trimesh_version) < StrictVersion("4.0.10"):
+    trimesh_version = determine_version('trimesh')
+    if Version(trimesh_version) < Version("4.0.10"):
         print(
             '[WARNING] With `trimesh` < 4.0.10, the output dae is not '
             + 'colored. Please `pip install trimesh -U`')
