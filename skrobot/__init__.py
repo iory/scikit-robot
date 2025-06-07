@@ -6,6 +6,7 @@ import sys
 if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
     or sys.version_info[0] > 3:
     import importlib
+    import importlib.metadata
     _SUBMODULES = [
         "coordinates",
         "data",
@@ -19,16 +20,10 @@ if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
         "sdf"
     ]
     __all__ = _SUBMODULES
-    _pkg_resources = None
     _version = None
 
-
-    def _lazy_pkg_resources():
-        global _pkg_resources
-        if _pkg_resources is None:
-            import pkg_resources
-            _pkg_resources = pkg_resources
-        return _pkg_resources
+    def determine_version(module_name):
+        return importlib.metadata.version(module_name)
 
 
     class LazyModule(object):
@@ -57,9 +52,7 @@ if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
         global _version
         if name == "__version__":
             if _version is None:
-                pkg_resources = _lazy_pkg_resources()
-                _version = pkg_resources.get_distribution(
-                    'scikit-robot').version
+                _version = determine_version('scikit-robot')
             return _version
         if name in _SUBMODULES:
             return _module_cache[name]
@@ -73,7 +66,10 @@ else:
     import pkg_resources
 
 
-    __version__ = pkg_resources.get_distribution('scikit-robot').version
+    def determine_version(module_name):
+        return pkg_resources.get_distribution(module_name).version
+
+    __version__ = determine_version('scikit-robot')
 
 
     from skrobot import coordinates
@@ -86,6 +82,3 @@ else:
     from skrobot import viewers
     from skrobot import utils
     from skrobot import sdf
-
-    def _lazy_pkg_resources():
-        return pkg_resources

@@ -1,6 +1,6 @@
-from distutils.version import StrictVersion
 import os
 import os.path as osp
+from packaging.version import Version
 
 data_dir = osp.abspath(osp.dirname(__file__))
 _default_cache_dir = osp.expanduser('~/.skrobot')
@@ -20,9 +20,9 @@ def _lazy_gdown():
 def _lazy_gdown_version():
     global _gdown_version
     if _gdown_version is None:
-        from skrobot import _lazy_pkg_resources
-        _gdown_version = _lazy_pkg_resources().get_distribution(
-            'gdown').version
+        from skrobot import determine_version
+        _gdown_version = determine_version('gdown')
+
     return _gdown_version
 
 
@@ -34,7 +34,7 @@ def _download(url, path, md5, postprocess=None, quiet=False):
     gdown = _lazy_gdown()
     if postprocess == 'extractall':
         postprocess = gdown.extractall
-    if StrictVersion(_lazy_gdown_version()) < StrictVersion("5.1.0"):
+    if Version(_lazy_gdown_version()) < Version("5.1.0"):
         gdown.cached_download(
             url=url, path=path, md5=md5, quiet=quiet,
             postprocess=postprocess,
