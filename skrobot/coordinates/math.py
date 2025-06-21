@@ -261,9 +261,11 @@ def sr_inverse(J, k=1.0, weight_vector=None):
 
     # umat = J W J^T + kI
     # ret = W J^T (J W J^T + kI)^(-1)
+    # Instead of computing inverse, solve Ax=b where A=umat, b=weight_J,
+    # x=ret.T
     weight_J = np.matmul(weight_matrix, J.T)
     umat = np.matmul(J, weight_J) + k * np.eye(r)
-    ret = np.matmul(weight_J, np.linalg.inv(umat))
+    ret = np.linalg.solve(umat, weight_J.T).T
     return ret
 
 
@@ -287,8 +289,10 @@ def sr_inverse_org(J, k=1.0):
         calculated SR-inverse
     """
     r, _ = J.shape
-    return np.matmul(J.T,
-                     np.linalg.inv(np.matmul(J, J.T) + k * np.eye(r)))
+    # We want J^T * (JJ^T + kI)^(-1)
+    # This equals (solve((JJ^T + kI), J))^T since (JJ^T + kI) is symmetric
+    umat = np.matmul(J, J.T) + k * np.eye(r)
+    return np.linalg.solve(umat, J).T
 
 
 def batch_sr_inverse(J_batch, k_values, weight_vector=None):
@@ -342,8 +346,10 @@ def batch_sr_inverse(J_batch, k_values, weight_vector=None):
     J_T = J_batch.transpose(0, 2, 1)
     weighted_J_T = np.matmul(W, J_T)
     umat = np.matmul(J_batch, weighted_J_T) + k_matrix
-    umat_inv = np.linalg.inv(umat)
-    sr_inverse = np.matmul(weighted_J_T, umat_inv)
+    # Instead of computing inverse, solve Ax=b for each matrix in batch
+    # A=umat[i], b=weighted_J_T[i], x=sr_inverse[i].T
+    sr_inverse = np.linalg.solve(
+        umat, weighted_J_T.transpose(0, 2, 1)).transpose(0, 2, 1)
     return sr_inverse
 
 
