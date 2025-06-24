@@ -1400,7 +1400,7 @@ class CascadedLink(CascadedCoords):
         _check_type(frm)
         pl = to.parent_link
         # if to is not included in self.link_list, just trace parent-link
-        if pl and not (to in self.link_list):
+        if pl and to not in self.link_list:
             return self.find_link_route(pl, frm)
         # if self.link_list, append "to" link
         if pl and not (to == frm):

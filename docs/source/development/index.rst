@@ -24,30 +24,27 @@ Running Code Style Checks
 We follow `PEP 8 <https://www.python.org/dev/peps/pep-0008/>`_ and partially `OpenStack Style Guidelines <https://docs.openstack.org/developer/hacking/>`_ as basic style guidelines.
 Any contributions in terms of code are expected to follow these guidelines.
 
-You can use the ``autopep8``, ``isort`` and the ``flake8`` commands to check whether or not your code follows the guidelines.
-In order to avoid confusion from using different tool versions, we pin the versions of those tools.
-Install them with the following command (from within the top directory of the Chainer repository)::
+You can use ``ruff`` to check and automatically fix code style issues, including import ordering.
+``ruff`` is a fast Python linter and formatter that replaces ``flake8``, ``isort``, and ``autopep8``.
+Install it with the following command::
 
-  $ pip install hacking pytest autopep8 isort
+  $ pip install ruff pytest
 
-And check your code with::
+Check your code with::
 
-  $ autopep8 path/to/your/code.py
-  $ flake8 path/to/your/code.py
+  $ ruff check path/to/your/code.py
 
-``autopep8`` can automatically correct Python code to conform to the PEP 8 style guide::
+``ruff`` can automatically fix many style issues::
 
-  $ autopep8 --in-place path/to/your/code.py
+  $ ruff check --fix path/to/your/code.py
 
+To check the entire project::
 
-``isort`` can automatically correct ``import order``::
+  $ ruff check .
 
-  $ cd scikit-robot && isort path/to/your/code.py
+For more information, please see `the ruff documentation`_.
 
-
-For more information, please see `the flake8 documentation`_.
-
-.. _the flake8 documentation: https://flake8.pycqa.org/en/latest/user/options.html
+.. _the ruff documentation: https://docs.astral.sh/ruff/
 
 Running Tests
 -------------

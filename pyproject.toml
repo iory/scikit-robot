@@ -1,3 +1,23 @@
+[tool.ruff]
+# Exclude directories from linting
+extend-exclude = [".?*", "src/", "build", "docs"]
+line-length = 120
+
+[tool.ruff.lint]
+# Enable flake8-style rules
+select = ["E", "F", "W"]
+# Ignore specific rules to match current flake8 config
+ignore = [
+    "E741",  # ambiguous variable name
+]
+
+[tool.ruff.lint.isort]
+# Match current isort configuration
+force-single-line = true
+force-sort-within-sections = true
+order-by-type = false
+lines-after-imports = 2
+
 [tool.typos]
 default.extend-ignore-re = [
     "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",  # spellchecker:disable-line

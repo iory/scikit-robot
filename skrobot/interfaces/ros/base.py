@@ -463,7 +463,7 @@ class ROSRobotInterfaceBase(object):
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
-        if not (controller_type in self.controller_table):
+        if controller_type not in self.controller_table:
             rospy.logwarn(
                 'controller_type {} not found'.format(controller_type))
             return False
@@ -595,7 +595,7 @@ class ROSRobotInterfaceBase(object):
             # use default self.controller_type if controller_type is None
             controller_type = self.controller_type
 
-        if not (controller_type in self.controller_table):
+        if controller_type not in self.controller_table:
             rospy.logwarn('controller_type: {} not found'.
                           format(controller_type))
             return False
