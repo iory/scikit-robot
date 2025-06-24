@@ -17,7 +17,8 @@ if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
         "models",
         "viewers",
         "utils",
-        "sdf"
+        "sdf",
+        "urdf"
     ]
     __all__ = _SUBMODULES
     _version = None
@@ -82,3 +83,4 @@ else:
     from skrobot import viewers
     from skrobot import utils
     from skrobot import sdf
+    from skrobot import urdf
