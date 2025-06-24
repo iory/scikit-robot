@@ -6,6 +6,7 @@ import os
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 
+
 def main():
     parser = argparse.ArgumentParser(description="Modularize URDF to xacro macro")
     parser.add_argument("input_urdf", help="Input URDF file path")
@@ -24,15 +25,16 @@ def main():
         output_path = base_name + "_modularized.xacro"
 
     etree.ElementTree(xacro_root).write(output_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
-    print(f"Successfully converted to xacro: {output_path}")
-    print(f"""To use the generated xacro macro in your xacro file, copy and paste the following:
+    print("Successfully converted to xacro: {}".format(output_path))
+    print("""To use the generated xacro macro in your xacro file, copy and paste the following:
 
-  <xacro:{robot_name}
+  <xacro:{}
     prefix="[specify prefix]"
     parent_link="[specify parent link]">
     <origin xyz="0 0 0" rpy="0 0 0"/>
-  </xacro:{robot_name}>
-""")
+  </xacro:{}>
+""".format(robot_name, robot_name))
+
 
 if __name__ == "__main__":
     main()

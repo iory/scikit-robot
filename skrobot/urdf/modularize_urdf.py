@@ -5,8 +5,10 @@ import os
 import subprocess
 import tempfile
 
+
 def add_prefix_to_name(name):
     return "${prefix}" + name if not name.startswith("${prefix}") else name
+
 
 def indent_element(elem, level=1, indent_str="    "):
     i = "\n" + level * indent_str
@@ -20,6 +22,7 @@ def indent_element(elem, level=1, indent_str="    "):
     else:
         if not elem.tail or not elem.tail.strip():
             elem.tail = i
+
 
 def find_root_link(input_path):
     tree = etree.parse(input_path)
@@ -40,6 +43,7 @@ def find_root_link(input_path):
         return next(iter(root_candidates))  # root link name as string
     else:
         raise ValueError("Could not determine root link. Check that the URDF contains valid joint definitions.")
+
 
 def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     XACRO_NS = "http://ros.org/wiki/xacro"
@@ -63,13 +67,13 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     if not no_prefix:
         macro_params.insert(0, "prefix")
 
-    macro = etree.Element(f"{{{XACRO_NS}}}macro")
+    macro = etree.Element("{}macro".format("{" + XACRO_NS + "}"))
     macro.set("name", robot_name)
     macro.set("params", " ".join(macro_params))
     xacro_root.append(macro)
 
     connector_joint = etree.Element("joint")
-    connector_joint_name = f"{'${prefix}' if not no_prefix else ''}{connector_link}_to_${{parent_link}}_joint"
+    connector_joint_name = "{}{}_to_${{parent_link}}_joint".format('${prefix}' if not no_prefix else '', connector_link)
     connector_joint.set("name", connector_joint_name)
     connector_joint.set("type", "fixed")
 
@@ -79,7 +83,7 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     child_elem = etree.SubElement(connector_joint, "child")
     child_elem.set("link", add_prefix_to_name(connector_link) if not no_prefix else connector_link)
 
-    origin_block = etree.SubElement(connector_joint, f"{{{XACRO_NS}}}insert_block")
+    origin_block = etree.SubElement(connector_joint, "{}insert_block".format("{" + XACRO_NS + "}"))
     origin_block.set("name", "origin")
 
     macro.append(connector_joint)

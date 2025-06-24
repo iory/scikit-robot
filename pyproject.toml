@@ -4,6 +4,8 @@ extend-exclude = [".?*", "src/", "build", "docs"]
 line-length = 120
 
 [tool.ruff.lint]
+preview = true
+
 # Enable flake8-style rules
 select = ["E", "F", "W"]
 # Ignore specific rules to match current flake8 config
