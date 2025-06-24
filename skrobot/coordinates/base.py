@@ -1339,7 +1339,7 @@ class CascadedCoords(Coordinates):
                 .format(child.parent.name)
             raise RuntimeError(msg)
 
-        if not (child in self._descendants):
+        if child not in self._descendants:
             if relative_coords is None or relative_coords == 'world':
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())

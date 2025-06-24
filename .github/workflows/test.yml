@@ -24,14 +24,11 @@ jobs:
     - name: Install Formatting
       run: |
         python -m pip install --upgrade pip
-        pip install hacking isort
+        pip install ruff
     - name: Check Formatting
       run: |
-        flake8 .
+        ruff check .
         grep -rlIP '[^\x00-\x7F]' skrobot | grep '\.pyx\?' | sort > unicode.out; grep -rlI '# -\*- coding: \(utf-8\|latin-1\) -\*-' skrobot | grep '\.pyx\?' | sort > coding.out; comm -23 unicode.out coding.out > test_code.out; cat test_code.out;  test \! -s test_code.out
-    - name: Check isort
-      run: |
-        isort -c .
 
   typos:
     name: Typos
@@ -162,7 +159,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install Cython
-        pip install pytest hacking
+        pip install pytest ruff
     - name: Install scikit-robot
       run: |
         pip cache purge
@@ -208,7 +205,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install Cython
-        pip install pytest hacking
+        pip install pytest
     - name: Install scikit-robot
       run: pip install --no-cache-dir .[all]
     - name: Run Pytest
