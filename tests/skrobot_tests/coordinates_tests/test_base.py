@@ -9,9 +9,9 @@ from numpy import testing
 
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
+from skrobot.coordinates import Transform
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy_matrix
-from skrobot.coordinates import Transform
 
 
 class TestTransform(unittest.TestCase):

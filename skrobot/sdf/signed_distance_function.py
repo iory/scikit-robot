@@ -404,8 +404,7 @@ class GridSDF(SignedDistanceFunction):
             interpolator = scipy.interpolate.RegularGridInterpolator
         except AttributeError:
             # scipy<=1.8.0
-            from scipy.interpolate import \
-                RegularGridInterpolator as interpolator
+            from scipy.interpolate import RegularGridInterpolator as interpolator
         self.itp = interpolator(
             (xlin, ylin, zlin),
             self._data,
@@ -532,11 +531,9 @@ class GridSDF(SignedDistanceFunction):
         with lock:
             if not os.path.exists(sdf_cache_path):
                 logger.info(
-                    'trying to acquire lock for {0}...'
-                    .format(sdf_cache_path))
+                    'trying to acquire lock for %s...', sdf_cache_path)
                 logger.info(
-                    'pre-computing sdf and making a cache at {0}.'
-                    .format(sdf_cache_path))
+                    'pre-computing sdf and making a cache at %s.', sdf_cache_path)
                 pysdfgen.obj2sdf(str(obj_filepath), dim_grid, padding_grid,
                                  output_filepath=sdf_cache_path)
                 logger.info('finish pre-computation')

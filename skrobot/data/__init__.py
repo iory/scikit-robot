@@ -1,6 +1,8 @@
 import os
 import os.path as osp
+
 from packaging.version import Version
+
 
 data_dir = osp.abspath(osp.dirname(__file__))
 _default_cache_dir = osp.expanduser('~/.skrobot')

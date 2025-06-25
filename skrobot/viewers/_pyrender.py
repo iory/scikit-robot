@@ -9,8 +9,8 @@ from pyglet import compat_platform
 import pyrender
 from pyrender.trackball import Trackball
 import trimesh
-from trimesh.scene import cameras
 from trimesh import transformations
+from trimesh.scene import cameras
 
 from skrobot.coordinates import Coordinates
 

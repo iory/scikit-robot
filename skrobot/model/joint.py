@@ -3,8 +3,8 @@ from logging import getLogger
 import numpy as np
 
 from skrobot.coordinates import convert_to_axis_vector
-from skrobot.coordinates.math import cross_product
 from skrobot.coordinates import normalize_vector
+from skrobot.coordinates.math import cross_product
 
 
 logger = getLogger(__name__)
@@ -264,13 +264,11 @@ class RotationalJoint(Joint):
             v += self.joint_angle()
         if v > self.max_angle:
             if not relative:
-                logger.warning('{} :joint-angle({}) violate max-angle({})'
-                               .format(self, v, self.max_angle))
+                logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, self.max_angle)
             v = self.max_angle
         elif v < self.min_angle:
             if not relative:
-                logger.warning('{} :joint-angle({}) violate min-angle({})'
-                               .format(self, v, self.min_angle))
+                logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, self.min_angle)
             v = self.min_angle
         diff_angle = v - self._joint_angle
         self._joint_angle = v
@@ -428,13 +426,11 @@ class LinearJoint(Joint):
                 v = v + self._joint_angle
             if v > self.max_angle:
                 if not relative:
-                    logger.warning('{} :joint-angle({}) violate max-angle({})'
-                                   .format(self, v, self.max_angle))
+                    logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, self.max_angle)
                 v = self.max_angle
             elif v < self.min_angle:
                 if not relative:
-                    logger.warning('{} :joint-angle({}) violate min-angle({})'
-                                   .format(self, v, self.min_angle))
+                    logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, self.min_angle)
                 v = self.min_angle
             diff_translation = v - self._joint_angle
             self._joint_angle = v

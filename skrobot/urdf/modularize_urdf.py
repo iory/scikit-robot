@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-from lxml import etree
 import os
 import subprocess
 import tempfile
+
+from lxml import etree
 
 
 def add_prefix_to_name(name):

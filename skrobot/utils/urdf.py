@@ -319,8 +319,7 @@ def _load_meshes(filename):
         if meshes.units is not None and meshes.units != 'meter':
             meshes = meshes.convert_units('meter')
     except Exception as e:
-        logger.error("Failed to load meshes from {}. Error: {}"
-                     .format(filename, e))
+        logger.error("Failed to load meshes from %s. Error: %s", filename, e)
         meshes = []
 
     # If we got a scene, dump the meshes
@@ -332,7 +331,7 @@ def _load_meshes(filename):
         meshes = list(meshes)
         if len(meshes) == 0:
             logger.error('At least one mesh must be present in file.'
-                         ' Please check {} file'.format(filename))
+                         ' Please check %s file', filename)
             meshes = []
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
@@ -341,7 +340,7 @@ def _load_meshes(filename):
     elif isinstance(meshes, trimesh.Trimesh):
         meshes = [meshes]
     else:
-        logger.error('Unable to load mesh from file {}'.format(filename))
+        logger.error('Unable to load mesh from file %s', filename)
         meshes = []
 
     for mesh in meshes:
@@ -501,11 +500,9 @@ class URDFType(object):
                 vs = node.findall(t._TAG)
                 if len(vs) == 0 and r:
                     logger.error(
-                        'Missing required {} tag for '
-                        '<{} name="{}"> in {}.'
-                        .format(t._TAG, node.tag,
-                                node.attrib['name'], cls.__name__
-                                ))
+                        'Missing required %s tag for '
+                        '<%s name="%s"> in %s.',
+                        t._TAG, node.tag, node.attrib['name'], cls.__name__)
                 v = [t._from_xml(n, path) for n in vs]
             kwargs[a] = v
         return kwargs

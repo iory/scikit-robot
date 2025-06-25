@@ -4,10 +4,10 @@ import numpy as np
 from numpy import pi
 from numpy import testing
 
+from skrobot.coordinates import make_coords
 from skrobot.coordinates.geo import midcoords
 from skrobot.coordinates.geo import orient_coords_to_axis
 from skrobot.coordinates.geo import rotate_points
-from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import matrix2quaternion
 
 
