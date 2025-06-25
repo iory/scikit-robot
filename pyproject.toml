@@ -7,7 +7,7 @@ line-length = 120
 preview = true
 
 # Enable flake8-style rules
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "G"]
 # Ignore specific rules to match current flake8 config
 ignore = [
     "E741",  # ambiguous variable name

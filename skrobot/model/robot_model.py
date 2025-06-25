@@ -654,14 +654,10 @@ class CascadedLink(CascadedCoords):
                 == len(dif_pos)
                 == len(dif_rot)):
             logger.error(
-                'list length differ : translation-axis {} rotation-axis {} '
-                'move-target {} link-list {} dif-pos {} dif-rot {}'.format(
-                    len(translation_axis),
-                    len(rotation_axis),
-                    len(move_target),
-                    len(link_list),
-                    len(dif_pos),
-                    len(dif_rot)))
+                'list length differ : translation-axis %s rotation-axis %s '
+                'move-target %s link-list %s dif-pos %s dif-rot %s',
+                len(translation_axis), len(rotation_axis), len(move_target),
+                len(link_list), len(dif_pos), len(dif_rot))
             return 'ik-continuous'
 
         for i in range(len(rotation_axis)):
@@ -929,18 +925,17 @@ class CascadedLink(CascadedCoords):
                 == len(move_target)
                 == len(link_list)
                 == len(target_coords)):
-            logger.error('list length differ : translation_axis {}'
-                         ', rotation_axis {}, move_target {} '
-                         'link_list {}, target_coords {}'.format(
-                             len(translation_axis), len(rotation_axis),
-                             len(move_target), len(link_list),
-                             len(target_coords)))
+            logger.error('list length differ : translation_axis %s'
+                         ', rotation_axis %s, move_target %s '
+                         'link_list %s, target_coords %s',
+                         len(translation_axis), len(rotation_axis),
+                         len(move_target), len(link_list), len(target_coords))
             return False
 
         if len(additional_jacobi) != len(additional_vel):
-            logger.error('list length differ : additional_jacobi {}, '
-                         'additional_vel {}'.format(
-                             len(additional_jacobi), len(additional_vel)))
+            logger.error('list length differ : additional_jacobi %s, '
+                         'additional_vel %s',
+                         len(additional_jacobi), len(additional_vel))
             return False
 
         tmp_additional_jacobi = map(
@@ -1110,12 +1105,10 @@ class CascadedLink(CascadedCoords):
                 == len(translation_axis)
                 == len(target_coords)):
             logger.error(
-                'list length differ : target_coords {} translation_axis {} \
-            rotation_axis {} move_target {}'. format(
-                    len(target_coords),
-                    len(translation_axis),
-                    len(rotation_axis),
-                    len(move_target)))
+                'list length differ : target_coords %s translation_axis %s '
+                'rotation_axis %s move_target %s',
+                len(target_coords), len(translation_axis),
+                len(rotation_axis), len(move_target))
 
         union_link_list = self.calc_union_link_list(link_list)
         for i in range(stop):
@@ -1189,7 +1182,7 @@ class CascadedLink(CascadedCoords):
                                *args, **kwargs):
         # argument check
         if jacobi is None and j_sharp is None:
-            logger.warn(
+            logger.warning(
                 'jacobi(j) or j_sharp(J#) is required '
                 'in calc_joint_angle_speed')
             return null_space
@@ -1827,8 +1820,7 @@ class RobotModel(CascadedLink):
                     robot_model.load_urdf_file(
                         file_obj=f, include_mimic_joints=include_mimic_joints)
             except Exception as e:
-                logger.error("Failed to load URDF from file: {}. Error: {}"
-                             .format(urdf_input, e))
+                logger.error("Failed to load URDF from file: %s. Error: %s", urdf_input, e)
                 logger.error("Attempting to load as URDF string instead.")
                 robot_model.load_urdf(
                     urdf_input, include_mimic_joints=include_mimic_joints)
