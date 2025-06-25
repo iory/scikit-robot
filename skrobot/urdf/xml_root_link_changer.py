@@ -1,8 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
-
-from skrobot.coordinates import Coordinates
-from skrobot.coordinates.math import rpy2quaternion
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 
 class URDFXMLRootLinkChanger:
@@ -146,7 +145,9 @@ class URDFXMLRootLinkChanger:
             return
 
         # Build path from current root to new root
-        path_to_new_root = self._find_path_to_link(current_root, new_root_link)
+        # path_to_new_root = self._find_path_to_link(current_root, new_root_link)
+        # Build path from new root to current root
+        path_to_new_root = self._find_path_to_link(new_root_link, current_root)
         if not path_to_new_root:
             raise ValueError(
                 "No path found from {} to {}".format(
@@ -208,7 +209,7 @@ class URDFXMLRootLinkChanger:
         if dfs(start_link, target_link, path, visited):
             return path
         return []
-
+        
     def _reverse_joints_along_path(self, path):
         """Reverse joints along the given path.
 
@@ -217,6 +218,25 @@ class URDFXMLRootLinkChanger:
         path : list of tuple
             List of (parent_link, child_link, joint_name) tuples
         """
+
+        # Cache origin/xyz,rpy values of each joint
+        joint_xyz_rpy_cache = {}
+        for parent_link, child_link, joint_name in path:
+            if joint_name in self.joints:
+                joint = self.joints[joint_name]
+                origin = joint.find('origin')
+
+                # Get current xyz and rpy
+                xyz_str = origin.get('xyz', '0 0 0')
+                rpy_str = origin.get('rpy', '0 0 0')
+
+                # Parse the values
+                xyz = [float(x) for x in xyz_str.split()]
+                rpy = [float(x) for x in rpy_str.split()]
+
+                joint_xyz_rpy_cache[joint] = [xyz, rpy]
+
+        prev_joint = None
         for parent_link, child_link, joint_name in path:
             if joint_name in self.joints:
                 joint = self.joints[joint_name]
@@ -246,7 +266,39 @@ class URDFXMLRootLinkChanger:
                     self.joint_tree[child_link]['joint'] = None
 
                     # Reverse the joint transformation if needed
-                    self._reverse_joint_transform(joint)
+                    prev_joint_xyz = None
+                    prev_joint_rpy = None
+                    if prev_joint is not None:
+                        prev_joint_xyz = joint_xyz_rpy_cache[prev_joint][0]
+                        prev_joint_rpy = joint_xyz_rpy_cache[prev_joint][1]
+                    self._reverse_joint_transform_2(joint, prev_joint_xyz, prev_joint_rpy)
+                    prev_joint = joint
+
+    def _get_inversed_joint_origin(self, xyz, rpy):
+        if xyz is not None and rpy is not None:
+            # Calculate inversed transform of origin
+            rot = R.from_euler('xyz', rpy)
+            rot_matrix = rot.as_matrix()
+            rot_matrix_inv = rot_matrix.T
+            xyz_reversed = -np.dot(rot_matrix_inv, xyz)
+            rpy_reversed = R.from_matrix(rot_matrix_inv).as_euler('xyz')
+            xyz_reversed.tolist()
+            rpy_reversed.tolist()
+
+            return xyz_reversed, rpy_reversed
+
+    # prev_joint is None: child of this joint is new root link
+    def _reverse_joint_transform_2(self, joint, prev_joint_xyz, prev_joint_rpy):
+        origin = joint.find('origin')
+        if prev_joint_xyz is None and prev_joint_rpy is None:
+            # Set origin of this joint to Zero
+            origin.set('xyz', ' '.join(map(str, [0, 0, 0])))
+            origin.set('rpy', ' '.join(map(str, [0, 0, 0])))
+        else:
+            # Set the reversed values of previous joint
+            xyz_reversed, rpy_reversed = self._get_inversed_joint_origin(prev_joint_xyz, prev_joint_rpy)
+            origin.set('xyz', ' '.join(map(str, xyz_reversed)))
+            origin.set('rpy', ' '.join(map(str, rpy_reversed)))
 
     def _reverse_joint_transform(self, joint):
         """Reverse the transformation of a joint.
@@ -267,11 +319,20 @@ class URDFXMLRootLinkChanger:
             xyz = [float(x) for x in xyz_str.split()]
             rpy = [float(x) for x in rpy_str.split()]
 
-            yaw_pitch_roll = rpy[::-1]
-            quaternion_wxyz = rpy2quaternion(yaw_pitch_roll)
-            transform = Coordinates(pos=xyz, rot=quaternion_wxyz).inverse_transformation()
-            xyz_reversed = transform.translation.tolist()
-            rpy_reversed = transform.rpy_angle()[0][::-1].tolist()
+            # For simplicity, we negate the translation and rotation
+            # In a full implementation, you would need proper matrix inversion
+            # xyz_reversed = [-x for x in xyz]
+            # rpy_reversed = [-r for r in rpy]
+
+            # ============
+            rot = R.from_euler('xyz', rpy)
+            rot_matrix = rot.as_matrix()
+            rot_matrix_inv = rot_matrix.T
+            xyz_reversed = -np.dot(rot_matrix_inv, xyz)
+            rpy_reversed = R.from_matrix(rot_matrix_inv).as_euler('xyz')
+            xyz_reversed.tolist()
+            rpy_reversed.tolist()
+            # ============
 
             # Set the reversed values
             origin.set('xyz', ' '.join(map(str, xyz_reversed)))
