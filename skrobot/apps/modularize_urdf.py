@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
 import argparse
-from lxml import etree
 import os
+
+from lxml import etree
+
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 

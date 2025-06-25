@@ -404,8 +404,7 @@ class GridSDF(SignedDistanceFunction):
             interpolator = scipy.interpolate.RegularGridInterpolator
         except AttributeError:
             # scipy<=1.8.0
-            from scipy.interpolate import \
-                RegularGridInterpolator as interpolator
+            from scipy.interpolate import RegularGridInterpolator as interpolator
         self.itp = interpolator(
             (xlin, ylin, zlin),
             self._data,

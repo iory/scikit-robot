@@ -17,12 +17,12 @@ from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
-from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates import rpy_angle
+from skrobot.coordinates.math import jacobian_inverse
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
@@ -33,8 +33,8 @@ from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
-from skrobot.utils.listify import listify
 from skrobot.utils import urdf
+from skrobot.utils.listify import listify
 from skrobot.utils.urdf import enable_mesh_cache
 from skrobot.utils.urdf import URDF
 

@@ -3,8 +3,8 @@ from logging import getLogger
 import numpy as np
 
 from skrobot.coordinates import convert_to_axis_vector
-from skrobot.coordinates.math import cross_product
 from skrobot.coordinates import normalize_vector
+from skrobot.coordinates.math import cross_product
 
 
 logger = getLogger(__name__)

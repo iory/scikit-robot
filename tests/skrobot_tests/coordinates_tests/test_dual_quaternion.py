@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 from numpy import testing
 
-from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates import make_coords
+from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
