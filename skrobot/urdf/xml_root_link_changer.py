@@ -1,6 +1,9 @@
 import os
 import xml.etree.ElementTree as ET
 
+from skrobot.coordinates import Coordinates
+from skrobot.coordinates.math import rpy2quaternion
+
 
 class URDFXMLRootLinkChanger:
     """A class to change the root link of a URDF by directly manipulating XML.
@@ -264,10 +267,11 @@ class URDFXMLRootLinkChanger:
             xyz = [float(x) for x in xyz_str.split()]
             rpy = [float(x) for x in rpy_str.split()]
 
-            # For simplicity, we negate the translation and rotation
-            # In a full implementation, you would need proper matrix inversion
-            xyz_reversed = [-x for x in xyz]
-            rpy_reversed = [-r for r in rpy]
+            yaw_pitch_roll = rpy[::-1]
+            quaternion_wxyz = rpy2quaternion(yaw_pitch_roll)
+            transform = Coordinates(pos=xyz, rot=quaternion_wxyz).inverse_transformation()
+            xyz_reversed = transform.translation.tolist()
+            rpy_reversed = transform.rpy_angle()[0][::-1].tolist()
 
             # Set the reversed values
             origin.set('xyz', ' '.join(map(str, xyz_reversed)))
