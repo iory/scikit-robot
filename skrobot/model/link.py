@@ -16,6 +16,7 @@ class Link(CascadedCoords):
                  inertia_tensor=None,
                  collision_mesh=None,
                  visual_mesh=None,
+                 mass=None,
                  *args, **kwargs):
         super(Link, self).__init__(*args, **kwargs)
         self.centroid = centroid
@@ -24,6 +25,7 @@ class Link(CascadedCoords):
         self._parent_link = None
         if inertia_tensor is None:
             inertia_tensor = np.eye(3)
+        self.inertia_tensor = inertia_tensor
         self._collision_mesh = collision_mesh
         self.visual_mesh = visual_mesh
         if visual_mesh is not None:
@@ -34,6 +36,23 @@ class Link(CascadedCoords):
             self._concatenated_visual_mesh = None
         self._visual_mesh_changed = False
         self._sdf = None
+
+        # Dynamics properties
+        self.mass = mass if mass is not None else 1.0  # kg
+
+        # Velocity and acceleration states for dynamics computation
+        self.angular_velocity = np.zeros(3)    # rad/s
+        self.spatial_velocity = np.zeros(3)    # m/s
+        self.angular_acceleration = np.zeros(3)  # rad/s^2
+        self.spatial_acceleration = np.zeros(3)  # m/s^2
+
+        # External forces and moments for dynamics computation
+        self.ext_force = np.zeros(3)   # N
+        self.ext_moment = np.zeros(3)  # Nm
+
+        # Internal force/moment accumulation for inverse dynamics
+        self._internal_force = np.zeros(3)   # N
+        self._internal_moment = np.zeros(3)  # Nm
 
     @property
     def parent_link(self):
@@ -206,6 +225,105 @@ class Link(CascadedCoords):
             raise TypeError('sdf must be skrobot.sdf.SignedDistanceFunction.'
                             ' but is {}'.format(type(sdf)))
         self._sdf = sdf
+
+    def set_mass_properties(self, mass, centroid=None, inertia_tensor=None):
+        """Set mass properties for dynamics computation.
+
+        Parameters
+        ----------
+        mass : float
+            Link mass in [kg].
+        centroid : np.ndarray, optional
+            Center of mass position in link coordinates [m].
+            If None, defaults to [0, 0, 0].
+        inertia_tensor : np.ndarray, optional
+            3x3 inertia tensor about centroid in [kg*m^2].
+            If None, defaults to identity matrix.
+        """
+        self.mass = mass
+        if centroid is not None:
+            self.centroid = np.array(centroid)
+        if inertia_tensor is not None:
+            self.inertia_tensor = np.array(inertia_tensor)
+
+    def clear_external_wrench(self):
+        """Clear external forces and moments applied to this link."""
+        self.ext_force.fill(0.0)
+        self.ext_moment.fill(0.0)
+
+    def apply_external_wrench(self, force=None, moment=None, point=None):
+        """Apply external force and/or moment to this link.
+
+        Parameters
+        ----------
+        force : np.ndarray, optional
+            Force vector in world coordinates [N].
+        moment : np.ndarray, optional
+            Moment vector in world coordinates [Nm].
+        point : np.ndarray, optional
+            Point of force application in world coordinates [m].
+            If provided, generates additional moment from force.
+        """
+        if force is not None:
+            force = np.array(force)
+            self.ext_force += force
+
+            # If point is specified, add moment due to force offset
+            if point is not None:
+                point = np.array(point)
+                link_pos = self.worldpos()
+                r = point - link_pos
+                self.ext_moment += np.cross(r, force)
+
+        if moment is not None:
+            self.ext_moment += np.array(moment)
+
+    def calc_center_of_mass_jacobian(self, root_link, joint_list):
+        """Calculate Jacobian matrix for center of mass.
+
+        Parameters
+        ----------
+        root_link : Link
+            Root link of the kinematic chain.
+        joint_list : list of Joint
+            List of joints affecting this link.
+
+        Returns
+        -------
+        jacobian : np.ndarray
+            3xn Jacobian matrix mapping joint velocities to CoM velocity.
+        """
+        if self.centroid is None:
+            com_world = self.worldpos()
+        else:
+            com_world = self.worldpos() + self.worldrot().dot(self.centroid)
+
+        jacobian = np.zeros((3, len(joint_list)))
+
+        for i, joint in enumerate(joint_list):
+            if joint is None:
+                continue
+
+            # Check if this joint affects this link
+            current_link = self
+            is_relevant = False
+            while current_link is not None:
+                if hasattr(current_link, 'joint') and current_link.joint == joint:
+                    is_relevant = True
+                    break
+                current_link = current_link.parent_link
+
+            if is_relevant:
+                joint_pos = joint.parent_link.worldpos()
+                joint_axis = joint.parent_link.worldrot().dot(joint.axis)
+
+                if joint.__class__.__name__ == 'LinearJoint':
+                    jacobian[:, i] = joint_axis
+                else:  # rotational joint
+                    r = com_world - joint_pos
+                    jacobian[:, i] = np.cross(joint_axis, r)
+
+        return jacobian
 
 
 def _find_link_path(src_link, target_link, previous_link=None,

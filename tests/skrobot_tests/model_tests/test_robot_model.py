@@ -455,3 +455,145 @@ class TestRobotModel(unittest.TestCase):
         self.assertIn("base", robot_from_path_2.__dict__)
 
         os.remove(urdf_path_2)
+
+    def test_torque_vector_basic(self):
+        """Basic test for torque_vector method."""
+        pr2 = self.pr2
+        pr2.init_pose()
+
+        # Test that torque_vector method exists and returns correct shape
+        torques = pr2.torque_vector()
+        self.assertEqual(len(torques), len(pr2.joint_list))
+
+        # Test with upward gravity
+        torques_upward = pr2.torque_vector(gravity=np.array([0, 0, 9.80665]))
+        self.assertEqual(len(torques_upward), len(pr2.joint_list))
+
+        # Torques should have opposite signs due to gravity direction
+        for i in range(len(torques)):
+            if abs(torques[i]) > 1e-6:  # Skip near-zero values
+                # Upward gravity should have opposite sign to default (downward gravity)
+                self.assertLess(
+                    torques[i] * torques_upward[i], 0,
+                    msg="Joint {}: torques should have opposite signs".format(i)
+                )
+
+    def test_torque_vector_static(self):
+        """Test static torque calculation (gravity only)."""
+        robot = self.pr2
+        robot.init_pose()
+
+        # Test with default gravity (should be downward)
+        torques_default = robot.torque_vector()
+
+        # Test with explicit downward gravity
+        torques_downward = robot.torque_vector(gravity=np.array([0, 0, -9.80665]))
+
+        # Test with upward gravity
+        torques_upward = robot.torque_vector(gravity=np.array([0, 0, 9.80665]))
+
+        # Default should match explicit downward
+        testing.assert_array_almost_equal(
+            torques_default, torques_downward, decimal=10,
+            err_msg="Default gravity should be downward"
+        )
+
+        # Torques should have opposite signs
+        for i in range(len(torques_downward)):
+            self.assertAlmostEqual(
+                torques_downward[i] + torques_upward[i], 0.0,
+                places=5,
+                msg="Joint {}: torques with opposite gravity should sum to zero".format(i)
+            )
+
+    def test_torque_vector_with_external_forces(self):
+        """Test torque calculation with external forces."""
+        robot = self.pr2
+        robot.init_pose()
+
+        # Apply 10N force in -Z direction at end effector
+        force = np.array([0, 0, -10.0])
+        target_coords = robot.rarm.end_coords
+
+        torques_no_force = robot.torque_vector()
+        torques_with_force = robot.torque_vector(
+            force_list=[force],
+            target_coords=[target_coords]
+        )
+
+        # Torques should be different when external force is applied
+        diff = np.linalg.norm(torques_with_force - torques_no_force)
+        self.assertGreater(
+            diff, 0.1,
+            msg="External force should change joint torques"
+        )
+
+    def test_torque_vector_different_poses(self):
+        """Test torque calculation at different robot poses."""
+        robot = self.pr2
+
+        # Test 1: Init pose
+        robot.init_pose()
+        torques_init = robot.torque_vector()
+
+        # Test 2: Reset pose (arms down)
+        robot.reset_pose()
+        torques_reset = robot.torque_vector()
+
+        # Shoulder lift joint should have different torques
+        shoulder_idx = robot.joint_names.index('l_shoulder_lift_joint')
+        self.assertNotAlmostEqual(
+            torques_init[shoulder_idx],
+            torques_reset[shoulder_idx],
+            places=0,
+            msg="Shoulder lift torque should change with pose"
+        )
+
+    def test_torque_vector_zero_gravity(self):
+        """Test torque calculation with zero gravity."""
+        robot = self.pr2
+        robot.init_pose()
+
+        # With zero gravity, static torques should be zero
+        torques = robot.torque_vector(gravity=np.array([0, 0, 0]))
+
+        for i, torque in enumerate(torques):
+            self.assertAlmostEqual(
+                torque, 0.0,
+                places=10,
+                msg="Joint {}: torque should be zero with no gravity".format(i)
+            )
+
+    def test_torque_vector_link_mass_effect(self):
+        """Test that link masses affect torque calculation correctly."""
+        robot = self.pr2
+        robot.init_pose()
+
+        # Get original torques
+        torques_original = robot.torque_vector()
+
+        # Double the mass of forearm link
+        forearm_link = robot.l_forearm_link
+        original_mass = forearm_link.mass
+        forearm_link.mass = original_mass * 2.0
+
+        # Recalculate torques
+        torques_doubled = robot.torque_vector()
+
+        # Restore original mass
+        forearm_link.mass = original_mass
+
+        # Shoulder and elbow joints should see increased torque
+        shoulder_idx = robot.joint_names.index('l_shoulder_lift_joint')
+        elbow_idx = robot.joint_names.index('l_elbow_flex_joint')
+
+        self.assertGreater(
+            abs(torques_doubled[shoulder_idx]),
+            abs(torques_original[shoulder_idx]),
+            msg="Shoulder torque should increase with heavier forearm"
+        )
+        self.assertGreater(
+            abs(torques_doubled[elbow_idx]),
+            abs(torques_original[elbow_idx]),
+            msg="Elbow torque should increase with heavier forearm"
+        )
