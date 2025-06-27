@@ -67,5 +67,5 @@ If you want to build your own robot from scratch, you can refer to the [How to C
 - [x] Collision detection
 - [x] Interactive viewer ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
 - [x] Pybullet and ROS command interface ([examples/pybullet_robot_interface.py](examples/pybullet_robot_interface.py))
-- [ ] Forward and inverse dynamics
+- [x] Forward and inverse dynamics
 - [x] Path planning ([examples/collision_free_trajectory.py](examples/collision_free_trajectory.py))
