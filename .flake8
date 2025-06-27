@@ -1,0 +1,3 @@
+[flake8]
+# Only check E128 (continuation line indentation) that ruff doesn't handle well
+select = E128
