@@ -24,10 +24,11 @@ jobs:
     - name: Install Formatting
       run: |
         python -m pip install --upgrade pip
-        pip install ruff
+        pip install ruff flake8
     - name: Check Formatting
       run: |
         ruff check .
+        flake8 .
         grep -rlIP '[^\x00-\x7F]' skrobot | grep '\.pyx\?' | sort > unicode.out; grep -rlI '# -\*- coding: \(utf-8\|latin-1\) -\*-' skrobot | grep '\.pyx\?' | sort > coding.out; comm -23 unicode.out coding.out > test_code.out; cat test_code.out;  test \! -s test_code.out
 
   typos:
