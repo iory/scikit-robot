@@ -1214,8 +1214,7 @@ class Coordinates(object):
                 if relative_coords.lower() == 'parent':
                     if self.parent is None:
                         raise ValueError(
-                            "No parent coordinate available"
-                            + "for relative_coords='parent'")
+                            "No parent coordinate available for relative_coords='parent'")
                     relative_coords = self.parent
                 elif relative_coords.lower() == 'world':
                     relative_coords = worldcoords
