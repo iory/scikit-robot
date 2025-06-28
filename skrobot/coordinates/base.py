@@ -482,7 +482,7 @@ class Coordinates(object):
         return self.newcoords(
             self._rotation,
             self.parent_orientation(vec, wrt) + self._translation,
-            check_validity=False)
+            check_validity=False, relative_coords='local')
 
     def transform_vector(self, v):
         """"Return vector represented at world frame.
@@ -988,12 +988,12 @@ class Coordinates(object):
         """
         if wrt == 'local' or wrt == self:
             rot = np.matmul(self._rotation, mat)
-            self.newcoords(rot, self._translation, check_validity=False)
+            self.newcoords(rot, self._translation, check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent or \
                 wrt == 'world' or wrt is None or \
                 wrt == worldcoords:
             rot = np.matmul(mat, self._rotation)
-            self.newcoords(rot, self._translation, check_validity=False)
+            self.newcoords(rot, self._translation, check_validity=False, relative_coords='local')
         elif isinstance(wrt, Coordinates):
             r2 = wrt.worldrot()
             r2t = r2.T
@@ -1065,7 +1065,7 @@ class Coordinates(object):
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
         return self.newcoords(self._rotation, self._translation,
-                              check_validity=False)
+                              check_validity=False, relative_coords='local')
 
     def orient_with_matrix(self, rotation_matrix, wrt='world'):
         """Force update this coordinate system's rotation.
@@ -1135,20 +1135,104 @@ class Coordinates(object):
         """
         return self._translation
 
-    def newcoords(self, c, pos=None, check_validity=True):
+    def newcoords(self, c, pos=None, check_validity=True,
+                  relative_coords=None):
         """Update of coords is always done through newcoords.
 
         Parameters
         ----------
         c : skrobot.coordinates.Coordinates or numpy.ndarray
-            If pos is `None`, `c` means new Coordinates.
-            If pos is given, `c` means rotation matrix.
+            If pos is None, c represents a Coordinates instance.
+            If pos is given, c represents a rotation matrix.
         pos : numpy.ndarray or None
-            new translation.
+            New translation.
         check_validity : bool
-            If this value is `True`, check whether an input rotation
-            and an input translation are valid.
+            If True, check whether the input rotation and translation
+            are valid.
+        relative_coords : skrobot.coordinates.Coordinates or str or None
+            Specifies the coordinate frame in which the input coordinates are expressed.
+
+            - None or 'local': The input coordinates are treated as local coordinates.
+              The coordinates are directly set without transformation.
+              Example: coord.newcoords(c) directly sets coord to c's values.
+              This is equivalent to: coord = c (for root coordinates)
+
+              Note: If you want to set world coordinates, you have two options:
+
+              1. Manual conversion (complex):
+                 coord.newcoords(parent.worldcoords().inverse_transformation() * world_target)
+              2. Use relative_coords='world' (recommended):
+                 coord.newcoords(world_target, relative_coords='world')
+
+            - 'world': The input coordinates are treated as world coordinates.
+              They are transformed to the local frame before being set.
+              Example: coord.newcoords(c, relative_coords='world') sets coord
+              such that coord.worldcoords() equals c.
+
+            - 'parent': The input coordinates are relative to the parent coordinate.
+              Only meaningful for CascadedCoords with a parent.
+              Example: child.newcoords(c, relative_coords='parent') sets child's
+              position relative to its parent.
+
+            - Coordinates instance: The input is relative to the given coordinate frame.
+              Example: coord.newcoords(c, relative_coords=ref) sets coord such that
+              ref.transform(c) becomes coord's world coordinates.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_coords
+        >>> coord = make_coords(pos=[1, 0, 0])
+        >>>
+        >>> # Direct assignment (default behavior)
+        >>> new_c = make_coords(pos=[2, 2, 2])
+        >>> coord.newcoords(new_c)
+        >>> coord.translation
+        array([2., 2., 2.])
+        >>>
+        >>> # World coordinate specification
+        >>> coord = make_coords(pos=[1, 0, 0]).rotate(np.pi/2, 'z')
+        >>> world_c = make_coords(pos=[3, 3, 3])
+        >>> coord.newcoords(world_c, relative_coords='world')
+        >>> coord.worldpos()  # Will be [3, 3, 3]
+        array([3., 3., 3.])
+        >>>
+        >>> # Understanding the inverse_transformation relationship
+        >>> parent = make_coords(pos=[5, 5, 5]).rotate(np.pi/4, 'z')
+        >>> child = make_coords()
+        >>> child.parent = parent  # Simulating parent-child relationship
+        >>>
+        >>> # To set child's world position to [10, 10, 10] using local coords:
+        >>> world_target = make_coords(pos=[10, 10, 10])
+        >>> local_coords = parent.inverse_transformation() * world_target
+        >>> child.newcoords(local_coords)  # Sets local coords relative to parent
+        >>> # Verify: parent * local_coords = world_target
+        >>> (parent * child).worldpos()
+        array([10., 10., 10.])
         """
+        if relative_coords is not None:
+            if isinstance(relative_coords, str):
+                if relative_coords.lower() == 'parent':
+                    if self.parent is None:
+                        raise ValueError(
+                            "No parent coordinate available for relative_coords='parent'")
+                    relative_coords = self.parent
+                elif relative_coords.lower() == 'world':
+                    relative_coords = worldcoords
+                elif relative_coords.lower() == 'local':
+                    relative_coords = None
+                else:
+                    raise ValueError(
+                        "Invalid value for relative_coords. "
+                        + "Must be 'parent', 'world', or 'local'.")
+            if relative_coords is not None:
+                if pos is None:
+                    c = relative_coords * c
+                else:
+                    temp = Coordinates(pos=pos, rot=c, check_validity=check_validity)
+                    temp = relative_coords * temp
+                    c = temp.rotation
+                    pos = temp.translation
+
         if pos is not None:
             if check_validity:
                 if id(self._rotation) != id(c):
@@ -1351,7 +1435,7 @@ class CascadedCoords(Coordinates):
                     "skrobot.coordinates.Coordinates, but is {}"
                     .format(type(relative_coords)))
             child.parent = self
-            child.newcoords(relative_coords, check_validity=False)
+            child.newcoords(relative_coords, check_validity=False, relative_coords='local')
             self._descendants.append(child)
         return child
 
@@ -1360,26 +1444,114 @@ class CascadedCoords(Coordinates):
             c = child.worldcoords().copy_coords()
             self._descendants.remove(child)
             child.parent = None
-            child.newcoords(c, check_validity=False)
+            child.newcoords(c, check_validity=False, relative_coords='local')
 
-    def newcoords(self, c, pos=None, check_validity=True):
-        """Update this coordinates.
+    def newcoords(self, target, pos=None, check_validity=True,
+                  relative_coords='local'):
+        """Update this coordinate system with a new coordinate value.
 
-        This function records that this CascadedCoords has changed and
-        recursively records the change to descendants of this CascadedCoords.
+        This method updates the coordinates while maintaining the parent-child relationship.
+        The key difference from Coordinates.newcoords is that this method handles the
+        parent-child transformation automatically.
 
         Parameters
         ----------
-        c : skrobot.coordinates.Coordinates or numpy.ndarray
-            If pos is `None`, `c` means new Coordinates.
-            If pos is given, `c` means rotation matrix.
+        target : skrobot.coordinates.Coordinates or numpy.ndarray
+            If pos is None, target represents a Coordinates instance
+            that describes the new desired coordinate.
+            If pos is provided, target represents a rotation matrix.
         pos : numpy.ndarray or None
-            new translation.
+            The new translation vector.
         check_validity : bool
-            If this value is `True`, check whether an input rotation
-            and an input translation are valid.
+            Whether to validate the inputs.
+        relative_coords : str or skrobot.coordinates.Coordinates, default 'local'
+            Specifies the coordinate frame in which the target coordinates are expressed.
+
+            - 'local' (default): The target represents coordinates in the local frame
+              (relative to parent if it exists). This is the default for backward compatibility.
+              Example: child.newcoords(c) directly sets child's local transformation to c.
+              For a child with parent, this means: child = parent * c (in world frame)
+
+              Note: If you want to set world coordinates, you have two options:
+
+              1. Manual conversion (complex):
+                 child.newcoords(parent.worldcoords().inverse_transformation() * world_target)
+              2. Use relative_coords='world' (recommended):
+                 child.newcoords(world_target, relative_coords='world')
+
+            - 'world': The target represents desired world coordinates.
+              For child coordinates, the target is automatically converted to the
+              parent's local frame to maintain the correct world position.
+              Example: child.newcoords(c, relative_coords='world') sets child
+              such that child.worldcoords() equals c.
+            - 'local': the target is already expressed in the child's local frame.
+            - 'parent': the target is given relative to the parent coordinate.
+            - Alternatively, a Coordinates instance can be provided as the reference frame.
+
+        Returns
+        -------
+        self : CascadedCoords
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_cascoords
+        >>> parent = make_cascoords(pos=[10, 0, 0])
+        >>> child = make_cascoords(pos=[0, 5, 0])
+        >>> parent.assoc(child)
+        >>>
+        >>> # Setting world coordinates
+        >>> target_world = make_cascoords(pos=[15, 15, 15])
+        >>> child.newcoords(target_world, relative_coords='world')
+        >>> child.worldpos()
+        array([15., 15., 15.])
+        >>> child.translation  # Local position relative to parent
+        array([5., 15., 15.])
+        >>>
+        >>> # Setting local coordinates
+        >>> target_local = make_cascoords(pos=[2, 2, 2])
+        >>> child.newcoords(target_local, relative_coords='local')
+        >>> child.translation
+        array([2., 2., 2.])
+        >>> child.worldpos()  # World position is parent + local
+        array([12., 2., 2.])
+        >>>
+        >>> # Manual world coordinate setting using inverse_transformation
+        >>> world_target = make_cascoords(pos=[20, 20, 20])
+        >>> local_target = parent.worldcoords().inverse_transformation() * world_target
+        >>> child.newcoords(local_target)  # Default is 'local'
+        >>> child.worldpos()
+        array([20., 20., 20.])
         """
-        super(CascadedCoords, self).newcoords(c, pos, check_validity)
+        if self.parent is not None:
+            if isinstance(relative_coords, str):
+                if relative_coords.lower() == 'world':
+                    if pos is None:
+                        target = self.parent.worldcoords().inverse_transformation().transform(target)
+                    else:
+                        temp = Coordinates(pos=pos, rot=target, check_validity=check_validity)
+                        temp = self.parent.worldcoords().inverse_transformation().transform(temp)
+                        target = temp.rotation
+                        pos = temp.translation
+                elif relative_coords.lower() == 'local':
+                    pass
+                elif relative_coords.lower() == 'parent':
+                    pass
+                else:
+                    raise ValueError(
+                        "Invalid relative_coords value. "
+                        "Use 'world', 'local', 'parent', or provide a Coordinates instance.")
+            elif isinstance(relative_coords, Coordinates):
+                if pos is None:
+                    target = relative_coords.transformation(target)
+                else:
+                    temp = Coordinates(pos=pos, rot=target, check_validity=check_validity)
+                    temp = relative_coords.transformation(temp)
+                    target = temp.rotation
+                    pos = temp.translation
+            else:
+                raise TypeError("relative_coords must be a string "
+                                "('world', 'local', or 'parent') or a Coordinates instance.")
+        super(CascadedCoords, self).newcoords(target, pos, check_validity, relative_coords=None)
         self.changed()
         return self
 
@@ -1404,11 +1576,11 @@ class CascadedCoords(Coordinates):
         if wrt == 'local' or wrt == self:
             self._rotation = np.dot(self._rotation, matrix)
             return self.newcoords(self._rotation, self._translation,
-                                  check_validity=False)
+                                  check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent:
             rotation = np.matmul(matrix, self._rotation)
             return self.newcoords(
-                rotation, self._translation, check_validity=False)
+                rotation, self._translation, check_validity=False, relative_coords='local')
         else:
             parent_coords = self.parentcoords()
             parent_rot = parent_coords._rotation
@@ -1420,7 +1592,7 @@ class CascadedCoords(Coordinates):
             matrix = np.matmul(parent_rot.T, matrix)
             rotation = np.matmul(matrix, self._rotation)
             return self.newcoords(rotation, self._translation,
-                                  check_validity=False)
+                                  check_validity=False, relative_coords='local')
 
     def rotate(self, theta, axis, wrt='local', skip_normalization=False):
         """Rotate this coordinate.
@@ -1453,12 +1625,12 @@ class CascadedCoords(Coordinates):
             rotation = rotate_matrix(self._rotation, theta, axis,
                                      skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
-                                  check_validity=False)
+                                  check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent:
             rotation = rotate_matrix(self._rotation, theta, axis,
                                      skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
-                                  check_validity=False)
+                                  check_validity=False, relative_coords='local')
         else:
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis,
@@ -1496,7 +1668,7 @@ class CascadedCoords(Coordinates):
         else:
             raise TypeError('wrt {} not supported'.format(wrt))
         return self.newcoords(rotation, self._translation,
-                              check_validity=False)
+                              check_validity=False, relative_coords='local')
 
     def rotate_vector(self, v):
         return self.worldcoords().rotate_vector(v)
@@ -1550,7 +1722,7 @@ class CascadedCoords(Coordinates):
         else:
             raise ValueError('transform wrt {} is not supported'.format(wrt))
         return out.newcoords(out._rotation, out._translation,
-                             check_validity=False)
+                             check_validity=False, relative_coords='local')
 
     def update(self, force=False):
         if not force and not self._changed:
