@@ -12,7 +12,8 @@ ordered_set
 packaging
 pillow
 pycollada<0.9;python_version<"3.2"  # required for robot model using collada
-pycollada>=0.8;python_version>="3.2"  # required for robot model using collada
+pycollada>=0.8,<=0.9;python_version>="3.2" and python_version<"3.9"
+pycollada>=0.8;python_version>="3.9"  # required for robot model using collada
 pyglet<2.0
 pysdfgen>=0.2.0
 repoze.lru;python_version<"3.2"
