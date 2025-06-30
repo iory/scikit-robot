@@ -1835,4 +1835,124 @@ def coordinates_distance(c1, c2, c=None):
     return np.linalg.norm(c.worldpos()), rotation_angle(c.worldrot())[0]
 
 
+def slerp_coordinates(c1, c2, t):
+    """Spherical linear interpolation between two coordinates.
+
+    Performs spherical linear interpolation (SLERP) between two coordinate frames,
+    interpolating both position and orientation smoothly using true quaternion SLERP.
+
+    Parameters
+    ----------
+    c1 : skrobot.coordinates.Coordinates
+        Starting coordinate frame
+    c2 : skrobot.coordinates.Coordinates
+        Ending coordinate frame
+    t : float
+        Interpolation parameter (0.0 = c1, 1.0 = c2)
+
+    Returns
+    -------
+    result : skrobot.coordinates.Coordinates
+        Interpolated coordinate frame
+
+    Examples
+    --------
+    >>> from skrobot.coordinates import Coordinates
+    >>> from skrobot.coordinates.base import slerp_coordinates
+    >>> import numpy as np
+    >>> c1 = Coordinates(pos=[0, 0, 0])
+    >>> c2 = Coordinates(pos=[1, 1, 1]).rotate(np.pi/2, 'z')
+    >>> c_mid = slerp_coordinates(c1, c2, 0.5)
+    >>> c_mid.translation
+    array([0.5, 0.5, 0.5])
+    """
+    if not (0.0 <= t <= 1.0):
+        raise ValueError("Interpolation parameter t must be between 0.0 and 1.0")
+
+    # Linear interpolation for translation
+    pos1 = c1.worldpos()
+    pos2 = c2.worldpos()
+    interpolated_pos = pos1 + t * (pos2 - pos1)
+
+    # True spherical linear interpolation for rotation using quaternions
+    q1 = c1.quaternion
+    q2 = c2.quaternion
+
+    # Ensure we take the shorter path for rotation
+    if np.dot(q1, q2) < 0:
+        q2 = -q2
+
+    # Compute the angle between quaternions
+    dot_product = np.clip(np.dot(q1, q2), -1.0, 1.0)
+    omega = np.arccos(np.abs(dot_product))
+
+    if np.abs(omega) < 1e-6:
+        # Linear interpolation for very small angles (avoid division by zero)
+        slerp_q = (1 - t) * q1 + t * q2
+    else:
+        sin_omega = np.sin(omega)
+        slerp_q = (np.sin((1 - t) * omega) / sin_omega) * q1 + (np.sin(t * omega) / sin_omega) * q2
+
+    slerp_q = slerp_q / np.linalg.norm(slerp_q)
+    interpolated_rot = quaternion2matrix(slerp_q)
+    result = Coordinates(pos=interpolated_pos, rot=interpolated_rot, check_validity=False)
+    return result
+
+
+def lerp_coordinates(c1, c2, t):
+    """Linear interpolation between two coordinates.
+
+    Performs linear interpolation between two coordinate frames for both
+    position and orientation. Uses quaternion LERP for rotation to avoid
+    artifacts from matrix interpolation.
+
+    Parameters
+    ----------
+    c1 : skrobot.coordinates.Coordinates
+        Starting coordinate frame
+    c2 : skrobot.coordinates.Coordinates
+        Ending coordinate frame
+    t : float
+        Interpolation parameter (0.0 = c1, 1.0 = c2)
+
+    Returns
+    -------
+    result : skrobot.coordinates.Coordinates
+        Interpolated coordinate frame
+
+    Examples
+    --------
+    >>> from skrobot.coordinates import Coordinates
+    >>> from skrobot.coordinates.base import lerp_coordinates
+    >>> c1 = Coordinates(pos=[0, 0, 0])
+    >>> c2 = Coordinates(pos=[2, 2, 2])
+    >>> c_mid = lerp_coordinates(c1, c2, 0.5)
+    >>> c_mid.translation
+    array([1., 1., 1.])
+    """
+    if not (0.0 <= t <= 1.0):
+        raise ValueError("Interpolation parameter t must be between 0.0 and 1.0")
+
+    # Linear interpolation for translation
+    pos1 = c1.worldpos()
+    pos2 = c2.worldpos()
+    interpolated_pos = pos1 + t * (pos2 - pos1)
+
+    # Linear interpolation for rotation using quaternions
+    q1 = c1.quaternion
+    q2 = c2.quaternion
+
+    # Ensure we take the shorter path
+    if np.dot(q1, q2) < 0:
+        q2 = -q2
+
+    # Linear interpolation of quaternions
+    lerp_q = (1 - t) * q1 + t * q2
+
+    lerp_q = lerp_q / np.linalg.norm(lerp_q)
+    interpolated_rot = quaternion2matrix(lerp_q)
+    result = Coordinates(pos=interpolated_pos, rot=interpolated_rot, check_validity=False)
+    return result
+
+
 worldcoords = CascadedCoords(name='worldcoords')

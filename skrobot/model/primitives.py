@@ -26,15 +26,81 @@ class Axis(Link):
     def __init__(self,
                  axis_radius=0.01,
                  axis_length=0.1,
+                 alpha=1.0,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
+        """Create a coordinate frame axis visualization.
+
+        Parameters
+        ----------
+        axis_radius : float
+            Radius of each axis cylinder
+        axis_length : float
+            Length of each axis cylinder
+        alpha : float
+            Transparency level (0.0 = fully transparent, 1.0 = opaque)
+        pos : tuple or np.ndarray
+            Position of the coordinate frame
+        rot : np.ndarray
+            Rotation matrix of the coordinate frame
+        name : str
+            Name of the link
+        """
         trimesh = _lazy_trimesh()
         if name is None:
             name = 'axis_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+
+        if alpha >= 1.0:
+            # Use original trimesh.creation.axis for opaque axes (backward compatibility)
+            visual_mesh = trimesh.creation.axis(
+                origin_size=0.00000001,
+                axis_radius=axis_radius,
+                axis_length=axis_length
+            )
+        else:
+            # Create transparent axes using cylinders
+            # X-axis (red)
+            x_cylinder = trimesh.creation.cylinder(
+                radius=axis_radius,
+                height=axis_length,
+                sections=8
+            )
+            x_cylinder.visual.face_colors = [255, 0, 0, int(alpha * 255)]  # Red with alpha
+            # Rotate and translate to align with X-axis
+            x_transform = np.eye(4)
+            x_transform[:3, :3] = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0])[:3, :3]
+            x_transform[:3, 3] = [axis_length / 2, 0, 0]
+            x_cylinder.apply_transform(x_transform)
+
+            # Y-axis (green)
+            y_cylinder = trimesh.creation.cylinder(
+                radius=axis_radius,
+                height=axis_length,
+                sections=8
+            )
+            y_cylinder.visual.face_colors = [0, 255, 0, int(alpha * 255)]  # Green with alpha
+            # Rotate and translate to align with Y-axis
+            y_transform = np.eye(4)
+            y_transform[:3, :3] = trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])[:3, :3]
+            y_transform[:3, 3] = [0, axis_length / 2, 0]
+            y_cylinder.apply_transform(y_transform)
+
+            # Z-axis (blue)
+            z_cylinder = trimesh.creation.cylinder(
+                radius=axis_radius,
+                height=axis_length,
+                sections=8
+            )
+            z_cylinder.visual.face_colors = [0, 0, 255, int(alpha * 255)]  # Blue with alpha
+            # Translate to align with Z-axis (already aligned)
+            z_transform = np.eye(4)
+            z_transform[:3, 3] = [0, 0, axis_length / 2]
+            z_cylinder.apply_transform(z_transform)
+
+            # Combine all three cylinders
+            visual_mesh = x_cylinder + y_cylinder + z_cylinder
+
         super(Axis, self).__init__(pos=pos, rot=rot, name=name,
-                                   visual_mesh=trimesh.creation.axis(
-                                       origin_size=0.00000001,
-                                       axis_radius=axis_radius,
-                                       axis_length=axis_length))
+                                   visual_mesh=visual_mesh)
 
     @classmethod
     def from_coords(cls, coords, **kwargs):
