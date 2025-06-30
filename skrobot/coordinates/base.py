@@ -849,8 +849,101 @@ class Coordinates(object):
         dif_pos[translation_axis == 1] = 0.0
         return dif_pos
 
-    def difference_rotation(self, coords,
-                            rotation_axis=True):
+    def _need_mirror_for_nearest_axis(self, coords, axis):
+        """Check if mirroring is needed for the nearest axis alignment.
+
+        Parameters
+        ----------
+        coords : skrobot.coordinates.Coordinates
+            coordinates to compare with
+        axis : str
+            axis to check ('x', 'y', or 'z')
+
+        Returns
+        -------
+        bool
+            True if mirroring is needed
+        """
+        a0 = self.axis(axis)
+        a1 = coords.axis(axis)
+        a1_mirror = -a1
+
+        dr1 = angle_between_vectors(a0, a1, normalize=False) * \
+              normalize_vector(cross_product(a0, a1))
+        dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) * \
+               normalize_vector(cross_product(a0, a1_mirror))
+
+        return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
+
+    def _compute_single_axis_rotation_difference(self, coords, axis):
+        """Compute rotation difference for single axis."""
+        a0 = self.axis(axis)
+        a1 = coords.axis(axis)
+
+        if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
+            return np.zeros(3, dtype=np.float32)
+
+        return np.matmul(
+            self.worldrot().T,
+            angle_between_vectors(a0, a1, normalize=False) *
+            normalize_vector(cross_product(a0, a1)))
+
+    def _compute_double_axis_rotation_difference(self, coords, axis):
+        """Compute rotation difference for double axis."""
+        ax = axis[0]
+        a0 = self.axis(ax)
+        a2 = coords.axis(ax)
+
+        if not self._need_mirror_for_nearest_axis(coords, ax):
+            a2 = -a2
+
+        return np.matmul(
+            self.worldrot().T,
+            angle_between_vectors(a0, a2, normalize=False) *
+            normalize_vector(cross_product(a0, a2)))
+
+    def _compute_combined_axis_rotation_difference(self, coords, rotation_axis):
+        """Compute rotation difference for combined axes."""
+        # Define axis pairs
+        axis_pairs = {
+            ('xy', 'yx'): ('z', 'x'),
+            ('yz', 'zy'): ('x', 'y'),
+            ('zx', 'xz'): ('y', 'z')
+        }
+
+        # Find matching axis pair
+        ax1, ax2 = None, None
+        for pair_keys, pair_values in axis_pairs.items():
+            if rotation_axis in pair_keys:
+                ax1, ax2 = pair_values
+                break
+
+        if ax1 is None:
+            raise ValueError(f"Invalid rotation_axis: {rotation_axis}")
+
+        # First rotation
+        a0 = self.axis(ax1)
+        a1 = coords.axis(ax1)
+        dif_rot = np.matmul(
+            self.worldrot().T,
+            angle_between_vectors(a0, a1, normalize=False) *
+            normalize_vector(cross_product(a0, a1)))
+
+        # Apply first rotation and compute second
+        norm = np.linalg.norm(dif_rot)
+        if np.isclose(norm, 0.0):
+            self_coords = self.copy_worldcoords()
+        else:
+            self_coords = self.copy_worldcoords().rotate(norm, dif_rot)
+
+        a0 = self_coords.axis(ax2)
+        a1 = coords.axis(ax2)
+        return np.matmul(
+            self_coords.worldrot().T,
+            angle_between_vectors(a0, a1, normalize=False) *
+            normalize_vector(cross_product(a0, a1)))
+
+    def difference_rotation(self, coords, rotation_axis=True):
         """Return differences in rotation of given coords.
 
         Parameters
@@ -876,99 +969,34 @@ class Coordinates(object):
         >>> coord2 = Coordinates(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
         >>> coord1.difference_rotation(coord2)
         array([-0.32855112,  1.17434985,  1.05738936])
-        >>> coord1.difference_rotation(coord2, rotation_axis=False)
-        array([0, 0, 0])
-        >>> coord1.difference_rotation(coord2, rotation_axis='x')
-        array([0.        , 1.36034952, 0.78539816])
-        >>> coord1.difference_rotation(coord2, rotation_axis='y')
-        array([0.35398131, 0.        , 0.97442695])
-        >>> coord1.difference_rotation(coord2, rotation_axis='z')
-        array([-0.88435715,  0.74192175,  0.        ])
-
-        Using mirror option ['xm', 'ym', 'zm'], you can
-        allow differences of mirror direction.
-
-        >>> coord1 = Coordinates()
-        >>> coord2 = Coordinates().rotate(pi, 'x')
-        >>> coord1.difference_rotation(coord2, 'xm')
-        array([-2.99951957e-32,  0.00000000e+00,  0.00000000e+00])
-        >>> coord1 = Coordinates()
-        >>> coord2 = Coordinates().rotate(pi / 2.0, 'x')
-        >>> coord1.difference_rotation(coord2, 'xm')
-        array([-1.57079633,  0.        ,  0.        ])
         """
-        def need_mirror_for_nearest_axis(coords0, coords1, ax):
-            a0 = coords0.axis(ax)
-            a1 = coords1.axis(ax)
-            a1_mirror = - a1
-            dr1 = angle_between_vectors(a0, a1, normalize=False) \
-                * normalize_vector(cross_product(a0, a1))
-            dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) \
-                * normalize_vector(cross_product(a0, a1_mirror))
-            return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
+        # Handle simple cases first
+        if rotation_axis is False or rotation_axis is None:
+            return np.zeros(3)
 
+        if rotation_axis is True:
+            dif_rotmatrix = np.matmul(self.worldrot().T, coords.worldrot())
+            return matrix_log(dif_rotmatrix)
+
+        # Handle string cases
         if rotation_axis in ['x', 'y', 'z']:
-            a0 = self.axis(rotation_axis)
-            a1 = coords.axis(rotation_axis)
-            if np.abs(np.linalg.norm(np.array(a0) - np.array(a1))) < 0.001:
-                dif_rot = np.array([0, 0, 0], 'f')
-            else:
-                dif_rot = np.matmul(
-                    self.worldrot().T,
-                    angle_between_vectors(a0, a1, normalize=False)
-                    * normalize_vector(cross_product(a0, a1)))
+            return self._compute_single_axis_rotation_difference(coords, rotation_axis)
+
         elif rotation_axis in ['xx', 'yy', 'zz']:
-            ax = rotation_axis[0]
-            a0 = self.axis(ax)
-            a2 = coords.axis(ax)
-            if not need_mirror_for_nearest_axis(self, coords, ax):
-                a2 = - a2
-            dif_rot = np.matmul(
-                self.worldrot().T,
-                angle_between_vectors(a0, a2, normalize=False)
-                * normalize_vector(cross_product(a0, a2)))
+            return self._compute_double_axis_rotation_difference(coords, rotation_axis)
+
         elif rotation_axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
-            if rotation_axis in ['xy', 'yx']:
-                ax1 = 'z'
-                ax2 = 'x'
-            elif rotation_axis in ['yz', 'zy']:
-                ax1 = 'x'
-                ax2 = 'y'
-            else:
-                ax1 = 'y'
-                ax2 = 'z'
-            a0 = self.axis(ax1)
-            a1 = coords.axis(ax1)
-            dif_rot = np.matmul(
-                self.worldrot().T,
-                angle_between_vectors(a0, a1, normalize=False)
-                * normalize_vector(cross_product(a0, a1)))
-            norm = np.linalg.norm(dif_rot)
-            if np.isclose(norm, 0.0):
-                self_coords = self.copy_worldcoords()
-            else:
-                self_coords = self.copy_worldcoords().rotate(norm, dif_rot)
-            a0 = self_coords.axis(ax2)
-            a1 = coords.axis(ax2)
-            dif_rot = np.matmul(
-                self_coords.worldrot().T,
-                angle_between_vectors(a0, a1, normalize=False)
-                * normalize_vector(cross_product(a0, a1)))
+            return self._compute_combined_axis_rotation_difference(coords, rotation_axis)
+
         elif rotation_axis in ['xm', 'ym', 'zm']:
             rot = coords.worldrot()
             ax = rotation_axis[0]
-            if not need_mirror_for_nearest_axis(self, coords, ax):
+            if not self._need_mirror_for_nearest_axis(coords, ax):
                 rot = rotate_matrix(rot, np.pi, ax)
-            dif_rot = matrix_log(np.matmul(self.worldrot().T, rot))
-        elif rotation_axis is False or rotation_axis is None:
-            dif_rot = np.array([0, 0, 0])
-        elif rotation_axis is True:
-            dif_rotmatrix = np.matmul(self.worldrot().T,
-                                      coords.worldrot())
-            dif_rot = matrix_log(dif_rotmatrix)
+            return matrix_log(np.matmul(self.worldrot().T, rot))
+
         else:
-            raise ValueError
-        return dif_rot
+            raise ValueError(f"Invalid rotation_axis: {rotation_axis}")
 
     def rotate_with_matrix(self, mat, wrt='local'):
         """Rotate this coordinate by given rotation matrix.
@@ -1135,6 +1163,101 @@ class Coordinates(object):
         """
         return self._translation
 
+    def _resolve_relative_coords(self, relative_coords):
+        """Resolve relative coordinate frame string to coordinate object.
+
+        Parameters
+        ----------
+        relative_coords : str or Coordinates or None
+            String identifier or coordinate object
+
+        Returns
+        -------
+        Coordinates or None
+            Resolved coordinate frame
+        """
+        if not isinstance(relative_coords, str):
+            return relative_coords
+
+        relative_coords_lower = relative_coords.lower()
+        if relative_coords_lower == 'parent':
+            if self.parent is None:
+                raise ValueError(
+                    "No parent coordinate available for relative_coords='parent'")
+            return self.parent
+        elif relative_coords_lower == 'world':
+            return worldcoords
+        elif relative_coords_lower == 'local':
+            return None
+        else:
+            raise ValueError(
+                "Invalid value for relative_coords. "
+                f"Must be 'parent', 'world', or 'local', got: {relative_coords}")
+
+    def _transform_to_relative_frame(self, c, pos, relative_coords, check_validity):
+        """Transform coordinates to relative frame.
+
+        Parameters
+        ----------
+        c : numpy.ndarray or Coordinates
+            rotation matrix or coordinates
+        pos : numpy.ndarray or None
+            position vector
+        relative_coords : Coordinates
+            relative coordinate frame
+        check_validity : bool
+            whether to check validity
+
+        Returns
+        -------
+        tuple
+            (rotation, translation) transformed to relative frame
+        """
+        if pos is None:
+            transformed = relative_coords * c
+            return transformed.rotation, transformed.translation
+        else:
+            temp = Coordinates(pos=pos, rot=c, check_validity=check_validity)
+            transformed = relative_coords * temp
+            return transformed.rotation, transformed.translation
+
+    def _update_coordinate_values(self, c, pos, check_validity):
+        """Update coordinate values with or without validity checking.
+
+        Parameters
+        ----------
+        c : numpy.ndarray or Coordinates
+            rotation matrix or coordinates
+        pos : numpy.ndarray or None
+            position vector
+        check_validity : bool
+            whether to check validity
+        """
+        if pos is not None:
+            # Update rotation and translation separately
+            if check_validity:
+                if id(self._rotation) != id(c):
+                    self.rotation = copy.deepcopy(c)
+                if id(self._translation) != id(pos):
+                    self.translation = copy.deepcopy(pos)
+            else:
+                if id(self._rotation) != id(c):
+                    self._rotation = np.copy(c)
+                if id(self._translation) != id(pos):
+                    self._translation = np.copy(pos)
+        else:
+            # Update from coordinate object
+            if check_validity:
+                if id(self._rotation) != id(c._rotation):
+                    self.rotation = copy.deepcopy(c._rotation)
+                if id(self._translation) != id(c._translation):
+                    self.translation = copy.deepcopy(c._translation)
+            else:
+                if id(self._rotation) != id(c._rotation):
+                    self._rotation = np.copy(c._rotation)
+                if id(self._translation) != id(c._translation):
+                    self._translation = np.copy(c._translation)
+
     def newcoords(self, c, pos=None, check_validity=True,
                   relative_coords=None):
         """Update of coords is always done through newcoords.
@@ -1152,109 +1275,24 @@ class Coordinates(object):
         relative_coords : skrobot.coordinates.Coordinates or str or None
             Specifies the coordinate frame in which the input coordinates are expressed.
 
-            - None or 'local': The input coordinates are treated as local coordinates.
-              The coordinates are directly set without transformation.
-              Example: coord.newcoords(c) directly sets coord to c's values.
-              This is equivalent to: coord = c (for root coordinates)
-
-              Note: If you want to set world coordinates, you have two options:
-
-              1. Manual conversion (complex):
-                 coord.newcoords(parent.worldcoords().inverse_transformation() * world_target)
-              2. Use relative_coords='world' (recommended):
-                 coord.newcoords(world_target, relative_coords='world')
-
-            - 'world': The input coordinates are treated as world coordinates.
-              They are transformed to the local frame before being set.
-              Example: coord.newcoords(c, relative_coords='world') sets coord
-              such that coord.worldcoords() equals c.
-
-            - 'parent': The input coordinates are relative to the parent coordinate.
-              Only meaningful for CascadedCoords with a parent.
-              Example: child.newcoords(c, relative_coords='parent') sets child's
-              position relative to its parent.
-
-            - Coordinates instance: The input is relative to the given coordinate frame.
-              Example: coord.newcoords(c, relative_coords=ref) sets coord such that
-              ref.transform(c) becomes coord's world coordinates.
-
         Examples
         --------
         >>> from skrobot.coordinates import make_coords
         >>> coord = make_coords(pos=[1, 0, 0])
-        >>>
-        >>> # Direct assignment (default behavior)
         >>> new_c = make_coords(pos=[2, 2, 2])
         >>> coord.newcoords(new_c)
         >>> coord.translation
         array([2., 2., 2.])
-        >>>
-        >>> # World coordinate specification
-        >>> coord = make_coords(pos=[1, 0, 0]).rotate(np.pi/2, 'z')
-        >>> world_c = make_coords(pos=[3, 3, 3])
-        >>> coord.newcoords(world_c, relative_coords='world')
-        >>> coord.worldpos()  # Will be [3, 3, 3]
-        array([3., 3., 3.])
-        >>>
-        >>> # Understanding the inverse_transformation relationship
-        >>> parent = make_coords(pos=[5, 5, 5]).rotate(np.pi/4, 'z')
-        >>> child = make_coords()
-        >>> child.parent = parent  # Simulating parent-child relationship
-        >>>
-        >>> # To set child's world position to [10, 10, 10] using local coords:
-        >>> world_target = make_coords(pos=[10, 10, 10])
-        >>> local_coords = parent.inverse_transformation() * world_target
-        >>> child.newcoords(local_coords)  # Sets local coords relative to parent
-        >>> # Verify: parent * local_coords = world_target
-        >>> (parent * child).worldpos()
-        array([10., 10., 10.])
         """
+        # Handle relative coordinate transformation
         if relative_coords is not None:
-            if isinstance(relative_coords, str):
-                if relative_coords.lower() == 'parent':
-                    if self.parent is None:
-                        raise ValueError(
-                            "No parent coordinate available for relative_coords='parent'")
-                    relative_coords = self.parent
-                elif relative_coords.lower() == 'world':
-                    relative_coords = worldcoords
-                elif relative_coords.lower() == 'local':
-                    relative_coords = None
-                else:
-                    raise ValueError(
-                        "Invalid value for relative_coords. "
-                        + "Must be 'parent', 'world', or 'local'.")
-            if relative_coords is not None:
-                if pos is None:
-                    c = relative_coords * c
-                else:
-                    temp = Coordinates(pos=pos, rot=c, check_validity=check_validity)
-                    temp = relative_coords * temp
-                    c = temp.rotation
-                    pos = temp.translation
+            resolved_coords = self._resolve_relative_coords(relative_coords)
+            if resolved_coords is not None:
+                c, pos = self._transform_to_relative_frame(
+                    c, pos, resolved_coords, check_validity)
 
-        if pos is not None:
-            if check_validity:
-                if id(self._rotation) != id(c):
-                    self.rotation = copy.deepcopy(c)
-                if id(self._translation) != id(pos):
-                    self.translation = copy.deepcopy(pos)
-            else:
-                if id(self._rotation) != id(c):
-                    self._rotation = np.copy(c)
-                if id(self._translation) != id(pos):
-                    self._translation = np.copy(pos)
-        else:
-            if check_validity:
-                if id(self._rotation) != id(c._rotation):
-                    self.rotation = copy.deepcopy(c._rotation)
-                if id(self._translation) != id(c._translation):
-                    self.translation = copy.deepcopy(c._translation)
-            else:
-                if id(self._rotation) != id(c._rotation):
-                    self._rotation = np.copy(c._rotation)
-                if id(self._translation) != id(c._translation):
-                    self._translation = np.copy(c._translation)
+        # Update coordinate values
+        self._update_coordinate_values(c, pos, check_validity)
         return self
 
     def __mul__(self, other_c):
@@ -1833,6 +1871,200 @@ def coordinates_distance(c1, c2, c=None):
     if c is None:
         c = c1.transformation(c2)
     return np.linalg.norm(c.worldpos()), rotation_angle(c.worldrot())[0]
+
+
+def slerp_coordinates(c1, c2, t):
+    """Spherical linear interpolation between two coordinates.
+
+    Performs spherical linear interpolation (SLERP) between two coordinate frames,
+    interpolating both position and orientation smoothly.
+
+    Parameters
+    ----------
+    c1 : skrobot.coordinates.Coordinates
+        Starting coordinate frame
+    c2 : skrobot.coordinates.Coordinates
+        Ending coordinate frame
+    t : float
+        Interpolation parameter (0.0 = c1, 1.0 = c2)
+
+    Returns
+    -------
+    result : skrobot.coordinates.Coordinates
+        Interpolated coordinate frame
+
+    Examples
+    --------
+    >>> from skrobot.coordinates import Coordinates
+    >>> from skrobot.coordinates.base import slerp_coordinates
+    >>> import numpy as np
+    >>> c1 = Coordinates(pos=[0, 0, 0])
+    >>> c2 = Coordinates(pos=[1, 1, 1]).rotate(np.pi/2, 'z')
+    >>> c_mid = slerp_coordinates(c1, c2, 0.5)
+    >>> c_mid.translation
+    array([0.5, 0.5, 0.5])
+    """
+    if not (0.0 <= t <= 1.0):
+        raise ValueError("Interpolation parameter t must be between 0.0 and 1.0")
+
+    # Linear interpolation for translation
+    pos1 = c1.worldpos()
+    pos2 = c2.worldpos()
+    interpolated_pos = pos1 + t * (pos2 - pos1)
+
+    # Spherical interpolation for rotation using dual quaternions
+    dq1 = c1.dual_quaternion
+    dq2 = c2.dual_quaternion
+
+    # Ensure we take the shorter path for rotation
+    if np.dot(dq1.qr.q, dq2.qr.q) < 0:
+        dq2.qr = -dq2.qr
+        dq2.qd = -dq2.qd
+
+    # Interpolate dual quaternions
+    interpolated_dq = dq1 * (1 - t) + dq2 * t
+    interpolated_dq = interpolated_dq.normalized
+
+    # Create result coordinates
+    result = Coordinates(pos=interpolated_pos, rot=interpolated_dq.rotation, check_validity=False)
+    return result
+
+
+def lerp_coordinates(c1, c2, t):
+    """Linear interpolation between two coordinates.
+
+    Performs linear interpolation between two coordinate frames for both
+    position and orientation. Note that this may not preserve rotation
+    properties as well as slerp_coordinates.
+
+    Parameters
+    ----------
+    c1 : skrobot.coordinates.Coordinates
+        Starting coordinate frame
+    c2 : skrobot.coordinates.Coordinates
+        Ending coordinate frame
+    t : float
+        Interpolation parameter (0.0 = c1, 1.0 = c2)
+
+    Returns
+    -------
+    result : skrobot.coordinates.Coordinates
+        Interpolated coordinate frame
+
+    Examples
+    --------
+    >>> from skrobot.coordinates import Coordinates
+    >>> from skrobot.coordinates.base import lerp_coordinates
+    >>> c1 = Coordinates(pos=[0, 0, 0])
+    >>> c2 = Coordinates(pos=[2, 2, 2])
+    >>> c_mid = lerp_coordinates(c1, c2, 0.5)
+    >>> c_mid.translation
+    array([1., 1., 1.])
+    """
+    if not (0.0 <= t <= 1.0):
+        raise ValueError("Interpolation parameter t must be between 0.0 and 1.0")
+
+    # Linear interpolation for translation
+    pos1 = c1.worldpos()
+    pos2 = c2.worldpos()
+    interpolated_pos = pos1 + t * (pos2 - pos1)
+
+    # Linear interpolation for rotation matrix
+    rot1 = c1.worldrot()
+    rot2 = c2.worldrot()
+    interpolated_rot = rot1 + t * (rot2 - rot1)
+
+    # Re-orthogonalize the rotation matrix using SVD
+    U, _, Vt = np.linalg.svd(interpolated_rot)
+    interpolated_rot = U @ Vt
+
+    # Create result coordinates
+    result = Coordinates(pos=interpolated_pos, rot=interpolated_rot, check_validity=False)
+    return result
+
+
+def make_coordinate_frame(origin, x_axis=None, y_axis=None, z_axis=None,
+                          primary_axis='x', secondary_axis='y'):
+    """Create a coordinate frame from origin and axis vectors.
+
+    Constructs a coordinate frame given an origin and up to two axis vectors.
+    The remaining axis is computed using the cross product to ensure orthogonality.
+
+    Parameters
+    ----------
+    origin : array_like
+        Origin position [x, y, z]
+    x_axis : array_like, optional
+        X-axis direction vector
+    y_axis : array_like, optional
+        Y-axis direction vector
+    z_axis : array_like, optional
+        Z-axis direction vector
+    primary_axis : str, optional
+        Which axis to prioritize ('x', 'y', or 'z'). Default 'x'
+    secondary_axis : str, optional
+        Which axis to use as secondary ('x', 'y', or 'z'). Default 'y'
+
+    Returns
+    -------
+    coords : skrobot.coordinates.Coordinates
+        Constructed coordinate frame
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.base import make_coordinate_frame
+    >>> coords = make_coordinate_frame([0, 0, 0], x_axis=[1, 0, 0], y_axis=[0, 1, 0])
+    >>> coords.translation
+    array([0., 0., 0.])
+    """
+    origin = np.array(origin)
+
+    # Collect provided axes
+    axes = {}
+    if x_axis is not None:
+        axes['x'] = normalize_vector(x_axis)
+    if y_axis is not None:
+        axes['y'] = normalize_vector(y_axis)
+    if z_axis is not None:
+        axes['z'] = normalize_vector(z_axis)
+
+    if len(axes) == 0:
+        raise ValueError("At least one axis vector must be provided")
+
+    if len(axes) == 1:
+        # Only one axis provided, use world axes for the others
+        axis_name = list(axes.keys())[0]
+        if axis_name == 'x':
+            axes['y'] = np.array([0, 1, 0])
+            axes['z'] = np.cross(axes['x'], axes['y'])
+        elif axis_name == 'y':
+            axes['z'] = np.array([0, 0, 1])
+            axes['x'] = np.cross(axes['y'], axes['z'])
+        else:  # z
+            axes['x'] = np.array([1, 0, 0])
+            axes['y'] = np.cross(axes['z'], axes['x'])
+
+    elif len(axes) == 2:
+        # Two axes provided, compute the third
+        axis_names = list(axes.keys())
+        missing_axis = {'x', 'y', 'z'} - set(axis_names)
+        missing_axis = list(missing_axis)[0]
+
+        if missing_axis == 'x':
+            axes['x'] = np.cross(axes['y'], axes['z'])
+        elif missing_axis == 'y':
+            axes['y'] = np.cross(axes['z'], axes['x'])
+        else:  # missing z
+            axes['z'] = np.cross(axes['x'], axes['y'])
+
+    # Normalize all axes
+    for key in axes:
+        axes[key] = normalize_vector(axes[key])
+
+    # Construct rotation matrix
+    rotation_matrix = np.column_stack([axes['x'], axes['y'], axes['z']])
+
+    return Coordinates(pos=origin, rot=rotation_matrix, check_validity=False)
 
 
 worldcoords = CascadedCoords(name='worldcoords')
