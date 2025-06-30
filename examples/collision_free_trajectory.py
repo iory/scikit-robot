@@ -13,6 +13,7 @@ from skrobot.planner import sqp_plan_trajectory
 from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
 from skrobot.planner.utils import set_robot_config
+from skrobot.utils.visualization import trajectory_visualization
 
 
 parser = argparse.ArgumentParser(
@@ -34,6 +35,11 @@ parser.add_argument(
     '--no-interactive',
     action='store_true',
     help="Run in non-interactive mode (do not wait for user input)"
+)
+parser.add_argument(
+    '--trajectory-visualization',
+    action='store_true',
+    help="Enable trajectory optimization visualization"
 )
 args = parser.parse_args()
 
@@ -87,14 +93,6 @@ sscc = SweptSphereSdfCollisionChecker(box.sdf, robot_model)
 for link in coll_link_list:
     sscc.add_collision_link(link)
 
-# motion planning
-ts = time.time()
-n_waypoint = args.n
-av_seq = sqp_plan_trajectory(
-    sscc, av_start, av_goal, joint_list, n_waypoint,
-    safety_margin=5.0e-2, with_base=with_base)
-print("solving time : {0} sec".format(time.time() - ts))
-
 # visualization
 print("show trajectory")
 if args.viewer == 'trimesh':
@@ -109,6 +107,32 @@ viewer.add(Axis(pos=target_coords.worldpos(), rot=target_coords.worldrot()))
 sscc.add_coll_spheres_to_viewer(viewer)
 viewer.show()
 viewer.set_camera([0, 0, np.pi / 2.0])
+
+# motion planning
+ts = time.time()
+n_waypoint = args.n
+
+# Trajectory planning with optional visualization
+if args.trajectory_visualization:
+    with trajectory_visualization(
+        viewer=viewer,
+        robot_model=robot_model,
+        joint_list=joint_list,
+        sleep_time=0.3,
+        with_base=with_base,
+        update_every_n_iterations=1,
+        debug=False,  # Disable debug for normal use
+        waypoint_mode='cycle',  # Cycle through waypoints to see trajectory evolution
+    ):
+        av_seq = sqp_plan_trajectory(
+            sscc, av_start, av_goal, joint_list, n_waypoint,
+            safety_margin=5.0e-2, with_base=with_base)
+else:
+    av_seq = sqp_plan_trajectory(
+        sscc, av_start, av_goal, joint_list, n_waypoint,
+        safety_margin=5.0e-2, with_base=with_base)
+
+print("solving time : {0} sec".format(time.time() - ts))
 
 rarm_point_history = []
 line_string = None

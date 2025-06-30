@@ -63,7 +63,7 @@ If you want to build your own robot from scratch, you can refer to the [How to C
 ## Features
 
 - [x] Loading robot model from URDF ([examples/robot_models.py](examples/robot_models.py))
-- [x] Forward and inverse kinematics ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
+- [x] Forward and inverse kinematics ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py) [examples/pr2_inverse_kinematics.py](examples/pr2_inverse_kinematics.py))
 - [x] Collision detection
 - [x] Interactive viewer ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
 - [x] Pybullet and ROS command interface ([examples/pybullet_robot_interface.py](examples/pybullet_robot_interface.py))
