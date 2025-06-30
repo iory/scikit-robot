@@ -5,6 +5,12 @@ from skrobot.planner.utils import scipinize
 from skrobot.pycompat import lru_cache
 
 
+try:
+    from skrobot.utils.visualization import get_trajectory_optimization_callback
+except ImportError:
+    get_trajectory_optimization_callback = None
+
+
 def sqp_plan_trajectory(collision_checker,
                         av_start,
                         av_goal,
@@ -14,7 +20,8 @@ def sqp_plan_trajectory(collision_checker,
                         with_base=False,
                         weights=None,
                         initial_trajectory=None,
-                        slsqp_option=None
+                        slsqp_option=None,
+                        optimization_callback=None
                         ):
     """Gradient based trajectory optimization using scipy's SLSQP.
 
@@ -49,11 +56,18 @@ def sqp_plan_trajectory(collision_checker,
         option of slsqp. Please see `options` in
         https://docs.scipy.org/doc/scipy/reference/optimize.minimize-slsqp.html
         for the detail. If set to `None`, a default values is used.
+    optimization_callback : callable or None
+        callback function called during optimization for visualization.
+        If None, automatically gets callback from visualization context.
     Returns
     ------------
     planned_trajectory : numpy.ndarray(n_wp, n_dof)
         planned trajectory.
     """
+
+    # Auto-inject visualization callback from context if not provided
+    if optimization_callback is None and get_trajectory_optimization_callback is not None:
+        optimization_callback = get_trajectory_optimization_callback()
 
     # common stuff
     joint_limit_list = [[j.min_angle, j.max_angle] for j in joint_list]
@@ -86,7 +100,8 @@ def sqp_plan_trajectory(collision_checker,
         collision_ineq_fun,
         joint_limit_list,
         weights,
-        slsqp_option)
+        slsqp_option,
+        optimization_callback)
     return optimal_trajectory
 
 
@@ -95,12 +110,13 @@ def _sqp_based_trajectory_optimization(
         collision_ineq_fun,
         joint_limit_list,
         weights,
-        slsqp_option=None):
+        slsqp_option=None,
+        optimization_callback=None):
 
     if slsqp_option is None:
         slsqp_option = {'ftol': 1e-4, 'disp': True, 'maxiter': 100}
     n_wp, n_dof = av_seq_init.shape
-    A = construct_smoothcost_fullmat(n_wp, n_dof, weights=weights)
+    A = construct_smoothcost_fullmat(n_wp, n_dof, weights=tuple(weights))
 
     def fun_objective(x):
         f = (0.5 * A.dot(x).dot(x)).item() / n_wp
@@ -140,7 +156,8 @@ def _sqp_based_trajectory_optimization(
         f, xi_init, method='SLSQP', jac=jac,
         bounds=bounds,
         constraints=[eq_dict, ineq_dict],
-        options=slsqp_option)
+        options=slsqp_option,
+        callback=optimization_callback)
     traj_opt = res.x.reshape(n_wp, n_dof)
     return traj_opt
 

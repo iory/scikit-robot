@@ -39,6 +39,11 @@ from skrobot.utils.urdf import enable_mesh_cache
 from skrobot.utils.urdf import URDF
 
 
+try:
+    from skrobot.utils.visualization import auto_ik_hook
+except ImportError:
+    auto_ik_hook = None
+
 logger = getLogger(__name__)
 
 
@@ -604,6 +609,12 @@ class CascadedLink(CascadedCoords):
         are updated.
         """
         inverse_kinematics_hook = inverse_kinematics_hook or []
+
+        # Auto-inject visualization hooks from context
+        if auto_ik_hook is not None:
+            context_hooks = auto_ik_hook()
+            if context_hooks:
+                inverse_kinematics_hook = list(inverse_kinematics_hook) + context_hooks
         if move_target is None:
             raise NotImplementedError
         move_target = listify(move_target)
@@ -1087,10 +1098,18 @@ class CascadedLink(CascadedCoords):
                                         rotation_axis=True,
                                         stop=100,
                                         dt=5e-3,
-                                        inverse_kinematics_hook=[],
+                                        inverse_kinematics_hook=None,
                                         thre=0.001,
                                         rthre=np.deg2rad(1.0),
                                         *args, **kwargs):
+
+        inverse_kinematics_hook = inverse_kinematics_hook or []
+
+        # Auto-inject visualization hooks from context
+        if auto_ik_hook is not None:
+            context_hooks = auto_ik_hook()
+            if context_hooks:
+                inverse_kinematics_hook = list(inverse_kinematics_hook) + context_hooks
 
         if not isinstance(target_coords, list):
             target_coords = [target_coords]
