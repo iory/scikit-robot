@@ -269,7 +269,7 @@ class URDFXMLRootLinkChanger:
                     if prev_joint is not None:
                         prev_joint_xyz = joint_xyz_rpy_cache[prev_joint][0]
                         prev_joint_rpy = joint_xyz_rpy_cache[prev_joint][1]
-                    self._reverse_joint_transform_2(joint, prev_joint_xyz, prev_joint_rpy, path)
+                    self._reverse_joint_transform(joint, prev_joint_xyz, prev_joint_rpy, path)
                     prev_joint = joint
 
     def _get_inversed_joint_origin(self, xyz, rpy):
@@ -285,7 +285,7 @@ class URDFXMLRootLinkChanger:
             return xyz_reversed, rpy_reversed
 
     # When the prev_joint_xyz and rpy is None, the child of this joint is the new root link
-    def _reverse_joint_transform_2(self, joint, prev_joint_xyz, prev_joint_rpy, path_to_current_root):
+    def _reverse_joint_transform(self, joint, prev_joint_xyz, prev_joint_rpy, path_to_current_root):
         origin = joint.find('origin')
 
         # Cache current xyz and rpy
@@ -401,44 +401,6 @@ class URDFXMLRootLinkChanger:
             if joint_name == target_joint_name:
                 return True
         return False
-
-    def _reverse_joint_transform(self, joint):
-        """Reverse the transformation of a joint.
-
-        Parameters
-        ----------
-        joint : ET.Element
-            Joint XML element to reverse
-        """
-        # Find the origin element
-        origin = joint.find('origin')
-        if origin is not None:
-            # Get current xyz and rpy
-            xyz_str = origin.get('xyz', '0 0 0')
-            rpy_str = origin.get('rpy', '0 0 0')
-
-            # Parse the values
-            xyz = [float(x) for x in xyz_str.split()]
-            rpy = [float(x) for x in rpy_str.split()]
-
-            # For simplicity, we negate the translation and rotation
-            # In a full implementation, you would need proper matrix inversion
-            # xyz_reversed = [-x for x in xyz]
-            # rpy_reversed = [-r for r in rpy]
-
-            # ============
-            rot = R.from_euler('xyz', rpy)
-            rot_matrix = rot.as_matrix()
-            rot_matrix_inv = rot_matrix.T
-            xyz_reversed = -np.dot(rot_matrix_inv, xyz)
-            rpy_reversed = R.from_matrix(rot_matrix_inv).as_euler('xyz')
-            xyz_reversed.tolist()
-            rpy_reversed.tolist()
-            # ============
-
-            # Set the reversed values
-            origin.set('xyz', ' '.join(map(str, xyz_reversed)))
-            origin.set('rpy', ' '.join(map(str, rpy_reversed)))
 
     def _save_urdf(self, output_path):
         """Save the modified URDF to a file.
