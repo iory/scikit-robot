@@ -228,7 +228,8 @@ def get_filename(base_path, file_path, makedirs=False):
     """
     resolved_file_path = resolve_filepath(base_path, file_path)
     if resolved_file_path is None:
-        raise OSError('could not find {}'.format(file_path))
+        logger.error('could not find %s', file_path)
+        return None
     if not os.path.isabs(resolved_file_path):
         resolved_file_path = os.path.join(base_path, resolved_file_path)
     if makedirs:
@@ -457,10 +458,11 @@ class URDFType(object):
                 try:
                     v = cls._parse_attrib(t, node.attrib[a])
                 except Exception:
-                    raise ValueError(
-                        'Missing required attribute {} when parsing an object '
-                        'of type {}'.format(a, cls.__name__)
+                    logger.error(
+                        'Missing required attribute %s when parsing an object '
+                        'of type %s', a, cls.__name__
                     )
+                    continue
             else:
                 v = None
                 if a in node.attrib:
@@ -1113,7 +1115,10 @@ class Texture(URDFType):
 
     def __init__(self, filename, image=None):
         if image is None:
-            image = PIL.image.open(filename)
+            if filename and os.path.exists(filename):
+                image = PIL.image.open(filename)
+            else:
+                return
         self.filename = filename
         self.image = image
 
@@ -1142,8 +1147,8 @@ class Texture(URDFType):
         if isinstance(value, np.ndarray):
             value = PIL.Image.fromarray(value)
         elif not isinstance(value, PIL.Image.Image):
-            raise ValueError('Texture only supports numpy arrays '
-                             'or PIL images')
+            logger.error('Texture only supports numpy arrays '
+                         'or PIL images')
         self._image = value
 
     @classmethod
@@ -1152,15 +1157,18 @@ class Texture(URDFType):
 
         # Load image
         fn = get_filename(path, kwargs['filename'])
-        kwargs['image'] = PIL.Image.open(fn)
+        if fn and os.path.exists(fn):
+            kwargs['image'] = PIL.Image.open(fn)
 
         return Texture(**kwargs)
 
     def _to_xml(self, parent, path):
         # Save the image
         filepath = get_filename(path, self.filename, makedirs=True)
-        self.image.save(filepath)
-
+        try:
+            self.image.save(filepath)
+        except OSError as e:
+            logger.error('Could not save texture image %s: %s', filepath, e)
         return self._unparse(path)
 
 
@@ -1291,7 +1299,8 @@ class Collision(URDFType):
         self.name = name
         self.origin = origin
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh.filename not in mesh_filenames_cache:
+            if self.geometry.mesh is not None and \
+                self.geometry.mesh.filename not in mesh_filenames_cache:
                 mesh_filenames_cache[self.geometry.mesh.filename] = True
                 if self.geometry.mesh is not None:
                     new_mesh = []
@@ -1383,7 +1392,8 @@ class Visual(URDFType):
         self.material = material
 
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh.filename not in mesh_filenames_cache:
+            if self.geometry.mesh is not None and \
+                self.geometry.mesh.filename not in mesh_filenames_cache:
                 mesh_filenames_cache[self.geometry.mesh.filename] = True
                 if self.geometry.mesh is not None:
                     new_mesh = []
@@ -1668,14 +1678,20 @@ class JointLimit(URDFType):
     """
 
     _ATTRIBS = {
-        'effort': (float, True),
-        'velocity': (float, True),
+        'effort': (float, False),
+        'velocity': (float, False),
         'lower': (float, False),
         'upper': (float, False),
     }
     _TAG = 'limit'
 
-    def __init__(self, effort, velocity, lower=None, upper=None):
+    def __init__(self, effort=None, velocity=None, lower=None, upper=None):
+        if effort is None:
+            logger.error('Joint effort is not set. Setting it to 0.0 by default.')
+            effort = 0.0
+        if velocity is None:
+            logger.error('Joint velocity is not set. Setting it to 0.0 by default.')
+            velocity = 0.0
         self.effort = effort
         self.velocity = velocity
         self.lower = lower
@@ -2332,8 +2348,11 @@ class Joint(URDFType):
     def limit(self, value):
         if value is None:
             if self.joint_type in ['prismatic', 'revolute']:
-                raise ValueError('Require joint limit for prismatic and '
-                                 'revolute joints')
+                logger.error('Require joint limit for prismatic and '
+                                    'revolute joints')
+                logger.error('Setting joint limit to 0.0')
+                value = JointLimit(effort=0.0, velocity=0.0,
+                                   lower=0, upper=0)
         elif not isinstance(value, JointLimit):
             raise TypeError('Expected JointLimit type')
         self._limit = value
@@ -2498,7 +2517,10 @@ class Joint(URDFType):
         kwargs['child'] = node.find('child').attrib['link']
         axis = node.find('axis')
         if axis is not None:
-            axis = np.fromstring(axis.attrib['xyz'], sep=' ')
+            if 'xyz' in axis.attrib:
+                axis = np.fromstring(axis.attrib['xyz'], sep=' ')
+            else:
+                axis = np.array([0.0, 0.0, 0.0])
         kwargs['axis'] = axis
         kwargs['origin'] = parse_origin(node)
         return Joint(**kwargs)
@@ -2704,25 +2726,29 @@ class URDF(URDFType):
 
         for x in self._links:
             if x.name in self._link_map:
-                raise ValueError('Two links with name {} found'.format(x.name))
+                logger.error('Two links with name %s found', x.name)
+                continue
             self._link_map[x.name] = x
 
         for x in self._joints:
             if x.name in self._joint_map:
-                raise ValueError('Two joints with name {} '
-                                 'found'.format(x.name))
+                logger.error('Two joints with name %s '
+                             'found', x.name)
+                continue
             self._joint_map[x.name] = x
 
         for x in self._transmissions:
             if x.name in self._transmission_map:
-                raise ValueError('Two transmissions with name {} '
-                                 'found'.format(x.name))
+                logger.error('Two transmissions with name %s '
+                             'found', x.name)
+                continue
             self._transmission_map[x.name] = x
 
         for x in self._materials:
             if x.name in self._material_map:
-                raise ValueError('Two materials with name {} '
-                                 'found'.format(x.name))
+                logger.error('Two materials with name %s '
+                             'found', x.name)
+                continue
             self._material_map[x.name] = x
 
         # Synchronize materials between links and top-level set
@@ -2741,22 +2767,38 @@ class URDF(URDFType):
 
         # Add all edges from CHILDREN TO PARENTS, with joints as their object
         for joint in self.joints:
+            if joint.parent not in self._link_map or joint.child not in self._link_map:
+                logger.error(
+                    'Joint %s has parent %s or child %s that is not in the link map',
+                    joint.name, joint.parent, joint.child
+                )
+                continue
             parent = self._link_map[joint.parent]
             child = self._link_map[joint.child]
             self._G.add_edge(child, parent, joint=joint)
 
-        # Validate the graph and get the base and end links
-        self._base_link, self._end_links = self._validate_graph()
+        if self._G.number_of_nodes() > 0:
+            # Validate the graph and get the base and end links
+            try:
+                self._base_link, self._end_links = self._validate_graph()
+            except ValueError as e:
+                logger.error('Invalid URDF graph: %s', e)
+                self._base_link = None
+                self._end_links = []
+                return
 
-        # Cache the paths to the base link
-        self._paths_to_base = nx.shortest_path(
-            self._G, target=self._base_link
-        )
+            # Cache the paths to the base link
+            self._paths_to_base = nx.shortest_path(
+                self._G, target=self._base_link
+            )
 
-        # Cache the reverse topological order (useful for speeding up FK,
-        # as we want to start at the base and work outward to cache
-        # computation.
-        self._reverse_topo = list(reversed(list(nx.topological_sort(self._G))))
+            # Cache the reverse topological order (useful for speeding up FK,
+            # as we want to start at the base and work outward to cache
+            # computation.
+            self._reverse_topo = list(reversed(list(nx.topological_sort(self._G))))
+        else:
+            self._base_link = None
+            logger.error('No links found in the URDF, cannot create base link')
 
     @property
     def name(self):
@@ -2945,13 +2987,21 @@ class URDF(URDFType):
             if os.path.isfile(file_obj):
                 parser = ET.XMLParser(remove_comments=True,
                                       remove_blank_text=True)
-                tree = ET.parse(file_obj, parser=parser)
+                try:
+                    tree = ET.parse(file_obj, parser=parser)
+                except ET.XMLSyntaxError as e:
+                    logger.error('Failed to parse XML from file-like object: %s', e)
+                    return URDF(name='INVALID_URDF', links=[])
                 path, _ = os.path.split(file_obj)
             else:
                 raise ValueError('{} is not a file'.format(file_obj))
         else:
             parser = ET.XMLParser(remove_comments=True, remove_blank_text=True)
-            tree = ET.parse(file_obj, parser=parser)
+            try:
+                tree = ET.parse(file_obj, parser=parser)
+            except ET.XMLSyntaxError as e:
+                logger.error('Failed to parse XML from file-like object: %s', e)
+                return URDF(name='INVALID_URDF', links=[])
             path, _ = os.path.split(file_obj.name)
 
         node = tree.getroot()
@@ -2974,24 +3024,24 @@ class URDF(URDFType):
         actuated_joints = []
         for joint in self.joints:
             if joint.parent not in self._link_map:
-                raise ValueError('Joint {} has invalid parent link name {}'
-                                 .format(joint.name, joint.parent))
+                logger.error('Joint %s has invalid parent link name %s',
+                             joint.name, joint.parent)
             if joint.child not in self._link_map:
-                raise ValueError('Joint {} has invalid child link name {}'
-                                 .format(joint.name, joint.child))
+                logger.error('Joint %s has invalid child link name %s',
+                             joint.name, joint.child)
             if joint.child == joint.parent:
-                raise ValueError('Joint {} has matching parent and child'
-                                 .format(joint.name))
+                logger.error('Joint %s has matching parent and child',
+                             joint.name)
             if joint.mimic is not None:
                 if joint.mimic.joint not in self._joint_map:
-                    raise ValueError(
-                        'Joint {} has an invalid mimic joint name {}'
-                        .format(joint.name, joint.mimic.joint)
+                    logger.error(
+                        'Joint %s has an invalid mimic joint name %s',
+                        joint.name, joint.mimic.joint
                     )
                 if joint.mimic.joint == joint.name:
-                    raise ValueError(
-                        'Joint {} set up to mimic itself'
-                        .format(joint.mimic.joint)
+                    logger.error(
+                        'Joint %s set up to mimic itself',
+                        joint.mimic.joint
                     )
             elif joint.joint_type != 'fixed':
                 actuated_joints.append(joint)
@@ -3007,8 +3057,8 @@ class URDF(URDFType):
         for t in self.transmissions:
             for joint in t.joints:
                 if joint.name not in self._joint_map:
-                    raise ValueError('Transmission {} has invalid joint name '
-                                     '{}'.format(t.name, joint.name))
+                    logger.error('Transmission %s has invalid joint name %s',
+                                 t.name, joint.name)
 
     def _validate_graph(self):
         """Raise an exception if the link-joint structure is invalid.
@@ -3073,6 +3123,8 @@ class URDF(URDFType):
 
         data = ET.tostring(extra_xml_node)
         kwargs['other_xml'] = data
+        if 'name' not in kwargs:
+            kwargs['name'] = 'UNNAMED_URDF'
         return URDF(**kwargs)
 
     def _to_xml(self, parent, path):

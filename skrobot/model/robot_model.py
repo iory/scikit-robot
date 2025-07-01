@@ -1884,7 +1884,11 @@ class RobotModel(CascadedLink):
         with enable_mesh_cache():
             self.urdf_robot_model = URDF.load(file_obj=file_obj)
         self.name = self.urdf_robot_model.name
-        root_link = self.urdf_robot_model.base_link
+        if self.urdf_robot_model.base_link is None:
+            logger.error('URDF must have a base link defined.')
+            root_link = None
+        else:
+            root_link = self.urdf_robot_model.base_link
 
         links = []
         for urdf_link in self.urdf_robot_model.links:
@@ -1901,6 +1905,11 @@ class RobotModel(CascadedLink):
                              if j.mimic is not None}
 
         for j in self.urdf_robot_model.joints:
+            if j.parent not in link_maps or j.child not in link_maps:
+                logger.warning(
+                    'Joint %s has invalid parent or child link. '
+                    'Skipping this joint.', j.name)
+                continue
             if j.limit is None:
                 j.limit = urdf.JointLimit(0, 0)
             if j.axis is None:
@@ -1956,6 +1965,8 @@ class RobotModel(CascadedLink):
             link_maps[j.parent].add_child_link(link_maps[j.child])
 
         for j in self.urdf_robot_model.joints:
+            if j.parent not in link_maps or j.child not in link_maps:
+                continue
             if j.origin is None:
                 rpy = np.zeros(3, dtype=np.float32)
                 xyz = np.zeros(3, dtype=np.float32)
@@ -2022,8 +2033,11 @@ class RobotModel(CascadedLink):
             self.__dict__[link.name] = link
         for joint in whole_joint_list:
             self.__dict__[joint.name] = joint
-        self.root_link = self.__dict__[root_link.name]
-        self.assoc(self.root_link)
+        if root_link is None:
+            self.root_link = None
+        else:
+            self.root_link = self.__dict__[root_link.name]
+            self.assoc(self.root_link)
 
         # Add hook of mimic joint.
         for j in self.urdf_robot_model.joints:
