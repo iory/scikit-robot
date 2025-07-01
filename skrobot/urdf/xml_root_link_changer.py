@@ -144,8 +144,6 @@ class URDFXMLRootLinkChanger:
             self._save_urdf(output_path)
             return
 
-        # Build path from current root to new root
-        # path_to_new_root = self._find_path_to_link(current_root, new_root_link)
         # Build path from new root to current root
         path_to_new_root = self._find_path_to_link(new_root_link, current_root)
         if not path_to_new_root:
@@ -271,7 +269,7 @@ class URDFXMLRootLinkChanger:
                     if prev_joint is not None:
                         prev_joint_xyz = joint_xyz_rpy_cache[prev_joint][0]
                         prev_joint_rpy = joint_xyz_rpy_cache[prev_joint][1]
-                    self._reverse_joint_transform_2(joint, prev_joint_xyz, prev_joint_rpy)
+                    self._reverse_joint_transform_2(joint, prev_joint_xyz, prev_joint_rpy, path)
                     prev_joint = joint
 
     def _get_inversed_joint_origin(self, xyz, rpy):
@@ -284,21 +282,125 @@ class URDFXMLRootLinkChanger:
             rpy_reversed = R.from_matrix(rot_matrix_inv).as_euler('xyz')
             xyz_reversed.tolist()
             rpy_reversed.tolist()
-
             return xyz_reversed, rpy_reversed
 
-    # prev_joint is None: child of this joint is new root link
-    def _reverse_joint_transform_2(self, joint, prev_joint_xyz, prev_joint_rpy):
+    # When the prev_joint_xyz and rpy is None, the child of this joint is the new root link
+    def _reverse_joint_transform_2(self, joint, prev_joint_xyz, prev_joint_rpy, path_to_current_root):
         origin = joint.find('origin')
-        if prev_joint_xyz is None and prev_joint_rpy is None:
-            # Set origin of this joint to Zero
-            origin.set('xyz', ' '.join(map(str, [0, 0, 0])))
-            origin.set('rpy', ' '.join(map(str, [0, 0, 0])))
-        else:
+
+        # Cache current xyz and rpy
+        current_xyz_str = origin.get('xyz', '0 0 0')
+        current_rpy_str = origin.get('rpy', '0 0 0')
+        current_xyz = [float(x) for x in current_xyz_str.split()]
+        current_rpy = [float(x) for x in current_rpy_str.split()]
+        inv_current_xyz, inv_current_rpy = self._get_inversed_joint_origin(current_xyz, current_rpy)
+        inv_current_pose = self._pose_to_matrix(inv_current_xyz, inv_current_rpy)
+
+        # Calculate new xyz and rpy from previous joint's origin
+        new_xyz = [0, 0, 0]
+        new_rpy = [0, 0, 0]
+        if (prev_joint_xyz is not None) and (prev_joint_rpy is not None):
             # Set the reversed values of previous joint
-            xyz_reversed, rpy_reversed = self._get_inversed_joint_origin(prev_joint_xyz, prev_joint_rpy)
-            origin.set('xyz', ' '.join(map(str, xyz_reversed)))
-            origin.set('rpy', ' '.join(map(str, rpy_reversed)))
+            new_xyz, new_rpy = self._get_inversed_joint_origin(prev_joint_xyz, prev_joint_rpy)
+        new_pose = self._pose_to_matrix(new_xyz, new_rpy)
+
+        origin.set('xyz', ' '.join(map(str, new_xyz)))
+        origin.set('rpy', ' '.join(map(str, new_rpy)))
+
+        # Invert axis direction
+        axis = joint.find('axis')
+        axis_xyz_str = axis.get('xyz', '0 0 0')
+        inv_axis_xyz = [-float(x) for x in axis_xyz_str.split()]
+        axis.set('xyz', ' '.join(map(str, inv_axis_xyz)))
+
+        # Adjust visual and collision origin
+        child_name = joint.find('child').get('link')
+        child = self.links[child_name]
+        child_visual = child.find('visual')
+        if child_visual is not None:
+            child_visual_origin = child_visual.find('origin')
+            if child_visual_origin is not None:
+                child_visual_origin.set('xyz', ' '.join(map(str, inv_current_xyz)))
+                child_visual_origin.set('rpy', ' '.join(map(str, inv_current_rpy)))
+        child_collision = child.find('collision')
+        if child_collision is not None:
+            child_collision_origin = child_collision.find('origin')
+            if child_collision_origin is not None:
+                child_collision_origin.set('xyz', ' '.join(map(str, inv_current_xyz)))
+                child_collision_origin.set('rpy', ' '.join(map(str, inv_current_rpy)))
+
+        # Correct relative positions of child joints which are not on the path
+        base_link_name = path_to_current_root[-1][0]
+        children_joints = self._get_all_children_joints(joint)
+        for child_joint in children_joints:
+            if self._joint_is_included_in_path(child_joint, path_to_current_root):
+                continue
+            child_origin = child_joint.find('origin')
+            if child_origin is not None:
+                # Get pose of child joint
+                child_xyz_str = child_origin.get('xyz', '0 0 0')
+                child_rpy_str = child_origin.get('rpy', '0 0 0')
+                child_xyz = [float(x) for x in child_xyz_str.split()]
+                child_rpy = [float(x) for x in child_rpy_str.split()]
+                child_pose = self._pose_to_matrix(child_xyz, child_rpy)
+
+                # Calculate new pose of child joint
+                if child_name == base_link_name:
+                    new_child_pose = inv_current_pose @ child_pose
+                else:
+                    new_child_pose = new_pose @ child_pose
+                new_child_xyz, new_child_rpy = self._matrix_to_pose(new_child_pose)
+
+                # Set new pose to child joint
+                child_origin.set('xyz', ' '.join(map(str, new_child_xyz)))
+                child_origin.set('rpy', ' '.join(map(str, new_child_rpy)))
+    
+    def _pose_to_matrix(self, xyz, rpy):
+        rot = R.from_euler('xyz', rpy)
+        T = np.eye(4)
+        T[:3, :3] = rot.as_matrix()
+        T[:3, 3] = xyz
+        return T
+
+    def _matrix_to_pose(self, T):
+        xyz = T[:3, 3]
+        rot = R.from_matrix(T[:3, :3])
+        rpy = rot.as_euler('xyz')
+        return xyz.tolist(), rpy.tolist()
+    
+    def _get_all_children_links(self, parent_link):
+        parent_link_name = parent_link.get('link')
+        for link_name, info in self.joint_tree.items():
+            if link_name == parent_link_name:
+                children_names = info['children']
+                children_links = [self.links[name] for name in children_names if name in self.links]
+                return children_links
+
+    def _get_all_children_joints(self, parent_joint):
+        children_joints = []
+        link_name = parent_joint.find('child').get('link')
+        for joint_name, joint in self.joints.items():
+            parent_link_name = joint.find('parent').get('link')
+            if parent_link_name == link_name:
+                children_joints.append(joint)
+        return children_joints
+    
+    def _link_is_included_in_path(self, target_link, path):
+        target_link_name = target_link.get('name')
+        for elem in path:
+            parent_link_name = elem[0]
+            child_link_name = elem[1]
+            if (target_link_name == parent_link_name) or (target_link_name == child_link_name):
+                return True
+        return False
+
+    def _joint_is_included_in_path(self, target_joint, path):
+        target_joint_name = target_joint.get('name')
+        for elem in path:
+            joint_name = elem[2]
+            if joint_name == target_joint_name:
+                return True
+        return False
 
     def _reverse_joint_transform(self, joint):
         """Reverse the transformation of a joint.
