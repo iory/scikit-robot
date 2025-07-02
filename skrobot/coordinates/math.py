@@ -1932,6 +1932,60 @@ def make_matrix(r, c):
     return np.zeros((r, c), 'f')
 
 
+def invert_yaw_pitch_roll(yaw=0.0, pitch=0.0, roll=0.0):
+    """Calculate the inverse of yaw-pitch-roll Euler angles.
+
+    This function computes the inverse transformation of a rotation specified
+    by yaw-pitch-roll angles. When used with rpy_matrix(), it produces
+    results compatible with the matrix inversion.
+
+    Parameters
+    ----------
+    yaw : float
+        Rotation angle around Z-axis in radians
+    pitch : float
+        Rotation angle around Y-axis in radians
+    roll : float
+        Rotation angle around X-axis in radians
+
+    Returns
+    -------
+    yaw_inv : float
+        Inverse yaw angle in radians
+    pitch_inv : float
+        Inverse pitch angle in radians
+    roll_inv : float
+        Inverse roll angle in radians
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import invert_yaw_pitch_roll
+    >>> yaw, pitch, roll = np.pi/4, np.pi/6, np.pi/3
+    >>> yaw_inv, pitch_inv, roll_inv = invert_yaw_pitch_roll(yaw, pitch, roll)
+    """
+    from scipy.spatial.transform import Rotation
+    # Create rotation matrix using rpy_matrix convention for consistency
+    R_original = rpy_matrix(yaw, pitch, roll)
+    # Convert to SciPy Rotation object and invert
+    R_inv = Rotation.from_matrix(R_original).inv()
+    # Get inverse rotation matrix and extract rpy angles
+    R_inv_matrix = R_inv.as_matrix()
+
+    # Extract rpy angles from the inverse matrix (same logic as rpy_angle)
+    if np.sqrt(R_inv_matrix[1, 0] ** 2 + R_inv_matrix[0, 0] ** 2) < _EPS:
+        a = 0.0
+    else:
+        a = np.arctan2(R_inv_matrix[1, 0], R_inv_matrix[0, 0])
+    sa = np.sin(a)
+    ca = np.cos(a)
+    b = np.arctan2(-R_inv_matrix[2, 0], ca * R_inv_matrix[0, 0] + sa * R_inv_matrix[1, 0])
+    c = np.arctan2(sa * R_inv_matrix[0, 2] - ca * R_inv_matrix[1, 2],
+                    -sa * R_inv_matrix[0, 1] + ca * R_inv_matrix[1, 1])
+
+    return a, b, c
+
+
 inverse_rodrigues = rotation_angle
 quat_from_rotation_matrix = matrix2quaternion
 quat_from_rpy = rpy2quaternion

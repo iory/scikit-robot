@@ -4,6 +4,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from skrobot.coordinates.math import invert_yaw_pitch_roll
+
 
 class URDFXMLRootLinkChanger:
     """A class to change the root link of a URDF by directly manipulating XML.
@@ -282,46 +284,12 @@ class URDFXMLRootLinkChanger:
     def _get_inversed_joint_origin(self, xyz, rpy):
         if xyz is not None and rpy is not None:
             # Calculate inversed transform of origin
-            inv_y, inv_p, inv_r = self._invert_yaw_pitch_roll(rpy[2], rpy[1], rpy[0])
+            inv_y, inv_p, inv_r = invert_yaw_pitch_roll(rpy[2], rpy[1], rpy[0])
             rpy_reversed = [inv_r, inv_p, inv_y]
             rot_inv = R.from_euler('xyz', rpy_reversed)
             xyz_reversed = -rot_inv.apply(xyz)
             return xyz_reversed, rpy_reversed
         return None, None
-
-    def _invert_yaw_pitch_roll(self, yaw, pitch, roll):
-        """
-        Calculate the inverse transformation of a rotation expressed in Yaw-Pitch-Roll,
-        and return it in Yaw-Pitch-Roll considering gimbal lock.
-        """
-        c_y, s_y = np.cos(yaw), np.sin(yaw)
-        c_p, s_p = np.cos(pitch), np.sin(pitch)
-        c_r, s_r = np.cos(roll), np.sin(roll)
-
-        Rz = np.array([[c_y, -s_y, 0], [s_y, c_y, 0], [0, 0, 1]])
-        Ry = np.array([[c_p, 0, s_p], [0, 1, 0], [-s_p, 0, c_p]])
-        Rx = np.array([[1, 0, 0], [0, c_r, -s_r], [0, s_r, c_r]])
-        R = np.dot(np.dot(Rz, Ry), Rx)
-
-        R_inv = R.T
-
-        sin_pitch_inv = -R_inv[2, 0]
-
-        epsilon = 1e-6
-        if abs(sin_pitch_inv) >= 1.0 - epsilon:
-            pitch_inv = np.pi / 2.0 if sin_pitch_inv > 0 else -np.pi / 2.0
-            roll_inv = 0.0
-            if sin_pitch_inv > 0:
-                yaw_inv = np.arctan2(-R_inv[0, 1], R_inv[1, 1])
-            else:
-                yaw_inv = np.arctan2(R_inv[0, 1], -R_inv[1, 1])
-        else:
-            pitch_inv = np.arcsin(sin_pitch_inv)
-            cos_pitch_inv = np.cos(pitch_inv)
-            yaw_inv = np.arctan2(R_inv[1, 0] / cos_pitch_inv, R_inv[0, 0] / cos_pitch_inv)
-            roll_inv = np.arctan2(R_inv[2, 1] / cos_pitch_inv, R_inv[2, 2] / cos_pitch_inv)
-
-        return yaw_inv, pitch_inv, roll_inv
 
     # When the prev_joint_xyz and rpy is None, the child of this joint is the new root link
     def _reverse_joint_transform(self, joint, prev_joint_xyz, prev_joint_rpy, path_to_current_root):
