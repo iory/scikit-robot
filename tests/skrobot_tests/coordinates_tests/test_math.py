@@ -1,15 +1,18 @@
 import math
+import sys
 import unittest
 
 import numpy as np
 from numpy import pi
 from numpy import testing
+import pytest
 
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import clockwise_angle_between_vectors
 from skrobot.coordinates.math import counter_clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
+from skrobot.coordinates.math import invert_yaw_pitch_roll
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix_exponent
 from skrobot.coordinates.math import matrix_log
@@ -624,3 +627,95 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(
             quaternion_norm(random_quaternion()),
             1.0)
+
+    @pytest.mark.skipif(sys.version_info[0] == 2, reason="Skip in Python 2")
+    def test_invert_yaw_pitch_roll(self):
+
+        # Test cases covering various scenarios
+        test_cases = [
+            # Basic cases
+            ("Normal Case", (np.deg2rad(30), np.deg2rad(45), np.deg2rad(60))),
+            ("Gimbal Lock at +90 deg", (np.deg2rad(45), np.deg2rad(90), np.deg2rad(30))),
+            ("Gimbal Lock at -90 deg", (np.deg2rad(20), np.deg2rad(-90), np.deg2rad(50))),
+            ("Zero Rotation", (0, 0, 0)),
+            ("Yaw only", (np.deg2rad(90), 0, 0)),
+            ("Pitch only", (0, np.deg2rad(-30), 0)),
+            ("Roll only", (0, 0, np.deg2rad(120))),
+            ("Negative angles", (np.deg2rad(-25), np.deg2rad(-50), np.deg2rad(-75))),
+
+            # Boundary value cases
+            ("Near gimbal lock +89.99", (np.deg2rad(30), np.deg2rad(89.99), np.deg2rad(45))),
+            ("Near gimbal lock -89.99", (np.deg2rad(30), np.deg2rad(-89.99), np.deg2rad(45))),
+            ("All 180 degrees", (np.deg2rad(180), np.deg2rad(180), np.deg2rad(180))),
+            ("Small angles", (np.deg2rad(0.01), np.deg2rad(0.01), np.deg2rad(0.01))),
+            ("Very small angles", (1e-6, 1e-6, 1e-6)),
+            ("Alternating signs", (np.deg2rad(45), np.deg2rad(-45), np.deg2rad(45))),
+            ("Edge case 1", (0, np.deg2rad(90), 0)),
+            ("Edge case 2", (0, np.deg2rad(-90), 0)),
+
+            # Precision cases
+            ("Very close to +90 (1e-10)", (0, np.pi / 2 - 1e-10, 0)),
+            ("Very close to -90 (1e-10)", (0, -np.pi / 2 + 1e-10, 0)),
+            ("Near +90 with yaw/roll", (np.deg2rad(45), np.deg2rad(89.9999), np.deg2rad(30))),
+            ("Near -90 with yaw/roll", (np.deg2rad(45), np.deg2rad(-89.9999), np.deg2rad(30))),
+
+            # Extreme corner cases
+            ("Multiple 90 degrees", (np.deg2rad(90), np.deg2rad(90), np.deg2rad(90))),
+            ("All negative 90s", (np.deg2rad(-90), np.deg2rad(-90), np.deg2rad(-90))),
+            ("Mixed extreme signs", (np.deg2rad(90), np.deg2rad(-90), np.deg2rad(90))),
+            ("Symmetric case", (np.deg2rad(60), np.deg2rad(60), np.deg2rad(60))),
+            ("Anti-symmetric", (np.deg2rad(60), np.deg2rad(-60), np.deg2rad(60))),
+        ]
+
+        tolerance = 1e-9
+
+        for name, angles in test_cases:
+            yaw, pitch, roll = angles
+
+            # 1. Calculate original rotation matrix
+            R_original = rpy_matrix(yaw, pitch, roll)
+
+            # 2. Calculate inverse YPR using our function
+            inv_yaw, inv_pitch, inv_roll = invert_yaw_pitch_roll(yaw, pitch, roll)
+
+            # 3. Calculate inverse rotation matrix from inverse YPR
+            R_inverted = rpy_matrix(inv_yaw, inv_pitch, inv_roll)
+
+            # 4. Compose original and inverse rotations
+            R_combined = np.matmul(R_original, R_inverted)
+
+            # 5. Result should be identity matrix
+            identity_matrix = np.identity(3)
+
+            # Test that the combined rotation is identity
+            testing.assert_allclose(
+                R_combined, identity_matrix, atol=tolerance,
+                err_msg="Failed for test case: {}".format(name)
+            )
+
+        # Additional specific tests for gimbal lock cases
+        # Test exact gimbal lock at +90 degrees
+        yaw, pitch, roll = np.deg2rad(45), np.pi / 2, np.deg2rad(30)
+        inv_yaw, inv_pitch, inv_roll = invert_yaw_pitch_roll(yaw, pitch, roll)
+
+        R_original = rpy_matrix(yaw, pitch, roll)
+        R_inverted = rpy_matrix(inv_yaw, inv_pitch, inv_roll)
+        R_combined = np.matmul(R_original, R_inverted)
+
+        testing.assert_allclose(
+            R_combined, np.identity(3), atol=tolerance,
+            err_msg="Failed for exact +90 degree gimbal lock case"
+        )
+
+        # Test exact gimbal lock at -90 degrees
+        yaw, pitch, roll = np.deg2rad(45), -np.pi / 2, np.deg2rad(30)
+        inv_yaw, inv_pitch, inv_roll = invert_yaw_pitch_roll(yaw, pitch, roll)
+
+        R_original = rpy_matrix(yaw, pitch, roll)
+        R_inverted = rpy_matrix(inv_yaw, inv_pitch, inv_roll)
+        R_combined = np.matmul(R_original, R_inverted)
+
+        testing.assert_allclose(
+            R_combined, np.identity(3), atol=tolerance,
+            err_msg="Failed for exact -90 degree gimbal lock case"
+        )
