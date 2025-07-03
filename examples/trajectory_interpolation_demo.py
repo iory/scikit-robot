@@ -307,7 +307,7 @@ def main():
                 viewer.redraw()
         else:
             print('\n==> Demo complete')
-            time.sleep(3)
+    viewer.close()
 
 
 if __name__ == '__main__':
