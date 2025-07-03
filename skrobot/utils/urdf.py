@@ -2955,16 +2955,54 @@ class URDF(URDFType):
                    xml_declaration=True, encoding='utf-8')
 
     def _merge_materials(self):
-        """Merge the top-level material set with the link materials."""
+        """Merge the top-level material set with the link materials.
+
+        This method handles empty material names and duplicate names
+        by creating unique internal names while preserving the original behavior.
+        """
+        material_name_counter = {}
+
         for link in self.links:
             for v in link.visuals:
                 if v.material is None:
                     continue
-                if v.material.name in self.material_map:
-                    v.material = self._material_map[v.material.name]
-                else:
+
+                # Get the original material name
+                original_name = v.material.name
+
+                # If the name is empty or we need to handle duplicates
+                if not original_name or original_name in material_name_counter:
+                    # Create a unique name for internal use
+                    if original_name not in material_name_counter:
+                        material_name_counter[original_name] = 0
+                    material_name_counter[original_name] += 1
+
+                    # Create unique internal name
+                    if original_name:
+                        unique_name = "{}___{}".format(original_name, material_name_counter[original_name])
+                    else:
+                        unique_name = "__unnamed_material_{}".format(material_name_counter[original_name])
+
+                    # Create a new material instance with the unique name
+                    # but keeping all other properties
+                    new_material = Material(
+                        name=unique_name,
+                        color=v.material.color,
+                        texture=v.material.texture
+                    )
+                    v.material = new_material
+
+                    # Add to materials list and map
                     self._materials.append(v.material)
-                    self._material_map[v.material.name] = v.material
+                    self._material_map[unique_name] = v.material
+                else:
+                    # First occurrence of this name - use original behavior
+                    if original_name in self.material_map:
+                        v.material = self._material_map[original_name]
+                    else:
+                        self._materials.append(v.material)
+                        self._material_map[original_name] = v.material
+                        material_name_counter[original_name] = 0
 
     @staticmethod
     def load(file_obj):
