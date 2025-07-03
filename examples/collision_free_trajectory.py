@@ -17,7 +17,15 @@ from skrobot.utils.visualization import trajectory_visualization
 
 
 parser = argparse.ArgumentParser(
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    description='Collision-free trajectory planning demo with optional video recording.',
+    epilog='''
+Recording Examples:
+  %(prog)s --record                                # Record with default settings
+  %(prog)s --record --record-fps 15.0              # Record at 15 FPS
+  %(prog)s --record --record-output trajectory.mp4 # Record to specific file
+  %(prog)s --record --no-interactive               # Record without interactive mode
+    ''',
+    formatter_class=argparse.RawDescriptionHelpFormatter
 )
 parser.add_argument(
     '-n', type=int, default=10,
@@ -40,6 +48,23 @@ parser.add_argument(
     '--trajectory-visualization',
     action='store_true',
     help="Enable trajectory optimization visualization"
+)
+parser.add_argument(
+    '--record',
+    action='store_true',
+    help="Record the demonstration as a video"
+)
+parser.add_argument(
+    '--record-output',
+    type=str,
+    default=None,
+    help='Video output file path (default: auto-generated with timestamp)'
+)
+parser.add_argument(
+    '--record-fps',
+    type=float,
+    default=10.0,
+    help='Recording frames per second (default: 10.0)'
 )
 args = parser.parse_args()
 
@@ -96,7 +121,7 @@ for link in coll_link_list:
 # visualization
 print("show trajectory")
 if args.viewer == 'trimesh':
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1/30.0)
 elif args.viewer == 'pyrender':
     viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
 
@@ -107,6 +132,15 @@ viewer.add(Axis(pos=target_coords.worldpos(), rot=target_coords.worldrot()))
 sscc.add_coll_spheres_to_viewer(viewer)
 viewer.show()
 viewer.set_camera([0, 0, np.pi / 2.0])
+
+# Give viewer time to initialize
+time.sleep(1.0)
+
+# Setup recording if requested
+if args.record:
+    print("=== Video Recording Enabled ===")
+    output_path = viewer.record(fps=args.record_fps, output_path=args.record_output)
+    print("Recording started. Output will be saved to: {}".format(output_path))
 
 # motion planning
 ts = time.time()
@@ -136,7 +170,7 @@ print("solving time : {0} sec".format(time.time() - ts))
 
 rarm_point_history = []
 line_string = None
-for av in av_seq:
+for i, av in enumerate(av_seq):
     set_robot_config(robot_model, joint_list, av, with_base=with_base)
     rarm_point_history.append(rarm_end_coords.worldpos())
 
@@ -149,10 +183,40 @@ for av in av_seq:
 
     sscc.update_color()
     viewer.redraw()
-    time.sleep(1.0)
+    
+    # Capture frame if recording
+    if args.record and hasattr(viewer, '_recording') and viewer._recording:
+        try:
+            viewer.capture_frame()
+            print("Frame captured: waypoint {}/{}".format(i+1, len(av_seq)))
+        except Exception as e:
+            print("Frame capture failed: {}".format(e))
+    
+    time.sleep(0.5)
+
+# Stop recording if it was started
+if args.record:
+    print("\n=== Stopping Video Recording ===")
+    saved_path = viewer.stop_record()
+    
+    if saved_path:
+        print("Recording successfully saved to: {}".format(saved_path))
+        print("\nYou can play the video with:")
+        print("  ffplay {}".format(saved_path))
+        print("or")
+        print("  vlc {}".format(saved_path))
+    else:
+        print("Recording failed!")
 
 if not args.no_interactive:
     print('==> Press [q] to close window')
     while not viewer.has_exit:
-        time.sleep(0.1)
+        time.sleep(0.05)
         viewer.redraw()
+        
+        # Capture frames during interactive mode if recording is still active
+        if args.record and hasattr(viewer, '_recording') and viewer._recording:
+            try:
+                viewer.capture_frame()
+            except Exception:
+                pass

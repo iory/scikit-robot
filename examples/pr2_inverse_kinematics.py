@@ -10,18 +10,20 @@ from skrobot.utils.visualization import ik_visualization
 
 
 def redraw_and_record(viewer, recording_info=None, delay=0.1):
-    """Redraw viewer and optionally record frame with macOS compatibility."""
+    """Redraw viewer and record frame if recording is active."""
     viewer.redraw()
     
-    # On macOS, add a delay and additional redraw for proper update
-    import platform
-    if platform.system() == 'Darwin':
-        time.sleep(delay)
-        viewer.redraw()
+    # Add a delay for stability
+    time.sleep(delay)
+    viewer.redraw()
     
-    # Record frame if recording on macOS
-    if recording_info and recording_info['is_macos']:
-        viewer.capture_frame()
+    # Manual frame capture for key moments during demo
+    if hasattr(viewer, '_recording') and viewer._recording:
+        try:
+            viewer.capture_frame()
+        except Exception as e:
+            # Frame capture failed, background thread will handle it
+            pass
 
 
 def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
@@ -305,6 +307,15 @@ Recording Examples:
     redraw_and_record(viewer, recording_info)
     
     print("First IK solving completed!")
+    
+    # Manual frame capture at key moments
+    if hasattr(viewer, '_recording') and viewer._recording:
+        time.sleep(0.5)
+        try:
+            viewer.capture_frame()
+            print("Key frame captured: IK completion")
+        except Exception as e:
+            print("Key frame capture failed: {}".format(e))
 
     # Demonstrate revert_if_fail=False with an unreachable target
     if not args.skip_revert_demo:
@@ -330,6 +341,7 @@ Recording Examples:
         while not viewer.has_exit:
             time.sleep(0.1)
             redraw_and_record(viewer, recording_info, delay=0.05)
+    viewer.close()
 
 
 if __name__ == '__main__':

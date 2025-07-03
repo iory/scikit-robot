@@ -146,6 +146,15 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             except Exception:
                 # If redraw fails, just continue - recording will capture next frame
                 pass
+        
+        # Capture frame during redraw when recording is active
+        if hasattr(self, '_recording') and self._recording:
+            try:
+                # Try to capture frame during redraw
+                self.capture_frame()
+            except Exception as e:
+                # Frame capture failed, background thread will handle it
+                pass
 
     def on_update(self, dt):
         self.on_draw()
@@ -155,6 +164,9 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             with self.lock:
                 self._update_vertex_list()
                 super(TrimeshSceneViewer, self).on_draw()
+            # Skip automatic frame capture during redraw when background recording is active
+            # Background thread handles frame capture automatically
+            pass
             return
 
         with self.lock:
@@ -168,6 +180,15 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             super(TrimeshSceneViewer, self).on_draw()
 
         self._redraw = False
+        
+        # Capture frame during redraw when recording is active
+        if hasattr(self, '_recording') and self._recording:
+            try:
+                # Try to capture frame during redraw
+                self.capture_frame()
+            except Exception as e:
+                # Frame capture failed, background thread will handle it
+                pass
 
     def on_mouse_press(self, *args, **kwargs):
         self._redraw = True
@@ -270,11 +291,75 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 )
 
     def save_image(self, file_obj):
-        self.switch_to()
-        self.dispatch_events()
-        self.dispatch_event('on_draw')
-        self.flip()
-        return super(TrimeshSceneViewer, self).save_image(file_obj)
+        # Check if viewer is initialized
+        if not hasattr(self, '_initialized') or not self._initialized:
+            raise RuntimeError("Viewer not initialized for save_image")
+        
+        # Check if we have a valid window (may be inherited from parent)
+        if not hasattr(self, 'window') or self.window is None:
+            # Try to get window from parent class or pyglet
+            try:
+                import pyglet
+                windows = list(pyglet.app.windows)
+                if not windows:
+                    raise RuntimeError("No pyglet windows available for save_image")
+                # Use the first available window
+                self.window = windows[0]
+            except:
+                raise RuntimeError("No window available for save_image")
+            
+        try:
+            # Make sure we have a current OpenGL context
+            if hasattr(self, 'switch_to'):
+                self.switch_to()
+            
+            # Dispatch events and draw
+            if hasattr(self, 'dispatch_events'):
+                self.dispatch_events()
+            if hasattr(self, 'dispatch_event'):
+                self.dispatch_event('on_draw')
+            if hasattr(self, 'flip'):
+                self.flip()
+                
+            return super(TrimeshSceneViewer, self).save_image(file_obj)
+        except Exception as e:
+            raise RuntimeError("Failed to save image: {}".format(e))
+    
+    def _safe_save_image(self, file_obj):
+        """Safer version of save_image optimized for GUI environments."""
+        if not hasattr(self, '_save_attempt_counter'):
+            self._save_attempt_counter = 0
+        self._save_attempt_counter += 1
+        
+        try:
+            # In GUI environments, we can use the standard save_image more reliably
+            import os
+            if 'DISPLAY' in os.environ:
+                # GUI environment - use standard approach
+                result = super(TrimeshSceneViewer, self).save_image(file_obj)
+                logger.debug("Successfully saved real frame #{} to {}".format(self._save_attempt_counter, file_obj))
+                return result
+            else:
+                # Fallback for headless environments
+                import pyglet
+                windows = list(pyglet.app.windows)
+                
+                if windows and len(windows) > 0:
+                    window = windows[0]
+                    if not window.has_exit:
+                        window.switch_to()
+                        result = super(TrimeshSceneViewer, self).save_image(file_obj)
+                        logger.debug("Successfully saved real frame #{} to {}".format(self._save_attempt_counter, file_obj))
+                        return result
+                    else:
+                        raise RuntimeError("Window has exited")
+                else:
+                    raise RuntimeError("No pyglet windows available")
+                
+        except Exception as e:
+            logger.warning("save_image failed on frame #{}: {}".format(self._save_attempt_counter, e))
+            # Re-raise the exception to indicate failure
+            raise e
 
     def record(self, fps=30.0, output_path=None):
         """Start recording the viewer's content as a video.
@@ -294,7 +379,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
         Notes
         -----
-        - Recording runs in a background thread
+        - Recording saves frames in memory and creates video on stop
         - Call stop_record() to stop recording and save the video
         - Requires imageio-ffmpeg to be installed for video encoding
         """
@@ -303,35 +388,42 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
         # Set default output path if not provided
         if output_path is None:
+            import os
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             output_path = os.path.join(tempfile.gettempdir(),
                                        "scikit_robot_recording_{}.mp4".format(timestamp))
 
         self._recording = True
         self._recording_frames = []
+        self._recording_frame_timestamps = []  # Store actual capture times
+        self._recording_start_time = None
         self._recording_stop_event.clear()
         self._recording_output_path = output_path
         self._recording_fps = fps
+        self._recording_frame_count = 0
 
-        if compat_platform == 'darwin':
-            # On macOS, use a different approach - user must manually call capture_frame()
-            print("macOS recording started in manual mode.")
-            print("Call viewer.capture_frame() from your animation loop to record frames.")
-            print("Call viewer.stop_record() when done.")
-        else:
-            # On Linux/Windows, use automatic background recording
+        # Start background recording thread for automatic capture
+        import os
+        if 'DISPLAY' in os.environ:
+            # GUI environment - start background recording thread
             self._recording_thread = threading.Thread(
-                target=self._record_loop,
-                args=(fps,)
+                target=self._background_record_loop,
+                daemon=True
             )
-            self._recording_thread.daemon = True
             self._recording_thread.start()
-
+            print("Recording started in background mode.")
+            print("Frames will be captured automatically.")
+        else:
+            # Headless environment - use manual capture
+            print("Recording started in manual mode.")
+            print("Frames will be captured during redraw operations.")
+        
+        print("Call viewer.stop_record() when done.")
         print("Recording started. Output will be saved to: {}".format(output_path))
         return output_path
 
     def capture_frame(self):
-        """Manually capture a frame during recording (macOS compatible).
+        """Manually capture a frame during recording for video.
         
         Returns
         -------
@@ -340,31 +432,64 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
             
         Notes
         -----
-        This method should be called from the main thread during animation
-        loops when recording on macOS.
+        This method captures frames in memory for video creation.
         """
         if not self._recording:
             return False
             
         try:
-            # Create a temporary file for the frame
+            # Increment frame counter
+            if not hasattr(self, '_recording_frame_count'):
+                self._recording_frame_count = 0
+            self._recording_frame_count += 1
+            
+            # Create temporary file for frame capture
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                 temp_path = tmp_file.name
 
-            # Save current frame
-            self.save_image(temp_path)
+            # Save current frame with error handling
+            try:
+                # Use safer save_image approach - only real frames
+                self._safe_save_image(temp_path)
+            except Exception as e:
+                logger.warning("Failed to save image: {}. Skipping this frame.".format(e))
+                # Clean up and skip this frame
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                return False
             
             # Check if file was created and has content
             if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
-                # Load and store the frame
+                # Check frame limit to prevent memory issues
+                if len(self._recording_frames) >= 300:  # Limit to 300 frames (~30 seconds at 10fps)
+                    print("Frame limit reached (300 frames). Skipping frame capture.")
+                    os.unlink(temp_path)
+                    return True
+                
+                # Record the actual capture time
+                import time
+                current_time = time.time()
+                
+                # Set start time for the first frame
+                if self._recording_start_time is None:
+                    self._recording_start_time = current_time
+                
+                # Store relative timestamp from recording start
+                relative_time = current_time - self._recording_start_time
+                self._recording_frame_timestamps.append(relative_time)
+                
+                # Load the frame into memory
                 frame = PIL.Image.open(temp_path)
+                # Ensure consistent format (RGB, 3 channels)
+                if frame.mode != 'RGB':
+                    frame = frame.convert('RGB')
                 frame_array = np.array(frame)
                 self._recording_frames.append(frame_array)
                 
                 # Clean up temporary file
                 os.unlink(temp_path)
                 
-                print("Frame {} captured".format(len(self._recording_frames)))
+                print("Frame {} captured at {:.2f}s".format(len(self._recording_frames), relative_time))
                 return True
             else:
                 if os.path.exists(temp_path):
@@ -372,11 +497,54 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 return False
                 
         except Exception as e:
-            logger.warning("Manual frame capture failed: {}".format(e))
+            logger.warning("Frame capture failed: {}".format(e))
             return False
 
+    def _background_record_loop(self):
+        """Background thread function for automatic frame recording."""
+        # Capture frames at regular intervals while recording is active
+        capture_interval = 0.1  # Capture every 100ms (10 FPS)
+        
+        logger.debug("Background recording thread started")
+        
+        # Wait for viewer to initialize
+        time.sleep(2.0)
+        
+        while self._recording and not self._recording_stop_event.is_set():
+            try:
+                # Check if viewer is properly initialized and has a window
+                if not hasattr(self, '_initialized') or not self._initialized:
+                    time.sleep(0.1)
+                    continue
+                
+                # Check if we have a window available
+                import pyglet
+                windows = list(pyglet.app.windows)
+                if not windows:
+                    logger.debug("No windows available for frame capture")
+                    time.sleep(0.1)
+                    continue
+                
+                # Capture frame in background
+                success = self.capture_frame()
+                if not success:
+                    logger.debug("Background frame capture failed, retrying...")
+                else:
+                    logger.debug("Background frame captured successfully")
+                
+                # Wait before next capture
+                time.sleep(capture_interval)
+                
+            except Exception as e:
+                logger.debug("Background recording error: {}".format(e))
+                # Continue recording despite errors
+                time.sleep(capture_interval)
+        
+        logger.debug("Background recording loop ended")
+
     def _record_loop(self, fps):
-        """Background thread function for recording frames."""
+        """Legacy background thread function for recording frames."""
+        # This method is kept for compatibility but not used in GUI mode
         frame_interval = 1.0 / fps
 
         while not self._recording_stop_event.is_set():
@@ -396,42 +564,9 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def _capture_frame(self):
         """Capture a single frame from the viewer."""
-        try:
-            if compat_platform == 'darwin':
-                # macOS requires window operations on main thread
-                # Store frame capture request and wait for main thread to process it
-                self._frame_capture_request = True
-                self._frame_capture_result = None
-                self._frame_capture_event = threading.Event()
-
-                # Wait for main thread to capture frame
-                self._frame_capture_event.wait(timeout=1.0)
-                frame_array = self._frame_capture_result
-
-                # Clean up
-                self._frame_capture_request = False
-                self._frame_capture_result = None
-                return frame_array
-            else:
-                # Linux/Windows can capture directly
-                # Create a temporary file for the frame
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                    temp_path = tmp_file.name
-
-                # Save current frame
-                self.save_image(temp_path)
-
-                # Load and return the frame
-                frame = PIL.Image.open(temp_path)
-                frame_array = np.array(frame)
-
-                # Clean up temporary file
-                os.unlink(temp_path)
-
-                return frame_array
-        except Exception as e:
-            logger.warning("Failed to capture frame: {}".format(e))
-            return None
+        # This method is no longer used since we switched to manual recording
+        # Just call capture_frame directly
+        return self.capture_frame()
 
 
     def stop_record(self):
@@ -453,8 +588,8 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._recording = False
         self._recording_stop_event.set()
 
-        # Wait for recording thread to finish
-        if self._recording_thread is not None:
+        # Wait for recording thread to finish (if any)
+        if hasattr(self, '_recording_thread') and self._recording_thread is not None:
             self._recording_thread.join(timeout=5.0)
 
         # Save video
@@ -463,23 +598,45 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 try:
                     import imageio
 
-                    # Save frames as video
-                    writer = imageio.get_writer(
-                        self._recording_output_path,
-                        fps=self._recording_fps,
-                        codec='libx264',
-                        pixelformat='yuv420p'
-                    )
+                    # Calculate actual duration and effective FPS
+                    if len(self._recording_frame_timestamps) > 1:
+                        actual_duration = self._recording_frame_timestamps[-1] - self._recording_frame_timestamps[0]
+                        effective_fps = (len(self._recording_frames) - 1) / actual_duration if actual_duration > 0 else self._recording_fps
+                    else:
+                        actual_duration = 1.0 / self._recording_fps
+                        effective_fps = self._recording_fps
+                    
+                    print("Actual recording duration: {:.2f} seconds".format(actual_duration))
+                    print("Effective FPS based on actual timing: {:.2f}".format(effective_fps))
 
-                    for frame in self._recording_frames:
-                        writer.append_data(frame)
+                    # Create video with actual timing preserved
+                    if len(self._recording_frame_timestamps) > 1:
+                        # Use the effective FPS based on actual capture timing
+                        writer = imageio.get_writer(
+                            self._recording_output_path,
+                            fps=effective_fps,
+                            codec='libx264',
+                            pixelformat='yuv420p'
+                        )
 
-                    writer.close()
-
-                    print("Recording saved to: {}".format(self._recording_output_path))
-                    print("Total frames: {}".format(len(self._recording_frames)))
-                    print("Duration: {:.2f} seconds".format(
-                        len(self._recording_frames) / self._recording_fps))
+                        # Simply add frames in order - the FPS will handle the timing
+                        for frame in self._recording_frames:
+                            writer.append_data(frame)
+                        
+                        writer.close()
+                        
+                        print("Recording saved to: {}".format(self._recording_output_path))
+                        print("Total frames: {}".format(len(self._recording_frames)))
+                        print("Actual duration: {:.2f} seconds".format(actual_duration))
+                        print("Effective FPS: {:.2f}".format(effective_fps))
+                        print("Video will play at the same speed as the actual recording")
+                    else:
+                        # Fallback for single frame
+                        writer.append_data(self._recording_frames[0])
+                        writer.close()
+                        
+                        print("Recording saved to: {}".format(self._recording_output_path))
+                        print("Single frame recorded")
 
                     return self._recording_output_path
 
@@ -497,4 +654,10 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         finally:
             # Clean up
             self._recording_frames = []
-            self._recording_thread = None
+            self._recording_frame_timestamps = []
+            self._recording_start_time = None
+            if hasattr(self, '_recording_thread'):
+                self._recording_thread = None
+            self._recording_frame_count = 0
+
+        return None
