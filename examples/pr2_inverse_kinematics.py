@@ -9,8 +9,23 @@ import skrobot
 from skrobot.utils.visualization import ik_visualization
 
 
+def redraw_and_record(viewer, recording_info=None, delay=0.1):
+    """Redraw viewer and optionally record frame with macOS compatibility."""
+    viewer.redraw()
+    
+    # On macOS, add a delay and additional redraw for proper update
+    import platform
+    if platform.system() == 'Darwin':
+        time.sleep(delay)
+        viewer.redraw()
+    
+    # Record frame if recording on macOS
+    if recording_info and recording_info['is_macos']:
+        viewer.capture_frame()
+
+
 def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
-                               no_ik_visualization):
+                               no_ik_visualization, recording_info=None):
     """Demonstrate the difference between revert_if_fail=True and False"""
     import numpy as np
 
@@ -32,6 +47,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     # Set green color for current end-effector
     current_ee_axis.set_color([0, 255, 0])  # RGB for green
     viewer.add(current_ee_axis)
+    redraw_and_record(viewer, recording_info)
 
     # Define an unreachable target (too far away)
     unreachable_pos = [0.8, -0.8, 1.2]  # Beyond robot's reach
@@ -50,7 +66,8 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     # Set red color for unreachable target
     unreachable_axis.set_color([255, 0, 0])  # RGB for red
     viewer.add(unreachable_axis)
-    viewer.redraw()
+    redraw_and_record(viewer, recording_info)
+    
     print("Unreachable target visualized with red coordinate frame")
 
     # First attempt with default revert_if_fail=True
@@ -77,7 +94,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
         rotation_axis=True
     )
 
-    viewer.redraw()
+    redraw_and_record(viewer, recording_info)
 
     # Second attempt with revert_if_fail=False
     print("\n2. Progressive IK (revert_if_fail=False):")
@@ -116,6 +133,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     # Set cyan color for progressive IK result
     progressive_result_axis.set_color([0, 255, 255])  # RGB for cyan
     viewer.add(progressive_result_axis)
+    redraw_and_record(viewer, recording_info)
 
     # Compare distances
     standard_distance = np.linalg.norm(standard_end_pos - unreachable_pos)
@@ -132,7 +150,8 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     else:
         print("   Standard IK performed better in this case")
 
-    viewer.redraw()
+    redraw_and_record(viewer, recording_info)
+    
     print("\nAll IK demonstrations completed!")
     print("\n" + "=" * 60)
     print("VISUALIZATION LEGEND:")
@@ -145,7 +164,15 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Simple PR2 inverse kinematics example.')
+        description='Simple PR2 inverse kinematics example with optional video recording.',
+        epilog='''
+Recording Examples:
+  %(prog)s --record                                # Record with default settings
+  %(prog)s --record --record-fps 30.0              # Record at 30 FPS
+  %(prog)s --record --record-output demo.mp4       # Record to specific file
+  %(prog)s --record --skip-revert-demo             # Record only basic IK demo
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         '--no-interactive',
         action='store_true',
@@ -164,6 +191,23 @@ def main():
         '--skip-revert-demo',
         action='store_true',
         help="Skip the revert_if_fail demonstration"
+    )
+    parser.add_argument(
+        '--record',
+        action='store_true',
+        help="Record the demonstration as a video"
+    )
+    parser.add_argument(
+        '--record-output',
+        type=str,
+        default=None,
+        help='Video output file path (default: auto-generated with timestamp)'
+    )
+    parser.add_argument(
+        '--record-fps',
+        type=float,
+        default=24.0,
+        help='Recording frames per second (default: 24.0)'
     )
     args = parser.parse_args()
 
@@ -190,8 +234,30 @@ def main():
 
     viewer.add(robot_model)
     viewer.show()
+    
+    # Give viewer time to initialize on macOS
+    time.sleep(1.0)
+    
     viewer.set_camera([np.deg2rad(45), -np.deg2rad(0),
                        np.deg2rad(135)], distance=2.5)
+    
+    # Setup recording if requested
+    recording_info = None
+    if args.record:
+        print("=== Video Recording Enabled ===")
+        output_path = viewer.record(fps=args.record_fps, output_path=args.record_output)
+        
+        # Check if we're on macOS for manual frame capture
+        import platform
+        is_macos = platform.system() == 'Darwin'
+        recording_info = {
+            'output_path': output_path,
+            'is_macos': is_macos
+        }
+        
+        if is_macos:
+            print("macOS detected - frames will be captured manually during demonstration")
+        print("Recording started. Output will be saved to: {}".format(output_path))
 
     # Define target position
     target_pos = [0.7, -0.2, 0.8]
@@ -208,7 +274,8 @@ def main():
         rot=target_coords.rotation
     )
     viewer.add(target_axis)
-    viewer.redraw()
+    redraw_and_record(viewer, recording_info)
+    
     print("Target position visualized with coordinate frame")
 
     # Solve inverse kinematics with optional visualization
@@ -235,19 +302,34 @@ def main():
     else:
         print("Failed to reach target")
 
-    viewer.redraw()
+    redraw_and_record(viewer, recording_info)
+    
     print("First IK solving completed!")
 
     # Demonstrate revert_if_fail=False with an unreachable target
     if not args.skip_revert_demo:
         demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
-                                   args.no_ik_visualization)
+                                   args.no_ik_visualization, recording_info)
+
+    # Stop recording if it was started
+    if args.record:
+        print("\n=== Stopping Video Recording ===")
+        saved_path = viewer.stop_record()
+        
+        if saved_path:
+            print("Recording successfully saved to: {}".format(saved_path))
+            print("\nYou can play the video with:")
+            print("  ffplay {}".format(saved_path))
+            print("or")
+            print("  vlc {}".format(saved_path))
+        else:
+            print("Recording failed!")
 
     if not args.no_interactive:
         print('==> Press [q] to close window')
         while not viewer.has_exit:
             time.sleep(0.1)
-            viewer.redraw()
+            redraw_and_record(viewer, recording_info, delay=0.05)
 
 
 if __name__ == '__main__':

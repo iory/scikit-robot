@@ -2,10 +2,14 @@ from __future__ import division
 
 import collections
 import logging
+import os
+import tempfile
 import threading
+import time
 import warnings
 
 import numpy as np
+import PIL.Image
 import pyglet
 from pyglet import compat_platform
 import trimesh
@@ -92,6 +96,12 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.lock = threading.Lock()
         self._initialized = True
 
+        # Recording related attributes
+        self._recording = False
+        self._recording_thread = None
+        self._recording_frames = []
+        self._recording_stop_event = threading.Event()
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(TrimeshSceneViewer, cls).__new__(cls)
@@ -129,7 +139,13 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     def redraw(self):
         self._redraw = True
         if compat_platform == 'darwin':
-            _redraw_all_windows()
+            # On macOS, try to redraw without blocking
+            try:
+                if hasattr(self, 'window') and self.window:
+                    _redraw_all_windows()
+            except Exception:
+                # If redraw fails, just continue - recording will capture next frame
+                pass
 
     def on_update(self, dt):
         self.on_draw()
@@ -259,3 +275,226 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.dispatch_event('on_draw')
         self.flip()
         return super(TrimeshSceneViewer, self).save_image(file_obj)
+
+    def record(self, fps=30.0, output_path=None):
+        """Start recording the viewer's content as a video.
+
+        Parameters
+        ----------
+        fps : float, optional
+            Frames per second for the recording. Default is 30.0.
+        output_path : str, optional
+            Path to save the video file. If None, a temporary file
+            will be created with a timestamp.
+
+        Returns
+        -------
+        str
+            The path where the video will be saved.
+
+        Notes
+        -----
+        - Recording runs in a background thread
+        - Call stop_record() to stop recording and save the video
+        - Requires imageio-ffmpeg to be installed for video encoding
+        """
+        if self._recording:
+            raise RuntimeError("Recording is already in progress. Call stop_record() first.")
+
+        # Set default output path if not provided
+        if output_path is None:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(tempfile.gettempdir(),
+                                       "scikit_robot_recording_{}.mp4".format(timestamp))
+
+        self._recording = True
+        self._recording_frames = []
+        self._recording_stop_event.clear()
+        self._recording_output_path = output_path
+        self._recording_fps = fps
+
+        if compat_platform == 'darwin':
+            # On macOS, use a different approach - user must manually call capture_frame()
+            print("macOS recording started in manual mode.")
+            print("Call viewer.capture_frame() from your animation loop to record frames.")
+            print("Call viewer.stop_record() when done.")
+        else:
+            # On Linux/Windows, use automatic background recording
+            self._recording_thread = threading.Thread(
+                target=self._record_loop,
+                args=(fps,)
+            )
+            self._recording_thread.daemon = True
+            self._recording_thread.start()
+
+        print("Recording started. Output will be saved to: {}".format(output_path))
+        return output_path
+
+    def capture_frame(self):
+        """Manually capture a frame during recording (macOS compatible).
+        
+        Returns
+        -------
+        bool
+            True if frame was captured successfully, False otherwise.
+            
+        Notes
+        -----
+        This method should be called from the main thread during animation
+        loops when recording on macOS.
+        """
+        if not self._recording:
+            return False
+            
+        try:
+            # Create a temporary file for the frame
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                temp_path = tmp_file.name
+
+            # Save current frame
+            self.save_image(temp_path)
+            
+            # Check if file was created and has content
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                # Load and store the frame
+                frame = PIL.Image.open(temp_path)
+                frame_array = np.array(frame)
+                self._recording_frames.append(frame_array)
+                
+                # Clean up temporary file
+                os.unlink(temp_path)
+                
+                print("Frame {} captured".format(len(self._recording_frames)))
+                return True
+            else:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                return False
+                
+        except Exception as e:
+            logger.warning("Manual frame capture failed: {}".format(e))
+            return False
+
+    def _record_loop(self, fps):
+        """Background thread function for recording frames."""
+        frame_interval = 1.0 / fps
+
+        while not self._recording_stop_event.is_set():
+            start_time = time.time()
+
+            # Capture frame
+            frame = self._capture_frame()
+            if frame is not None:
+                self._recording_frames.append(frame)
+
+            # Sleep to maintain fps
+            elapsed = time.time() - start_time
+            sleep_time = frame_interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+
+    def _capture_frame(self):
+        """Capture a single frame from the viewer."""
+        try:
+            if compat_platform == 'darwin':
+                # macOS requires window operations on main thread
+                # Store frame capture request and wait for main thread to process it
+                self._frame_capture_request = True
+                self._frame_capture_result = None
+                self._frame_capture_event = threading.Event()
+
+                # Wait for main thread to capture frame
+                self._frame_capture_event.wait(timeout=1.0)
+                frame_array = self._frame_capture_result
+
+                # Clean up
+                self._frame_capture_request = False
+                self._frame_capture_result = None
+                return frame_array
+            else:
+                # Linux/Windows can capture directly
+                # Create a temporary file for the frame
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                    temp_path = tmp_file.name
+
+                # Save current frame
+                self.save_image(temp_path)
+
+                # Load and return the frame
+                frame = PIL.Image.open(temp_path)
+                frame_array = np.array(frame)
+
+                # Clean up temporary file
+                os.unlink(temp_path)
+
+                return frame_array
+        except Exception as e:
+            logger.warning("Failed to capture frame: {}".format(e))
+            return None
+
+
+    def stop_record(self):
+        """Stop recording and save the video.
+
+        Returns
+        -------
+        str or None
+            The path to the saved video file, or None if recording failed.
+
+        Notes
+        -----
+        This method will block until the video is saved.
+        """
+        if not self._recording:
+            raise RuntimeError("No recording in progress.")
+
+        # Stop recording
+        self._recording = False
+        self._recording_stop_event.set()
+
+        # Wait for recording thread to finish
+        if self._recording_thread is not None:
+            self._recording_thread.join(timeout=5.0)
+
+        # Save video
+        try:
+            if len(self._recording_frames) > 0:
+                try:
+                    import imageio
+
+                    # Save frames as video
+                    writer = imageio.get_writer(
+                        self._recording_output_path,
+                        fps=self._recording_fps,
+                        codec='libx264',
+                        pixelformat='yuv420p'
+                    )
+
+                    for frame in self._recording_frames:
+                        writer.append_data(frame)
+
+                    writer.close()
+
+                    print("Recording saved to: {}".format(self._recording_output_path))
+                    print("Total frames: {}".format(len(self._recording_frames)))
+                    print("Duration: {:.2f} seconds".format(
+                        len(self._recording_frames) / self._recording_fps))
+
+                    return self._recording_output_path
+
+                except ImportError:
+                    logger.error("imageio is required for video recording. "
+                                 "Install it with: pip install imageio imageio-ffmpeg")
+                    return None
+                except Exception as e:
+                    logger.error("Failed to save video: {}".format(e))
+                    return None
+            else:
+                print("No frames captured during recording.")
+                return None
+
+        finally:
+            # Clean up
+            self._recording_frames = []
+            self._recording_thread = None

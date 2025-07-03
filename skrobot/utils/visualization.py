@@ -311,6 +311,16 @@ def get_trajectory_optimization_callback():
                 if hasattr(viewer, 'update'):
                     viewer.update()
                 viewer.redraw()
+                
+                # Check if viewer is recording and handle macOS frame capture
+                if hasattr(viewer, '_recording') and viewer._recording:
+                    try:
+                        import platform
+                        if platform.system() == 'Darwin' and hasattr(viewer, 'capture_frame'):
+                            viewer.capture_frame()
+                    except Exception:
+                        # If frame capture fails, continue without error
+                        pass
 
                 time.sleep(sleep_time)
 
@@ -378,6 +388,17 @@ def create_ik_visualization_hook(viewer, sleep_time=0.05, enabled=None):
 
     def redraw_hook():
         viewer.redraw()
+        
+        # Check if viewer is recording and handle macOS frame capture
+        if hasattr(viewer, '_recording') and viewer._recording:
+            # Check if we're on macOS and need manual frame capture
+            try:
+                import platform
+                if platform.system() == 'Darwin' and hasattr(viewer, 'capture_frame'):
+                    viewer.capture_frame()
+            except Exception:
+                # If frame capture fails, continue without error
+                pass
 
     def sleep_hook():
         time.sleep(sleep_time)
