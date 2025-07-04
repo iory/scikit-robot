@@ -120,11 +120,52 @@ class CascadedLink(CascadedCoords):
         return False
 
     def angle_vector(self, av=None, return_av=None):
-        """Returns angle vector
+        """Get or set joint angle vector.
 
-        If av is given, it updates angles of all joint.
-        If given av violate min/max range, the value is modified.
+        This is the core function for joint angle manipulation. If av is provided,
+        it updates the angles of all joints. Joint limits are automatically enforced
+        when setting angles.
 
+        Parameters
+        ----------
+        av : numpy.ndarray or None
+            Joint angle vector to set. If None, returns current joint angles.
+            Values that violate joint limits are automatically clipped to valid range.
+        return_av : numpy.ndarray or None
+            Pre-allocated array to store the result. If None, creates a new array.
+            This can improve performance when called repeatedly in optimization loops.
+
+        Returns
+        -------
+        return_av : numpy.ndarray
+            Current joint angle vector. Shape is (n_joints,) where n_joints is
+            the total number of joint degrees of freedom.
+
+        Notes
+        -----
+        This function handles:
+
+        - Joint limit enforcement through min/max table lookup when available
+        - Multi-DOF joints by processing multiple angles per joint
+        - Efficient memory allocation when return_av is pre-allocated
+
+        The function uses CascadedCoords lazy evaluation, so coordinate
+        transformations are automatically updated when joint angles change.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.models import PR2
+        >>> robot = PR2()
+        >>> # Get current joint angles
+        >>> current_angles = robot.angle_vector()
+        >>> # Set new joint angles (with automatic limit enforcement)
+        >>> new_angles = np.zeros(len(robot.joint_list))
+        >>> robot.angle_vector(new_angles)
+        >>> # Efficient repeated calls with pre-allocated array
+        >>> result_array = np.zeros(len(robot.joint_list))
+        >>> for i in range(100):
+        ...     angles = robot.angle_vector(return_av=result_array)
         """
         if return_av is None:
             return_av = np.zeros(len(self.joint_list), dtype=np.float32)
@@ -146,6 +187,55 @@ class CascadedLink(CascadedCoords):
                 else:
                     return_av[index] = j.joint_angle[k]()
         return return_av
+
+    def forward_kinematics(self, av=None, return_av=None):
+        """Compute forward kinematics.
+
+        This function sets joint angles and computes the forward kinematics
+        to update the positions and orientations of all links in the robot.
+
+        Parameters
+        ----------
+        av : numpy.ndarray or None
+            Joint angle vector. If None, uses current joint angles.
+        return_av : numpy.ndarray or None
+            Pre-allocated array to store the result. If None, creates a new array.
+            This can improve performance when called repeatedly.
+
+        Returns
+        -------
+        av : numpy.ndarray
+            Current angle vector after forward kinematics computation.
+
+        Notes
+        -----
+        This is a wrapper function for `angle_vector` that provides a more
+        intuitive name for computing forward kinematics. The function:
+
+        1. Sets joint angles if av is provided
+        2. Updates the kinematic chain (implicit through joint angle setting)
+        3. Returns the current angle vector
+
+        **Important:** After setting joint angles with `joint.joint_angle()`,
+        you typically do not need to explicitly call `forward_kinematics()`
+        because scikit-robot uses the CascadedCoords class which implements lazy
+        evaluation. The coordinate transformations are automatically computed
+        when needed (e.g., when accessing `worldpos()` or `worldrot()`).
+        Explicit calls to `forward_kinematics()` are only necessary when you
+        need to ensure all transformations are computed immediately.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.models import PR2
+        >>> robot = PR2()
+        >>> # Set specific joint angles and compute forward kinematics
+        >>> angles = np.zeros(len(robot.joint_list))
+        >>> current_av = robot.forward_kinematics(angles)
+        >>> # Get current configuration after forward kinematics
+        >>> pos = robot.rarm.end_coords.worldpos()
+        """
+        return self.angle_vector(av, return_av)
 
     def calc_joint_angle_from_min_max_table(self, index, j, av):
         # currently only 1dof joint is supported
