@@ -709,9 +709,16 @@ def normalize_vector(v, ord=2):
     array([0., 0., 0.])
     """
     v = np.array(v, dtype=np.float64)
-    norm = np.linalg.norm(v, ord=ord)
-    if norm == 0:
-        return v
+    if ord == 2:
+        # Optimized L2 norm calculation
+        norm_squared = np.dot(v, v)
+        if norm_squared == 0:
+            return v
+        norm = np.sqrt(norm_squared)
+    else:
+        norm = np.linalg.norm(v, ord=ord)
+        if norm == 0:
+            return v
     return v / norm
 
 
@@ -992,7 +999,12 @@ def cross_product(a, b):
     cross_prod : numpy.ndarray
         calculated cross product
     """
-    return np.dot(outer_product_matrix(a), b)
+    # Direct implementation instead of matrix multiplication for better performance
+    return np.array([
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    ])
 
 
 def quaternion2rpy(q):
