@@ -2425,6 +2425,53 @@ class RobotModel(CascadedLink):
             'total_inertia': total_inertia
         }
 
+    def centroid(self, update_mass_properties=True):
+        """Calculate total robot centroid (Center Of Gravity, COG) in world coordinates.
+
+        Parameters
+        ----------
+        update_mass_properties : bool, optional
+            If True, recalculate total mass properties for all links and return
+            the total robot centroid. If False, return pre-computed centroid
+            without recalculation. Default is True.
+
+        Returns
+        -------
+        numpy.ndarray
+            3D vector of robot centroid position [m] in world coordinates.
+
+        Notes
+        -----
+        This method calculates the center of gravity (centroid) of the entire robot
+        by considering the mass and centroid of each link. The calculation is based
+        on the weighted average of all link centroids in world coordinates.
+
+        The centroid is calculated as:
+        centroid = sum(mass_i * position_i) / sum(mass_i)
+
+        where mass_i and position_i are the mass and world position of link i.
+
+        Examples
+        --------
+        >>> robot = RobotModel()
+        >>> cog = robot.centroid()  # Calculate and return centroid
+        >>> cog_cached = robot.centroid(update_mass_properties=False)  # Use cached values
+        """
+        if update_mass_properties:
+            mass_props = self.update_mass_properties()
+            # Update the cache with the latest mass properties
+            self._cached_mass_props = mass_props
+            return mass_props['total_centroid']
+        else:
+            # Return cached centroid if available
+            if hasattr(self, '_cached_mass_props'):
+                return self._cached_mass_props['total_centroid']
+            else:
+                # If no cached values, calculate once
+                mass_props = self.update_mass_properties()
+                self._cached_mass_props = mass_props
+                return mass_props['total_centroid']
+
     def calc_av_vel_acc_from_pos(self, dt, av_prev=None, av_curr=None, av_next=None):
         """Calculate joint velocities and accelerations from angle vectors.
 

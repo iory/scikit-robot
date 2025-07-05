@@ -597,3 +597,13 @@ class TestRobotModel(unittest.TestCase):
             abs(torques_original[elbow_idx]),
             msg="Elbow torque should increase with heavier forearm"
         )
+
+    def test_centroid(self):
+        """Test centroid (center of gravity) calculation."""
+        pr2 = self.pr2
+        pr2.reset_pose()
+
+        # Test that centroid method exists and returns correct shape
+        cog = pr2.centroid()
+        self.assertEqual(cog.shape, (3,))
+        self.assertIsInstance(cog, np.ndarray)
