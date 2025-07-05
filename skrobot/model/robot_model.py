@@ -2459,6 +2459,8 @@ class RobotModel(CascadedLink):
         """
         if update_mass_properties:
             mass_props = self.update_mass_properties()
+            # Update the cache with the latest mass properties
+            self._cached_mass_props = mass_props
             return mass_props['total_centroid']
         else:
             # Return cached centroid if available
