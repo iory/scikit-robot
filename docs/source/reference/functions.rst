@@ -38,6 +38,10 @@ Utilities functions
    rotation_distance
    axis_angle_from_matrix
    angle_between_vectors
+   matrix2ypr
+   matrix2rpy
+   ypr2matrix
+   rpy2matrix
 
 
 Jacobian Functions

@@ -11,6 +11,7 @@ from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import convert_to_axis_vector
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
@@ -789,6 +790,9 @@ class Coordinates(object):
     def rpy_angle(self):
         """Return a pair of rpy angles of this coordinates.
 
+        .. deprecated::
+            This method is deprecated and confusing. Use matrix2ypr() or matrix2rpy() instead.
+
         Returns
         -------
         rpy_angle(self._rotation) : tuple(numpy.ndarray, numpy.ndarray)
@@ -803,6 +807,12 @@ class Coordinates(object):
         (array([ 3.84592537e-16, -1.04719755e+00,  1.57079633e+00]),
         array([ 3.14159265, -2.0943951 , -1.57079633]))
         """
+        warnings.warn(
+            "rpy_angle() method is deprecated and confusing. Use matrix2ypr() for [yaw, pitch, roll] "
+            "or matrix2rpy() for [roll, pitch, yaw] instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return rpy_angle(self._rotation)
 
     def axis(self, ax):
@@ -1304,7 +1314,7 @@ class Coordinates(object):
     def __str__(self):
         self.worldrot()
         pos = self.worldpos()
-        self.rpy = rpy_angle(self._rotation)[0]
+        self.rpy = matrix2ypr(self._rotation)
         if self.name:
             prefix = self.__class__.__name__ + ':' + self.name
         else:

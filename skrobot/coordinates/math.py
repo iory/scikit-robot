@@ -642,6 +642,10 @@ def rpy_matrix(az, ay, ax):
 def rpy_angle(matrix):
     """Decomposing a rotation matrix to yaw-pitch-roll.
 
+    .. deprecated::
+        This function is deprecated and confusing. Use matrix2ypr() or matrix2rpy() instead.
+        matrix2ypr() returns [yaw, pitch, roll] and matrix2rpy() returns [roll, pitch, yaw].
+
     Parameters
     ----------
     matrix : list or numpy.ndarray
@@ -665,6 +669,12 @@ def rpy_angle(matrix):
     (array([1.57079633, 1.04719755, 0.52359878]),
      array([ 4.71238898,  2.0943951 , -2.61799388]))
     """
+    warnings.warn(
+        "rpy_angle() is deprecated and confusing. Use matrix2ypr() for [yaw, pitch, roll] "
+        "or matrix2rpy() for [roll, pitch, yaw] instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
         a = 0.0
     else:
@@ -683,6 +693,166 @@ def rpy_angle(matrix):
     c = np.arctan2(sa * matrix[0, 2] - ca * matrix[1, 2],
                    -sa * matrix[0, 1] + ca * matrix[1, 1])
     return rpy, np.array([a, b, c])
+
+
+def matrix2ypr(matrix):
+    """Convert rotation matrix to yaw-pitch-roll angles.
+
+    This function extracts yaw, pitch, roll angles from a rotation matrix.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    angles : numpy.ndarray
+        Array of [yaw, pitch, roll] angles in radians
+        - yaw: rotation around Z-axis
+        - pitch: rotation around Y-axis
+        - roll: rotation around X-axis
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import ypr2matrix, matrix2ypr
+    >>> yaw, pitch, roll = np.pi/6, np.pi/4, np.pi/3
+    >>> rot = ypr2matrix(yaw, pitch, roll)
+    >>> angles = matrix2ypr(rot)
+    >>> np.allclose(angles, [yaw, pitch, roll])
+    True
+    >>> print("Yaw: {:.3f}, Pitch: {:.3f}, Roll: {:.3f}".format(angles[0], angles[1], angles[2]))
+    Yaw: 0.524, Pitch: 0.785, Roll: 1.047
+    """
+    # Extract yaw, pitch, roll angles directly
+    if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
+        yaw = 0.0
+    else:
+        yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+
+    sin_yaw = np.sin(yaw)
+    cos_yaw = np.cos(yaw)
+    pitch = np.arctan2(-matrix[2, 0], cos_yaw * matrix[0, 0] + sin_yaw * matrix[1, 0])
+    roll = np.arctan2(sin_yaw * matrix[0, 2] - cos_yaw * matrix[1, 2],
+                      -sin_yaw * matrix[0, 1] + cos_yaw * matrix[1, 1])
+
+    return np.array([yaw, pitch, roll])
+
+
+def matrix2rpy(matrix):
+    """Extract roll, pitch, yaw angles from rotation matrix.
+
+    This function returns angles in roll-pitch-yaw order (X-Y-Z rotation order).
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    angles : numpy.ndarray
+        Array of [roll, pitch, yaw] angles in radians
+        - roll: rotation around X-axis
+        - pitch: rotation around Y-axis
+        - yaw: rotation around Z-axis
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rpy_matrix, matrix2rpy
+    >>> roll, pitch, yaw = np.pi/3, np.pi/4, np.pi/6
+    >>> rot = rpy_matrix(yaw, pitch, roll)  # Note: rpy_matrix takes yaw first
+    >>> angles = matrix2rpy(rot)
+    >>> np.allclose(angles, [roll, pitch, yaw])
+    True
+    >>> print("Roll: {:.3f}, Pitch: {:.3f}, Yaw: {:.3f}".format(angles[0], angles[1], angles[2]))
+    Roll: 1.047, Pitch: 0.785, Yaw: 0.524
+    """
+    ypr_angles = matrix2ypr(matrix)
+    # Convert from [yaw, pitch, roll] to [roll, pitch, yaw]
+    return np.array([ypr_angles[2], ypr_angles[1], ypr_angles[0]])
+
+
+def ypr2matrix(yaw, pitch, roll):
+    """Create rotation matrix from yaw, pitch, roll angles.
+
+    This is a clearly named wrapper around rpy_matrix that explicitly
+    indicates the parameter order. The rotation is applied in Z-Y-X order
+    (yaw around Z, then pitch around Y, then roll around X).
+
+    Parameters
+    ----------
+    yaw : float
+        Rotation around Z-axis in radians
+    pitch : float
+        Rotation around Y-axis in radians
+    roll : float
+        Rotation around X-axis in radians
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import ypr2matrix, matrix2ypr
+    >>> yaw, pitch, roll = np.pi/6, np.pi/4, np.pi/3
+    >>> rot = ypr2matrix(yaw, pitch, roll)
+    >>> recovered = matrix2ypr(rot)
+    >>> np.allclose(recovered, [yaw, pitch, roll])
+    True
+
+    # Compare with rpy_matrix (which has same parameter order)
+    >>> from skrobot.coordinates.math import rpy_matrix
+    >>> rot_old = rpy_matrix(yaw, pitch, roll)
+    >>> np.allclose(rot, rot_old)
+    True
+    """
+    return rpy_matrix(yaw, pitch, roll)
+
+
+def rpy2matrix(roll, pitch, yaw):
+    """Create rotation matrix from roll, pitch, yaw angles.
+
+    This function takes parameters in roll-pitch-yaw order (X-Y-Z rotation order),
+    which is more intuitive for many applications. The rotation is applied as:
+    roll around X, then pitch around Y, then yaw around Z.
+
+    Parameters
+    ----------
+    roll : float
+        Rotation around X-axis in radians
+    pitch : float
+        Rotation around Y-axis in radians
+    yaw : float
+        Rotation around Z-axis in radians
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rpy2matrix, matrix2rpy
+    >>> roll, pitch, yaw = np.pi/3, np.pi/4, np.pi/6
+    >>> rot = rpy2matrix(roll, pitch, yaw)
+    >>> recovered = matrix2rpy(rot)
+    >>> np.allclose(recovered, [roll, pitch, yaw])
+    True
+
+    # Verify rotation order: X then Y then Z
+    >>> # Pure rotations should work correctly
+    >>> rot_x = rpy2matrix(np.pi/2, 0, 0)
+    >>> rot_y = rpy2matrix(0, np.pi/2, 0)
+    >>> rot_z = rpy2matrix(0, 0, np.pi/2)
+    """
+    return rpy_matrix(yaw, pitch, roll)
 
 
 def normalize_vector(v, ord=2):

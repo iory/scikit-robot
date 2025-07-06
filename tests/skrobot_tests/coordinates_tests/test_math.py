@@ -14,6 +14,8 @@ from skrobot.coordinates.math import counter_clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import invert_yaw_pitch_roll
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2rpy
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import matrix_exponent
 from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import midrot
@@ -41,12 +43,14 @@ from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
 from skrobot.coordinates.math import rotation_vector_to_quaternion
+from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.coordinates.math import triple_product
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
+from skrobot.coordinates.math import ypr2matrix
 
 
 class TestMath(unittest.TestCase):
@@ -719,3 +723,69 @@ class TestMath(unittest.TestCase):
             R_combined, np.identity(3), atol=tolerance,
             err_msg="Failed for exact -90 degree gimbal lock case"
         )
+
+    def test_matrix2ypr(self):
+        # Test identity matrix
+        identity = np.eye(3)
+        ypr = matrix2ypr(identity)
+        testing.assert_almost_equal(ypr, np.array([0, 0, 0]))
+
+        # Test known rotation: 90 degrees around Z (yaw)
+        rot_z = np.array([[0, -1, 0],
+                          [1, 0, 0],
+                          [0, 0, 1]])
+        ypr = matrix2ypr(rot_z)
+        testing.assert_almost_equal(ypr, np.array([pi / 2, 0, 0]))
+
+        # Test known rotation: 90 degrees around Y (pitch)
+        rot_y = np.array([[0, 0, 1],
+                          [0, 1, 0],
+                          [-1, 0, 0]])
+        ypr = matrix2ypr(rot_y)
+        testing.assert_almost_equal(ypr, np.array([0, pi / 2, 0]))
+
+        # Test known rotation: 90 degrees around X (roll)
+        rot_x = np.array([[1, 0, 0],
+                          [0, 0, -1],
+                          [0, 1, 0]])
+        ypr = matrix2ypr(rot_x)
+        testing.assert_almost_equal(ypr, np.array([0, 0, pi / 2]))
+
+        # Test composite rotation and round-trip conversion
+        yaw, pitch, roll = pi / 6, pi / 4, pi / 3
+        rot = ypr2matrix(yaw, pitch, roll)
+        recovered_ypr = matrix2ypr(rot)
+        testing.assert_almost_equal(recovered_ypr, np.array([yaw, pitch, roll]))
+
+    def test_matrix2rpy(self):
+        # Test identity matrix
+        identity = np.eye(3)
+        rpy = matrix2rpy(identity)
+        testing.assert_almost_equal(rpy, np.array([0, 0, 0]))
+
+        # Test known rotation: 90 degrees around Z (yaw)
+        rot_z = np.array([[0, -1, 0],
+                          [1, 0, 0],
+                          [0, 0, 1]])
+        rpy = matrix2rpy(rot_z)
+        testing.assert_almost_equal(rpy, np.array([0, 0, pi / 2]))
+
+        # Test known rotation: 90 degrees around Y (pitch)
+        rot_y = np.array([[0, 0, 1],
+                          [0, 1, 0],
+                          [-1, 0, 0]])
+        rpy = matrix2rpy(rot_y)
+        testing.assert_almost_equal(rpy, np.array([0, pi / 2, 0]))
+
+        # Test known rotation: 90 degrees around X (roll)
+        rot_x = np.array([[1, 0, 0],
+                          [0, 0, -1],
+                          [0, 1, 0]])
+        rpy = matrix2rpy(rot_x)
+        testing.assert_almost_equal(rpy, np.array([pi / 2, 0, 0]))
+
+        # Test composite rotation and round-trip conversion
+        roll, pitch, yaw = pi / 3, pi / 4, pi / 6
+        rot = rpy2matrix(roll, pitch, yaw)
+        recovered_rpy = matrix2rpy(rot)
+        testing.assert_almost_equal(recovered_rpy, np.array([roll, pitch, yaw]))
