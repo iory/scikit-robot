@@ -36,6 +36,8 @@ class URDFXMLRootLinkChanger:
         self.tree = ET.parse(urdf_path)
         self.root = self.tree.getroot()
 
+        ET.register_namespace('xacro', "http://ros.org/wiki/xacro")
+
         # Parse the URDF structure
         self.links = self._parse_links()
         self.joints = self._parse_joints()
