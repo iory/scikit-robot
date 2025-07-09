@@ -90,10 +90,10 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     macro.append(connector_joint)
 
     for elem in urdf_root:
-        if elem.tag in ["link", "joint"]:
-            if not no_prefix:
-                if "name" in elem.attrib:
-                    elem.attrib["name"] = add_prefix_to_name(elem.attrib["name"])
+        if not no_prefix:
+            if "name" in elem.attrib:
+                elem.attrib["name"] = add_prefix_to_name(elem.attrib["name"])
+            if elem.tag in ["joint"]:
                 for sub in elem.findall("parent"):
                     sub.attrib["link"] = add_prefix_to_name(sub.attrib["link"])
                 for sub in elem.findall("child"):
@@ -101,9 +101,7 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
                 for sub in elem.findall("mimic"):
                     if "joint" in sub.attrib:
                         sub.attrib["joint"] = add_prefix_to_name(sub.attrib["joint"])
-            macro.append(elem)
-        else:
-            xacro_root.append(elem)
+        macro.append(elem)
 
     indent_element(macro, level=1)
 
