@@ -93,6 +93,8 @@ def main():
             while not viewer.has_exit:
                 time.sleep(0.1)
                 viewer.redraw()
+        viewer.close()
+        time.sleep(1.0)
 
 
 if __name__ == '__main__':
