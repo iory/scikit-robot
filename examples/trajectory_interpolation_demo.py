@@ -308,6 +308,7 @@ def main():
         else:
             print('\n==> Demo complete')
     viewer.close()
+    time.sleep(1.0)
 
 
 if __name__ == '__main__':
