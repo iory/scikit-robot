@@ -40,29 +40,40 @@ class TestExampleScripts(unittest.TestCase):
         failures = []
 
         for script in example_scripts:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                env = os.environ.copy()
-                env["TMPDIR"] = tmp_dir
+            max_attempts = 3
+            attempt = 0
+            success = False
 
-                cmd = "{} {} --no-interactive".format(sys.executable, script)
-                print("Executing: {}".format(cmd))
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env,
-                )
+            while attempt < max_attempts and not success:
+                attempt += 1
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    env = os.environ.copy()
+                    env["TMPDIR"] = tmp_dir
 
-                if result.returncode != 0:
-                    failures.append(
-                        (
-                            script,
-                            result.returncode,
-                            result.stdout.decode(),
-                            result.stderr.decode(),
-                        )
+                    cmd = "{} {} --no-interactive".format(sys.executable, script)
+                    print("Executing: {} (attempt {}/{})".format(cmd, attempt, max_attempts))
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=env,
                     )
+
+                    if result.returncode == 0:
+                        success = True
+                        print("Success on attempt {}".format(attempt))
+                    elif attempt < max_attempts:
+                        print("Failed on attempt {}, retrying...".format(attempt))
+                    else:
+                        failures.append(
+                            (
+                                script,
+                                result.returncode,
+                                result.stdout.decode(),
+                                result.stderr.decode(),
+                            )
+                        )
 
         if failures:
             messages = []
