@@ -255,7 +255,9 @@ def main():
 
     # Set camera view
     viewer.set_camera(angles=[np.deg2rad(30), 0, np.deg2rad(45)], distance=2.5)
-    viewer.show()
+
+    if not args.no_interactive:
+        viewer.show()
 
     if args.interactive:
         print('''>>> # Trajectory Interpolation Demo
@@ -307,8 +309,10 @@ def main():
                 viewer.redraw()
         else:
             print('\n==> Demo complete')
-    viewer.close()
-    time.sleep(1.0)
+
+    if not args.no_interactive:
+        viewer.close()
+        time.sleep(1.0)
 
 
 if __name__ == '__main__':
