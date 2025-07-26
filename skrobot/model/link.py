@@ -201,6 +201,22 @@ class Link(CascadedCoords):
             concat_mesh.visual.face_colors
         self._visual_mesh_changed = True
 
+    def set_alpha(self, alpha):
+        """Set alpha (transparency) value for visual mesh.
+
+        Parameters
+        ----------
+        alpha : float
+            Alpha value between 0.0 (transparent) and 1.0 (opaque)
+        """
+        mesh = self._concatenated_visual_mesh
+        if mesh is None:
+            return
+        alpha = np.clip(alpha, 0.0, 1.0)  # Ensure alpha is in valid range
+        # Update alpha channel (4th component) of all face colors
+        mesh.visual.face_colors[:, 3] = np.round(alpha * 255).astype(np.uint8)
+        self._visual_mesh_changed = True
+
     @property
     def sdf(self):
         """Return signed distance function.
