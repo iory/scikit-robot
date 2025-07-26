@@ -23,6 +23,14 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates.math import jacobian_inverse
+from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix_log
+from skrobot.coordinates.math import quaternion2matrix
+from skrobot.coordinates.math import quaternion2rpy
+from skrobot.coordinates.math import quaternion_inverse
+from skrobot.coordinates.math import quaternion_multiply
+from skrobot.coordinates.math import rodrigues
+from skrobot.coordinates.math import rpy2quaternion
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
@@ -2109,7 +2117,7 @@ class RobotModel(CascadedLink):
                 # Set default minimal mass properties if not specified in URDF
                 link.mass = 0.001  # 1 gram
                 link.centroid = np.zeros(3)
-                link.inertia_tensor = np.eye(3) * 1e-6  # Very small inertia
+                link.inertia_tensor = np.eye(3) * 1e-6
 
         # TODO(duplicate of __init__)
         self.link_list = links
@@ -2247,6 +2255,559 @@ class RobotModel(CascadedLink):
             target_coords, move_target=move_target,
             link_list=link_list,
             **kwargs)
+
+    def batch_inverse_kinematics(
+            self,
+            target_coords,
+            move_target=None,
+            link_list=None,
+            rotation_axis=True,
+            translation_axis=True,
+            stop=100,
+            thre=0.001,
+            rthre=np.deg2rad(1.0),
+            initial_angles="current",
+            alpha=1.0,
+            attempts_per_pose=1,
+            random_initial_range=0.7,
+            **kwargs):
+        """Solve batch inverse kinematics for multiple target poses.
+
+        This method efficiently processes multiple target poses in parallel,
+        providing significant performance improvements over sequential IK solving.
+
+        Parameters
+        ----------
+        target_coords : Union[np.ndarray, List[Coordinates]]
+            Target poses as numpy array in shape (batch_size, 6) where each row is
+            [x, y, z, roll, pitch, yaw] or (batch_size, 7) where quaternion is included
+            [x, y, z, qx, qy, qz, qw], or list of Coordinates objects
+        move_target : Optional
+            Target link or end-effector. If None, uses self.end_coords
+        link_list : Optional[List]
+            List of links from root to target. If None, automatically computed from move_target
+        rotation_axis : Union[bool, str, List]
+            Rotation constraints. If True, use all axes. If False, no rotation.
+            If string, specify axes (e.g., 'xy', 'z'). Can be list for multiple targets
+        translation_axis : Union[bool, str, List]
+            Translation constraints. If True, use all axes. If False, no translation.
+            If string, specify axes (e.g., 'xy', 'z'). Can be list for multiple targets
+        stop : int
+            Maximum number of iterations
+        thre : float
+            Position error threshold in meters
+        rthre : float
+            Rotation error threshold in radians
+        initial_angles : Optional[Union[np.ndarray, str]]
+            Initial joint angles. Can be:
+            - "current": Use current robot joint angles for all poses (default)
+            - None or "random": Use random initial angles
+            - np.ndarray of shape (batch_size, ndof): Use provided initial angles
+            Note: When attempts_per_pose > 1, defaults to "random" for better exploration
+        alpha : float
+            Step size for gradient descent (0 < alpha <= 1)
+        attempts_per_pose : int
+            Number of attempts with different random initial poses per target (default: 1)
+        random_initial_range : float
+            Range for random initial poses as fraction of joint limits (0.0-1.0, default: 0.7)
+        **kwargs : dict
+            Additional keyword arguments
+
+        Returns
+        -------
+        Tuple[List[np.ndarray], List[bool], List[int]] or Tuple[List[np.ndarray], List[bool]]
+            - List of joint angle solutions (each is ndarray matching self.angle_vector())
+            - List of success flags indicating if IK was solved
+            - List of attempt counts (only returned when attempts_per_pose > 1)
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> robot = Fetch()
+        >>> robot.reset_pose()
+        >>>
+        >>> # Multiple target poses
+        >>> target_poses = np.array([
+        ...     [0.8, -0.3, 0.8, 0.0, np.deg2rad(30), np.deg2rad(-30)],
+        ...     [0.7, -0.2, 0.9, 0.0, np.deg2rad(45), np.deg2rad(-15)],
+        ... ])
+        >>> solutions, success_flags = robot.batch_inverse_kinematics(target_poses)
+        >>>
+        >>> # Apply first successful solution
+        >>> for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+        ...     if success:
+        ...         robot.angle_vector(solution)
+        ...         break
+        """
+        return self._batch_inverse_kinematics_impl(
+            target_coords, move_target, link_list,
+            rotation_axis, translation_axis, stop, thre, rthre,
+            initial_angles, alpha, attempts_per_pose, random_initial_range, **kwargs)
+
+    def _batch_inverse_kinematics_impl(
+            self, target_coords, move_target, link_list,
+            rotation_axis, translation_axis, stop, thre, rthre,
+            initial_angles, alpha, attempts_per_pose, random_initial_range, **kwargs):
+        """Internal implementation of batch inverse kinematics."""
+        # Auto-adjust initial_angles based on attempts_per_pose
+        if isinstance(initial_angles, str) and initial_angles == "current" and attempts_per_pose > 1:
+            initial_angles = "random"
+
+        if move_target is None:
+            move_target = self.end_coords
+        if link_list is None:
+            if not isinstance(move_target, list):
+                link_list = self.link_lists(move_target.parent)
+            else:
+                link_list = list(map(lambda mt: self.link_lists(mt.parent), move_target))
+
+        # Handle single link list (not list of lists) for now
+        if isinstance(link_list, list) and len(link_list) > 0 and isinstance(link_list[0], list):
+            single_link_list = link_list[0]  # Use first link list for batch processing
+        else:
+            single_link_list = link_list
+
+        # Convert input to consistent format: [x, y, z, qw, qx, qy, qz]
+        if isinstance(target_coords, list) and all(isinstance(coord, Coordinates) for coord in target_coords):
+            n_poses = len(target_coords)
+            positions_xyz = np.array([coord.worldpos() for coord in target_coords])
+            quaternions_wxyz = np.array([coord.quaternion for coord in target_coords])  # skrobot uses [w,x,y,z] order
+            target_poses_xyz_qwxyz = np.concatenate([positions_xyz, quaternions_wxyz], axis=1)
+        elif isinstance(target_coords, np.ndarray):
+            if target_coords.ndim != 2:
+                raise ValueError(f"target_coords must be 2D array, got shape {target_coords.shape}")
+
+            n_poses = target_coords.shape[0]
+
+            if target_coords.shape[1] == 6:
+                # Convert 6D pose (x, y, z, roll, pitch, yaw) to 7D (x, y, z, qw, qx, qy, qz)
+                positions_xyz = target_coords[:, :3]
+                rpy_roll_pitch_yaw = target_coords[:, 3:]  # [roll, pitch, yaw] order
+                quaternions_wxyz = np.array([rpy2quaternion(rpy) for rpy in rpy_roll_pitch_yaw])  # -> [w,x,y,z]
+                target_poses_xyz_qwxyz = np.concatenate([positions_xyz, quaternions_wxyz], axis=1)
+            elif target_coords.shape[1] == 7:
+                target_poses_xyz_qwxyz = target_coords  # Assume [x,y,z,qw,qx,qy,qz] format
+            else:
+                raise ValueError(f"target_coords must have shape (batch, 6) or (batch, 7), got {target_coords.shape}")
+        else:
+            raise ValueError("target_coords must be numpy array or list of Coordinates objects")
+
+        # Get joint information for the kinematic chain
+        joint_list_without_fixed = self.joint_list_from_link_list(single_link_list, ignore_fixed_joint=True)
+        ndof = calc_target_joint_dimension(joint_list_without_fixed)
+        min_angles, max_angles = self.joint_limits_from_joint_list(joint_list_without_fixed)
+
+        # Map kinematic chain joints to full robot joint indices
+        robot_joint_list = self.joint_list
+        joint_indices = []
+        for joint in joint_list_without_fixed:
+            if joint in robot_joint_list:
+                joint_indices.append(robot_joint_list.index(joint))
+
+        if initial_angles is None or (isinstance(initial_angles, str) and initial_angles == "random"):
+            joint_angles_current = np.random.uniform(min_angles, max_angles, (n_poses, ndof))
+        elif isinstance(initial_angles, str) and initial_angles == "current":
+            current_full_angles = self.angle_vector()
+            current_kinematic_angles = current_full_angles[joint_indices]
+            joint_angles_current = np.tile(current_kinematic_angles, (n_poses, 1))
+        elif isinstance(initial_angles, np.ndarray):
+            if initial_angles.shape != (n_poses, ndof):
+                raise ValueError(f"initial_angles must have shape ({n_poses}, {ndof}), got {initial_angles.shape}")
+            joint_angles_current = initial_angles.copy()
+        else:
+            raise ValueError(
+                f"initial_angles must be None, 'random', 'current', or np.ndarray, got {type(initial_angles)}")
+
+        source_link = single_link_list[0]
+        if hasattr(self, 'root_link') and source_link == self.root_link:
+            base_to_source = np.eye(4, dtype=np.float64)
+        else:
+            base_to_source = source_link.parent.copy_worldcoords().T()
+
+        if not isinstance(rotation_axis, list):
+            rotation_axis = [rotation_axis] * n_poses
+        if not isinstance(translation_axis, list):
+            translation_axis = [translation_axis] * n_poses
+
+        solutions, success_flags, attempt_counts = self._solve_batch_ik(
+            single_link_list, target_poses_xyz_qwxyz, joint_angles_current, ndof, min_angles, max_angles,
+            stop, thre, rthre, alpha, base_to_source,
+            rotation_axis, translation_axis, joint_list_without_fixed,
+            attempts_per_pose, random_initial_range
+        )
+
+        full_solutions = []
+        full_av_org = self.angle_vector()
+        for solution in solutions:
+            full_av = full_av_org.copy()
+            for i, joint_idx in enumerate(joint_indices):
+                if i < len(solution):
+                    full_av[joint_idx] = solution[i]
+            full_solutions.append(full_av)
+
+        return full_solutions, success_flags, attempt_counts
+
+    def _solve_batch_ik(
+            self, link_list, target_poses_xyz_qwxyz, initial_angles, ndof, min_angles, max_angles,
+            stop, thre, rthre, alpha, base_to_source,
+            rotation_axis, translation_axis, joint_list_without_fixed,
+            attempts_per_pose, random_initial_range):
+        """Batch IK solver using batch expansion for multiple attempts."""
+
+        n_poses = target_poses_xyz_qwxyz.shape[0]
+
+        expanded_batch_size = n_poses * attempts_per_pose
+        expanded_targets = np.repeat(target_poses_xyz_qwxyz, attempts_per_pose, axis=0)
+        expanded_initials = np.zeros((expanded_batch_size, ndof))
+
+        centers = (np.array(min_angles) + np.array(max_angles)) / 2
+        ranges = random_initial_range * (np.array(max_angles) - np.array(min_angles)) / 2
+
+        for i in range(n_poses):
+            start_idx = i * attempts_per_pose
+            end_idx = start_idx + attempts_per_pose
+
+            if initial_angles is not None:
+                expanded_initials[start_idx] = initial_angles[i]
+                if attempts_per_pose > 1:
+                    random_initials = centers + np.random.uniform(
+                        -ranges, ranges, size=(attempts_per_pose - 1, ndof)
+                    )
+                    expanded_initials[start_idx + 1:end_idx] = random_initials
+            else:
+                random_initials = centers + np.random.uniform(
+                    -ranges, ranges, size=(attempts_per_pose, ndof)
+                )
+                expanded_initials[start_idx:end_idx] = random_initials
+
+        expanded_rotation_axis = []
+        expanded_translation_axis = []
+        for i in range(n_poses):
+            for _ in range(attempts_per_pose):
+                if isinstance(rotation_axis, list):
+                    expanded_rotation_axis.append(rotation_axis[i])
+                else:
+                    expanded_rotation_axis.append(rotation_axis)
+
+                if isinstance(translation_axis, list):
+                    expanded_translation_axis.append(translation_axis[i])
+                else:
+                    expanded_translation_axis.append(translation_axis)
+
+        # Solve all attempts in parallel using batch processing
+        expanded_solutions, expanded_success = self._solve_batch_ik_internal(
+            link_list, expanded_targets, expanded_initials,
+            stop, thre, rthre, alpha, base_to_source,
+            expanded_rotation_axis, expanded_translation_axis,
+            joint_list_without_fixed, min_angles, max_angles
+        )
+
+        solutions = []
+        success_flags = []
+        attempt_counts = []
+
+        for i in range(n_poses):
+            start_idx = i * attempts_per_pose
+            end_idx = start_idx + attempts_per_pose
+
+            target_solutions = expanded_solutions[start_idx:end_idx]
+            target_success = expanded_success[start_idx:end_idx]
+
+            best_solution = target_solutions[-1]
+            is_solved = False
+            attempts_used = attempts_per_pose
+
+            for attempt_idx, (sol, success) in enumerate(zip(target_solutions, target_success)):
+                if success:
+                    best_solution = sol
+                    is_solved = True
+                    attempts_used = attempt_idx + 1
+                    break
+
+            solutions.append(best_solution)
+            success_flags.append(is_solved)
+            attempt_counts.append(attempts_used)
+
+        return solutions, success_flags, attempt_counts
+
+    def _solve_batch_ik_internal(
+            self, link_list, target_poses_xyz_qwxyz, joint_angles_current,
+            stop, thre, rthre, alpha, base_to_source,
+            rotation_axis, translation_axis,
+            joint_list_without_fixed, min_angles, max_angles):
+        """Internal batch IK solver."""
+        # Use integrated batch IK functions
+
+        batch_size = target_poses_xyz_qwxyz.shape[0]
+
+        # Track which problems are still unsolved
+        unsolved_mask = np.ones(batch_size, dtype=bool)
+        solutions = [None] * batch_size
+        success_flags = [False] * batch_size
+
+        # Iterative solving
+        for iteration in range(stop):
+            if not np.any(unsolved_mask):
+                break
+
+            # Get indices of unsolved problems
+            unsolved_indices = np.where(unsolved_mask)[0]
+
+            # Update only unsolved problems
+            joint_angles_unsolved = joint_angles_current[unsolved_mask]
+            target_poses_unsolved = target_poses_xyz_qwxyz[unsolved_mask]
+
+            # Use unified constrained IK (handles both constrained and unconstrained cases)
+            if isinstance(rotation_axis, list):
+                rotation_axis_unsolved = [rotation_axis[i] for i in unsolved_indices]
+            else:
+                rotation_axis_unsolved = [rotation_axis] * len(unsolved_indices)
+
+            if isinstance(translation_axis, list):
+                translation_axis_unsolved = [translation_axis[i] for i in unsolved_indices]
+            else:
+                translation_axis_unsolved = [translation_axis] * len(unsolved_indices)
+
+            joint_angles_updated, pose_errors = self._batch_ik_step_with_constraints(
+                link_list, target_poses_unsolved, joint_angles_unsolved,
+                alpha, base_to_source,
+                rotation_axis_unsolved, translation_axis_unsolved,
+                joint_list_without_fixed, min_angles, max_angles
+            )
+
+            # Check convergence with respect to constraints
+            converged = np.zeros(len(unsolved_indices), dtype=bool)
+
+            for i, global_idx in enumerate(unsolved_indices):
+                # Apply the same constraints as used in IK
+                constrained_pose_error = pose_errors[i].copy()
+
+                # Handle rotation constraints
+                if isinstance(rotation_axis, list):
+                    rot_axis = rotation_axis[global_idx]
+                else:
+                    rot_axis = rotation_axis
+
+                if rot_axis is False:
+                    constrained_pose_error[:3] = 0
+                elif isinstance(rot_axis, str):
+                    # For mirror constraints (xm, ym, zm), don't zero out any rotation errors
+                    # since we want to converge on the mirrored solution
+                    if rot_axis.lower() not in ['xm', 'ym', 'zm']:
+                        # Standard axis constraints
+                        if 'x' not in rot_axis.lower():
+                            constrained_pose_error[0] = 0
+                        if 'y' not in rot_axis.lower():
+                            constrained_pose_error[1] = 0
+                        if 'z' not in rot_axis.lower():
+                            constrained_pose_error[2] = 0
+
+                # Handle translation constraints
+                if isinstance(translation_axis, list):
+                    trans_axis = translation_axis[global_idx]
+                else:
+                    trans_axis = translation_axis
+
+                if trans_axis is False:
+                    constrained_pose_error[3:] = 0
+                elif isinstance(trans_axis, str):
+                    # For mirror constraints (xm, ym, zm), don't zero out any translation errors
+                    # since we want to converge on the mirrored solution
+                    if trans_axis.lower() not in ['xm', 'ym', 'zm']:
+                        # Standard axis constraints
+                        if 'x' not in trans_axis.lower():
+                            constrained_pose_error[3] = 0
+                        if 'y' not in trans_axis.lower():
+                            constrained_pose_error[4] = 0
+                        if 'z' not in trans_axis.lower():
+                            constrained_pose_error[5] = 0
+
+                # Check convergence only for active constraints
+                position_error = np.linalg.norm(constrained_pose_error[3:])
+                rotation_error = np.linalg.norm(constrained_pose_error[:3])
+
+                converged[i] = position_error < thre and rotation_error < rthre
+
+            # Update solutions for converged problems
+            converged_global_indices = unsolved_indices[converged]
+            for idx in converged_global_indices:
+                local_idx = np.where(unsolved_indices == idx)[0][0]
+                solutions[idx] = joint_angles_updated[local_idx].copy()
+                success_flags[idx] = True
+
+            # Update current angles
+            joint_angles_current[unsolved_mask] = joint_angles_updated
+
+            # Update unsolved mask
+            unsolved_mask[converged_global_indices] = False
+
+        # Fill in remaining unsolved problems with their final angles
+        for idx in range(batch_size):
+            if solutions[idx] is None:
+                solutions[idx] = joint_angles_current[idx].copy()
+
+        return solutions, success_flags
+
+    def _batch_ik_step_with_constraints(
+            self, link_list, target_poses, joint_angles_current, alpha, base_to_source,
+            rotation_axis_list, translation_axis_list,
+            joint_list_without_fixed, min_angles, max_angles):
+        """Batch IK step with per-problem axis constraints."""
+        # Use integrated batch IK functions
+
+        batch_size = joint_angles_current.shape[0]
+        ndof = joint_angles_current.shape[1]
+
+        # Get jacobians
+        jacobian_matrices = self._jacobian_batch(link_list, joint_angles_current, base_to_source=base_to_source)
+
+        # Calculate current poses
+        current_poses = self._forward_kinematics_batch(
+            link_list, joint_angles_current, return_quaternion=True, base_to_source=base_to_source
+        )
+
+        # Calculate pose errors
+        pose_errors = np.zeros((batch_size, 6))
+
+        # Calculate translation errors, potentially with mirroring
+        translation_errors = target_poses[:, :3] - current_poses[:, :3]
+
+        for i in range(batch_size):
+            trans_axis = translation_axis_list[i]
+
+            if isinstance(trans_axis, str) and trans_axis.lower() in ['xm', 'ym', 'zm']:
+                # For translation mirror constraints, check if mirrored translation gives smaller error
+                axis_char = trans_axis[0].lower()
+
+                # Calculate error with original translation difference
+                original_error = translation_errors[i].copy()
+                original_error_norm = np.linalg.norm(original_error)
+
+                # Calculate error with mirrored translation along specified axis
+                mirrored_error = original_error.copy()
+                if axis_char == 'x':
+                    mirrored_error[0] = -mirrored_error[0]
+                elif axis_char == 'y':
+                    mirrored_error[1] = -mirrored_error[1]
+                else:  # 'z'
+                    mirrored_error[2] = -mirrored_error[2]
+
+                mirrored_error_norm = np.linalg.norm(mirrored_error)
+
+                # Use the translation error that gives smaller magnitude
+                if mirrored_error_norm < original_error_norm:
+                    translation_errors[i] = mirrored_error
+
+        pose_errors[:, :3] = translation_errors
+
+        # Orientation errors with mirror constraint handling
+        current_pose_quat_inv = quaternion_inverse(current_poses[:, 3:])
+
+        # Calculate rotation errors, potentially with mirroring
+        adjusted_target_poses = target_poses.copy()
+
+        for i in range(batch_size):
+            rot_axis = rotation_axis_list[i]
+
+            if isinstance(rot_axis, str) and rot_axis.lower() in ['xm', 'ym', 'zm']:
+                # For mirror constraints, check if mirrored target gives smaller error
+
+                axis_char = rot_axis[0].lower()
+                target_rot_matrix = quaternion2matrix(target_poses[i, 3:])
+                current_rot_matrix = quaternion2matrix(current_poses[i, 3:])
+
+                # Calculate error with original target
+                original_error_matrix = np.matmul(current_rot_matrix.T, target_rot_matrix)
+                original_error = matrix_log(original_error_matrix)
+                original_error_norm = np.linalg.norm(original_error)
+
+                # Calculate error with mirrored target (180° rotation around axis)
+                if axis_char == 'x':
+                    mirror_matrix = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
+                elif axis_char == 'y':
+                    mirror_matrix = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]])
+                else:  # 'z'
+                    mirror_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
+                mirrored_target_rot = np.matmul(target_rot_matrix, mirror_matrix)
+                mirrored_error_matrix = np.matmul(current_rot_matrix.T, mirrored_target_rot)
+                mirrored_error = matrix_log(mirrored_error_matrix)
+                mirrored_error_norm = np.linalg.norm(mirrored_error)
+
+                # Use the target orientation that gives smaller error
+                if mirrored_error_norm < original_error_norm:
+                    adjusted_target_poses[i, 3:] = matrix2quaternion(mirrored_target_rot)
+
+        # Calculate rotation errors with potentially adjusted targets
+        rotation_error_quat = quaternion_multiply(adjusted_target_poses[:, 3:], current_pose_quat_inv)
+        rotation_error_rpy = quaternion2rpy(rotation_error_quat)[0][:, ::-1]
+        pose_errors[:, 3:] = rotation_error_rpy
+        pose_errors = pose_errors[:, [3, 4, 5, 0, 1, 2]]
+
+        # Apply constraints and calculate delta for each problem
+        joint_angle_deltas = np.zeros((batch_size, ndof))
+
+        for i in range(batch_size):
+            # Create active constraint mask using row exclusion approach
+            active_rows = []
+
+            # Handle rotation constraints
+            rot_axis = rotation_axis_list[i]
+            if rot_axis is True:
+                active_rows.extend([0, 1, 2])  # All rotation DOF
+            elif isinstance(rot_axis, str):
+                # Handle mirror constraints (xm, ym, zm)
+                if rot_axis.lower() in ['xm', 'ym', 'zm']:
+                    # For mirror constraints, allow all rotation DOF but we'll handle mirroring in error calculation
+                    active_rows.extend([0, 1, 2])
+                else:
+                    # Standard axis constraints
+                    if 'x' in rot_axis.lower():
+                        active_rows.append(0)
+                    if 'y' in rot_axis.lower():
+                        active_rows.append(1)
+                    if 'z' in rot_axis.lower():
+                        active_rows.append(2)
+            # If rot_axis is False, no rotation rows are added
+
+            # Handle translation constraints
+            trans_axis = translation_axis_list[i]
+            if trans_axis is True:
+                active_rows.extend([3, 4, 5])  # All translation DOF
+            elif isinstance(trans_axis, str):
+                # Handle mirror constraints (xm, ym, zm) for translation
+                if trans_axis.lower() in ['xm', 'ym', 'zm']:
+                    # For translation mirror constraints, allow all translation DOF
+                    active_rows.extend([3, 4, 5])
+                else:
+                    # Standard axis constraints
+                    if 'x' in trans_axis.lower():
+                        active_rows.append(3)
+                    if 'y' in trans_axis.lower():
+                        active_rows.append(4)
+                    if 'z' in trans_axis.lower():
+                        active_rows.append(5)
+            # If trans_axis is False, no translation rows are added
+
+            # Extract only the active rows (exclude unwanted constraints)
+            if len(active_rows) > 0:
+                jacobian_active = jacobian_matrices[i][active_rows, :]
+                pose_error_active = pose_errors[i][active_rows]
+
+                # Solve the reduced problem
+                jacobian_pinv_active = jacobian_inverse(jacobian_active[np.newaxis, :, :])[0]
+                joint_angle_deltas[i] = np.dot(jacobian_pinv_active, pose_error_active)
+            else:
+                # No active constraints - don't move
+                joint_angle_deltas[i] = np.zeros(ndof)
+
+        # Update angles
+        joint_angles_updated = joint_angles_current + alpha * joint_angle_deltas
+
+        # Apply joint limits
+        joint_angles_updated = np.clip(joint_angles_updated, min_angles, max_angles)
+
+        return joint_angles_updated, pose_errors
 
     def inverse_kinematics_loop(self,
                                 dif_pos,
@@ -2852,3 +3413,100 @@ class RobotModel(CascadedLink):
         )
 
         return joint_torques
+
+    # ============================================================================
+    # Batch Inverse Kinematics Implementation
+    # ============================================================================
+
+    @staticmethod
+    def _batch_fk_iteration(joint, x_i, base_T_joint):
+        """Single iteration of batch forward kinematics for a joint."""
+        batch_size = x_i.shape[0]
+        parent_T_child_fixed = np.repeat(
+            joint.default_coords.T()[np.newaxis, :, :], batch_size, axis=0)
+        base_T_joint = np.matmul(base_T_joint, parent_T_child_fixed)
+        if joint.__class__.__name__ == "RotationalJoint":
+            joint_rotation = rodrigues(joint.axis, x_i, skip_normalization=True)
+            T = np.tile(np.eye(4, dtype=x_i.dtype), (batch_size, 1, 1))
+            T[:, 0:3, 0:3] = joint_rotation
+            return np.matmul(base_T_joint, T)
+        if joint.__class__.__name__ == "LinearJoint":
+            translations = np.outer(x_i, joint.axis)
+            joint_fixed_T_joint = np.tile(
+                np.eye(4, dtype=x_i.dtype), (batch_size, 1, 1))
+            joint_fixed_T_joint[:, 0:3, 3] = translations
+            return np.matmul(base_T_joint, joint_fixed_T_joint)
+        if joint.__class__.__name__ == "FixedJoint":
+            return base_T_joint
+        raise RuntimeError(f"Unsupported joint type: {type(joint)}")
+
+    @staticmethod
+    def _forward_kinematics_batch(
+            link_list, x, dtype=np.float64,
+            return_quaternion=True, return_full_joint_fk=False,
+            return_full_link_fk=False, base_to_source=None):
+        """Batch forward kinematics computation."""
+
+        batch_size = x.shape[0]
+        base_T_joint = np.tile(np.eye(4, dtype=dtype), (batch_size, 1, 1))
+        if base_to_source is not None:
+            base_T_joint = np.matmul(base_to_source, base_T_joint)
+        base_T_joints = [base_T_joint]
+        base_T_links = [base_T_joint]
+
+        i = 0
+        joint_list = RobotModel.joint_list_from_link_list(link_list, ignore_fixed_joint=False)
+        ndof = calc_target_joint_dimension(joint_list)
+        for joint in joint_list:
+            i = min(i, ndof - 1)
+            base_T_joint_new = RobotModel._batch_fk_iteration(joint, x[:, i], base_T_joint)
+            base_T_links.append(base_T_joint_new)
+            if joint.__class__.__name__ == 'RotationalJoint':
+                base_T_joints.append(base_T_joint_new)
+                i += 1
+            if joint.__class__.__name__ == "LinearJoint":
+                base_T_joints.append(base_T_joint_new)
+                i += 1
+            if joint.__class__.__name__ == "FixedJoint":
+                base_T_joints[-1] = base_T_joint_new
+            base_T_joint = base_T_joint_new
+
+        if return_quaternion:
+            quaternions = matrix2quaternion(base_T_joint[:, 0:3, 0:3])
+            translations = base_T_joint[:, 0:3, 3]
+            base_T_joint = np.concatenate([translations, quaternions], axis=1)
+
+        if return_full_joint_fk:
+            ret = np.stack(base_T_joints, axis=1)
+            return ret
+
+        return base_T_joint
+
+    @staticmethod
+    def _jacobian_batch(links, x: np.ndarray,
+                        base_to_source=None) -> np.ndarray:
+        """Batch Jacobian computation."""
+        batch_size = x.shape[0]
+
+        joint_list = RobotModel.joint_list_from_link_list(links, ignore_fixed_joint=False)
+        ndof = calc_target_joint_dimension(joint_list)
+
+        base_T_joints = RobotModel._forward_kinematics_batch(
+            links, x, return_full_joint_fk=True, dtype=np.float64,
+            base_to_source=base_to_source)
+        base_T_joints = base_T_joints[:, 1:, :, :]  # remove the base link
+
+        J = np.zeros((batch_size, 6, ndof), dtype=np.float64)
+        x_i = 0
+        for joint in joint_list:
+            if joint.__class__.__name__ == "RotationalJoint":
+                axis = np.tile(joint.axis, (batch_size, 1, 1))
+                J[:, :3, x_i] = np.matmul(base_T_joints[:, x_i, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
+                d = base_T_joints[:, -1, :3, 3] - base_T_joints[:, x_i, :3, 3]
+                world_axis = np.matmul(base_T_joints[:, x_i, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
+                J[:, 3:6, x_i] = np.cross(world_axis, d, axis=1)
+                x_i += 1
+            elif joint.__class__.__name__ == "LinearJoint":
+                J[:, 3, x_i], J[:, 4, x_i], J[:, 5, x_i] = joint.axis
+                x_i += 1
+        return J

@@ -1,0 +1,266 @@
+#!/usr/bin/env python
+
+import argparse
+import time
+
+import numpy as np
+
+from skrobot.coordinates import Coordinates
+from skrobot.model.primitives import Axis
+from skrobot.models import Fetch
+
+
+def parse_axis_constraint(axis_str):
+    """Parse axis constraint string to appropriate format."""
+    if axis_str.lower() == 'true':
+        return True
+    elif axis_str.lower() == 'false':
+        return False
+    else:
+        # String like 'xy', 'xyz', 'z', etc.
+        return axis_str.lower()
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with axis constraints')
+    parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
+                        default='True',
+                        help='Rotation axis constraints (True/False/xyz/xy/z/etc). Default: True')
+    parser.add_argument('--translation-axis', '--translation_axis', '-t',
+                        default='True',
+                        help='Translation axis constraints (True/False/xyz/xy/z/etc). Default: True')
+    parser.add_argument('--attempts-per-pose', '--attempts_per_pose', '-a',
+                        type=int, default=50,
+                        help='Number of attempts per pose with different random initial poses. Default: 50')
+    parser.add_argument('--stop', '-s', type=int, default=100,
+                        help='Maximum iterations per attempt. Default: 100')
+    parser.add_argument('--thre', type=float, default=0.001,
+                        help='Position error threshold in meters. Default: 0.001')
+    parser.add_argument('--rthre', type=float, default=1.0,
+                        help='Rotation error threshold in degrees. Default: 1.0')
+    parser.add_argument('--no-interactive', action='store_true',
+                        help='Disable interactive visualization')
+
+    args = parser.parse_args()
+
+    # Parse axis constraints
+    rotation_axis = parse_axis_constraint(args.rotation_axis)
+    translation_axis = parse_axis_constraint(args.translation_axis)
+
+    print("ADVANCED BATCH IK - WITH AXIS CONSTRAINTS")
+    print("=" * 55)
+    print("Configuration:")
+    print(f"   Rotation axis: {rotation_axis}")
+    print(f"   Translation axis: {translation_axis}")
+    print(f"   Attempts per pose: {args.attempts_per_pose}")
+    print(f"   Max iterations: {args.stop}")
+    print(f"   Position threshold: {args.thre}m")
+    print(f"   Rotation threshold: {args.rthre} degrees")
+
+    # Initialize robot
+    robot = Fetch()
+    robot.reset_pose()
+
+    target_poses = [
+        Coordinates(pos=(0.7, -0.2, 0.9)).rotate(np.deg2rad(30), 'y'),
+        Coordinates(pos=(0.6, -0.3, 1.0)).rotate(np.deg2rad(-25), 'z'),
+        Coordinates(pos=(0.8, -0.1, 0.8)).rotate(np.deg2rad(45), 'x'),
+        Coordinates(pos=(0.5, -0.4, 1.1)).rotate(np.deg2rad(20), 'y').rotate(np.deg2rad(15), 'z'),
+        Coordinates(pos=(0.65, -0.45, 0.95)).rotate(np.deg2rad(-30), 'x'),
+        Coordinates(pos=(0.75, -0.25, 1.05)).rotate(np.deg2rad(35), 'y').rotate(np.deg2rad(-20), 'z'),
+        Coordinates(pos=(0.55, -0.35, 0.85)).rotate(np.deg2rad(-15), 'y'),
+        Coordinates(pos=(0.68, -0.38, 1.08)).rotate(np.deg2rad(25), 'z').rotate(np.deg2rad(10), 'x'),
+    ]
+
+    for i, coord in enumerate(target_poses):
+        pos = coord.worldpos()
+
+    print("\nStarting batch IK solving...")
+
+    overall_start = time.time()
+    solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
+        target_poses,
+        move_target=robot.rarm.end_coords,
+        rotation_axis=rotation_axis,
+        translation_axis=translation_axis,
+        stop=args.stop,
+        thre=args.thre,
+        rthre=np.deg2rad(args.rthre),
+        attempts_per_pose=args.attempts_per_pose,
+    )
+    overall_time = time.time() - overall_start
+
+    success_count = sum(success_flags)
+
+    print("\nOVERALL PERFORMANCE:")
+    print(f"   Total time: {overall_time:.3f}s")
+    print(f"   Success rate: {success_count}/{len(target_poses)} ({success_count / len(target_poses) * 100:.1f}%)")
+    print(f"   Average time per solved pose: {overall_time / max(success_count, 1):.3f}s")
+
+    print("\nATTEMPT BREAKDOWN:")
+    for i, (success, attempts) in enumerate(zip(success_flags, attempt_counts)):
+        status = "[SOLVED]" if success else "[FAILED]"
+        print(f"   Pose {i}: {status} after {attempts} attempts")
+
+    if success_count > 0:
+        print("\nVerifying successful solutions...")
+
+        successful_solutions = []
+        successful_indices = []
+        original_angles = robot.angle_vector()
+
+        for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+            if success:
+                successful_solutions.append(solution)
+                successful_indices.append(i)
+
+                # Test the solution
+                robot.angle_vector(solution)
+                achieved_pos = robot.rarm.end_coords.worldpos()
+                target_pos = target_poses[i].worldpos()
+
+                # Calculate error considering only the constrained axes
+                pos_error = achieved_pos - target_pos
+                constrained_pos_error = pos_error.copy()
+
+                # Apply translation constraints to error calculation
+                if translation_axis is False:
+                    constrained_pos_error = np.array([0, 0, 0])
+                elif isinstance(translation_axis, str):
+                    # For mirror constraints (xm, ym, zm), don't zero out any translation errors
+                    # since we want to see the full error after mirroring is applied
+                    if translation_axis.lower() not in ['xm', 'ym', 'zm']:
+                        # Standard axis constraints
+                        if 'x' not in translation_axis.lower():
+                            constrained_pos_error[0] = 0
+                        if 'y' not in translation_axis.lower():
+                            constrained_pos_error[1] = 0
+                        if 'z' not in translation_axis.lower():
+                            constrained_pos_error[2] = 0
+
+                error = np.linalg.norm(constrained_pos_error)
+
+                print(f"  [OK] Pose {i}: Error = {error:.4f}m (constrained)")
+
+                # Restore for next test
+                robot.angle_vector(original_angles)
+
+        if not args.no_interactive:
+            print(f"\nAttempting visualization of {len(successful_solutions)} solutions...")
+
+        if not args.no_interactive:
+            try:
+                from skrobot.viewers import PyrenderViewer
+
+                viewer = PyrenderViewer(update_interval=1 / 30.0)
+
+                print(f"Adding {len(target_poses)} target poses as coordinate frames...")
+                axis_objects = []
+                for i, target_coord in enumerate(target_poses):
+                    is_solved = success_flags[i]
+
+                    if is_solved:
+                        axis = Axis.from_coords(
+                            target_coord,
+                            axis_radius=0.008,
+                            axis_length=0.12,
+                            alpha=0.3
+                        )
+                        status = "[SOLVED]"
+                    else:
+                        axis = Axis.from_coords(
+                            target_coord,
+                            axis_radius=0.008,
+                            axis_length=0.12,
+                            alpha=0.3
+                        )
+                        axis.set_color([1.0, 0.0, 0.0, 1.0])
+                        status = "[UNSOLVED]"
+
+                    axis_objects.append(axis)
+                    viewer.add(axis)
+                    pos = target_coord.worldpos()
+                    print(f"  Target {i}: {status} - Axis at [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}]")
+
+                robot.reset_pose()
+                viewer.add(robot)
+
+                end_effector_axis = Axis.from_coords(
+                    robot.rarm.end_coords,
+                    axis_radius=0.006,
+                    axis_length=0.10,
+                    alpha=1.0
+                )
+                viewer.add(end_effector_axis)
+
+                print(f"Added robot (will cycle through {len(successful_solutions)} solutions)")
+                print("Added end-effector axis (RGB colors) to show actual robot pose")
+
+                viewer.show()
+
+                print("\n3D VISUALIZATION ACTIVE!")
+                print("=" * 50)
+                print("Mouse: Rotate and zoom")
+                print("Close window to continue")
+                print("Solved poses: Normal colored axes (RGB = XYZ)")
+                print("Unsolved poses: Red axes")
+                print("End-effector: RGB colored axis (shows actual robot pose)")
+                print("Note: Axes shown regardless of rotation_axis setting for visual comparison")
+                print(f"Robot cycles through {len(successful_solutions)} successful solutions only")
+                print("Each solution displays for 0.5 seconds")
+                print("Current target axis will be highlighted, others will be dimmed")
+
+            # Animation loop - cycle through solutions
+                try:
+                    solution_idx = 0
+                    last_change_time = time.time()
+
+                    while viewer.is_active:
+                        current_time = time.time()
+
+                        if current_time - last_change_time > 0.5:
+                            if len(successful_solutions) > 0:
+                                robot.angle_vector(successful_solutions[solution_idx])
+                                orig_idx = successful_indices[solution_idx]
+
+                                end_effector_axis.newcoords(robot.rarm.end_coords)
+
+                                for i, axis in enumerate(axis_objects):
+                                    if success_flags[i]:
+                                        if i == orig_idx:
+                                            axis.set_alpha(1.0)
+                                        else:
+                                            axis.set_alpha(0.3)
+
+                                target_pos = target_poses[orig_idx].worldpos()
+                                achieved_pos = robot.rarm.end_coords.worldpos()
+                                pos_error = np.linalg.norm(achieved_pos - target_pos)
+
+                                print(f"Showing solution {solution_idx + 1}/{len(successful_solutions)} "
+                                      f"(target pose {orig_idx}) | Error: {pos_error:.4f}m")
+
+                                solution_idx = (solution_idx + 1) % len(successful_solutions)
+                                last_change_time = current_time
+
+                        viewer.redraw()
+                        time.sleep(0.05)
+
+                    print("\nVisualization completed")
+
+                except KeyboardInterrupt:
+                    print("\nVisualization interrupted")
+
+            except ImportError:
+                print("3D visualization not available")
+                print("Install with: pip install pyrender trimesh")
+            except Exception as e:
+                print(f"Visualization error: {e}")
+
+        else:
+            print("No successful solutions to visualize")
+    else:
+        print("Interactive visualization skipped (--no-interactive)")
+
+
+if __name__ == '__main__':
+    main()
