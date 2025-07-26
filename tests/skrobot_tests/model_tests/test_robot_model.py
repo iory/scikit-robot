@@ -5,7 +5,6 @@ import unittest
 
 import numpy as np
 from numpy import testing
-import pytest
 import trimesh
 
 import skrobot
@@ -402,7 +401,7 @@ class TestRobotModel(unittest.TestCase):
             joint_angle_limit_weight([j3]),
             np.float32(0.0))
 
-    @pytest.mark.skipif(sys.version_info[0] == 2, reason="Skip in Python 2")
+    @unittest.skipIf(sys.version_info[0] == 2, "Skip in Python 2")
     def test_from_urdf(self):
         import tempfile
 
@@ -607,3 +606,305 @@ class TestRobotModel(unittest.TestCase):
         cog = pr2.centroid()
         self.assertEqual(cog.shape, (3,))
         self.assertIsInstance(cog, np.ndarray)
+
+    def test_batch_inverse_kinematics_basic(self):
+        """Test basic batch inverse kinematics functionality."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        # Create test target poses using current position with small offsets
+        current_pos = fetch.rarm.end_coords.worldpos()
+        target_coords = [
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.01, 0.0, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.01, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.0, 0.01])
+        ]
+
+        # Test basic functionality
+        solutions, success_flags, attempt_counts = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            stop=50,
+            attempts_per_pose=1
+        )
+
+        # Check return types and shapes
+        self.assertEqual(len(solutions), len(target_coords))
+        self.assertEqual(len(success_flags), len(target_coords))
+        self.assertEqual(len(attempt_counts), len(target_coords))
+
+        for solution in solutions:
+            self.assertEqual(len(solution), len(fetch.angle_vector()))
+            self.assertIsInstance(solution, np.ndarray)
+
+        for success in success_flags:
+            self.assertIsInstance(success, bool)
+
+        for attempts in attempt_counts:
+            self.assertIsInstance(attempts, int)
+            self.assertGreaterEqual(attempts, 1)
+
+    def test_batch_inverse_kinematics_numpy_input(self):
+        """Test batch IK with numpy array input."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        # Test with 6D numpy array input (x, y, z, roll, pitch, yaw)
+        target_poses_6d = np.array([
+            [0.7, -0.2, 0.9, 0.0, 0.0, 0.0],
+            [0.6, -0.3, 1.0, 0.0, np.deg2rad(30), 0.0]
+        ])
+
+        solutions, success_flags, attempt_counts = fetch.batch_inverse_kinematics(
+            target_poses_6d,
+            move_target=fetch.rarm.end_coords,
+            stop=50,
+            attempts_per_pose=1
+        )
+
+        self.assertEqual(len(solutions), 2)
+        self.assertEqual(len(success_flags), 2)
+        self.assertEqual(len(attempt_counts), 2)
+
+        # Test with 7D numpy array input (x, y, z, qw, qx, qy, qz)
+        target_poses_7d = np.array([
+            [0.7, -0.2, 0.9, 1.0, 0.0, 0.0, 0.0],
+            [0.6, -0.3, 1.0, 1.0, 0.0, 0.0, 0.0]
+        ])
+
+        solutions, success_flags, attempt_counts = fetch.batch_inverse_kinematics(
+            target_poses_7d,
+            move_target=fetch.rarm.end_coords,
+            stop=50,
+            attempts_per_pose=1
+        )
+
+        self.assertEqual(len(solutions), 2)
+        self.assertEqual(len(success_flags), 2)
+        self.assertEqual(len(attempt_counts), 2)
+
+    def test_batch_inverse_kinematics_initial_angles(self):
+        """Test batch IK with different initial_angles options."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        current_pos = fetch.rarm.end_coords.worldpos()
+        target_coords = [skrobot.coordinates.Coordinates(pos=current_pos)]
+
+        # Test with None (random)
+        solutions1, success1, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            initial_angles=None,
+            stop=10,
+            attempts_per_pose=1
+        )
+
+        # Test with "random"
+        solutions2, success2, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            initial_angles="random",
+            stop=10,
+            attempts_per_pose=1
+        )
+
+        # Test with "current"
+        solutions3, success3, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            initial_angles="current",
+            stop=10,
+            attempts_per_pose=1
+        )
+
+        # All should return valid results
+        self.assertEqual(len(solutions1), 1)
+        self.assertEqual(len(solutions2), 1)
+        self.assertEqual(len(solutions3), 1)
+
+        # Test with numpy array
+        link_list = fetch.link_lists(fetch.rarm.end_coords.parent)
+        joint_list_without_fixed = fetch.joint_list_from_link_list(link_list, ignore_fixed_joint=True)
+        from skrobot.model.joint import calc_target_joint_dimension
+        ndof = calc_target_joint_dimension(joint_list_without_fixed)
+
+        initial_angles_array = np.random.uniform(-1, 1, (1, ndof))
+        solutions4, success4, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            initial_angles=initial_angles_array,
+            stop=10,
+            attempts_per_pose=1
+        )
+        self.assertEqual(len(solutions4), 1)
+
+    def test_batch_inverse_kinematics_multiple_attempts(self):
+        """Test batch IK with multiple attempts per pose."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        # Test with multiple attempts
+        solutions, success_flags, attempt_counts = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            stop=10,
+            attempts_per_pose=5
+        )
+
+        self.assertEqual(len(solutions), 1)
+        self.assertEqual(len(success_flags), 1)
+        self.assertEqual(len(attempt_counts), 1)
+        self.assertLessEqual(attempt_counts[0], 5)
+
+    def test_batch_inverse_kinematics_axis_constraints(self):
+        """Test batch IK with different axis constraints."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        # Test different rotation axis constraints
+        for rotation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+            solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                target_coords,
+                move_target=fetch.rarm.end_coords,
+                rotation_axis=rotation_axis,
+                stop=20,
+                attempts_per_pose=1
+            )
+            self.assertEqual(len(solutions), 1)
+            self.assertEqual(len(success_flags), 1)
+
+        # Test different translation axis constraints
+        for translation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+            solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                target_coords,
+                move_target=fetch.rarm.end_coords,
+                translation_axis=translation_axis,
+                stop=20,
+                attempts_per_pose=1
+            )
+            self.assertEqual(len(solutions), 1)
+            self.assertEqual(len(success_flags), 1)
+
+    def test_batch_inverse_kinematics_parameters(self):
+        """Test batch IK with different parameter values."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        # Test different alpha values
+        for alpha in [0.1, 0.5, 1.0]:
+            solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                target_coords,
+                move_target=fetch.rarm.end_coords,
+                alpha=alpha,
+                stop=10,
+                attempts_per_pose=1
+            )
+            self.assertEqual(len(solutions), 1)
+
+        # Test different threshold values
+        solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            thre=0.01,
+            rthre=np.deg2rad(5),
+            stop=10,
+            attempts_per_pose=1
+        )
+        self.assertEqual(len(solutions), 1)
+
+    def test_batch_inverse_kinematics_error_cases(self):
+        """Test batch IK error handling."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        # Test invalid target_coords shape
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                np.array([[0.7, -0.2]]),  # Wrong shape
+                move_target=fetch.rarm.end_coords
+            )
+
+        # Test invalid initial_angles type
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])],
+                move_target=fetch.rarm.end_coords,
+                initial_angles="invalid_string"
+            )
+
+        # Test invalid initial_angles shape
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])],
+                move_target=fetch.rarm.end_coords,
+                initial_angles=np.array([[1, 2, 3]])  # Wrong ndof
+            )
+
+    def test_batch_inverse_kinematics_solution_accuracy(self):
+        """Test that batch IK solutions are accurate."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        # Create target coordinates
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        # Solve IK
+        solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            stop=100,
+            attempts_per_pose=10,
+            thre=0.001
+        )
+
+        # If IK succeeded, check accuracy
+        if success_flags[0]:
+            # Apply solution and check error
+            original_angles = fetch.angle_vector()
+            fetch.angle_vector(solutions[0])
+
+            achieved_pos = fetch.rarm.end_coords.worldpos()
+            target_pos = target_coords[0].worldpos()
+
+            pos_error = np.linalg.norm(achieved_pos - target_pos)
+            self.assertLess(pos_error, 0.01, "Position error should be small")
+
+            # Restore original angles
+            fetch.angle_vector(original_angles)
+
+    def test_batch_inverse_kinematics_consistency(self):
+        """Test that batch IK gives consistent results."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        # Run same problem multiple times with current initial angles
+        results = []
+        for _ in range(3):
+            solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                target_coords,
+                move_target=fetch.rarm.end_coords,
+                initial_angles="current",
+                stop=50,
+                attempts_per_pose=1
+            )
+            results.append((solutions[0], success_flags[0]))
+
+        # All should have same success status when starting from same initial pose
+        success_statuses = [result[1] for result in results]
+        if any(success_statuses):
+            # If any succeeded, check that solutions are similar
+            successful_solutions = [result[0] for result in results if result[1]]
+            if len(successful_solutions) > 1:
+                for i in range(1, len(successful_solutions)):
+                    diff = np.linalg.norm(successful_solutions[i] - successful_solutions[0])
+                    # Solutions should be identical when starting from same initial pose
+                    self.assertLess(diff, 1e-6, "Solutions should be identical with same initial pose")
