@@ -214,7 +214,7 @@ class Link(CascadedCoords):
             return
         alpha = np.clip(alpha, 0.0, 1.0)  # Ensure alpha is in valid range
         # Update alpha channel (4th component) of all face colors
-        mesh.visual.face_colors[:, 3] = int(alpha * 255)
+        mesh.visual.face_colors[:, 3] = np.round(alpha * 255).astype(np.uint8)
         self._visual_mesh_changed = True
 
     @property
