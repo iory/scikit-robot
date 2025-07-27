@@ -8,6 +8,8 @@ import numpy as np
 from skrobot.coordinates import Coordinates
 from skrobot.model.primitives import Axis
 from skrobot.models import Fetch
+from skrobot.models import Panda
+from skrobot.models import PR2
 
 
 def parse_axis_constraint(axis_str):
@@ -23,6 +25,9 @@ def parse_axis_constraint(axis_str):
 
 def main():
     parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with axis constraints')
+    parser.add_argument('--robot', type=str, default='fetch',
+                        choices=['fetch', 'pr2', 'panda'],
+                        help='Robot model to use. Default: fetch')
     parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
                         default='True',
                         help='Rotation axis constraints (True/False/xyz/xy/z/etc). Default: True')
@@ -50,6 +55,7 @@ def main():
     print("ADVANCED BATCH IK - WITH AXIS CONSTRAINTS")
     print("=" * 55)
     print("Configuration:")
+    print(f"   Robot: {args.robot.upper()}")
     print(f"   Rotation axis: {rotation_axis}")
     print(f"   Translation axis: {translation_axis}")
     print(f"   Attempts per pose: {args.attempts_per_pose}")
@@ -57,8 +63,17 @@ def main():
     print(f"   Position threshold: {args.thre}m")
     print(f"   Rotation threshold: {args.rthre} degrees")
 
-    # Initialize robot
-    robot = Fetch()
+    # Initialize robot based on selection
+    if args.robot == 'fetch':
+        robot = Fetch()
+        arm = robot.rarm
+    elif args.robot == 'pr2':
+        robot = PR2()
+        arm = robot.rarm
+    elif args.robot == 'panda':
+        robot = Panda()
+        arm = robot.rarm
+
     robot.reset_pose()
 
     target_poses = [
@@ -80,7 +95,7 @@ def main():
     overall_start = time.time()
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         target_poses,
-        move_target=robot.rarm.end_coords,
+        move_target=arm.end_coords,
         rotation_axis=rotation_axis,
         translation_axis=translation_axis,
         stop=args.stop,
@@ -116,7 +131,7 @@ def main():
 
                 # Test the solution
                 robot.angle_vector(solution)
-                achieved_coords = robot.rarm.end_coords.copy_worldcoords()
+                achieved_coords = arm.end_coords.copy_worldcoords()
                 achieved_pos = achieved_coords.worldpos()
                 target_pos = target_poses[i].worldpos()
 
@@ -213,7 +228,7 @@ def main():
                 viewer.add(robot)
 
                 end_effector_axis = Axis.from_coords(
-                    robot.rarm.end_coords,
+                    arm.end_coords,
                     axis_radius=0.006,
                     axis_length=0.10,
                     alpha=1.0
@@ -250,7 +265,7 @@ def main():
                                 robot.angle_vector(successful_solutions[solution_idx])
                                 orig_idx = successful_indices[solution_idx]
 
-                                end_effector_axis.newcoords(robot.rarm.end_coords)
+                                end_effector_axis.newcoords(arm.end_coords)
 
                                 for i, axis in enumerate(axis_objects):
                                     if success_flags[i]:
@@ -260,7 +275,7 @@ def main():
                                             axis.set_alpha(0.3)
 
                                 target_pos = target_poses[orig_idx].worldpos()
-                                achieved_pos = robot.rarm.end_coords.worldpos()
+                                achieved_pos = arm.end_coords.worldpos()
                                 pos_error = np.linalg.norm(achieved_pos - target_pos)
 
                                 print(f"Showing solution {solution_idx + 1}/{len(successful_solutions)} "
