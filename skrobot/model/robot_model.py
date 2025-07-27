@@ -2703,7 +2703,7 @@ class RobotModel(CascadedLink):
         # Orientation errors with mirror constraint handling
         current_pose_quat_inv = quaternion_inverse(current_poses[:, 3:])
 
-        # Calculate rotation errors, potentially with mirroring
+        # Calculate rotation errors with proper single-axis constraint handling
         adjusted_target_poses = target_poses.copy()
 
         for i in range(batch_size):
@@ -2711,7 +2711,6 @@ class RobotModel(CascadedLink):
 
             if isinstance(rot_axis, str) and rot_axis.lower() in ['xm', 'ym', 'zm']:
                 # For mirror constraints, check if mirrored target gives smaller error
-
                 axis_char = rot_axis[0].lower()
                 target_rot_matrix = quaternion2matrix(target_poses[i, 3:])
                 current_rot_matrix = quaternion2matrix(current_poses[i, 3:])
@@ -2738,6 +2737,29 @@ class RobotModel(CascadedLink):
                 if mirrored_error_norm < original_error_norm:
                     adjusted_target_poses[i, 3:] = matrix2quaternion(mirrored_target_rot)
 
+            elif isinstance(rot_axis, str) and rot_axis.lower() in ['x', 'y', 'z']:
+                # For single axis constraints, use coordinate frame difference_rotation method
+                # This ensures the same behavior as regular IK
+
+                # Create coordinate objects
+                current_coord = Coordinates()
+                current_coord.newcoords(quaternion2matrix(current_poses[i, 3:]), current_poses[i, :3])
+
+                target_coord = Coordinates()
+                target_coord.newcoords(quaternion2matrix(target_poses[i, 3:]), target_poses[i, :3])
+
+                # Calculate rotation difference using the same method as regular IK
+                dif_rot = current_coord.difference_rotation(target_coord, rotation_axis=rot_axis.lower())
+
+                # Apply the calculated rotation to current pose to get the adjusted target
+                if np.linalg.norm(dif_rot) > 1e-6:
+                    corrected_coord = current_coord.copy_worldcoords()
+                    corrected_coord.rotate_with_matrix(rodrigues(dif_rot), wrt='local')
+                    adjusted_target_poses[i, 3:] = matrix2quaternion(corrected_coord.worldrot())
+                else:
+                    # No rotation needed - target orientation becomes current orientation
+                    adjusted_target_poses[i, 3:] = current_poses[i, 3:]
+
         # Calculate rotation errors with potentially adjusted targets
         rotation_error_quat = quaternion_multiply(adjusted_target_poses[:, 3:], current_pose_quat_inv)
         rotation_error_rpy = quaternion2rpy(rotation_error_quat)[0][:, ::-1]
@@ -2761,13 +2783,18 @@ class RobotModel(CascadedLink):
                     # For mirror constraints, allow all rotation DOF but we'll handle mirroring in error calculation
                     active_rows.extend([0, 1, 2])
                 else:
-                    # Standard axis constraints
-                    if 'x' in rot_axis.lower():
-                        active_rows.append(0)
-                    if 'y' in rot_axis.lower():
-                        active_rows.append(1)
-                    if 'z' in rot_axis.lower():
-                        active_rows.append(2)
+                    # For single axis constraints, use all rotation DOF
+                    # The constraint is applied in the error calculation phase
+                    if rot_axis.lower() in ['x', 'y', 'z']:
+                        active_rows.extend([0, 1, 2])  # All rotation DOF for single axis constraints
+                    else:
+                        # Multi-axis constraints like 'xy', 'xyz', etc.
+                        if 'x' in rot_axis.lower():
+                            active_rows.append(0)
+                        if 'y' in rot_axis.lower():
+                            active_rows.append(1)
+                        if 'z' in rot_axis.lower():
+                            active_rows.append(2)
             # If rot_axis is False, no rotation rows are added
 
             # Handle translation constraints

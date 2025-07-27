@@ -116,10 +116,11 @@ def main():
 
                 # Test the solution
                 robot.angle_vector(solution)
-                achieved_pos = robot.rarm.end_coords.worldpos()
+                achieved_coords = robot.rarm.end_coords.copy_worldcoords()
+                achieved_pos = achieved_coords.worldpos()
                 target_pos = target_poses[i].worldpos()
 
-                # Calculate error considering only the constrained axes
+                # Calculate position error considering only the constrained axes
                 pos_error = achieved_pos - target_pos
                 constrained_pos_error = pos_error.copy()
 
@@ -138,9 +139,35 @@ def main():
                         if 'z' not in translation_axis.lower():
                             constrained_pos_error[2] = 0
 
-                error = np.linalg.norm(constrained_pos_error)
+                pos_error_norm = np.linalg.norm(constrained_pos_error)
 
-                print(f"  [OK] Pose {i}: Error = {error:.4f}m (constrained)")
+                # Calculate rotation error considering rotation constraints
+                rot_error = 0.0
+                rot_error_details = ""
+
+                if rotation_axis is not False:
+                    # Calculate rotation error using difference_rotation method
+                    dif_rot = achieved_coords.difference_rotation(target_poses[i], rotation_axis=rotation_axis)
+                    rot_error = np.linalg.norm(dif_rot)
+
+                    # Calculate individual axis errors for detailed analysis
+                    achieved_x = achieved_coords.axis('x')
+                    achieved_y = achieved_coords.axis('y')
+                    achieved_z = achieved_coords.axis('z')
+                    target_x = target_poses[i].axis('x')
+                    target_y = target_poses[i].axis('y')
+                    target_z = target_poses[i].axis('z')
+
+                    x_angle_error = np.rad2deg(np.arccos(np.clip(np.dot(achieved_x, target_x), -1, 1)))
+                    y_angle_error = np.rad2deg(np.arccos(np.clip(np.dot(achieved_y, target_y), -1, 1)))
+                    z_angle_error = np.rad2deg(np.arccos(np.clip(np.dot(achieved_z, target_z), -1, 1)))
+
+                    rot_error_details = (
+                        f" | Rot: {np.rad2deg(rot_error):.2f}° "
+                        f"(X:{x_angle_error:.1f}° Y:{y_angle_error:.1f}° Z:{z_angle_error:.1f}°)"
+                    )
+
+                print(f"  [OK] Pose {i}: Pos = {pos_error_norm:.4f}m{rot_error_details}")
 
                 # Restore for next test
                 robot.angle_vector(original_angles)
