@@ -51,6 +51,12 @@ resulting in less simplification. Default is None."""
         'it is used as the voxel size in the function to perform '
         'mesh simplification. This process reduces the complexity'
         ' of the mesh by clustering vertices within the specified voxel size.')
+    parser.add_argument(
+        '--target-triangles', type=int, default=None,
+        help='Target number of triangles for texture-preserving decimation. '
+        'When specified, uses enhanced decimation that preserves texture '
+        'colors by converting them to vertex colors, performing decimation, '
+        'and converting back to texture format. Default is None.')
 
     args = parser.parse_args()
 
@@ -60,14 +66,14 @@ resulting in less simplification. Default is None."""
             '[WARNING] With `trimesh` < 4.0.10, the output dae is not '
             + 'colored. Please `pip install trimesh -U`')
         sys.exit(1)
-    if args.decimation_area_ratio_threshold:
+    if args.decimation_area_ratio_threshold or args.target_triangles:
         disable_decimation = False
         if is_package_installed('open3d') is False:
             print("[ERROR] open3d is not installed. "
                   + "Please install it as 'pip install scikit-robot[all]' "
                   + "to include open3d or 'pip install open3d'")
             disable_decimation = True
-        if is_package_installed('fast-simplification') is False:
+        if args.decimation_area_ratio_threshold and is_package_installed('fast-simplification') is False:
             print("[ERROR] fast-simplification is not installed. "
                   + "Please install it with 'pip install fast-simplification'")
             disable_decimation = True
@@ -108,6 +114,7 @@ resulting in less simplification. Default is None."""
             '.' + args.format,
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
             simplify_vertex_clustering_voxel_size=args.voxel_size,
+            target_triangles=args.target_triangles,
             overwrite_mesh=args.overwrite_mesh):
         r.urdf_robot_model.save(str(base_path / output_path))
 
