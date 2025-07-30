@@ -45,6 +45,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'export_mesh_format': None,
                         'decimation_area_ratio_threshold': None,
                         'simplify_vertex_clustering_voxel_size': None,
+                        'target_triangles': None,
                         'enable_mesh_cache': False,
                         'force_visual_mesh_origin_to_zero': False,
                         'overwrite_mesh': False,
@@ -71,17 +72,20 @@ def export_mesh_format(
         mesh_format,
         decimation_area_ratio_threshold=None,
         simplify_vertex_clustering_voxel_size=None,
+        target_triangles=None,
         overwrite_mesh=False):
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
         decimation_area_ratio_threshold
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
         simplify_vertex_clustering_voxel_size
+    _CONFIGURABLE_VALUES["target_triangles"] = target_triangles
     _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
     yield
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
+    _CONFIGURABLE_VALUES["target_triangles"] = None
     _CONFIGURABLE_VALUES["overwrite_mesh"] = False
 
 
@@ -935,7 +939,12 @@ class Mesh(URDFType):
 
         # Export the meshes as a single file
         meshes = self.meshes
-        if _CONFIGURABLE_VALUES[
+        if _CONFIGURABLE_VALUES["target_triangles"] is not None:
+            from skrobot.utils.mesh import auto_simplify_quadric_decimation_with_texture_preservation
+            meshes = auto_simplify_quadric_decimation_with_texture_preservation(
+                meshes, target_number_of_triangles=_CONFIGURABLE_VALUES[
+                    "target_triangles"], verbose=True)
+        elif _CONFIGURABLE_VALUES[
                 "decimation_area_ratio_threshold"] is not None:
             from skrobot.utils.mesh import auto_simplify_quadric_decimation
             meshes = auto_simplify_quadric_decimation(
