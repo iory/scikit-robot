@@ -259,3 +259,30 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.dispatch_event('on_draw')
         self.flip()
         return super(TrimeshSceneViewer, self).save_image(file_obj)
+
+    def is_active(self):
+        """Check if the viewer window is active and visible.
+
+        Returns
+        -------
+        bool
+            True if the viewer is active and visible, False otherwise.
+        """
+        # Check if the viewer has been initialized and shown
+        if not hasattr(self, 'has_exit'):
+            return False
+
+        # Check if the viewer has exited
+        if self.has_exit:
+            return False
+
+        # Check if the viewer window is visible
+        if hasattr(self, 'visible') and not self.visible:
+            return False
+
+        # For non-Darwin platforms, check if the thread is alive
+        if compat_platform != 'darwin':
+            if self.thread is None or not self.thread.is_alive():
+                return False
+
+        return True
