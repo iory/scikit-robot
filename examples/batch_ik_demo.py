@@ -25,7 +25,7 @@ def parse_axis_constraint(axis_str):
 
 def main():
     parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with axis constraints')
-    parser.add_argument('--robot', type=str, default='fetch',
+    parser.add_argument('--robot', type=str, default='pr2',
                         choices=['fetch', 'pr2', 'panda'],
                         help='Robot model to use. Default: fetch')
     parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
@@ -45,6 +45,9 @@ def main():
                         help='Rotation error threshold in degrees. Default: 1.0')
     parser.add_argument('--no-interactive', action='store_true',
                         help='Disable interactive visualization')
+    parser.add_argument('--viewer', type=str,
+                        choices=['pyrender', 'trimesh'], default='trimesh',
+                        help='Choose the viewer type: trimesh or pyrender. Default: trimesh')
 
     args = parser.parse_args()
 
@@ -192,9 +195,12 @@ def main():
 
         if not args.no_interactive:
             try:
-                from skrobot.viewers import PyrenderViewer
-
-                viewer = PyrenderViewer(update_interval=1 / 30.0)
+                if args.viewer == 'pyrender':
+                    from skrobot.viewers import PyrenderViewer
+                    viewer = PyrenderViewer(update_interval=1 / 30.0)
+                else:  # trimesh
+                    from skrobot.viewers import TrimeshSceneViewer
+                    viewer = TrimeshSceneViewer(update_interval=1 / 30.0)
 
                 print(f"Adding {len(target_poses)} target poses as coordinate frames...")
                 axis_objects = []
