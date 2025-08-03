@@ -126,7 +126,7 @@ def get_combined_mesh_hash(mesh_path):
                         texture_hashes.extend(
                             get_texture_hashes_from_mtl(mtl_path))
                         # Don't break to support multiple mtllib references
-        except Exception as e:
+        except (OSError, IOError, UnicodeDecodeError) as e:
             print(f"Error parsing OBJ file {mesh_path}: {e}")
 
     # Combine mesh hash with sorted texture hashes for final hash
