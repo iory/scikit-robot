@@ -130,7 +130,7 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
 
             # Create directory and preserve original filename
             target_dir = output_dir / friendly_dir_name
-            os.makedirs(target_dir, mode=0o777, exist_ok=True)
+            os.makedirs(target_dir, mode=0o755, exist_ok=True)
             target_path = target_dir / original_filename
 
             # Copy file
