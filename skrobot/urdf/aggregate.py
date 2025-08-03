@@ -62,7 +62,7 @@ def _resolve_directory_structure(original_path, abs_path):
 
 
 def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False):
-    """Collect URDF and related files and rewrite mesh paths to relative paths.
+    """Collect URDF and related files and rewrite mesh paths to file:// URLs.
 
     Preserves original filenames and directory structure.
 
@@ -150,10 +150,11 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
                     mtl_target = target_dir / mtl_path.name
                     shutil.copy(mtl_path, mtl_target)
 
-            # Set relative path
-            relative_path = f"{friendly_dir_name}/{original_filename}"
-            mesh.set("filename", relative_path)
-            file_mapping[abs_path] = relative_path
+            # Set file:// URL for the copied file
+            absolute_target_path = os.path.abspath(target_path)
+            file_url = f"file://{absolute_target_path}"
+            mesh.set("filename", file_url)
+            file_mapping[abs_path] = file_url
 
     # Process <texture> tags similarly
     for texture in root.findall(".//texture"):
@@ -181,10 +182,11 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
             # Copy file
             shutil.copy(abs_path, target_path)
 
-            # Set relative path
-            relative_path = f"{friendly_dir_name}/{original_filename}"
-            texture.set("filename", relative_path)
-            file_mapping[abs_path] = relative_path
+            # Set file:// URL for the copied file
+            absolute_target_path = os.path.abspath(target_path)
+            file_url = f"file://{absolute_target_path}"
+            texture.set("filename", file_url)
+            file_mapping[abs_path] = file_url
 
     # Save modified URDF
     output_urdf_path = output_dir / f"{robot_name}.urdf"
