@@ -137,7 +137,7 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
             shutil.copy(abs_path, target_path)
 
             # Copy MTL file if it exists (for OBJ files)
-            if original_filename.endswith(".obj"):
+            if original_filename.lower().endswith(".obj"):
                 mtl_path = Path(abs_path).with_suffix(".mtl")
                 if mtl_path.exists():
                     mtl_target = target_dir / mtl_path.name
