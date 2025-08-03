@@ -100,7 +100,14 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
     safe_robot_name = "".join(
         c for c in robot_name if c.isalnum() or c in "._-"
     ).rstrip()
-    if not safe_robot_name:
+    # Sanitize robot name (keep only filesystem-safe characters, and avoid leading/trailing dots/spaces)
+    safe_robot_name = "".join(
+        c for c in robot_name if c.isalnum() or c in "._-"
+    )
+    # Strip leading/trailing dots and spaces
+    safe_robot_name = safe_robot_name.strip(" .")
+    # Avoid reserved names and empty string
+    if not safe_robot_name or safe_robot_name in {".", ".."}:
         safe_robot_name = "robot"
 
     dir_name = f"{safe_robot_name}_{urdf_hash}"
