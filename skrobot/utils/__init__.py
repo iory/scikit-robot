@@ -2,6 +2,7 @@
 
 from skrobot.utils.urdf import URDF
 
+from skrobot.utils.archive import make_tarfile
 from skrobot.utils.checksum import checksum_md5
 
 from skrobot.utils.visualization import create_ik_visualization_hook
