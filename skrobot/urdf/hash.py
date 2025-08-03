@@ -58,7 +58,7 @@ def get_texture_hashes_from_dae(dae_path):
                 texture_path = os.path.join(base_path, init_from.text)
                 hashes.append(get_file_hash(texture_path))
     except Exception as e:
-        print(f"Error parsing DAE file {dae_path}: {e}")
+        print(f"Error parsing DAE file {dae_path}: {e}", file=sys.stderr)
     return sorted(hashes)  # Sort to ensure consistent order
 
 
