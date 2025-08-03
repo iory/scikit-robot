@@ -105,7 +105,7 @@ def aggregate_urdf_mesh_files(input_urdf_path, output_directory, compress=False)
 
     dir_name = f"{safe_robot_name}_{urdf_hash}"
     output_dir = Path(output_directory) / dir_name
-    os.makedirs(output_dir, mode=0o777, exist_ok=True)
+    os.makedirs(output_dir, mode=0o755, exist_ok=True)
 
     # Keep file path mapping to avoid duplicates
     file_mapping = {}
