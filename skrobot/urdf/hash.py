@@ -87,7 +87,7 @@ def get_texture_hashes_from_mtl(mtl_path):
                     if len(parts) > 1:
                         texture_path = os.path.join(base_path, parts[-1])
                         hashes.append(get_file_hash(texture_path))
-    except Exception as e:
+    except (OSError, UnicodeDecodeError) as e:
         logging.error(f"Error parsing MTL file {mtl_path}: {e}")
     return sorted(hashes)
 
