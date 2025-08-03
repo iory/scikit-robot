@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 
 from lxml import etree
@@ -20,13 +21,12 @@ def get_file_hash(filepath):
         SHA-256 hash of the file content, or 'file_not_found' if file doesn't exist.
     """
     if not os.path.exists(filepath):
-        logging.warning(f"File not found at {filepath}")
+        logging.warning("File not found at %s", filepath)
         return 'file_not_found'
 
     sha256 = hashlib.sha256()
     with open(filepath, 'rb') as f:
         # Read in chunks to handle large files efficiently
-        while chunk := f.read(8192):
         chunk = f.read(8192)
         while chunk:
             sha256.update(chunk)
@@ -58,7 +58,7 @@ def get_texture_hashes_from_dae(dae_path):
                 texture_path = os.path.join(base_path, init_from.text)
                 hashes.append(get_file_hash(texture_path))
     except (etree.XMLSyntaxError, OSError) as e:
-        print(f"Error parsing DAE file {dae_path}: {e}", file=sys.stderr)
+        logging.error("Error parsing DAE file %s: %s", dae_path, e)
     return sorted(hashes)  # Sort to ensure consistent order
 
 
@@ -88,7 +88,7 @@ def get_texture_hashes_from_mtl(mtl_path):
                         texture_path = os.path.join(base_path, parts[-1])
                         hashes.append(get_file_hash(texture_path))
     except (OSError, UnicodeDecodeError) as e:
-        logging.error(f"Error parsing MTL file {mtl_path}: {e}")
+        logging.error("Error parsing MTL file %s: %s", mtl_path, e)
     return sorted(hashes)
 
 
@@ -126,8 +126,8 @@ def get_combined_mesh_hash(mesh_path):
                         texture_hashes.extend(
                             get_texture_hashes_from_mtl(mtl_path))
                         # Don't break to support multiple mtllib references
-        except (OSError, IOError, UnicodeDecodeError) as e:
-            logging.warning(f"Error parsing OBJ file {mesh_path}: {e}")
+        except (OSError, UnicodeDecodeError) as e:
+            logging.warning("Error parsing OBJ file %s: %s", mesh_path, e)
 
     # Combine mesh hash with sorted texture hashes for final hash
     combined_string = mesh_content_hash + ''.join(sorted(texture_hashes))
