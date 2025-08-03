@@ -20,7 +20,7 @@ def get_file_hash(filepath):
         SHA-256 hash of the file content, or 'file_not_found' if file doesn't exist.
     """
     if not os.path.exists(filepath):
-        print(f"Warning: File not found at {filepath}")
+        logging.warning(f"File not found at {filepath}")
         return 'file_not_found'
 
     sha256 = hashlib.sha256()
