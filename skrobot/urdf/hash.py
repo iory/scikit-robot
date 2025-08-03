@@ -27,7 +27,10 @@ def get_file_hash(filepath):
     with open(filepath, 'rb') as f:
         # Read in chunks to handle large files efficiently
         while chunk := f.read(8192):
+        chunk = f.read(8192)
+        while chunk:
             sha256.update(chunk)
+            chunk = f.read(8192)
     return sha256.hexdigest()
 
 
