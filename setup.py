@@ -87,6 +87,7 @@ if (sys.version_info.major, sys.version_info.minor) >= (3, 6):
 console_scripts.append("modularize-urdf=skrobot.apps.modularize_urdf:main")
 console_scripts.append("change-urdf-root=skrobot.apps.change_urdf_root:main")
 console_scripts.append("visualize-mesh=skrobot.apps.visualize_mesh:main")
+console_scripts.append("urdf-hash=skrobot.apps.urdf_hash:main")
 
 
 setup(
