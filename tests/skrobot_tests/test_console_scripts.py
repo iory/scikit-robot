@@ -21,10 +21,14 @@ class TestConsoleScripts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_output:
             os.environ['SKROBOT_CACHE_DIR'] = tmp_output
             urdfpath = fetch_urdfpath()
+            urdf_dir = osp.dirname(urdfpath)
 
-            out_urdfpath = osp.join(osp.dirname(urdfpath), 'fetch_0.urdf')
+            out_urdfpath = osp.join(urdf_dir, 'fetch_0.urdf')
             out_stl_urdfpath = osp.join(
-                osp.dirname(urdfpath), 'fetch_stl.urdf')
+                urdf_dir, 'fetch_stl.urdf')
+
+            relative_input_path = osp.join(osp.basename(urdf_dir), osp.basename(urdfpath))
+            relative_output_path = osp.join(osp.basename(urdf_dir), osp.basename(out_urdfpath))
 
             cmds = [
                 'convert-urdf-mesh {}'.format(urdfpath),
@@ -34,19 +38,24 @@ class TestConsoleScripts(unittest.TestCase):
                 'convert-urdf-mesh {} --output {} -f stl'.format(
                     out_urdfpath, out_stl_urdfpath),
                 'convert-urdf-mesh {} --inplace'.format(out_urdfpath),
+                'cd .. && convert-urdf-mesh {} --output {}'.format(
+                    relative_input_path, relative_output_path),
             ]
-
             failures = []
             env = os.environ.copy()
 
             for cmd in cmds:
                 print("Executing: {}".format(cmd))
+
+                exec_dir = osp.dirname(urdf_dir) if 'cd ..' in cmd else urdf_dir
+
                 result = subprocess.run(
                     cmd,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    env=env
+                    env=env,
+                    cwd=exec_dir
                 )
 
                 if result.returncode != 0:

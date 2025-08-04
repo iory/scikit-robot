@@ -1950,7 +1950,7 @@ class RobotModel(CascadedLink):
         is_python3 = sys.version_info.major > 2
         f = io.StringIO()
         if is_python3:
-            f.write(urdf)
+            f.write(str(urdf))
         else:
             f.write(urdf.decode('utf-8'))
         f.seek(0)
