@@ -80,7 +80,6 @@ resulting in less simplification. Default is None."""
         if disable_decimation:
             sys.exit(1)
 
-    base_path = Path(args.urdf).parent
     urdf_path = Path(args.urdf)
 
     if args.output is None:
@@ -91,8 +90,9 @@ resulting in less simplification. Default is None."""
         while osp.exists(outfile):
             index += 1
             outfile = pattern % index
-        args.output = outfile
-    output_path = Path(args.output)
+        output_path = Path(outfile)
+    else:
+        output_path = Path(args.output)
 
     if args.force_zero_origin:
         force_visual_mesh_origin_to_zero_or_not = \
@@ -108,7 +108,8 @@ resulting in less simplification. Default is None."""
         force_visual_mesh_origin_to_zero_or_not = nullcontext
 
     with force_visual_mesh_origin_to_zero_or_not():
-        r = RobotModel.from_urdf(base_path / urdf_path)
+        print(f"Loading URDF from: {urdf_path}")
+        r = RobotModel.from_urdf(urdf_path)
 
     with export_mesh_format(
             '.' + args.format,
@@ -116,11 +117,16 @@ resulting in less simplification. Default is None."""
             simplify_vertex_clustering_voxel_size=args.voxel_size,
             target_triangles=args.target_triangles,
             overwrite_mesh=args.overwrite_mesh):
-        r.urdf_robot_model.save(str(base_path / output_path))
+        print(f"Saving new URDF to: {output_path}")
+        # Ensure output directory exists
+        output_dir = output_path.parent
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+        r.urdf_robot_model.save(str(output_path))
 
     if args.inplace:
-        shutil.move(str(base_path / output_path),
-                    base_path / urdf_path)
+        print(f"Moving {output_path} to {urdf_path} (inplace)")
+        shutil.move(output_path, urdf_path)
 
 
 if __name__ == '__main__':
