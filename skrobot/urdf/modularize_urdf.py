@@ -74,7 +74,9 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     xacro_root.append(macro)
 
     connector_joint = etree.Element("joint")
-    connector_joint_name = "{}{}_to_${{parent_link}}_joint".format('${prefix}' if not no_prefix else '', connector_link)
+    prefix_part = '${prefix}' if not no_prefix else ''
+    connector_link_with_prefix = add_prefix_to_name(connector_link) if not no_prefix else connector_link
+    connector_joint_name = f"{prefix_part}${{parent_link}}_to_{connector_link_with_prefix}_joint"
     connector_joint.set("name", connector_joint_name)
     connector_joint.set("type", "fixed")
 
