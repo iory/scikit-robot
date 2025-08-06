@@ -7,10 +7,13 @@ from pathlib import Path
 import shutil
 import sys
 
+from lxml import etree
 from packaging.version import Version
 
 from skrobot import determine_version
 from skrobot.model import RobotModel
+from skrobot.urdf.modularize_urdf import find_root_link
+from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.utils.package import is_package_installed
 from skrobot.utils.urdf import export_mesh_format
 from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
@@ -57,6 +60,14 @@ resulting in less simplification. Default is None."""
         'When specified, uses enhanced decimation that preserves texture '
         'colors by converting them to vertex colors, performing decimation, '
         'and converting back to texture format. Default is None.')
+    parser.add_argument(
+        '--xacro', action='store_true',
+        help='Generate xacro macro file with modularized URDF '
+        'in addition to converted URDF.')
+    parser.add_argument(
+        '--xacro-no-prefix', action='store_true',
+        help='When generating xacro, do not use prefix parameter '
+        '(only works with --xacro option).')
 
     args = parser.parse_args()
 
@@ -127,6 +138,32 @@ resulting in less simplification. Default is None."""
     if args.inplace:
         print(f"Moving {output_path} to {urdf_path} (inplace)")
         shutil.move(output_path, urdf_path)
+
+    if args.xacro:
+        root_link = find_root_link(str(output_path) if not args.inplace else str(urdf_path))
+        xacro_root, robot_name = transform_urdf_to_macro(
+            str(output_path) if not args.inplace else str(urdf_path),
+            root_link,
+            args.xacro_no_prefix
+        )
+
+        xacro_output_path = output_path.with_suffix('.xacro') if not args.inplace else urdf_path.with_suffix('.xacro')
+        etree.ElementTree(xacro_root).write(
+            str(xacro_output_path),
+            pretty_print=True,
+            xml_declaration=True,
+            encoding="utf-8"
+        )
+        print(f"Successfully generated xacro: {xacro_output_path}")
+        prefix_attr = 'prefix="[specify prefix]"' if not args.xacro_no_prefix else ''
+        print(f"""To use the generated xacro macro in your xacro file, copy and paste the following:
+
+  <xacro:{robot_name}
+    {prefix_attr}
+    parent_link="[specify parent link]">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:{robot_name}>
+""")
 
 
 if __name__ == '__main__':
