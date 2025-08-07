@@ -78,6 +78,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self._links = collections.OrderedDict()
 
         self._redraw = True
+        self._is_active = False
         pyglet.clock.schedule_interval(self.on_update, update_interval)
 
         self.scene = trimesh.Scene()
@@ -108,10 +109,12 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
         if compat_platform == 'darwin':
             super(TrimeshSceneViewer, self).__init__(**self._kwargs)
+            self._is_active = True
             init_loop = 30
             for _ in range(init_loop):
                 _redraw_all_windows()
         else:
+            self._is_active = True
             self.thread = threading.Thread(target=self._init_and_start_app)
             self.thread.daemon = True  # terminate when main thread exit
             self.thread.start()
@@ -120,11 +123,14 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         with self.lock:
             try:
                 super(TrimeshSceneViewer, self).__init__(**self._kwargs)
+                self._is_active = True
             except pyglet.canvas.xlib.NoSuchDisplayException:
                 print('No display found. Viewer is disabled.')
                 self.has_exit = True
+                self._is_active = False
                 return
         pyglet.app.run()
+        self._is_active = False
 
     def redraw(self):
         self._redraw = True
@@ -260,29 +266,12 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         self.flip()
         return super(TrimeshSceneViewer, self).save_image(file_obj)
 
+    def on_close(self):
+        """Handle window close event by setting is_active to False."""
+        self._is_active = False
+        super(TrimeshSceneViewer, self).on_close()
+
+    @property
     def is_active(self):
-        """Check if the viewer window is active and visible.
-
-        Returns
-        -------
-        bool
-            True if the viewer is active and visible, False otherwise.
-        """
-        # Check if the viewer has been initialized and shown
-        if not hasattr(self, 'has_exit'):
-            return False
-
-        # Check if the viewer has exited
-        if self.has_exit:
-            return False
-
-        # Check if the viewer window is visible
-        if hasattr(self, 'visible') and not self.visible:
-            return False
-
-        # For non-Darwin platforms, check if the thread is alive
-        if compat_platform != 'darwin':
-            if self.thread is None or not self.thread.is_alive():
-                return False
-
-        return True
+        """bool : `True` if the viewer is active, or `False` if it has been closed."""
+        return self._is_active
