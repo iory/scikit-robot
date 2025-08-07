@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 import argparse
-import time
 import os.path as osp
+import time
 
 import skrobot
 from skrobot.models.urdf import RobotModelFromURDF
@@ -38,9 +38,10 @@ def main():
             return
         IPython.embed()
     else:
-        while not viewer.has_exit:
+        while viewer.is_active:
             viewer.redraw()
             time.sleep(0.1)
+        viewer.close()
 
 
 if __name__ == '__main__':

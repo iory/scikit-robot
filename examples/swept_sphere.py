@@ -76,7 +76,7 @@ viewer.show()
 
 print('==> Press [q] to close window')
 if not args.no_interactive:
-    while not viewer.has_exit:
+    while viewer.is_active:
         time.sleep(0.1)
         viewer.redraw()
 viewer.close()

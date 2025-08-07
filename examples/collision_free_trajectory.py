@@ -153,7 +153,7 @@ for av in av_seq:
 
 if not args.no_interactive:
     print('==> Press [q] to close window')
-    while not viewer.has_exit:
+    while viewer.is_active:
         time.sleep(0.1)
         viewer.redraw()
 viewer.close()

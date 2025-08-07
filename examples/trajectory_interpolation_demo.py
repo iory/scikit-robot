@@ -304,7 +304,7 @@ def main():
 
         if not args.no_interactive:
             print('\n==> Press [q] to close window')
-            while not viewer.has_exit:
+            while viewer.is_active:
                 time.sleep(0.1)
                 viewer.redraw()
         else:
