@@ -54,7 +54,7 @@ try:
                     'The correct version of pyrender is not installed.\n'
                     'To install the appropriate version of pyrender, '
                     'please execute the following command:\n'
-                    'pip uninstall -y pyrender && pip install git+https://github.com/mmatl/pyrender.git --no-cache-dir'
+                    'pip uninstall -y pyrender && pip install scikit-robot-pyrender --no-cache-dir'
                 )
 except ImportError as error_log:
     warn_gl(error_log)
