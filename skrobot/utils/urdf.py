@@ -1686,7 +1686,13 @@ class Inertial(URDFType):
         if scale_factor != 1.0:
             # Mass scales with volume (scale^3)
             scaled_mass = self.mass * (scale_factor ** 3)
-            # Inertia scales with mass * length^2, so scale^5 total
+            # Mass scales with volume (scale^3).
+            # Reference: For a uniform scaling of a 3D object, the volume (and thus mass, assuming constant density) scales with the cube of the linear scale factor.
+            # See e.g. "Classical Mechanics" by J.R. Taylor, Section 4.4, or https://en.wikipedia.org/wiki/Scaling_law#Dimensional_analysis
+            scaled_mass = self.mass * (scale_factor ** 3)
+            # Inertia scales with mass * length^2, so scale^5 total.
+            # Reference: The moment of inertia for a rigid body is proportional to mass times the square of the characteristic length. Under uniform scaling, inertia scales as (scale^3) * (scale^2) = scale^5.
+            # See e.g. "Classical Mechanics" by J.R. Taylor, Section 10.2, or https://en.wikipedia.org/wiki/Moment_of_inertia#Scaling_of_moment_of_inertia
             scaled_inertia = self.inertia * (scale_factor ** 5)
 
         mass = ET.Element('mass')
