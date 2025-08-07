@@ -59,7 +59,9 @@ def remove_from_requirements(install_requires, remove_req):
 
 extra_all_requires = ['pybullet>=2.1.9']
 if (sys.version_info.major > 2):
-    extra_all_requires.append('open3d')
+    # open3d doesn't support Python 3.13 yet
+    if (sys.version_info.major, sys.version_info.minor) < (3, 13):
+        extra_all_requires.append('open3d')
     extra_all_requires.append('fast-simplification')
 
 # Python 2.7 and 3.4 support has been dropped from packages
@@ -106,9 +108,12 @@ setup(
         'Natural Language :: English',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: Implementation :: CPython',
     ],
     packages=find_packages(),

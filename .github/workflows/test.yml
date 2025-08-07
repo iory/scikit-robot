@@ -143,6 +143,17 @@ jobs:
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: true  # <- this one uses the latest setuptools
+
+          - python-version: 3.13
+            os: ubuntu-latest
+            numpy-version: "latest"
+            scipy-version: "latest"
+            remove-setuptools: false
+          - python-version: 3.13
+            os: ubuntu-latest
+            numpy-version: "latest"
+            scipy-version: "latest"
+            remove-setuptools: true  # <- this one uses the latest setuptools
       fail-fast: false
     steps:
     - uses: actions/checkout@v3
