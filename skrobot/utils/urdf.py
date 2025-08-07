@@ -49,6 +49,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'enable_mesh_cache': False,
                         'force_visual_mesh_origin_to_zero': False,
                         'overwrite_mesh': False,
+                        'scale_factor': 1.0,
                         }
 _MESH_CACHE = {}
 
@@ -101,6 +102,13 @@ def force_visual_mesh_origin_to_zero():
     _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = True
     yield
     _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = False
+
+
+@contextlib.contextmanager
+def apply_scale(scale_factor):
+    _CONFIGURABLE_VALUES['scale_factor'] = scale_factor
+    yield
+    _CONFIGURABLE_VALUES['scale_factor'] = 1.0
 
 
 def get_transparency(mesh):
@@ -712,6 +720,19 @@ class Box(URDFType):
                 self._meshes = [trimesh.creation.box(extents=self.size)]
         return self._meshes
 
+    def _to_xml(self, parent, path):
+        # Apply scale factor to box size
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        original_size = self.size.copy()
+        if scale_factor != 1.0:
+            self.size = original_size * scale_factor
+
+        node = self._unparse(path)
+
+        # Restore original size
+        self.size = original_size
+        return node
+
 
 class Cylinder(URDFType):
     """A cylinder whose center is at the local origin.
@@ -775,6 +796,22 @@ class Cylinder(URDFType):
                 )]
         return self._meshes
 
+    def _to_xml(self, parent, path):
+        # Apply scale factor to cylinder dimensions
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        original_radius = self.radius
+        original_length = self.length
+        if scale_factor != 1.0:
+            self.radius = original_radius * scale_factor
+            self.length = original_length * scale_factor
+
+        node = self._unparse(path)
+
+        # Restore original dimensions
+        self.radius = original_radius
+        self.length = original_length
+        return node
+
 
 class Sphere(URDFType):
     """A sphere whose center is at the local origin.
@@ -817,6 +854,19 @@ class Sphere(URDFType):
                 trimesh = _lazy_trimesh()
                 self._meshes = [trimesh.creation.icosphere(radius=self.radius)]
         return self._meshes
+
+    def _to_xml(self, parent, path):
+        # Apply scale factor to sphere radius
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        original_radius = self.radius
+        if scale_factor != 1.0:
+            self.radius = original_radius * scale_factor
+
+        node = self._unparse(path)
+
+        # Restore original radius
+        self.radius = original_radius
+        return node
 
 
 class Mesh(URDFType):
@@ -926,6 +976,27 @@ class Mesh(URDFType):
     def _to_xml(self, parent, path):
         # Get the filename
         fn = get_filename(path, self.filename, makedirs=True)
+        if fn is None:
+            # File not found, skip mesh processing and just apply scaling
+            scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+            original_scale = None
+            if scale_factor != 1.0:
+                original_scale = self.scale.copy() if self.scale is not None else None
+                if self.scale is None:
+                    self.scale = np.array([scale_factor, scale_factor, scale_factor])
+                else:
+                    self.scale = self.scale * scale_factor
+
+            node = self._unparse(path)
+
+            # Restore original scale
+            if original_scale is not None:
+                self.scale = original_scale
+            elif scale_factor != 1.0:
+                self.scale = None
+
+            return node
+
         ext = _CONFIGURABLE_VALUES['export_mesh_format']
         if ext is not None:
             if not fn.endswith(ext):
@@ -933,8 +1004,24 @@ class Mesh(URDFType):
                 fn = name + _CONFIGURABLE_VALUES['export_mesh_format']
                 self.filename = os.path.splitext(self.filename)[0] + ext
                 if os.path.exists(fn):
-                    # skip mesh save process.
+                    # skip mesh save process but still apply scaling
+                    scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+                    original_scale = None
+                    if scale_factor != 1.0:
+                        original_scale = self.scale.copy() if self.scale is not None else None
+                        if self.scale is None:
+                            self.scale = np.array([scale_factor, scale_factor, scale_factor])
+                        else:
+                            self.scale = self.scale * scale_factor
+
                     node = self._unparse(path)
+
+                    # Restore original scale
+                    if original_scale is not None:
+                        self.scale = original_scale
+                    elif scale_factor != 1.0:
+                        self.scale = None
+
                     return node
 
         # Export the meshes as a single file
@@ -982,8 +1069,25 @@ class Mesh(URDFType):
                     or not os.path.exists(fn):
                 trimesh.exchange.export.export_mesh(meshes, fn)
 
+        # Apply scale factor to the mesh if different from 1.0
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        original_scale = None
+        if scale_factor != 1.0:
+            original_scale = self.scale.copy() if self.scale is not None else None
+            if self.scale is None:
+                self.scale = np.array([scale_factor, scale_factor, scale_factor])
+            else:
+                self.scale = self.scale * scale_factor
+
         # Unparse the node
         node = self._unparse(path)
+
+        # Restore original scale
+        if original_scale is not None:
+            self.scale = original_scale
+        elif scale_factor != 1.0:
+            self.scale = None
+
         return node
 
 
@@ -1366,7 +1470,14 @@ class Collision(URDFType):
 
     def _to_xml(self, parent, path):
         node = self._unparse(path)
-        node.append(unparse_origin(self.origin))
+
+        # Apply scale factor to collision origin
+        scaled_origin = self.origin.copy()
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        if scale_factor != 1.0:
+            scaled_origin[:3, 3] *= scale_factor
+
+        node.append(unparse_origin(scaled_origin))
         return node
 
 
@@ -1473,7 +1584,14 @@ class Visual(URDFType):
 
     def _to_xml(self, parent, path):
         node = self._unparse(path)
-        node.append(unparse_origin(self.origin))
+
+        # Apply scale factor to visual origin
+        scaled_origin = self.origin.copy()
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        if scale_factor != 1.0:
+            scaled_origin[:3, 3] *= scale_factor
+
+        node.append(unparse_origin(scaled_origin))
         return node
 
 
@@ -1553,17 +1671,45 @@ class Inertial(URDFType):
 
     def _to_xml(self, parent, path):
         node = ET.Element('inertial')
-        node.append(unparse_origin(self.origin))
+
+        # Apply scale factor to inertial origin
+        scaled_origin = self.origin.copy()
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        if scale_factor != 1.0:
+            scaled_origin[:3, 3] *= scale_factor
+
+        node.append(unparse_origin(scaled_origin))
+
+        # Scale mass and inertia properties
+        scaled_mass = self.mass
+        scaled_inertia = self.inertia.copy()
+        if scale_factor != 1.0:
+            # Mass scales with volume (scale^3)
+            scaled_mass = self.mass * (scale_factor ** 3)
+            # Mass scales with volume (scale^3).
+            # Reference: For a uniform scaling of a 3D object, the volume
+            # (and thus mass, assuming constant density) scales with the cube of the linear scale factor.
+            # See e.g. "Classical Mechanics" by J.R. Taylor, Section 4.4,
+            # or https://en.wikipedia.org/wiki/Scaling_law#Dimensional_analysis
+            scaled_mass = self.mass * (scale_factor ** 3)
+            # Inertia scales with mass * length^2, so scale^5 total.
+            # Reference: The moment of inertia for a rigid body is proportional
+            # to mass times the square of the characteristic length. Under uniform scaling,
+            # inertia scales as (scale^3) * (scale^2) = scale^5.
+            # See e.g. "Classical Mechanics" by J.R. Taylor,
+            # Section 10.2, or https://en.wikipedia.org/wiki/Moment_of_inertia#Scaling_of_moment_of_inertia
+            scaled_inertia = self.inertia * (scale_factor ** 5)
+
         mass = ET.Element('mass')
-        mass.attrib['value'] = str(self.mass)
+        mass.attrib['value'] = str(scaled_mass)
         node.append(mass)
         inertia = ET.Element('inertia')
-        inertia.attrib['ixx'] = str(self.inertia[0, 0])
-        inertia.attrib['ixy'] = str(self.inertia[0, 1])
-        inertia.attrib['ixz'] = str(self.inertia[0, 2])
-        inertia.attrib['iyy'] = str(self.inertia[1, 1])
-        inertia.attrib['iyz'] = str(self.inertia[1, 2])
-        inertia.attrib['izz'] = str(self.inertia[2, 2])
+        inertia.attrib['ixx'] = str(scaled_inertia[0, 0])
+        inertia.attrib['ixy'] = str(scaled_inertia[0, 1])
+        inertia.attrib['ixz'] = str(scaled_inertia[0, 2])
+        inertia.attrib['iyy'] = str(scaled_inertia[1, 1])
+        inertia.attrib['iyz'] = str(scaled_inertia[1, 2])
+        inertia.attrib['izz'] = str(scaled_inertia[2, 2])
         node.append(inertia)
         return node
 
@@ -2546,7 +2692,14 @@ class Joint(URDFType):
             axis = ET.Element('axis')
             axis.attrib['xyz'] = np.array2string(self.axis)[1:-1]
             node.append(axis)
-        node.append(unparse_origin(self.origin))
+
+        # Apply scale factor to joint origin translation
+        scaled_origin = self.origin.copy()
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        if scale_factor != 1.0:
+            scaled_origin[:3, 3] *= scale_factor
+
+        node.append(unparse_origin(scaled_origin))
         node.attrib['type'] = self.joint_type
         return node
 
