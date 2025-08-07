@@ -22,13 +22,20 @@ def main():
         '--axis_radius', type=float, default=0.01,
         help='Radius (thickness) of the coordinate system axes. Default is 0.01.')
     parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender'], default='pyrender',
+        help='Choose the viewer type: trimesh or pyrender')
+    parser.add_argument(
         '--interactive', '-i',
         action='store_true',
         help='enter interactive shell'
     )
     args = parser.parse_args()
 
-    viewer = skrobot.viewers.TrimeshSceneViewer()
+    if args.viewer == 'trimesh':
+        viewer = skrobot.viewers.TrimeshSceneViewer()
+    elif args.viewer == 'pyrender':
+        viewer = skrobot.viewers.PyrenderViewer()
     for mesh_path in args.input_mesh_paths:
         if not osp.exists(mesh_path):
             print(f"Warning: Mesh file not found at {mesh_path}. Skipping.")

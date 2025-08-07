@@ -23,7 +23,7 @@ def main():
         description='Set viewer for skrobot.')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender'], default='trimesh',
+        choices=['trimesh', 'pyrender'], default='pyrender',
         help='Choose the viewer type: trimesh or pyrender')
     parser.add_argument(
         '--no-interactive',
