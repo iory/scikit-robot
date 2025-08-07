@@ -15,6 +15,7 @@ from skrobot.model import RobotModel
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.utils.package import is_package_installed
+from skrobot.utils.urdf import apply_scale
 from skrobot.utils.urdf import export_mesh_format
 from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
 
@@ -68,6 +69,10 @@ resulting in less simplification. Default is None."""
         '--xacro-no-prefix', action='store_true',
         help='When generating xacro, do not use prefix parameter '
         '(only works with --xacro option).')
+    parser.add_argument(
+        '--scale', type=float, default=1.0,
+        help='Scale factor for link lengths and mesh geometries. '
+        'Default is 1.0 (no scaling).')
 
     args = parser.parse_args()
 
@@ -127,7 +132,7 @@ resulting in less simplification. Default is None."""
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
             simplify_vertex_clustering_voxel_size=args.voxel_size,
             target_triangles=args.target_triangles,
-            overwrite_mesh=args.overwrite_mesh):
+            overwrite_mesh=args.overwrite_mesh), apply_scale(args.scale):
         print(f"Saving new URDF to: {output_path}")
         # Ensure output directory exists
         output_dir = output_path.parent
