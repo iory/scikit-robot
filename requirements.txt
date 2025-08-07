@@ -20,6 +20,7 @@ repoze.lru;python_version<"3.2"
 rtree # need rtree for simplify_quadric_decimation
 scikit-learn;python_version<"3.8"
 scikit-learn>=0.24.0;python_version>="3.8"
+scikit-robot-pyrender>=0.1.47
 scipy;python_version>="3.0" and python_version<"3.8"
 scipy<=1.2.3;python_version<"3.0"
 scipy>=1.6.3;python_version>="3.8"

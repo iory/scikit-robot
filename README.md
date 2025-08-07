@@ -41,7 +41,7 @@ pip install scikit-robot[all]
 To visualize a URDF model and inspect your robot's configuration, you can use the `visualize-urdf` command as follows:
 
 ```bash
-visualize-urdf ~/.skrobot/pr2_description/pr2.urdf
+visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer trimesh
 ```
 
 If you experience performance issues with the default viewer, try pyrender for smoother visualization:
