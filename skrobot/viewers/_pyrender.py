@@ -134,7 +134,7 @@ class PyrenderViewer(pyrender.Viewer):
                                              width=self._viewport_size[0],
                                              height=self._viewport_size[1])
                 break
-            except pyglet.window.NoSuchConfigException:
+            except (pyglet.window.NoSuchConfigException, pyglet.gl.ContextException):
                 pass
             except pyglet.canvas.xlib.NoSuchDisplayException:
                 print('No display found. Viewer is disabled.')
