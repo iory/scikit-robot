@@ -9,6 +9,7 @@ import numpy as np
 import pyglet
 from pyglet import compat_platform
 
+
 # WSL2 Ubuntu 20.04 specific fix for pyrender
 # Check if running in WSL2 environment
 if platform.system() == 'Linux':
