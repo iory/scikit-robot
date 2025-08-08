@@ -9,23 +9,11 @@ import numpy as np
 import pyglet
 from pyglet import compat_platform
 
-
 # WSL2 Ubuntu 20.04 specific fix for pyrender
 # Check if running in WSL2 environment
 if platform.system() == 'Linux':
     # Check for WSL-specific indicators
     if os.path.exists('/proc/version'):
-        with open('/proc/version', 'r') as f:
-            version_info = f.read().lower()
-            if 'microsoft' in version_info or 'wsl' in version_info:
-                # Check Ubuntu version
-                if os.path.exists('/etc/os-release'):
-                    with open('/etc/os-release', 'r') as f:
-                        os_info = f.read()
-                        if '20.04' in os_info:
-                            # Set PYOPENGL_PLATFORM to GLX for WSL2 Ubuntu 20.04
-                            # This ensures proper rendering with X11 forwarding
-                            if 'PYOPENGL_PLATFORM' not in os.environ:
         try:
             with open('/proc/version', 'r') as f:
                 version_info = f.read().lower()
