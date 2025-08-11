@@ -43,7 +43,6 @@ def find_root_link(input_path):
     if root_candidates:
         return next(iter(root_candidates))  # root link name as string
     else:
-        if len(root.findall("link")) == 1:
         root_links = root.findall("link")
         if len(root_links) == 1:
             return root_links[0].attrib["name"]
