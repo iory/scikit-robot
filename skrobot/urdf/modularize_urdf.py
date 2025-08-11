@@ -43,6 +43,8 @@ def find_root_link(input_path):
     if root_candidates:
         return next(iter(root_candidates))  # root link name as string
     else:
+        if len(root.findall("link")) == 1:
+            return root.findall("link")[0].attrib["name"]
         raise ValueError("Could not determine root link. Check that the URDF contains valid joint definitions.")
 
 
