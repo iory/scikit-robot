@@ -73,6 +73,13 @@ jobs:
         with:
           python-version: '3.9'
 
+      - name: Wait for apt-get lock
+        run: |
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for apt lock release..."
+            sleep 1
+          done
+
       - name: Install APT On Linux
         run: |
           sudo apt-get update -qq -y
