@@ -116,7 +116,9 @@ class PyrenderViewer(pyrender.Viewer):
     def show(self):
         if self.thread is not None and self.thread.is_alive():
             return
-        self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)])
+        distance = self._calculate_camera_distance()
+        self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)],
+                        distance=distance)
         if compat_platform == 'darwin':
             self._init_and_start_app()
             init_loop = 30
@@ -322,3 +324,9 @@ class PyrenderViewer(pyrender.Viewer):
             scale=self.scene.scale,
             target=self.scene.centroid
         )
+
+    def _calculate_camera_distance(self, distance_margin=1.2):
+        """Calculate optimal camera distance based on scene bounds."""
+        bounds = self.scene.bounds
+        bbox_diagonal = np.linalg.norm(bounds[1] - bounds[0])
+        return bbox_diagonal * distance_margin
