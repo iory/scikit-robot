@@ -2,10 +2,12 @@ from __future__ import division
 
 import collections
 import os
+from pathlib import Path
 import platform
 import threading
 
 import numpy as np
+from PIL import Image
 import pyglet
 from pyglet import compat_platform
 
@@ -324,6 +326,237 @@ class PyrenderViewer(pyrender.Viewer):
             scale=self.scene.scale,
             target=self.scene.centroid
         )
+
+    def capture_360_images(self, output_dir, num_frames=36,
+                           distance=None, center=None, fov=None,
+                           lighting_config=None, camera_elevation=45,
+                           distance_margin=1.2, create_gif=True,
+                           gif_duration=100, gif_loop=0,
+                           transparent_background=True):
+        """Capture 360-degree rotation images around the scene.
+
+        Parameters
+        ----------
+        output_dir : str
+            Directory to save the images
+        num_frames : int
+            Number of images to capture (default: 36, every 10 degrees)
+        distance : float, optional
+            Camera distance from center
+        center : array-like, optional
+            Center point to rotate around
+        fov : array-like, optional
+            Field of view [horizontal, vertical] in degrees
+        lighting_config : dict, optional
+            Lighting configuration with keys: 'positions', 'colors', 'intensity'
+        camera_elevation : float
+            Camera elevation angle in degrees (default: 45)
+        distance_margin : float
+            Margin factor for automatic distance calculation (default: 1.2)
+        create_gif : bool
+            Whether to create a GIF animation from captured images (default: True)
+        gif_duration : int
+            Duration between frames in milliseconds for GIF (default: 100)
+        gif_loop : int
+            Number of loops for GIF (0 = infinite loop, default: 0)
+        transparent_background : bool
+            Whether to render with transparent background (default: True)
+        """
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        if fov is None:
+            fov = np.array([60, 45])
+
+        # Create offscreen renderer
+        offscreen_renderer = pyrender.OffscreenRenderer(
+            viewport_width=self._viewport_size[0],
+            viewport_height=self._viewport_size[1]
+        )
+
+        # Setup lighting
+        added_lights = self._setup_scene_lighting(lighting_config)
+
+        # Store original camera pose and scene settings to restore later
+        original_pose = self._camera_node.matrix.copy()
+        original_bg_color = self.scene.bg_color
+
+        # Set transparent background if requested
+        if transparent_background:
+            self.scene.bg_color = np.array([0.0, 0.0, 0.0, 0.0])
+
+        # Determine render flags
+        render_flags = pyrender.RenderFlags.RGBA if transparent_background else pyrender.RenderFlags.NONE
+
+        # Calculate rotation angles
+        angles = np.linspace(0, 2 * np.pi, num_frames, endpoint=False)
+
+        try:
+            with self._render_lock:
+                # Update scene meshes
+                self._update_scene_meshes()
+
+                # Calculate optimal camera distance
+                camera_distance_calc = self._calculate_camera_distance(distance_margin)
+
+                for i, z_angle in enumerate(angles):
+                    # Set camera position with rotation around Z axis
+                    camera_angles = [np.deg2rad(camera_elevation), np.deg2rad(0), z_angle]
+                    rotation = transformations.euler_matrix(*camera_angles)
+
+                    # Use calculated distance if not provided
+                    actual_distance = distance if distance is not None else camera_distance_calc
+                    pose = cameras.look_at(
+                        self.scene.bounds, fov=fov, rotation=rotation,
+                        distance=actual_distance, center=center)
+
+                    # Update camera node matrix
+                    self._camera_node.matrix = pose
+
+                    # Render image
+                    color, depth = offscreen_renderer.render(self.scene, flags=render_flags)
+
+                    # Save image with appropriate mode
+                    if transparent_background and color.shape[2] == 4:
+                        image = Image.fromarray(color, mode='RGBA')
+                    else:
+                        image = Image.fromarray(color)
+                    image_path = output_path / f"frame_{i:03d}.png"
+                    image.save(image_path)
+                    print(f"Saved: {image_path}")
+        finally:
+            # Clean up
+            self._cleanup_scene_lighting(added_lights)
+            self._camera_node.matrix = original_pose
+            self.scene.bg_color = original_bg_color
+            offscreen_renderer.delete()
+
+        print(f"360-degree image capture complete. {num_frames} images saved to {output_dir}")
+
+        # Create GIF animation if requested
+        if create_gif:
+            gif_path = output_path / "animation.gif"
+            self._create_gif_from_images(output_path, gif_path, gif_duration, gif_loop)
+
+    def _create_gif_from_images(self, image_dir, output_gif, duration=100, loop=0):
+        """Create GIF animation from captured images.
+
+        Parameters
+        ----------
+        image_dir : Path
+            Directory containing the images
+        output_gif : Path
+            Output path for the GIF file
+        duration : int
+            Duration between frames in milliseconds
+        loop : int
+            Number of loops (0 = infinite loop)
+        """
+        # Get all PNG files and sort them
+        image_files = sorted(image_dir.glob("frame_*.png"))
+
+        if not image_files:
+            print("No images found to create GIF")
+            return
+
+        # Load images
+        images = []
+        for img_path in image_files:
+            img = Image.open(img_path)
+            images.append(img)
+
+        # Save as GIF with proper disposal for transparency
+        if images:
+            images[0].save(
+                output_gif,
+                save_all=True,
+                append_images=images[1:],
+                duration=duration,
+                loop=loop,
+                optimize=True,
+                disposal=2  # Clear frame before rendering next frame
+            )
+            print(f"GIF animation saved: {output_gif}")
+
+    def _get_default_lighting_config(self):
+        """Get default lighting configuration for uniform illumination."""
+        return {
+            'use_ambient': True,
+            'ambient_intensity': 0.2
+        }
+
+    def _setup_scene_lighting(self, lighting_config=None):
+        """Setup scene lighting and return list of added light nodes."""
+        if lighting_config is None:
+            lighting_config = self._get_default_lighting_config()
+
+        added_lights = []
+
+        if lighting_config.get('use_ambient', True):
+            # Use uniform ambient lighting for shadowless rendering
+            ambient_intensity = lighting_config.get('ambient_intensity', 0.2)
+
+            # Set ambient light on the scene
+            self.scene.ambient_light = np.array([ambient_intensity,
+                                                 ambient_intensity,
+                                                 ambient_intensity])
+
+            # Add a single directional light for some definition
+            light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=0.2)
+            pose = np.eye(4)
+            # Point downward from above
+            pose[:3, :3] = transformations.euler_matrix(np.pi / 4, 0, 0)[:3, :3]
+            light_node = self.scene.add(light, pose=pose)
+            added_lights.append(light_node)
+        else:
+            # Use traditional point lights if specified
+            bounds = self.scene.bounds
+            center_z = (bounds[0][2] + bounds[1][2]) / 2
+
+            positions = lighting_config.get('positions', [])
+            colors = lighting_config.get('colors', [[1.0, 1.0, 1.0]] * len(positions))
+            intensity = lighting_config.get('intensity', 10.0)
+            distance_factors = lighting_config.get('distance_factors', [3] * len(positions))
+
+            for i, (pos_factor, color) in enumerate(zip(positions, colors)):
+                if isinstance(pos_factor, tuple):
+                    pos_factor, height_offset = pos_factor
+                else:
+                    height_offset = [0, 0, 1]
+
+                distance_factor = distance_factors[i] if i < len(distance_factors) else 3
+                pos = [pos_factor[0] * distance_factor, pos_factor[1] * distance_factor,
+                       center_z + height_offset[2] * distance_factor]
+
+                light = pyrender.PointLight(color=color, intensity=intensity)
+                pose = np.eye(4)
+                pose[:3, 3] = pos
+                light_node = self.scene.add(light, pose=pose)
+                added_lights.append(light_node)
+
+        return added_lights
+
+    def _cleanup_scene_lighting(self, light_nodes):
+        """Remove lighting nodes from scene and reset ambient light."""
+        for light_node in light_nodes:
+            self.scene.remove_node(light_node)
+        # Reset ambient light to default
+        self.scene.ambient_light = None
+
+    def _update_scene_meshes(self):
+        """Update scene meshes with latest transforms."""
+        for link_id, (node, link) in self._visual_mesh_map.items():
+            link.update(force=True)
+            transform = link.worldcoords().T()
+            if link.visual_mesh_changed:
+                mesh = link.concatenated_visual_mesh
+                pyrender_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=False)
+                self.scene.remove_node(node)
+                node = self.scene.add(pyrender_mesh, pose=transform)
+                self._visual_mesh_map[link_id] = (node, link)
+                link._visual_mesh_changed = False
+            else:
+                node.matrix = transform
 
     def _calculate_camera_distance(self, distance_margin=1.2):
         """Calculate optimal camera distance based on scene bounds."""
