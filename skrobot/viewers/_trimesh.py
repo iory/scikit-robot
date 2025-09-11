@@ -56,6 +56,8 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     update_interval : float, optional
         The update interval (in seconds) for the viewer. Default is
         1.0 seconds.
+    title : str, optional
+        The title of the viewer window. Default is 'scikit-robot TrimeshSceneViewer'.
 
     Notes
     -----
@@ -67,7 +69,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     _instance = None
     _version_warning_issued = False
 
-    def __init__(self, resolution=None, update_interval=1.0):
+    def __init__(self, resolution=None, update_interval=1.0, title=None):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
@@ -82,12 +84,13 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         pyglet.clock.schedule_interval(self.on_update, update_interval)
 
         self.scene = trimesh.Scene()
+        caption = title if title is not None else 'scikit-robot TrimeshSceneViewer'
         self._kwargs = dict(
             scene=self.scene,
             resolution=resolution,
             offset_lines=False,
             start_loop=False,
-            caption='scikit-robot TrimeshSceneViewer',
+            caption=caption,
         )
 
         self.lock = threading.Lock()
