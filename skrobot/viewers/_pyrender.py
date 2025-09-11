@@ -74,6 +74,8 @@ class PyrenderViewer(pyrender.Viewer):
     update_interval : float, optional
         The update interval (in seconds) for the viewer. Default is
         1.0 seconds.
+    title : str, optional
+        The title of the viewer window. Default is 'scikit-robot PyrenderViewer'.
 
     Notes
     -----
@@ -85,7 +87,7 @@ class PyrenderViewer(pyrender.Viewer):
     _instance = None
 
     def __init__(self, resolution=None, update_interval=1.0,
-                 render_flags=None):
+                 render_flags=None, title=None):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
@@ -107,7 +109,8 @@ class PyrenderViewer(pyrender.Viewer):
             refresh_rate=refresh_rate,
         )
         super(PyrenderViewer, self).__init__(**self._kwargs)
-        self.viewer_flags['window_title'] = 'scikit-robot PyrenderViewer'
+        window_title = title if title is not None else 'scikit-robot PyrenderViewer'
+        self.viewer_flags['window_title'] = window_title
         self._initialized = True
 
     def __new__(cls, *args, **kwargs):
