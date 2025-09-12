@@ -13,6 +13,7 @@ from packaging.version import Version
 from skrobot import determine_version
 from skrobot.model import RobotModel
 from skrobot.urdf.modularize_urdf import find_root_link
+from skrobot.urdf.modularize_urdf import print_xacro_usage_instructions
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.utils.package import is_package_installed
 from skrobot.utils.urdf import apply_scale
@@ -159,16 +160,7 @@ resulting in less simplification. Default is None."""
             xml_declaration=True,
             encoding="utf-8"
         )
-        print(f"Successfully generated xacro: {xacro_output_path}")
-        prefix_attr = 'prefix="[specify prefix]"' if not args.xacro_no_prefix else ''
-        print(f"""To use the generated xacro macro in your xacro file, copy and paste the following:
-
-  <xacro:{robot_name}
-    {prefix_attr}
-    parent_link="[specify parent link]">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-  </xacro:{robot_name}>
-""")
+        print_xacro_usage_instructions(str(xacro_output_path), robot_name, args.xacro_no_prefix)
 
 
 if __name__ == '__main__':
