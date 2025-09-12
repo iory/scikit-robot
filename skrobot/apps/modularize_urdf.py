@@ -27,15 +27,20 @@ def main():
         output_path = base_name + "_modularized.xacro"
 
     etree.ElementTree(xacro_root).write(output_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
-    print("Successfully converted to xacro: {}".format(output_path))
-    print("""To use the generated xacro macro in your xacro file, copy and paste the following:
 
-  <xacro:{}
-    prefix="[specify prefix]"
-    parent_link="[specify parent link]">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-  </xacro:{}>
-""".format(robot_name, robot_name))
+    output_filename = os.path.basename(output_path)
+    print(f"Successfully converted to xacro: {output_path}")
+    print(f"""
+To use the generated xacro macro in your file, first include it:
+<xacro:include filename="$(find YOUR_PACKAGE)/path/to/{output_filename}" />
+
+Then, instantiate the macro:
+<xacro:{robot_name}
+  prefix="[your_prefix_]"
+  parent_link="[the_link_to_attach_to]"
+  xyz="0.0 0.0 0.0"
+  rpy="0.0 0.0 0.0" />
+""")
 
 
 if __name__ == "__main__":

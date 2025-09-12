@@ -20,6 +20,9 @@ def add_prefix_to_name(name):
     str
         Name with "${prefix}" prefix if not already present
     """
+    # If name is already a variable (e.g., from a property), don't prefix it.
+    if name.startswith("$"):
+        return name
     return "${prefix}" + name if not name.startswith("${prefix}") else name
 
 
@@ -132,7 +135,7 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
             tmp_path = tmp.name
             subprocess.run(["xacro", input_path, "-o", tmp_path], check=True)
             tree = etree.parse(tmp_path)
-            os.remove(tmp_path)
+        os.remove(tmp_path)
     else:
         tree = etree.parse(input_path)
     urdf_root = tree.getroot()
@@ -142,10 +145,15 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     xacro_root = etree.Element("robot", nsmap=NSMAP)
     xacro_root.set("name", robot_name)
 
-    # Define macro parameters
-    macro_params = ["parent_link", "*origin"]
+    # Define macro parameters with default values
+    macro_params = [
+        "parent_link:=world",
+        "xyz:='0 0 0'",
+        "rpy:='0 0 0'"
+    ]
     if not no_prefix:
-        macro_params.insert(0, "prefix")
+        # Provide a default empty string for the prefix.
+        macro_params.insert(0, "prefix:=''")
 
     # Create macro element
     macro = etree.Element("{}macro".format("{" + XACRO_NS + "}"))
@@ -164,10 +172,12 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     parent_elem.set("link", "${parent_link}")
 
     child_elem = etree.SubElement(connector_joint, "child")
-    child_elem.set("link", add_prefix_to_name(connector_link) if not no_prefix else connector_link)
+    child_elem.set("link", connector_link_with_prefix)
 
-    origin_block = etree.SubElement(connector_joint, "{}insert_block".format("{" + XACRO_NS + "}"))
-    origin_block.set("name", "origin")
+    # Replace the insert_block with a standard origin tag using parameters
+    origin_elem = etree.SubElement(connector_joint, "origin")
+    origin_elem.set("xyz", "${xyz}")
+    origin_elem.set("rpy", "${rpy}")
 
     macro.append(connector_joint)
 
