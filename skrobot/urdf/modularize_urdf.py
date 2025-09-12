@@ -203,3 +203,42 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     xacro_root.tail = None  # Ensure no tail text at the root level
 
     return xacro_root, robot_name
+
+
+def print_xacro_usage_instructions(output_path, robot_name, no_prefix=False):
+    """Print usage instructions for the generated xacro macro.
+
+    Parameters
+    ----------
+    output_path : str
+        Path to the generated xacro file
+    robot_name : str
+        Name of the robot macro
+    no_prefix : bool, optional
+        Whether the macro was generated without prefix parameter, by default False
+    """
+    import os
+    output_filename = os.path.basename(output_path)
+    print(f"Successfully converted to xacro: {output_path}")
+
+    if no_prefix:
+        print(f"""
+To use the generated xacro macro in your xacro file, copy and paste the following:
+
+  <xacro:{robot_name}
+    parent_link="[specify parent link]">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:{robot_name}>
+""")
+    else:
+        print(f"""
+To use the generated xacro macro in your file, first include it:
+<xacro:include filename="$(find YOUR_PACKAGE)/path/to/{output_filename}" />
+
+Then, instantiate the macro:
+<xacro:{robot_name}
+  prefix="[your_prefix_]"
+  parent_link="[the_link_to_attach_to]"
+  xyz="0.0 0.0 0.0"
+  rpy="0.0 0.0 0.0" />
+""")
