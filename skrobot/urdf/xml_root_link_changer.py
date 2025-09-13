@@ -318,12 +318,18 @@ class URDFXMLRootLinkChanger:
 
         # Invert axis direction
         axis = joint.find('axis')
-        axis_xyz_str = axis.get('xyz', '0 0 0')
-        inv_axis_xyz = [-float(x) for x in axis_xyz_str.split()]
-        axis.set('xyz', ' '.join(map(str, inv_axis_xyz)))
+        if axis is not None:
+            axis_xyz_str = axis.get('xyz', '0 0 0')
+            inv_axis_xyz = [-float(x) for x in axis_xyz_str.split()]
+            axis.set('xyz', ' '.join(map(str, inv_axis_xyz)))
 
         # Adjust visual and collision origin
-        parent_name = joint.find('parent').get('link')
+        parent_elem = joint.find('parent')
+        if parent_elem is None:
+            return
+        parent_name = parent_elem.get('link')
+        if parent_name not in self.links:
+            return
         parent = self.links[parent_name]
         parent_visual = parent.find('visual')
         if parent_visual is not None:
@@ -395,6 +401,8 @@ class URDFXMLRootLinkChanger:
         return xyz.tolist(), rpy.tolist()
 
     def _get_all_children_links(self, parent_link):
+        if parent_link is None:
+            return []
         parent_link_name = parent_link.get('link')
         for link_name, info in self.joint_tree.items():
             if link_name == parent_link_name:
@@ -404,9 +412,17 @@ class URDFXMLRootLinkChanger:
 
     def _get_all_children_joints(self, parent_joint):
         children_joints = []
-        link_name = parent_joint.find('child').get('link')
+        child_elem = parent_joint.find('child')
+        if child_elem is None:
+            return children_joints
+        link_name = child_elem.get('link')
+        if link_name is None:
+            return children_joints
         for joint_name, joint in self.joints.items():
-            parent_link_name = joint.find('parent').get('link')
+            parent_elem = joint.find('parent')
+            if parent_elem is None:
+                continue
+            parent_link_name = parent_elem.get('link')
             if parent_link_name == link_name:
                 children_joints.append(joint)
         return children_joints
@@ -414,12 +430,17 @@ class URDFXMLRootLinkChanger:
     def _get_all_children_joints_of_link(self, link_name):
         children_joints = []
         for joint_name, joint in self.joints.items():
-            parent_link_name = joint.find('parent').get('link')
+            parent_elem = joint.find('parent')
+            if parent_elem is None:
+                continue
+            parent_link_name = parent_elem.get('link')
             if parent_link_name == link_name:
                 children_joints.append(joint)
         return children_joints
 
     def _link_is_included_in_path(self, target_link, path):
+        if target_link is None:
+            return False
         target_link_name = target_link.get('name')
         for elem in path:
             parent_link_name = elem[0]
@@ -429,6 +450,8 @@ class URDFXMLRootLinkChanger:
         return False
 
     def _joint_is_included_in_path(self, target_joint, path):
+        if target_joint is None:
+            return False
         target_joint_name = target_joint.get('name')
         for elem in path:
             joint_name = elem[2]
