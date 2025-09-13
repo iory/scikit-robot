@@ -505,7 +505,9 @@ class PyrenderViewer(pyrender.Viewer):
                                                  ambient_intensity])
 
             # Add a single directional light for some definition
-            light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=0.2)
+            # Scale its intensity with ambient_intensity
+            light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0],
+                                              intensity=ambient_intensity * 2.0)
             pose = np.eye(4)
             # Point downward from above
             pose[:3, :3] = transformations.euler_matrix(np.pi / 4, 0, 0)[:3, :3]
@@ -544,7 +546,7 @@ class PyrenderViewer(pyrender.Viewer):
         for light_node in light_nodes:
             self.scene.remove_node(light_node)
         # Reset ambient light to default
-        self.scene.ambient_light = None
+        self.scene.ambient_light = np.array([0., 0., 0.])
 
     def _update_scene_meshes(self):
         """Update scene meshes with latest transforms."""
