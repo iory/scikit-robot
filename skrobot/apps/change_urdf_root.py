@@ -28,6 +28,12 @@ Examples:
 
   # Change root link with verbose output
   change_urdf_root robot.urdf new_root output.urdf --verbose
+
+  # Change root link with custom robot name
+  change_urdf_root robot.urdf new_root output.urdf --robot-name my_robot
+
+  # Keep original robot name
+  change_urdf_root robot.urdf new_root output.urdf --keep-robot-name
         """)
 
     parser.add_argument(
@@ -62,6 +68,16 @@ Examples:
         action='store_true',
         help='Overwrite output file if it exists')
 
+    parser.add_argument(
+        '--robot-name',
+        type=str,
+        help='Custom robot name for the output URDF')
+
+    parser.add_argument(
+        '--keep-robot-name',
+        action='store_true',
+        help='Keep the original robot name (do not auto-generate new name)')
+
     args = parser.parse_args()
 
     # Check if input file exists
@@ -80,8 +96,10 @@ Examples:
         # If --list is specified, show all links and exit
         if args.list:
             current_root = changer.get_current_root_link()
+            robot_name = changer.get_robot_name()
             links = changer.list_links()
 
+            print("Robot name: {}".format(robot_name))
             print("Current root link: {}".format(current_root))
             print("Total links: {}".format(len(links)))
             print("\nAll links:")
@@ -122,7 +140,21 @@ Examples:
 
         # Show current state
         current_root = changer.get_current_root_link()
+        current_robot_name = changer.get_robot_name()
+
+        # Determine robot name for output
+        if args.keep_robot_name:
+            output_robot_name = current_robot_name
+        elif args.robot_name:
+            output_robot_name = args.robot_name
+        else:
+            # Default: auto-generate based on new root link
+            output_robot_name = "{}_root_{}".format(
+                current_robot_name, args.new_root_link)
+
         if args.verbose:
+            print("Current robot name: {}".format(current_robot_name))
+            print("New robot name: {}".format(output_robot_name))
             print("Current root link: {}".format(current_root))
             print("New root link: {}".format(args.new_root_link))
             print("Output file: {}".format(args.output_urdf))
@@ -137,7 +169,16 @@ Examples:
         if args.verbose:
             print("Changing root link...")
 
-        changer.change_root_link(args.new_root_link, args.output_urdf)
+        # Pass robot name (either custom or None for auto-generation)
+        if args.keep_robot_name:
+            changer.change_root_link(args.new_root_link, args.output_urdf,
+                                     robot_name=current_robot_name)
+        elif args.robot_name:
+            changer.change_root_link(args.new_root_link, args.output_urdf,
+                                     robot_name=args.robot_name)
+        else:
+            # Let the changer auto-generate the name
+            changer.change_root_link(args.new_root_link, args.output_urdf)
 
         # Verify the result
         if args.verbose:
@@ -145,10 +186,14 @@ Examples:
 
         result_changer = URDFXMLRootLinkChanger(args.output_urdf)
         actual_root = result_changer.get_current_root_link()
+        actual_robot_name = result_changer.get_robot_name()
 
         if actual_root == args.new_root_link:
             print("Successfully changed root link from '{}' "
                   "to '{}'".format(current_root, args.new_root_link))
+            if current_robot_name != actual_robot_name:
+                print("Robot name changed from '{}' to '{}'".format(
+                    current_robot_name, actual_robot_name))
             print("Modified URDF saved to: {}".format(args.output_urdf))
         else:
             print("Failed to change root link. Expected "

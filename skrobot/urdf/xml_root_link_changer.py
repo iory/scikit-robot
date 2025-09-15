@@ -124,7 +124,7 @@ class URDFXMLRootLinkChanger:
         """
         return list(self.links.keys())
 
-    def change_root_link(self, new_root_link, output_path):
+    def change_root_link(self, new_root_link, output_path, robot_name=None):
         """Change the root link and save the modified URDF.
 
         Parameters
@@ -133,6 +133,9 @@ class URDFXMLRootLinkChanger:
             Name of the new root link
         output_path : str
             Path where the modified URDF will be saved
+        robot_name : str, optional
+            New robot name. If None, generates a default name based on
+            the original robot name and new root link.
 
         Raises
         ------
@@ -144,8 +147,13 @@ class URDFXMLRootLinkChanger:
                 "Link '{}' not found in URDF".format(new_root_link))
 
         current_root = self.get_current_root_link()
+
+        # Set robot name if needed
+        if robot_name is not None or new_root_link != current_root:
+            self._set_robot_name(robot_name, new_root_link)
+
         if new_root_link == current_root:
-            # No change needed, just copy the file
+            # No change needed to kinematic tree, just save with new name
             self._save_urdf(output_path)
             return
 
@@ -476,6 +484,33 @@ class URDFXMLRootLinkChanger:
         # Format the output for better readability
         self._format_xml_file(output_path)
 
+    def get_robot_name(self):
+        """Get the current robot name.
+
+        Returns
+        -------
+        str
+            Current robot name, or 'robot' if not set
+        """
+        return self.root.get('name', 'robot')
+
+    def _set_robot_name(self, robot_name, new_root_link):
+        """Set the robot name.
+
+        Parameters
+        ----------
+        robot_name : str or None
+            New robot name. If None, generates default name.
+        new_root_link : str
+            Name of the new root link (used for default naming)
+        """
+        if robot_name is None:
+            # Generate default name: original_name_root_new_root_link
+            original_name = self.get_robot_name()
+            robot_name = "{}_root_{}".format(original_name, new_root_link)
+
+        self.root.set('name', robot_name)
+
     def _format_xml_file(self, file_path):
         """Format XML file for better readability.
 
@@ -504,7 +539,7 @@ class URDFXMLRootLinkChanger:
             pass
 
 
-def change_urdf_root_link(urdf_path, new_root_link, output_path):
+def change_urdf_root_link(urdf_path, new_root_link, output_path, robot_name=None):
     """Change the root link of a URDF file.
 
     Parameters
@@ -515,6 +550,8 @@ def change_urdf_root_link(urdf_path, new_root_link, output_path):
         Name of the new root link
     output_path : str
         Path where the modified URDF will be saved
+    robot_name : str, optional
+        New robot name. If None, generates a default name.
     """
     changer = URDFXMLRootLinkChanger(urdf_path)
-    changer.change_root_link(new_root_link, output_path)
+    changer.change_root_link(new_root_link, output_path, robot_name=robot_name)
