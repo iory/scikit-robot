@@ -2018,6 +2018,10 @@ class RobotModel(CascadedLink):
                     parent_link=link_maps[j.parent],
                     child_link=link_maps[j.child])
             elif j.joint_type == 'revolute':
+                # For mimic joints, set a default velocity if not specified to avoid warnings
+                velocity = j.limit.velocity
+                if j.mimic is not None and velocity <= 0:
+                    velocity = np.deg2rad(5)  # Default velocity for mimic joints
                 joint = RotationalJoint(
                     axis=j.axis,
                     name=j.name,
@@ -2026,8 +2030,12 @@ class RobotModel(CascadedLink):
                     min_angle=j.limit.lower,
                     max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
-                    max_joint_velocity=j.limit.velocity)
+                    max_joint_velocity=velocity)
             elif j.joint_type == 'continuous':
+                # For mimic joints, set a default velocity if not specified to avoid warnings
+                velocity = j.limit.velocity
+                if j.mimic is not None and velocity <= 0:
+                    velocity = np.deg2rad(5)  # Default velocity for mimic joints
                 joint = RotationalJoint(
                     axis=j.axis,
                     name=j.name,
@@ -2036,10 +2044,14 @@ class RobotModel(CascadedLink):
                     min_angle=-np.inf,
                     max_angle=np.inf,
                     max_joint_torque=j.limit.effort,
-                    max_joint_velocity=j.limit.velocity)
+                    max_joint_velocity=velocity)
             elif j.joint_type == 'prismatic':
                 # http://wiki.ros.org/urdf/XML/joint
                 # meters for prismatic joints
+                # For mimic joints, set a default velocity if not specified to avoid warnings
+                velocity = j.limit.velocity
+                if j.mimic is not None and velocity <= 0:
+                    velocity = np.pi / 4.0  # Default velocity for mimic joints
                 joint = LinearJoint(
                     axis=j.axis,
                     name=j.name,
@@ -2048,7 +2060,7 @@ class RobotModel(CascadedLink):
                     min_angle=j.limit.lower,
                     max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
-                    max_joint_velocity=j.limit.velocity)
+                    max_joint_velocity=velocity)
 
             is_mimic = j.name in mimic_joint_names
             if j.joint_type != 'fixed':
