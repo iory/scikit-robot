@@ -5,7 +5,7 @@ import os.path as osp
 import time
 
 import skrobot
-from skrobot.models.urdf import RobotModelFromURDF
+from skrobot.model import RobotModel
 
 
 def main():
@@ -26,8 +26,8 @@ def main():
         viewer = skrobot.viewers.TrimeshSceneViewer(update_interval=0.1)
     elif args.viewer == 'pyrender':
         viewer = skrobot.viewers.PyrenderViewer(update_interval=0.1)
-    robot_model = RobotModelFromURDF(
-        urdf_file=osp.abspath(args.input_urdfpath))
+    robot_model = RobotModel.from_urdf(
+        osp.abspath(args.input_urdfpath))
     viewer.add(robot_model)
     viewer.show()
     if args.interactive:
