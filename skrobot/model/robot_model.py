@@ -1860,7 +1860,7 @@ class RobotModel(CascadedLink):
 
         Waits until the specified ROS parameter is available, reads the URDF
         content, saves it to a temporary file, and then loads it using
-        `load_urdf_file`. Requires `rospy` to be available.
+        `load_urdf_file`. Supports both ROS1 and ROS2.
 
         Parameters
         ----------
@@ -1871,25 +1871,177 @@ class RobotModel(CascadedLink):
             If True, mimic joints are included in the `self.joint_list`.
             Passed directly to `load_urdf_file`.
         """
+        ros_version = os.environ.get('ROS_VERSION', '1')
+
+        if ros_version == '2':
+            try:
+                self._load_urdf_from_ros2(param_name, include_mimic_joints)
+                return
+            except ImportError:
+                logger.warning("rclpy not available for ROS2, falling back to ROS1 method")
+
+        try:
+            self._load_urdf_from_ros1(param_name, include_mimic_joints)
+        except ImportError:
+            raise RuntimeError("Neither rclpy (ROS2) nor rospy (ROS1) is available. "
+                               "Please ensure ROS is properly installed and sourced.")
+
+    def _load_urdf_from_ros2(self, param_name, include_mimic_joints):
+        """Load URDF from ROS2 parameter server with security and dynamic node discovery."""
+        import rclpy
+        from rclpy.node import Node
+
+        if not rclpy.ok():
+            rclpy.init()
+
+        node = Node('urdf_loader_node_for_skrobot')
+
+        try:
+            urdf = self._discover_and_fetch_urdf_ros2(node, param_name)
+            self._load_urdf_from_string_secure(urdf, include_mimic_joints)
+        finally:
+            # Always destroy the node to prevent resource leaks
+            logger.debug("Destroying temporary ROS2 node")
+            node.destroy_node()
+
+    def _discover_and_fetch_urdf_ros2(self, node, param_name):
+        """Discover nodes and fetch URDF parameter from ROS2."""
+
+        # Get available services to find nodes with get_parameters service
+        available_services = node.get_service_names_and_types()
+        get_param_services = [svc[0] for svc in available_services if 'get_parameters' in svc[0]]
+        logger.debug("Available get_parameters services: %s", get_param_services)
+
+        # Extract node names from service names (dynamic discovery)
+        candidate_nodes = []
+        for service in get_param_services:
+            if service.endswith('/get_parameters'):
+                node_name = service[:-len('/get_parameters')]
+                if node_name != f'/{node.get_name()}':  # Skip our own node
+                    candidate_nodes.append(node_name)
+
+        logger.info("Searching for URDF parameter in nodes: %s", candidate_nodes)
+
+        # Clean parameter name (remove leading slash for ROS2)
+        clean_param_name = param_name.lstrip('/')
+
+        for target_node in candidate_nodes:
+            try:
+                urdf = self._fetch_parameter_from_node(node, target_node, clean_param_name)
+                if urdf:
+                    logger.info("Successfully got URDF parameter from node: %s", target_node)
+                    return urdf
+            except Exception as e:
+                logger.debug("Failed to get parameter from %s: %s", target_node, e)
+                continue
+
+        raise RuntimeError("Could not find parameter '%s' in any ROS2 node. "
+                           "Available nodes: %s" % (param_name, candidate_nodes))
+
+    def _fetch_parameter_from_node(self, node, target_node, clean_param_name):
+        """Fetch a specific parameter from a target node."""
+        from rcl_interfaces.srv import GetParameters
+        import rclpy
+
+        service_name = f'{target_node}/get_parameters'
+        logger.debug("Trying to get parameter from node: %s", target_node)
+
+        # Try 1: Create client and wait for service
+        try:
+            client = node.create_client(GetParameters, service_name)
+            if not client.wait_for_service(timeout_sec=2.0):
+                logger.debug("Service not available: %s", service_name)
+                return None
+        except Exception as e:
+            logger.debug("Failed to create client for %s: %s", service_name, e)
+            return None
+
+        # Try 2: Call service and get response
+        try:
+            request = GetParameters.Request()
+            request.names = [clean_param_name]
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(node, future, timeout_sec=2.0)
+        except Exception as e:
+            logger.debug("Failed to call service %s: %s", service_name, e)
+            return None
+
+        # Try 3: Process response
+        try:
+            if future.result() is None:
+                return None
+
+            response = future.result()
+            if not (response.values and len(response.values) > 0):
+                return None
+
+            param_value = response.values[0]
+            logger.debug("Parameter type: %s, string value length: %s",
+                         param_value.type,
+                         len(param_value.string_value) if param_value.string_value else 0)
+
+            # Parameter type 4 corresponds to PARAMETER_STRING in ROS2
+            if (param_value.type == 4 and
+                param_value.string_value):
+                return param_value.string_value
+
+        except Exception as e:
+            logger.debug("Failed to process response from %s: %s", service_name, e)
+
+        return None
+
+    def _load_urdf_from_string_secure(self, urdf_string, include_mimic_joints):
+        """Load URDF from string using secure temporary file handling."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".urdf") as f:
+            f.write(urdf_string)
+            tmp_path = f.name
+
+        try:
+            self.load_urdf_file(file_obj=tmp_path, include_mimic_joints=include_mimic_joints)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError as e:
+                logger.warning("Failed to remove temporary file %s: %s", tmp_path, e)
+
+    def _load_urdf_from_ros1(self, param_name, include_mimic_joints):
+        """Load URDF from ROS1 parameter server with security and timeout handling."""
         import rospy
+
+        # Initialize rospy if not already initialized
+        if rospy.rostime._rostime_initialized is False:
+            rospy.init_node('urdf_loader_node_for_skrobot', anonymous=True)
+            logger.info("Initialized temporary ROS1 node")
+
+        urdf = self._fetch_urdf_with_timeout_ros1(param_name)
+        self._load_urdf_from_string_secure(urdf, include_mimic_joints)
+
+    def _fetch_urdf_with_timeout_ros1(self, param_name, timeout_seconds=10):
+        """Fetch URDF parameter from ROS1 with timeout."""
+        import rospy
+
         rate = rospy.Rate(1)
-        while not rospy.is_shutdown():
+        for attempt in range(timeout_seconds):
+            if rospy.is_shutdown():
+                raise RuntimeError("ROS was shut down")
+
             urdf = rospy.get_param(param_name, None)
             if urdf is not None:
-                tmp_file = tempfile.mktemp()
-                with open(tmp_file, "w") as f:
-                    f.write(urdf)
-                self.load_urdf_file(file_obj=tmp_file,
-                                    include_mimic_joints=include_mimic_joints)
-                os.remove(tmp_file)
-                break
+                return urdf
+
+            logger.warning("Waiting for ROS parameter '%s'... (attempt %d/%d)",
+                           param_name, attempt + 1, timeout_seconds)
             rate.sleep()
-            rospy.logwarn('Waiting {} set.'.format(param_name))
+
+        raise RuntimeError("Timeout: Could not find ROS parameter '%s' after %d seconds" %
+                           (param_name, timeout_seconds))
 
     @staticmethod
     def from_robot_description(param_name='/robot_description',
                                include_mimic_joints=True):
         """Load URDF from ROS parameter server.
+
+        Supports both ROS1 and ROS2 based on the ROS_VERSION environment variable.
 
         Parameters
         ----------
