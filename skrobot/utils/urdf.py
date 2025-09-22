@@ -177,6 +177,18 @@ def unparse_origin(matrix):
 
 @lru_cache(maxsize=None)
 def get_path_with_cache(ros_package):
+    ros_version = os.environ.get('ROS_VERSION', '1')
+
+    if ros_version == '2':
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            return get_package_share_directory(ros_package)
+        except ImportError:
+            logger.warning("ament_index_python not available, falling back to rospkg")
+        except Exception as e:
+            logger.warning("Failed to find ROS2 package %s: %s", ros_package, e)
+
+    # ROS1 or fallback: Use rospkg
     rospack = rospkg.RosPack()
     return rospack.get_path(ros_package)
 
