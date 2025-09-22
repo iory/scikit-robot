@@ -27,8 +27,8 @@ import six
 
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import normalize_vector
-from skrobot.coordinates import rpy_angle
 from skrobot.coordinates import rpy_matrix
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.pycompat import lru_cache
 
 
@@ -170,7 +170,7 @@ def unparse_origin(matrix):
     """
     node = ET.Element('origin')
     node.attrib['xyz'] = '{} {} {}'.format(*matrix[:3, 3])
-    yaw, pitch, roll = rpy_angle(matrix[:3, :3])[0]
+    yaw, pitch, roll = matrix2ypr(matrix[:3, :3])
     node.attrib['rpy'] = '{} {} {}'.format(roll, pitch, yaw)
     return node
 
