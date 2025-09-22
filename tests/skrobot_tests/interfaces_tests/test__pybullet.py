@@ -9,7 +9,7 @@ from skrobot.interfaces._pybullet import PybulletRobotInterface
 
 class TestPybulletRobotInterface(unittest.TestCase):
 
-    @pytest.mark.skipif(_check_available() is False,
+    @pytest.mark.skipif(_check_available(silent=True) is False,
                         reason="Pybullet is not available")
     def test_init(self):
         fetch = skrobot.models.Fetch()

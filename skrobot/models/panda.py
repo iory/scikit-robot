@@ -34,6 +34,10 @@ class Panda(RobotModelFromURDF):
             link.joint.joint_angle(angle)
         return self.angle_vector()
 
+    def reset_manip_pose(self):
+        """Reset robot to manipulation pose (same as reset_pose for Panda)"""
+        return self.reset_pose()
+
     @cached_property
     def rarm(self):
         link_names = ['panda_link{}'.format(i) for i in range(1, 8)]
