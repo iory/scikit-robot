@@ -187,8 +187,9 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
             # Add prefix to element names
             if "name" in elem.attrib:
                 elem.attrib["name"] = add_prefix_to_name(elem.attrib["name"])
-            # Update joint references to use prefixed names
-            if elem.tag in ["joint"]:
+            # Update references based on element type
+            if elem.tag == "joint":
+                # Update joint references
                 for sub in elem.findall("parent"):
                     sub.attrib["link"] = add_prefix_to_name(sub.attrib["link"])
                 for sub in elem.findall("child"):
@@ -196,6 +197,19 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
                 for sub in elem.findall("mimic"):
                     if "joint" in sub.attrib:
                         sub.attrib["joint"] = add_prefix_to_name(sub.attrib["joint"])
+            elif elem.tag == "link":
+                # Update material references in visual and collision elements
+                for visual in elem.findall("visual"):
+                    for material in visual.findall("material"):
+                        if "name" in material.attrib:
+                            material.attrib["name"] = add_prefix_to_name(material.attrib["name"])
+                for collision in elem.findall("collision"):
+                    for material in collision.findall("material"):
+                        if "name" in material.attrib:
+                            material.attrib["name"] = add_prefix_to_name(material.attrib["name"])
+            elif elem.tag == "material":
+                # Material definitions already have their names prefixed above
+                pass
         macro.append(elem)
 
     indent_element(macro, level=1)
