@@ -76,18 +76,26 @@ class PyrenderViewer(pyrender.Viewer):
         1.0 seconds.
     title : str, optional
         The title of the viewer window. Default is 'scikit-robot PyrenderViewer'.
+    enable_collision_toggle : bool, optional
+        Enable collision/visual mesh toggle functionality with 'v' key.
+        Default is True.
 
     Notes
     -----
     Since this is a singleton, the __init__ method might be called
     multiple times, but only one instance is actually used.
+
+    Keyboard Controls
+    -----------------
+    v : Toggle between visual and collision meshes (if enable_collision_toggle=True)
+        Collision meshes are displayed in orange/transparent color
     """
 
     # Class variable to hold the single instance of the class.
     _instance = None
 
     def __init__(self, resolution=None, update_interval=1.0,
-                 render_flags=None, title=None):
+                 render_flags=None, title=None, enable_collision_toggle=True):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
@@ -95,6 +103,12 @@ class PyrenderViewer(pyrender.Viewer):
 
         self.thread = None
         self._visual_mesh_map = collections.OrderedDict()
+
+        # Collision toggle functionality
+        self.enable_collision_toggle = enable_collision_toggle
+        if self.enable_collision_toggle:
+            self._stored_links = []
+            self.show_collision = False
 
         self._redraw = True
 
@@ -228,9 +242,26 @@ class PyrenderViewer(pyrender.Viewer):
         self._redraw = True
         return super(PyrenderViewer, self).on_mouse_scroll(*args, **kwargs)
 
-    def on_key_press(self, *args, **kwargs):
+    def on_key_press(self, symbol, modifiers, *args, **kwargs):
+        """Handle key press events with collision toggle support."""
+        # Handle 'v' key for collision toggle if enabled
+        if self.enable_collision_toggle:
+            from pyglet.window import key
+            if symbol == key.V:
+                # Toggle display mode
+                self.show_collision = not self.show_collision
+
+                # Rebuild scene with current mesh type
+                self._rebuild_scene_for_toggle()
+
+                mode_text = "Collision" if self.show_collision else "Visual"
+                print(f"Switched to {mode_text.lower()} mesh display")
+
+                self._redraw = True
+                return True
+
         self._redraw = True
-        return super(PyrenderViewer, self).on_key_press(*args, **kwargs)
+        return super(PyrenderViewer, self).on_key_press(symbol, modifiers, *args, **kwargs)
 
     def on_resize(self, *args, **kwargs):
         self._redraw = True
@@ -282,6 +313,12 @@ class PyrenderViewer(pyrender.Viewer):
             links = geometry.link_list
         else:
             raise TypeError('geometry must be Link or CascadedLink')
+
+        # Store links for collision toggle if enabled
+        if self.enable_collision_toggle:
+            for link in links:
+                if link not in self._stored_links:
+                    self._stored_links.append(link)
 
         for link in links:
             self._add_link(link)
@@ -568,3 +605,78 @@ class PyrenderViewer(pyrender.Viewer):
         bounds = self.scene.bounds
         bbox_diagonal = np.linalg.norm(bounds[1] - bounds[0])
         return bbox_diagonal * distance_margin
+
+    def _rebuild_scene_for_toggle(self):
+        """Completely rebuild the scene with current mesh type for toggle functionality."""
+        if not self.enable_collision_toggle:
+            return
+
+        with self._render_lock:
+            # Clear all mesh nodes but preserve camera and lights
+            mesh_nodes_to_remove = []
+
+            for node in list(self.scene.nodes):
+                if node.camera is None and node.light is None and node.mesh is not None:
+                    mesh_nodes_to_remove.append(node)
+
+            # Remove mesh nodes
+            for node in mesh_nodes_to_remove:
+                self.scene.remove_node(node)
+
+            # Clear visual mesh map
+            self._visual_mesh_map.clear()
+
+            # Add meshes for current mode
+            for link in self._stored_links:
+                self._add_single_link_mesh_for_toggle(link)
+
+    def _add_single_link_mesh_for_toggle(self, link):
+        """Add a single mesh (visual or collision) for a link during toggle."""
+        if not isinstance(link, model_module.Link):
+            return
+
+        link_id = str(id(link))
+        transform = link.worldcoords().T()
+
+        # Choose mesh based on current mode
+        if self.show_collision:
+            mesh = link.collision_mesh
+            # Process collision mesh with orange coloring
+            if mesh is not None:
+                if isinstance(mesh, list):
+                    colored_meshes = []
+                    for m in mesh:
+                        colored_mesh = m.copy()
+                        colored_mesh.visual.face_colors = [255, 150, 100, 200]
+                        colored_meshes.append(colored_mesh)
+                    if colored_meshes:
+                        mesh = trimesh.util.concatenate(colored_meshes)
+                    else:
+                        mesh = None
+                else:
+                    mesh = mesh.copy()
+                    mesh.visual.face_colors = [255, 150, 100, 200]
+        else:
+            mesh = link.concatenated_visual_mesh
+
+        if mesh is not None and len(mesh.vertices) > 0:
+            # Create pyrender mesh
+            pyrender_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=False)
+
+            # Create node with transformation matrix
+            node = pyrender.Node(
+                name=f"{'collision' if self.show_collision else 'visual'}_{link.name}_{link_id}",
+                mesh=pyrender_mesh,
+                matrix=transform
+            )
+
+            # Add to scene
+            self.scene.add_node(node)
+
+            # Update visual mesh map for compatibility (only for visual meshes)
+            if not self.show_collision:
+                self._visual_mesh_map[link_id] = (node, link)
+
+        # Process child links
+        for child_link in link.child_links:
+            self._add_single_link_mesh_for_toggle(child_link)
