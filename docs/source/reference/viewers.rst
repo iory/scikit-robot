@@ -62,22 +62,156 @@ PyrenderViewer
 --------------
 
 **Description:**
-  The ``PyrenderViewer`` utilizes the Pyrender library for advanced 3D rendering, ideal for creating realistic visual simulations. This viewer is particularly suited for complex rendering tasks in robotics, including detailed lighting and shading effects.
+  The ``PyrenderViewer`` utilizes the Pyrender library for advanced 3D rendering, ideal for creating realistic visual simulations. This viewer is implemented as a Singleton to ensure only one instance exists throughout the program. It's particularly suited for complex rendering tasks in robotics, including detailed lighting, shading effects, and collision visualization.
 
 **Key Functionalities:**
 
 - **Initialization and Configuration:**
-  The viewer is initialized with specified resolution and rendering flags, creating a scene managed by Pyrender. It supports high-quality rendering features like raymond lighting.
+  The viewer is initialized with specified resolution, update interval, and rendering flags. Key parameters include:
+
+  - ``resolution``: Window size (default: ``(640, 480)``)
+  - ``update_interval``: Update frequency in seconds (default: ``1.0``)
+  - ``enable_collision_toggle``: Enable collision/visual mesh switching (default: ``True``)
+  - ``title``: Window title (default: ``'scikit-robot PyrenderViewer'``)
 
 - **Rendering Control:**
-  Handles real-time scene updates triggered by user interactions such as mouse events and keyboard inputs, ensuring the scene remains interactive and up-to-date.
+  Handles real-time scene updates triggered by user interactions. The viewer automatically manages OpenGL compatibility with fallback support from OpenGL 4.1 → 4.0 → 3.3, ensuring robust operation across different systems including WSL2.
 
 - **Scene Management:**
-  Similar to ``TrimeshSceneViewer``, it allows for the addition and removal of visual meshes linked to robotic models, supporting dynamic updates to the scene as robotic configurations change.
+  Supports dynamic addition and removal of visual and collision meshes linked to robotic models. The viewer maintains real-time synchronization with robot configurations through the ``redraw()`` method.
 
 - **Camera Management:**
-  Offers detailed camera setup options, including angle adjustments, distance settings, center positioning, and field of view configuration, providing flexibility in viewing angles for complex scenes.
+  Offers detailed camera setup options through the ``set_camera()`` method:
 
+  - Angle-based positioning with Euler angles
+  - Distance and center point configuration
+  - Field of view (FOV) adjustment
+  - Direct Coordinates object support for precise camera placement
+
+- **Collision/Visual Mesh Toggle:**
+  When ``enable_collision_toggle=True``, press the ``v`` key to switch between:
+
+  - **Visual meshes**: Default appearance meshes for rendering (left in figure below)
+  - **Collision meshes**: Simplified meshes used for collision detection (displayed in orange/transparent, right in figure below)
+
+  .. figure:: ../_static/visual-collision-comparison.jpg
+     :width: 100%
+     :align: center
+     :alt: Visual mesh (left) vs Collision mesh (right) comparison
+
+     **Visual mesh (left) vs Collision mesh (right).** The visual mesh shows the detailed appearance of the robot with textured wheels. The collision mesh on the right uses simplified cylinder representations for the wheels, which are computationally more efficient for collision detection algorithms.
+
+- **360-Degree Image Capture:**
+  The ``capture_360_images()`` method enables automated scene capture from multiple angles:
+
+  - Configurable number of frames and camera elevation
+  - Automatic GIF animation generation
+  - Transparent background support
+  - Custom lighting configuration options
+
+
+**Keyboard Controls:**
+
+The PyrenderViewer provides extensive keyboard controls for interactive manipulation:
+
+.. list-table:: Keyboard Controls
+   :header-rows: 1
+   :widths: 10 90
+
+   * - Key
+     - Function
+   * - ``a``
+     - Toggle rotational animation mode
+   * - ``c``
+     - Toggle backface culling
+   * - ``f``
+     - Toggle fullscreen mode
+   * - ``h``
+     - Toggle shadow rendering (may impact performance)
+   * - ``i``
+     - Cycle through axis display modes (none → world → mesh → all)
+   * - ``l``
+     - Cycle lighting modes (scene → Raymond → direct)
+   * - ``m``
+     - Toggle face normal visualization
+   * - ``n``
+     - Toggle vertex normal visualization
+   * - ``o``
+     - Toggle orthographic camera mode
+   * - ``q``
+     - Quit the viewer
+   * - ``r``
+     - Start/stop GIF recording (opens file dialog on stop)
+   * - ``s``
+     - Save current view as image (opens file dialog)
+   * - ``v``
+     - **Toggle between visual and collision meshes** (if enabled)
+   * - ``w``
+     - Cycle wireframe modes
+   * - ``z``
+     - Reset camera to default view
+
+**Mouse Controls:**
+
+- **Left-click + drag**: Rotate camera around scene center
+- **Ctrl + Left-click + drag**: Rotate camera around viewing axis
+- **Shift + Left-click + drag** or **Middle-click + drag**: Pan camera
+- **Right-click + drag** or **Scroll wheel**: Zoom in/out
+
+**Example Usage:**
+
+Basic viewer initialization and robot display:
+
+.. code-block:: python
+
+    from skrobot.viewers import PyrenderViewer
+    from skrobot.models import PR2
+
+    # Create viewer instance (Singleton pattern ensures only one instance)
+    viewer = PyrenderViewer(resolution=(800, 600), update_interval=1.0/30)
+    
+    # Load and add robot model
+    robot = PR2()
+    viewer.add(robot)
+    
+    # Show the viewer window
+    viewer.show()
+    
+    # Update robot pose and redraw
+    robot.reset_manip_pose()
+    viewer.redraw()
+
+Collision/Visual mesh toggle example:
+
+.. code-block:: python
+
+    # Enable collision toggle functionality
+    viewer = PyrenderViewer(enable_collision_toggle=True)
+    
+    # Add robot to viewer
+    viewer.add(robot)
+    viewer.show()
+    
+    # Press 'v' key in the viewer to toggle between visual and collision meshes
+    # Collision meshes will appear in orange/transparent color
+    
+    # The visual mesh displays the full detailed geometry with textures
+    # while collision mesh shows simplified shapes (e.g., cylinders for wheels)
+    # optimized for physics calculations
+
+360-degree image capture example:
+
+.. code-block:: python
+
+    # Capture 360-degree rotation images
+    viewer.capture_360_images(
+        output_dir="./robot_360",
+        num_frames=36,  # One image every 10 degrees
+        camera_elevation=45,  # Camera elevation angle
+        create_gif=True,  # Generate animated GIF
+        gif_duration=100,  # 100ms between frames
+        transparent_background=True  # Render with transparent background
+    )
 
 .. caution::
 
@@ -88,6 +222,7 @@ PyrenderViewer
   .. code-block:: python
 
     viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # Set update interval for 30 Hz
+    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480), update_interval=1.0/30)      # Same for PyrenderViewer
 
 
 Color Management
