@@ -53,6 +53,9 @@ You have direct access to link and joint information.
 Inverse Kinematics
 ------------------
 
+This section provides a basic example of inverse kinematics. For comprehensive documentation 
+including axis constraints, batch processing, and advanced features, see :doc:`../reference/robot_model_tips`.
+
 First, set the initial pose. Note that the position of the prismatic joint is in [m] and angles of rotational joints are in [rad].
 
 >>> robot_model.torso_lift_joint.joint_angle(0.05)
@@ -95,3 +98,13 @@ Set target_coords.
 ...     target_coords,
 ...     link_list=link_list,
 ...     move_target=move_target)
+
+For detailed information about inverse kinematics including:
+
+- Axis constraints (``rotation_axis`` and ``translation_axis`` parameters)
+- Batch inverse kinematics for multiple poses
+- Visual examples of different constraint types
+- Advanced features and performance optimization
+- Common usage patterns
+
+See the comprehensive :doc:`../reference/robot_model_tips` documentation.
