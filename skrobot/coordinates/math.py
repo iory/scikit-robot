@@ -1112,15 +1112,80 @@ def matrix_exponent(omega, p=1.0):
            [ 0.        ,  0.84147098,  0.54030231]])
     """
     w = np.linalg.norm(omega)
-    amat = outer_product_matrix(normalize_vector(omega))
+    amat = skew_symmetric_matrix(normalize_vector(omega))
     return np.eye(3) + np.sin(w * p) * amat + \
         (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
 
 
-def outer_product_matrix(v):
-    """Returns outer product matrix of given v.
+def skew_symmetric_matrix(v):
+    """Returns skew-symmetric matrix of given vector v.
 
-    Returns following outer product matrix.
+    This function creates a skew-symmetric matrix (also known as an antisymmetric matrix)
+    that represents the cross product operation as matrix multiplication.
+    For any vectors a and v, the cross product v x a is equivalent to the matrix-vector
+    product of the skew-symmetric matrix of v and the vector a.
+
+    v × a = skew_symmetric_matrix(v) @ a
+
+    .. math::
+        \\left(
+            \\begin{array}{ccc}
+                0 & -v_2 & v_1 \\\\
+                v_2 & 0 & -v_0 \\\\
+                -v_1 & v_0 & 0
+            \\end{array}
+        \\right)
+
+    Parameters
+    ----------
+    v : numpy.ndarray or list
+        3D vector [v0, v1, v2]
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        3x3 skew-symmetric matrix.
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import skew_symmetric_matrix
+    >>> skew_symmetric_matrix([1, 2, 3])
+    array([[ 0, -3,  2],
+           [ 3,  0, -1],
+           [-2,  1,  0]])
+
+    >>> # Verify cross product equivalence: v x a = [v]x @ a
+    >>> import numpy as np
+    >>> v = np.array([0, 1, 0])  # vector j
+    >>> a = np.array([1, 0, 0])  # vector i
+    >>>
+    >>> # Expected result of v x a (j x i) is -k = [0, 0, -1]
+    >>> cross_result = np.cross(v, a)
+    >>> matrix_result = skew_symmetric_matrix(v) @ a
+    >>>
+    >>> print(f"np.cross(v, a) = {cross_result}")
+    np.cross(v, a) = [ 0  0 -1]
+    >>> print(f"skew_symmetric_matrix(v) @ a = {matrix_result}")
+    skew_symmetric_matrix(v) @ a = [ 0.  0. -1.]
+    >>>
+    >>> np.allclose(cross_result, matrix_result)
+    True
+    """
+    # Ensure v is a numpy array for consistent indexing
+    v = np.asarray(v)
+    return np.array([[0, -v[2], v[1]],
+                     [v[2], 0, -v[0]],
+                     [-v[1], v[0], 0]])
+
+
+def outer_product_matrix(v):
+    """Returns skew-symmetric matrix of given v.
+
+    .. deprecated::
+        This function name is misleading. It actually returns a skew-symmetric matrix,
+        not an outer product matrix. Use `skew_symmetric_matrix` instead.
+
+    Returns following skew-symmetric matrix (incorrectly called "outer product matrix").
 
     .. math::
         \\left(
@@ -1139,7 +1204,7 @@ def outer_product_matrix(v):
     Returns
     -------
     matrix : numpy.ndarray
-        3x3 rotation matrix.
+        3x3 skew-symmetric matrix (NOT outer product matrix).
 
     Examples
     --------
@@ -1149,9 +1214,13 @@ def outer_product_matrix(v):
            [ 3,  0, -1],
            [-2,  1,  0]])
     """
-    return np.array([[0, -v[2], v[1]],
-                     [v[2], 0, -v[0]],
-                     [-v[1], v[0], 0]])
+    warnings.warn(
+        'Function `outer_product_matrix` is deprecated and incorrectly named. '
+        'It actually returns a skew-symmetric matrix, not an outer product matrix. '
+        'Please use `skew_symmetric_matrix` instead',
+        DeprecationWarning,
+        stacklevel=2)
+    return skew_symmetric_matrix(v)
 
 
 def cross_product(a, b):
