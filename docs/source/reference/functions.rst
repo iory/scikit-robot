@@ -31,6 +31,7 @@ Utilities functions
    matrix_log
    matrix_exponent
    outer_product_matrix
+   skew_symmetric_matrix
    rotation_matrix_from_rpy
    rotation_matrix_from_axis
    rodrigues
