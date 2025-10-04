@@ -24,12 +24,12 @@ from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates import rpy_angle
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
-from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_inverse
 from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import rodrigues
+from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_target_joint_dimension
@@ -2881,7 +2881,7 @@ class RobotModel(CascadedLink):
 
                 # Calculate error with original target
                 original_error_matrix = np.matmul(current_rot_matrix.T, target_rot_matrix)
-                original_error = matrix_log(original_error_matrix)
+                original_error = rotation_matrix_to_axis_angle_vector(original_error_matrix)
                 original_error_norm = np.linalg.norm(original_error)
 
                 # Calculate error with mirrored target (180° rotation around axis)
@@ -2894,7 +2894,7 @@ class RobotModel(CascadedLink):
 
                 mirrored_target_rot = np.matmul(target_rot_matrix, mirror_matrix)
                 mirrored_error_matrix = np.matmul(current_rot_matrix.T, mirrored_target_rot)
-                mirrored_error = matrix_log(mirrored_error_matrix)
+                mirrored_error = rotation_matrix_to_axis_angle_vector(mirrored_error_matrix)
                 mirrored_error_norm = np.linalg.norm(mirrored_error)
 
                 # Use the target orientation that gives smaller error

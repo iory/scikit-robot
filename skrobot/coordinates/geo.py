@@ -3,8 +3,8 @@ import numpy as np
 from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import angle_between_vectors
 from skrobot.coordinates.math import convert_to_axis_vector
+from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import midpoint
-from skrobot.coordinates.math import midrot
 from skrobot.coordinates.math import normalize_vector
 
 
@@ -36,7 +36,7 @@ def midcoords(p, c1, c2):
     array([0.05, 0.  , 0.  ])
     """
     return make_coords(pos=midpoint(p, c1.worldpos(), c2.worldpos()),
-                       rot=midrot(p, c1.worldrot(), c2.worldrot()))
+                       rot=interpolate_rotation_matrices(p, c1.worldrot(), c2.worldrot()))
 
 
 def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
