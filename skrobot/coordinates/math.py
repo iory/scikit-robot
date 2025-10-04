@@ -446,8 +446,56 @@ def midpoint(p, a, b):
     return a + (b - a) * p
 
 
+def interpolate_rotation_matrices(p, r1, r2):
+    """Interpolate between two rotation matrices.
+
+    Performs spherical linear interpolation (SLERP) between two rotation
+    matrices. This gives a smooth rotation path from r1 to r2.
+
+    Parameters
+    ----------
+    p : float
+        Interpolation parameter in [0, 1]. When p=0, returns r1.
+        When p=1, returns r2. When p=0.5, returns the midpoint rotation.
+    r1 : numpy.ndarray
+        Starting 3x3 rotation matrix
+    r2 : numpy.ndarray
+        Ending 3x3 rotation matrix
+
+    Returns
+    -------
+    r : numpy.ndarray
+        Interpolated 3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import interpolate_rotation_matrices
+    >>> interpolate_rotation_matrices(0.5,
+            np.eye(3),
+            np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    array([[ 0.70710678,  0.        ,  0.70710678],
+           [ 0.        ,  1.        ,  0.        ],
+           [-0.70710678,  0.        ,  0.70710678]])
+    >>> from skrobot.coordinates.math import matrix2ypr
+    >>> np.rad2deg(matrix2ypr(interpolate_rotation_matrices(0.5,
+                   np.eye(3),
+                   np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))))
+    array([ 0., 45.,  0.])
+    """
+    r1 = _check_valid_rotation(r1)
+    r2 = _check_valid_rotation(r2)
+    r = np.matmul(r1.T, r2)
+    omega = rotation_matrix_to_axis_angle_vector(r)
+    r = axis_angle_vector_to_rotation_matrix(omega, p)
+    return np.matmul(r1, r)
+
+
 def midrot(p, r1, r2):
     """Returns mid (or p) rotation matrix of given two matrix r1 and r2.
+
+    .. deprecated::
+        This function is deprecated. Use `interpolate_rotation_matrices` instead.
 
     Parameters
     ----------
@@ -479,12 +527,12 @@ def midrot(p, r1, r2):
                    np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])))[0])
     array([ 0., 45.,  0.])
     """
-    r1 = _check_valid_rotation(r1)
-    r2 = _check_valid_rotation(r2)
-    r = np.matmul(r1.T, r2)
-    omega = matrix_log(r)
-    r = matrix_exponent(omega, p)
-    return np.matmul(r1, r)
+    warnings.warn(
+        'Function `midrot` is deprecated. '
+        'Please use `interpolate_rotation_matrices` instead',
+        DeprecationWarning,
+        stacklevel=2)
+    return interpolate_rotation_matrices(p, r1, r2)
 
 
 def transform(m, v):
@@ -1050,8 +1098,48 @@ def quaternion2matrix(q, normalize=False):
     return m
 
 
+def rotation_matrix_to_axis_angle_vector(m):
+    """Convert rotation matrix to axis-angle representation as a vector.
+
+    The magnitude of the returned vector represents the rotation angle,
+    and its direction represents the rotation axis.
+
+    Parameters
+    ----------
+    m : list or numpy.ndarray
+        3x3 rotation matrix
+
+    Returns
+    -------
+    axis_angle_vector : numpy.ndarray
+        Axis-angle representation as a vector of shape (3,).
+        The vector's magnitude is the rotation angle in radians [-pi, pi],
+        and its direction is the rotation axis.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
+    >>> rotation_matrix_to_axis_angle_vector(np.eye(3))
+    array([0., 0., 0.])
+    """
+    # calc logarithm of quaternion
+    q = matrix2quaternion(m)
+    q_w = q[0]
+    q_xyz = q[1:]
+    theta = 2.0 * np.arctan(np.linalg.norm(q_xyz) / q_w)
+    if theta > np.pi:
+        theta = theta - 2.0 * np.pi
+    elif theta < - np.pi:
+        theta = theta + 2.0 * np.pi
+    return theta * normalize_vector(q_xyz)
+
+
 def matrix_log(m):
     """Returns matrix log of given rotation matrix, it returns [-pi, pi]
+
+    .. deprecated::
+        This function is deprecated. Use `rotation_matrix_to_axis_angle_vector` instead.
 
     Parameters
     ----------
@@ -1070,20 +1158,60 @@ def matrix_log(m):
     >>> matrix_log(np.eye(3))
     array([0., 0., 0.])
     """
-    # calc logarithm of quaternion
-    q = matrix2quaternion(m)
-    q_w = q[0]
-    q_xyz = q[1:]
-    theta = 2.0 * np.arctan(np.linalg.norm(q_xyz) / q_w)
-    if theta > np.pi:
-        theta = theta - 2.0 * np.pi
-    elif theta < - np.pi:
-        theta = theta + 2.0 * np.pi
-    return theta * normalize_vector(q_xyz)
+    warnings.warn(
+        'Function `matrix_log` is deprecated. '
+        'Please use `rotation_matrix_to_axis_angle_vector` instead',
+        DeprecationWarning,
+        stacklevel=2)
+    return rotation_matrix_to_axis_angle_vector(m)
+
+
+def axis_angle_vector_to_rotation_matrix(omega, p=1.0):
+    """Convert axis-angle vector representation to rotation matrix.
+
+    Converts an axis-angle representation (where the vector direction
+    is the rotation axis and magnitude is the rotation angle) to a
+    rotation matrix using Rodrigues' formula.
+
+    Parameters
+    ----------
+    omega : list or numpy.ndarray
+        Axis-angle vector of shape (3,). The direction represents
+        the rotation axis and the magnitude represents the rotation
+        angle in radians.
+    p : float, optional
+        Interpolation parameter (default: 1.0). When p=1.0, returns
+        the full rotation. When 0<p<1, returns partial rotation.
+
+    Returns
+    -------
+    rot : numpy.ndarray
+        3x3 rotation matrix
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import axis_angle_vector_to_rotation_matrix
+    >>> axis_angle_vector_to_rotation_matrix([1, 1, 1])
+    array([[ 0.22629564, -0.18300792,  0.95671228],
+           [ 0.95671228,  0.22629564, -0.18300792],
+           [-0.18300792,  0.95671228,  0.22629564]])
+    >>> axis_angle_vector_to_rotation_matrix([1, 0, 0])
+    array([[ 1.        ,  0.        ,  0.        ],
+           [ 0.        ,  0.54030231, -0.84147098],
+           [ 0.        ,  0.84147098,  0.54030231]])
+    """
+    w = np.linalg.norm(omega)
+    amat = skew_symmetric_matrix(normalize_vector(omega))
+    return np.eye(3) + np.sin(w * p) * amat + \
+        (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
 
 
 def matrix_exponent(omega, p=1.0):
     """Returns exponent of given omega.
+
+    .. deprecated::
+        This function is deprecated. Use `axis_angle_vector_to_rotation_matrix` instead.
 
     This function is similar to cv2.Rodrigues.
     Convert rvec (which is log quaternion) to rotation matrix.
@@ -1111,10 +1239,12 @@ def matrix_exponent(omega, p=1.0):
            [ 0.        ,  0.54030231, -0.84147098],
            [ 0.        ,  0.84147098,  0.54030231]])
     """
-    w = np.linalg.norm(omega)
-    amat = skew_symmetric_matrix(normalize_vector(omega))
-    return np.eye(3) + np.sin(w * p) * amat + \
-        (1.0 - np.cos(w * p)) * np.matmul(amat, amat)
+    warnings.warn(
+        'Function `matrix_exponent` is deprecated. '
+        'Please use `axis_angle_vector_to_rotation_matrix` instead',
+        DeprecationWarning,
+        stacklevel=2)
+    return axis_angle_vector_to_rotation_matrix(omega, p)
 
 
 def skew_symmetric_matrix(v):

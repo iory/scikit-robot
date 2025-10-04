@@ -12,7 +12,6 @@ from skrobot.coordinates.math import convert_to_axis_vector
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
-from skrobot.coordinates.math import matrix_log
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
@@ -21,6 +20,7 @@ from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
 from skrobot.coordinates.math import rotation_angle
 from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
 from skrobot.coordinates.math import wxyz2xyzw
@@ -969,13 +969,13 @@ class Coordinates(object):
             ax = rotation_axis[0]
             if not need_mirror_for_nearest_axis(self, coords, ax):
                 rot = rotate_matrix(rot, np.pi, ax)
-            dif_rot = matrix_log(np.matmul(self.worldrot().T, rot))
+            dif_rot = rotation_matrix_to_axis_angle_vector(np.matmul(self.worldrot().T, rot))
         elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
             dif_rotmatrix = np.matmul(self.worldrot().T,
                                       coords.worldrot())
-            dif_rot = matrix_log(dif_rotmatrix)
+            dif_rot = rotation_matrix_to_axis_angle_vector(dif_rotmatrix)
         else:
             raise ValueError
         return dif_rot

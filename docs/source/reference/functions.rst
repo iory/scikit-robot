@@ -20,7 +20,7 @@ Utilities functions
    random_rotation
    random_translation
    midpoint
-   midrot
+   interpolate_rotation_matrices
    transform
    rotation_matrix
    rotate_vector
@@ -28,9 +28,8 @@ Utilities functions
    rpy_matrix
    rpy_angle
    normalize_vector
-   matrix_log
-   matrix_exponent
-   outer_product_matrix
+   rotation_matrix_to_axis_angle_vector
+   axis_angle_vector_to_rotation_matrix
    skew_symmetric_matrix
    rotation_matrix_from_rpy
    rotation_matrix_from_axis
@@ -97,3 +96,17 @@ Geometry functions
    :nosignatures:
 
    rotate_points
+
+
+Deprecated Functions
+--------------------
+
+These functions are deprecated and will be removed in future versions.
+Please use their replacements instead.
+
+**Deprecated Functions:**
+
+- :func:`~skrobot.coordinates.math.matrix_log` → Use :func:`~skrobot.coordinates.math.rotation_matrix_to_axis_angle_vector` instead
+- :func:`~skrobot.coordinates.math.matrix_exponent` → Use :func:`~skrobot.coordinates.math.axis_angle_vector_to_rotation_matrix` instead
+- :func:`~skrobot.coordinates.math.midrot` → Use :func:`~skrobot.coordinates.math.interpolate_rotation_matrices` instead
+- :func:`~skrobot.coordinates.math.outer_product_matrix` → Use :func:`~skrobot.coordinates.math.skew_symmetric_matrix` instead
