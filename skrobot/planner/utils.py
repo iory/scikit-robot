@@ -2,7 +2,7 @@ import numpy as np
 
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
-from skrobot.coordinates.math import rpy_angle
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rpy_matrix
 
 
@@ -93,8 +93,7 @@ def get_robot_config(robot_model, joint_list, with_base=False):
     av_joint = np.array([j.joint_angle() for j in joint_list])
     if with_base:
         x, y, _ = robot_model.translation
-        rpy = rpy_angle(robot_model.rotation)[0]
-        theta = rpy[0]
+        theta, _, _ = matrix2ypr(robot_model.rotation)
         av_whole = np.hstack((av_joint, [x, y, theta]))
         return av_whole
     else:

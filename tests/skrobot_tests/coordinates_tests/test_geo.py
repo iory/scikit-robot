@@ -28,8 +28,9 @@ class TestGeo(unittest.TestCase):
 
         testing.assert_array_equal(target_coords.worldpos(),
                                    [1, 1, 1])
+        from skrobot.coordinates.math import matrix2ypr
         testing.assert_array_almost_equal(
-            target_coords.rpy_angle()[0],
+            matrix2ypr(target_coords.rotation),
             [0, 0, -1.57079633])
 
         # case of rot_angle_cos == 1.0
@@ -39,7 +40,7 @@ class TestGeo(unittest.TestCase):
         testing.assert_array_equal(target_coords.worldpos(),
                                    [1, 1, 1])
         testing.assert_array_almost_equal(
-            target_coords.rpy_angle()[0],
+            matrix2ypr(target_coords.rotation),
             [0, 0, 0])
 
         # case of rot_angle_cos == -1.0
@@ -49,7 +50,7 @@ class TestGeo(unittest.TestCase):
         testing.assert_array_equal(target_coords.worldpos(),
                                    [0, 0, 0])
         testing.assert_array_almost_equal(
-            target_coords.rpy_angle()[0],
+            matrix2ypr(target_coords.rotation),
             [0, 0, pi])
 
     def test_rotate_points(self):

@@ -238,7 +238,7 @@ class Sphere(Link, SDFImplemented):
         mesh = trimesh.creation.icosphere(
             radius=radius,
             subdivisions=subdivisions,
-            color=color,
+            face_colors=color,
         )
         super(Sphere, self).__init__(pos=pos, rot=rot, name=name,
                                      collision_mesh=mesh,

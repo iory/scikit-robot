@@ -21,9 +21,9 @@ from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
-from skrobot.coordinates import rpy_angle
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_inverse
@@ -2230,12 +2230,12 @@ class RobotModel(CascadedLink):
             if j.parent not in link_maps or j.child not in link_maps:
                 continue
             if j.origin is None:
-                rpy = np.zeros(3, dtype=np.float32)
+                ypr = np.zeros(3, dtype=np.float32)
                 xyz = np.zeros(3, dtype=np.float32)
             else:
-                rpy = rpy_angle(j.origin[:3, :3])[0]
+                ypr = matrix2ypr(j.origin[:3, :3])
                 xyz = j.origin[:3, 3]
-            link_maps[j.child].newcoords(rpy,
+            link_maps[j.child].newcoords(ypr,
                                          xyz)
             # TODO(fix automatically update default_coords)
             link_maps[j.child].joint.default_coords = Coordinates(
