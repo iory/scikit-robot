@@ -16,6 +16,7 @@ def get_available_apps():
         'convert_urdf_mesh': ('Convert URDF mesh files', (3, 6)),
         'modularize_urdf': ('Modularize URDF files', None),
         'change_urdf_root': ('Change URDF root link', None),
+        'transform_urdf': ('Add world link with transform to URDF', None),
         'visualize_mesh': ('Visualize mesh file', None),
         'urdf_hash': ('Calculate URDF hash', None),
         'convert_wheel_collision': ('Convert wheel collision model', None),
@@ -64,7 +65,8 @@ def main():
     for command_name, app_info in available_apps.items():
         app_parser = subparsers.add_parser(
             command_name,
-            help=app_info['help']
+            help=app_info['help'],
+            add_help=False
         )
         app_parser.set_defaults(
             func=lambda args, module=app_info['module']: run_app(f'{module}:main', args)
