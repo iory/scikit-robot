@@ -36,21 +36,63 @@ pip install scikit-robot[all]
 
 ## Command Line Tools
 
-### Visualize URDF
+Scikit-robot provides a unified command-line interface through the `skr` command, which consolidates all robot-related tools into a single entry point.
 
-To visualize a URDF model and inspect your robot's configuration, you can use the `visualize-urdf` command as follows:
+### Using the skr Command
+
+You can use the `skr` command with various subcommands:
 
 ```bash
+# View all available commands
+skr --help
+
+# Visualize URDF models
+skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer trimesh
+
+# Convert URDF mesh files
+skr convert-urdf-mesh robot.urdf --output converted_robot.urdf
+
+# Change URDF root link
+skr change-urdf-root robot.urdf new_root_link output.urdf
+
+# Calculate URDF hash
+skr urdf-hash robot.urdf
+
+# Modularize URDF files
+skr modularize-urdf robot.urdf --output modular_robot.urdf
+
+# Visualize mesh files
+skr visualize-mesh mesh_file.stl
+
+# Convert wheel collision models
+skr convert-wheel-collision robot.urdf --output converted.urdf
+```
+
+### Legacy Commands (still supported)
+
+For backward compatibility, the original commands are still available:
+
+```bash
+# These commands work the same as their skr equivalents
 visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer trimesh
+convert-urdf-mesh robot.urdf --output converted_robot.urdf
+```
+
+### Visualize URDF
+
+To visualize a URDF model and inspect your robot's configuration:
+
+```bash
+skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer trimesh
 ```
 
 If you experience performance issues with the default viewer, try pyrender for smoother visualization:
 
 ```bash
-visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer pyrender
+skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer pyrender
 ```
 
-Running these commands should open a viewer displaying your robot’s 3D model. Below is a sample image of what you should expect.
+Running these commands should open a viewer displaying your robot's 3D model. Below is a sample image of what you should expect.
 
 ![Viewer Example](docs/image/viewer.jpg)
 
