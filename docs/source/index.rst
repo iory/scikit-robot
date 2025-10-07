@@ -13,6 +13,7 @@ robot moving after being loaded by this library.
    :maxdepth: 2
 
    install/index.rst
+   cli.rst
    examples/index.rst
    reference/index.rst
    development/index.rst

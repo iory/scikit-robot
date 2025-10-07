@@ -79,7 +79,8 @@ if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
 extra_all_requires += docs_install_requires + opt_install_requires
 
 
-console_scripts = ["visualize-urdf=skrobot.apps.visualize_urdf:main"]
+console_scripts = ["skr=skrobot.apps.cli:main",
+                   "visualize-urdf=skrobot.apps.visualize_urdf:main"]
 if (sys.version_info.major, sys.version_info.minor) >= (3, 6):
     console_scripts.append(
         "convert-urdf-mesh=skrobot.apps.convert_urdf_mesh:main")

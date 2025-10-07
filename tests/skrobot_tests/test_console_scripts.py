@@ -14,6 +14,37 @@ from skrobot.urdf import URDFXMLRootLinkChanger
 
 class TestConsoleScripts(unittest.TestCase):
 
+    def test_skr_command(self):
+        """Test skr main command and its subcommands."""
+        # Test main skr command help
+        result = subprocess.run(
+            ['skr', '--help'],
+            capture_output=True,
+            text=True
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('scikit-robot CLI tool', result.stdout)
+        self.assertIn('visualize-urdf', result.stdout)
+        self.assertIn('modularize-urdf', result.stdout)
+
+        # Get available subcommands dynamically from cli module
+        from skrobot.apps.cli import get_available_apps
+        available_apps = get_available_apps()
+        subcommands = list(available_apps.keys())
+
+        # Ensure we have some subcommands
+        self.assertGreater(len(subcommands), 0, "No subcommands found")
+
+        for subcmd in subcommands:
+            with self.subTest(subcommand=subcmd):
+                result = subprocess.run(
+                    ['skr', subcmd, '--help'],
+                    capture_output=True,
+                    text=True
+                )
+                self.assertEqual(result.returncode, 0,
+                                 f"skr {subcmd} --help failed with: {result.stderr}")
+
     @pytest.mark.skipif(
         sys.version_info[0] == 2 or sys.version_info[:2] == (3, 6) or sys.version_info[:2] >= (3, 13),
         reason="Skip in Python 2, Python 3.6, and Python 3.13+ (open3d not supported)")
@@ -34,6 +65,9 @@ class TestConsoleScripts(unittest.TestCase):
                 'convert-urdf-mesh {}'.format(urdfpath),
                 'convert-urdf-mesh {} --voxel-size 0.001'.format(urdfpath),
                 'convert-urdf-mesh {} -d 0.98'.format(urdfpath),
+                # Test skr version of the command
+                'skr convert-urdf-mesh {}'.format(urdfpath),
+                'skr convert-urdf-mesh {} --voxel-size 0.001'.format(urdfpath),
                 # inplace option should be used last
                 'convert-urdf-mesh {} --output {} -f stl'.format(
                     out_urdfpath, out_stl_urdfpath),
