@@ -534,8 +534,8 @@ class GridSDF(SignedDistanceFunction):
                     'trying to acquire lock for %s...', sdf_cache_path)
                 logger.info(
                     'pre-computing sdf and making a cache at %s.', sdf_cache_path)
-                pysdfgen.obj2sdf(str(obj_filepath), dim_grid, padding_grid,
-                                 output_filepath=sdf_cache_path)
+                pysdfgen.mesh2sdf(str(obj_filepath), dim_grid, padding_grid,
+                                  output_filepath=sdf_cache_path)
                 logger.info('finish pre-computation')
         return GridSDF.from_file(sdf_cache_path, **kwargs)
 

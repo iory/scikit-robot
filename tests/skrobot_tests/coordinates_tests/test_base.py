@@ -216,8 +216,9 @@ class TestCoordinates(unittest.TestCase):
         c.translate([0.1, 0.2, 0.3], c2)
         testing.assert_almost_equal(
             c.translation, [0.3, 0.2, -0.1])
+        from skrobot.coordinates.math import matrix2ypr
         testing.assert_almost_equal(
-            c.rpy_angle()[0], [pi / 3.0, 0, 0])
+            matrix2ypr(c.rotation), [pi / 3.0, 0, 0])
 
     def test_transform_vector(self):
         pos = [0.13264493, 0.05263172, 0.93042636]

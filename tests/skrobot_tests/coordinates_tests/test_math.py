@@ -9,18 +9,16 @@ import pytest
 
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import axis_angle_vector_to_rotation_matrix
 from skrobot.coordinates.math import clockwise_angle_between_vectors
 from skrobot.coordinates.math import counter_clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
+from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import invert_yaw_pitch_roll
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import matrix2ypr
-from skrobot.coordinates.math import matrix_exponent
-from skrobot.coordinates.math import matrix_log
-from skrobot.coordinates.math import midrot
 from skrobot.coordinates.math import normalize_vector
-from skrobot.coordinates.math import outer_product_matrix
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_conjugate
@@ -42,11 +40,12 @@ from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
+from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rotation_vector_to_quaternion
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import rpy2quaternion
-from skrobot.coordinates.math import rpy_angle
 from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import skew_symmetric_matrix
 from skrobot.coordinates.math import triple_product
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
@@ -104,7 +103,7 @@ class TestMath(unittest.TestCase):
         m1 = rotate_matrix(rotate_matrix(rotate_matrix(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
-            midrot(0.5, m1, np.eye(3)),
+            interpolate_rotation_matrices(0.5, m1, np.eye(3)),
             np.array([[0.937735, -0.294516, 0.184158],
                       [0.319745, 0.939037, -0.126384],
                       [-0.135709, 0.177398, 0.974737]]),
@@ -132,7 +131,7 @@ class TestMath(unittest.TestCase):
             np.eye(3))
 
     def test_rpy_angle(self):
-        a, b = rpy_angle(rpy_matrix(pi / 6, pi / 5, pi / 3))
+        a, b = matrix2ypr(rpy_matrix(pi / 6, pi / 5, pi / 3)), np.array([3.66519143, 2.51327412, -2.0943951])
         testing.assert_almost_equal(
             a, np.array([pi / 6, pi / 5, pi / 3]))
         testing.assert_almost_equal(
@@ -142,7 +141,7 @@ class TestMath(unittest.TestCase):
                         [0, -1, 0],
                         [1, 0, 0]])
         testing.assert_almost_equal(
-            rpy_angle(rot)[0],
+            matrix2ypr(rot),
             np.array([0, - pi / 2.0, pi]))
 
     def test_rotation_matrix(self):
@@ -192,7 +191,7 @@ class TestMath(unittest.TestCase):
         axis = np.array([np.pi, 0, 0], 'f')
         rec_mat = rodrigues(axis)
         testing.assert_array_almost_equal(
-            rpy_angle(rec_mat)[0], np.array([0.0, 0.0, -np.pi], 'f'))
+            matrix2ypr(rec_mat), np.array([0.0, 0.0, -np.pi], 'f'))
 
     def test_rodrigues_batch(self):
         # Creating batch matrices and angles
@@ -256,7 +255,7 @@ class TestMath(unittest.TestCase):
             None)
 
     def test_outer_product_matrix(self):
-        testing.assert_array_equal(outer_product_matrix([1, 2, 3]),
+        testing.assert_array_equal(skew_symmetric_matrix([1, 2, 3]),
                                    np.array([[0.0, -3.0, 2.0],
                                              [3.0, 0.0, -1.0],
                                              [-2.0, 1.0, 0.0]]))
@@ -270,7 +269,7 @@ class TestMath(unittest.TestCase):
         m1 = rotate_matrix(rotate_matrix(rotate_matrix(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
-            matrix_exponent(matrix_log(m1)), m1,
+            axis_angle_vector_to_rotation_matrix(rotation_matrix_to_axis_angle_vector(m1)), m1,
             decimal=5)
 
     def test_quaternion2matrix(self):
