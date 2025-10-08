@@ -43,6 +43,7 @@ logger = getLogger(__name__)
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
                         'export_mesh_format': None,
+                        'collision_mesh_format': None,
                         'decimation_area_ratio_threshold': None,
                         'simplify_vertex_clustering_voxel_size': None,
                         'target_triangles': None,
@@ -50,6 +51,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'force_visual_mesh_origin_to_zero': False,
                         'overwrite_mesh': False,
                         'scale_factor': 1.0,
+                        '_current_geometry_context': None,  # 'collision' or 'visual'
                         }
 _MESH_CACHE = {}
 
@@ -74,8 +76,10 @@ def export_mesh_format(
         decimation_area_ratio_threshold=None,
         simplify_vertex_clustering_voxel_size=None,
         target_triangles=None,
-        overwrite_mesh=False):
+        overwrite_mesh=False,
+        collision_mesh_format=None):
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
+    _CONFIGURABLE_VALUES["collision_mesh_format"] = collision_mesh_format
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
         decimation_area_ratio_threshold
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
@@ -84,6 +88,7 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
     yield
     _CONFIGURABLE_VALUES["export_mesh_format"] = None
+    _CONFIGURABLE_VALUES["collision_mesh_format"] = None
     _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
     _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
     _CONFIGURABLE_VALUES["target_triangles"] = None
@@ -1009,11 +1014,16 @@ class Mesh(URDFType):
 
             return node
 
-        ext = _CONFIGURABLE_VALUES['export_mesh_format']
+        # Determine which format to use based on context
+        is_collision = (_CONFIGURABLE_VALUES.get('_current_geometry_context')
+                        == 'collision')
+        ext = (_CONFIGURABLE_VALUES['collision_mesh_format'] if is_collision
+               else _CONFIGURABLE_VALUES['export_mesh_format'])
+
         if ext is not None:
             if not fn.endswith(ext):
                 name, _ = os.path.splitext(fn)
-                fn = name + _CONFIGURABLE_VALUES['export_mesh_format']
+                fn = name + ext
                 self.filename = os.path.splitext(self.filename)[0] + ext
                 if os.path.exists(fn):
                     # skip mesh save process but still apply scaling
@@ -1481,16 +1491,21 @@ class Collision(URDFType):
         return Collision(**kwargs)
 
     def _to_xml(self, parent, path):
-        node = self._unparse(path)
+        # Set context for mesh conversion
+        _CONFIGURABLE_VALUES['_current_geometry_context'] = 'collision'
+        try:
+            node = self._unparse(path)
 
-        # Apply scale factor to collision origin
-        scaled_origin = self.origin.copy()
-        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-        if scale_factor != 1.0:
-            scaled_origin[:3, 3] *= scale_factor
+            # Apply scale factor to collision origin
+            scaled_origin = self.origin.copy()
+            scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+            if scale_factor != 1.0:
+                scaled_origin[:3, 3] *= scale_factor
 
-        node.append(unparse_origin(scaled_origin))
-        return node
+            node.append(unparse_origin(scaled_origin))
+            return node
+        finally:
+            _CONFIGURABLE_VALUES['_current_geometry_context'] = None
 
 
 class Visual(URDFType):
@@ -1595,16 +1610,21 @@ class Visual(URDFType):
         return Visual(**kwargs)
 
     def _to_xml(self, parent, path):
-        node = self._unparse(path)
+        # Set context for mesh conversion
+        _CONFIGURABLE_VALUES['_current_geometry_context'] = 'visual'
+        try:
+            node = self._unparse(path)
 
-        # Apply scale factor to visual origin
-        scaled_origin = self.origin.copy()
-        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-        if scale_factor != 1.0:
-            scaled_origin[:3, 3] *= scale_factor
+            # Apply scale factor to visual origin
+            scaled_origin = self.origin.copy()
+            scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+            if scale_factor != 1.0:
+                scaled_origin[:3, 3] *= scale_factor
 
-        node.append(unparse_origin(scaled_origin))
-        return node
+            node.append(unparse_origin(scaled_origin))
+            return node
+        finally:
+            _CONFIGURABLE_VALUES['_current_geometry_context'] = None
 
 
 class Inertial(URDFType):
