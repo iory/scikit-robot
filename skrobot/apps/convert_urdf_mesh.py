@@ -28,7 +28,11 @@ def main():
     parser.add_argument('--format', '-f',
                         default='dae',
                         choices=['dae', 'stl'],
-                        help='Mesh format for export. Default is dae.')
+                        help='Mesh format for visual mesh export. Default is dae.')
+    parser.add_argument('--collision-mesh-format',
+                        default='stl',
+                        choices=['dae', 'stl'],
+                        help='Mesh format for collision mesh export. Default is stl.')
     parser.add_argument('--output', '-o', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
     parser.add_argument('--inplace', '-i', action='store_true',
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
@@ -133,7 +137,8 @@ resulting in less simplification. Default is None."""
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
             simplify_vertex_clustering_voxel_size=args.voxel_size,
             target_triangles=args.target_triangles,
-            overwrite_mesh=args.overwrite_mesh), apply_scale(args.scale):
+            overwrite_mesh=args.overwrite_mesh,
+            collision_mesh_format='.' + args.collision_mesh_format), apply_scale(args.scale):
         print(f"Saving new URDF to: {output_path}")
         # Ensure output directory exists
         output_dir = output_path.parent
