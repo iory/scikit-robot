@@ -22,15 +22,31 @@ def split_mesh_by_face_color(mesh):
     generate a list of submeshes, where each submesh contains
     faces of the same color.
     """
-    if mesh.visual.kind == 'texture':
+    # If mesh has no color info or uses texture, don't split
+    if not hasattr(mesh.visual, 'face_colors') or mesh.visual.kind == 'texture':
         return [mesh]
+
     face_colors = mesh.visual.face_colors
-    unique_colors = np.unique(face_colors, axis=0)
-    submeshes = []
-    for color in unique_colors:
-        mask = np.all(face_colors == color, axis=1)
-        submesh = mesh.submesh([mask])[0]
-        submeshes.append(submesh)
+
+    # Use np.unique to get unique colors and inverse indices
+    # return_inverse=True returns indices to reconstruct the original array
+    unique_colors, inverse_indices = np.unique(
+        face_colors, axis=0, return_inverse=True)
+
+    # Sort face indices by their color group
+    # This creates a contiguous array of face indices grouped by color
+    sorted_face_indices = np.arange(len(face_colors))[inverse_indices.argsort()]
+
+    # Count how many faces belong to each color group
+    counts = np.bincount(inverse_indices)
+
+    # Split the sorted indices into groups based on counts
+    # This creates a list of arrays, each containing face indices for one color
+    grouped_face_indices = np.split(sorted_face_indices, counts.cumsum()[:-1])
+
+    # Create all submeshes at once using the grouped indices
+    # append=False prevents adding to the original mesh
+    submeshes = mesh.submesh(grouped_face_indices, append=False)
 
     return submeshes
 
