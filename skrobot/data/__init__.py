@@ -108,3 +108,7 @@ def pr2_urdfpath():
         quiet=True,
     )
     return path
+
+
+def r8_6_urdfpath():
+    return osp.join(data_dir, 'robot_descriptions', 'urdf', 'r8_6.urdf')
