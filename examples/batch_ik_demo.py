@@ -10,6 +10,7 @@ from skrobot.model.primitives import Axis
 from skrobot.models import Fetch
 from skrobot.models import Panda
 from skrobot.models import PR2
+from skrobot.models import R8_6
 
 
 def parse_axis_constraint(axis_str):
@@ -26,7 +27,7 @@ def parse_axis_constraint(axis_str):
 def main():
     parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with axis constraints')
     parser.add_argument('--robot', type=str, default='pr2',
-                        choices=['fetch', 'pr2', 'panda'],
+                        choices=['fetch', 'pr2', 'panda', 'r8_6'],
                         help='Robot model to use. Default: fetch')
     parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
                         default='True',
@@ -76,19 +77,39 @@ def main():
     elif args.robot == 'panda':
         robot = Panda()
         arm = robot.rarm
+    elif args.robot == 'r8_6':
+        robot = R8_6()
+        arm = robot.rarm
 
     robot.reset_pose()
 
-    target_poses = [
-        Coordinates(pos=(0.7, -0.2, 0.9)).rotate(np.deg2rad(30), 'y'),
-        Coordinates(pos=(0.6, -0.3, 1.0)).rotate(np.deg2rad(-25), 'z'),
-        Coordinates(pos=(0.8, -0.1, 0.8)).rotate(np.deg2rad(45), 'x'),
-        Coordinates(pos=(0.5, -0.4, 1.1)).rotate(np.deg2rad(20), 'y').rotate(np.deg2rad(15), 'z'),
-        Coordinates(pos=(0.65, -0.45, 0.95)).rotate(np.deg2rad(-30), 'x'),
-        Coordinates(pos=(0.75, -0.25, 1.05)).rotate(np.deg2rad(35), 'y').rotate(np.deg2rad(-20), 'z'),
-        Coordinates(pos=(0.55, -0.35, 0.85)).rotate(np.deg2rad(-15), 'y'),
-        Coordinates(pos=(0.68, -0.38, 1.08)).rotate(np.deg2rad(25), 'z').rotate(np.deg2rad(10), 'x'),
-    ]
+    # Define target poses based on robot type
+    if args.robot == 'r8_6':
+        # R8_6-specific target poses (within reachable workspace)
+        # R8_6 has z-axis range ~0.18-1.4m and typical reach ~0.5-1.0m from base
+        target_poses = [
+            Coordinates(pos=(0.85, -0.2, 0.85)).rotate(np.deg2rad(15), 'y'),
+            Coordinates(pos=(0.90, -0.25, 0.90)).rotate(np.deg2rad(-10), 'z'),
+            Coordinates(pos=(0.80, -0.15, 0.95)).rotate(np.deg2rad(20), 'x'),
+            Coordinates(pos=(0.75, -0.30, 0.88)).rotate(np.deg2rad(10), 'y').rotate(np.deg2rad(5), 'z'),
+            Coordinates(pos=(0.88, -0.22, 0.92)).rotate(np.deg2rad(-15), 'x'),
+            Coordinates(pos=(0.82, -0.18, 0.87)).rotate(np.deg2rad(12), 'y').rotate(np.deg2rad(-8), 'z'),
+            Coordinates(pos=(0.78, -0.28, 0.93)).rotate(np.deg2rad(-5), 'y'),
+            Coordinates(pos=(0.46, -0.24, 0.89)).rotate(np.deg2rad(8), 'z').rotate(np.deg2rad(3), 'x'),
+            Coordinates(pos=(0.56, -0.24, 0.89)),
+        ]
+    else:
+        # Default target poses for Fetch/PR2/Panda
+        target_poses = [
+            Coordinates(pos=(0.7, -0.2, 0.9)).rotate(np.deg2rad(30), 'y'),
+            Coordinates(pos=(0.6, -0.3, 1.0)).rotate(np.deg2rad(-25), 'z'),
+            Coordinates(pos=(0.8, -0.1, 0.8)).rotate(np.deg2rad(45), 'x'),
+            Coordinates(pos=(0.5, -0.4, 1.1)).rotate(np.deg2rad(20), 'y').rotate(np.deg2rad(15), 'z'),
+            Coordinates(pos=(0.65, -0.45, 0.95)).rotate(np.deg2rad(-30), 'x'),
+            Coordinates(pos=(0.75, -0.25, 1.05)).rotate(np.deg2rad(35), 'y').rotate(np.deg2rad(-20), 'z'),
+            Coordinates(pos=(0.55, -0.35, 0.85)).rotate(np.deg2rad(-15), 'y'),
+            Coordinates(pos=(0.68, -0.38, 1.08)).rotate(np.deg2rad(25), 'z').rotate(np.deg2rad(10), 'x'),
+        ]
 
     for i, coord in enumerate(target_poses):
         pos = coord.worldpos()
@@ -96,15 +117,26 @@ def main():
     print("\nStarting batch IK solving...")
 
     overall_start = time.time()
+    # Use inverse_kinematics_defaults if available, otherwise specify explicitly
+    ik_kwargs = {
+        'move_target': arm.end_coords,
+        'rotation_axis': rotation_axis,
+        'translation_axis': translation_axis,
+        'stop': args.stop,
+        'thre': args.thre,
+        'rthre': np.deg2rad(args.rthre),
+        'attempts_per_pose': args.attempts_per_pose,
+    }
+
+    # For robots with inverse_kinematics_defaults, use those settings
+    if hasattr(arm, 'inverse_kinematics_defaults'):
+        ik_defaults = arm.inverse_kinematics_defaults
+        if 'link_list' in ik_defaults:
+            ik_kwargs['link_list'] = ik_defaults['link_list']
+
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         target_poses,
-        move_target=arm.end_coords,
-        rotation_axis=rotation_axis,
-        translation_axis=translation_axis,
-        stop=args.stop,
-        thre=args.thre,
-        rthre=np.deg2rad(args.rthre),
-        attempts_per_pose=args.attempts_per_pose,
+        **ik_kwargs
     )
     overall_time = time.time() - overall_start
 
