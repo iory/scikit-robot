@@ -1,26 +1,12 @@
 from logging import getLogger
 from pathlib import Path
 
+from lxml import etree as ET
 import numpy as np
-
-
-# Use lxml instead of standard xml.etree.ElementTree for better XML formatting preservation.
-# Falls back to standard library if lxml is not installed.
-try:
-    from lxml import etree as ET
-    LXML_AVAILABLE = True
-except ImportError:
-    import xml.etree.ElementTree as ET
-    LXML_AVAILABLE = False
-    getLogger(__name__).warning(
-        "lxml not found, falling back to xml.etree.ElementTree. "
-        "XML formatting may be changed, causing unnecessary diffs. "
-        "For best results, install lxml: `pip install lxml`"
-    )
 
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates.math import matrix2ypr
-from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_z_to_axis
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.utils.urdf import get_filename
 from skrobot.utils.urdf import load_meshes
@@ -118,23 +104,6 @@ def detect_indentation(root):
     }
 
 
-def axis_to_rotation_matrix(axis):
-    """Convert cylinder axis to rotation matrix using skrobot functions."""
-    z_axis = np.array([0, 0, 1])
-
-    axis = axis / np.linalg.norm(axis)
-
-    if np.allclose(axis, z_axis):
-        return np.eye(3)
-
-    if np.allclose(axis, -z_axis):
-        return rotation_matrix(np.pi, [1, 0, 0])
-
-    rotation_axis = np.cross(z_axis, axis)
-    angle = np.arccos(np.clip(np.dot(z_axis, axis), -1.0, 1.0))
-    return rotation_matrix(angle, rotation_axis)
-
-
 def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
     """
     Convert collision meshes of continuous joint child links to cylinders.
@@ -154,12 +123,8 @@ def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
     urdf_path = Path(urdf_file)
     urdf_dir = urdf_path.parent
 
-    if LXML_AVAILABLE:
-        parser = ET.XMLParser(remove_blank_text=False, remove_comments=False)
-        tree = ET.parse(str(urdf_file), parser)
-    else:
-        parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
-        tree = ET.parse(urdf_file, parser=parser)
+    parser = ET.XMLParser(remove_blank_text=False, remove_comments=False)
+    tree = ET.parse(str(urdf_file), parser)
 
     root = tree.getroot()
 
@@ -232,7 +197,7 @@ def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
         mesh_center_link = rotation_urdf @ mesh_center_offset
         cylinder_center = origin_xyz + mesh_center_link
         axis_link = rotation_urdf @ axis
-        cylinder_rotation_matrix = axis_to_rotation_matrix(axis_link)
+        cylinder_rotation_matrix = rotation_matrix_z_to_axis(axis_link)
         cylinder_ypr = matrix2ypr(cylinder_rotation_matrix)
         cylinder_rpy = np.array([cylinder_ypr[2], cylinder_ypr[1], cylinder_ypr[0]])
 
@@ -275,36 +240,35 @@ def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
             origin.set('xyz', f"{cylinder_center[0]} {cylinder_center[1]} {cylinder_center[2]}")
             origin.set('rpy', f"{cylinder_rpy[0]} {cylinder_rpy[1]} {cylinder_rpy[2]}")
 
-        if LXML_AVAILABLE:
-            collision.text = indent_patterns['collision_indent']
-            collision.tail = '\n  '
+        collision.text = indent_patterns['collision_indent']
+        collision.tail = '\n  '
 
-            first_element = collision[0] if len(collision) > 0 else None
-            second_element = collision[1] if len(collision) > 1 else None
+        first_element = collision[0] if len(collision) > 0 else None
+        second_element = collision[1] if len(collision) > 1 else None
 
-            if first_element is not None:
-                if first_element.tag == 'geometry':
-                    first_element.text = indent_patterns['geometry_text']
-                    if second_element is not None:
-                        first_element.tail = indent_patterns['origin_tail']
-                    else:
-                        first_element.tail = '\n    '
-                    if len(first_element) > 0:
-                        first_element[0].tail = indent_patterns['cylinder_tail']
+        if first_element is not None:
+            if first_element.tag == 'geometry':
+                first_element.text = indent_patterns['geometry_text']
+                if second_element is not None:
+                    first_element.tail = indent_patterns['origin_tail']
                 else:
-                    if second_element is not None:
-                        first_element.tail = indent_patterns['origin_tail']
-                    else:
-                        first_element.tail = '\n    '
-
-            if second_element is not None:
-                if second_element.tag == 'geometry':
-                    second_element.text = indent_patterns['geometry_text']
-                    second_element.tail = '\n    '
-                    if len(second_element) > 0:
-                        second_element[0].tail = indent_patterns['cylinder_tail']
+                    first_element.tail = '\n    '
+                if len(first_element) > 0:
+                    first_element[0].tail = indent_patterns['cylinder_tail']
+            else:
+                if second_element is not None:
+                    first_element.tail = indent_patterns['origin_tail']
                 else:
-                    second_element.tail = '\n    '
+                    first_element.tail = '\n    '
+
+        if second_element is not None:
+            if second_element.tag == 'geometry':
+                second_element.text = indent_patterns['geometry_text']
+                second_element.tail = '\n    '
+                if len(second_element) > 0:
+                    second_element[0].tail = indent_patterns['cylinder_tail']
+            else:
+                second_element.tail = '\n    '
 
         logger.info("Converted collision to cylinder: radius=%.4f, length=%.4f", radius, height)
         logger.debug("Collision origin: xyz=%s, rpy=%s", cylinder_center, cylinder_rpy)
@@ -313,15 +277,10 @@ def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
 
     output_path = output_file if output_file is not None else urdf_file
 
-    if LXML_AVAILABLE:
-        tree.write(str(output_path),
-                   encoding='utf-8',
-                   xml_declaration=True,
-                   pretty_print=True)
-    else:
-        tree.write(str(output_path),
-                   encoding='utf-8',
-                   xml_declaration=True)
+    tree.write(str(output_path),
+               encoding='utf-8',
+               xml_declaration=True,
+               pretty_print=True)
 
     if output_file is not None:
         logger.info("Modified URDF saved to: %s", output_file)

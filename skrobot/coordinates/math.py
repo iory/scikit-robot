@@ -1541,6 +1541,77 @@ def rotation_matrix_from_axis(
     return np.vstack([e1, e2, e3])[np.argsort(indices)].T
 
 
+def rotation_matrix_z_to_axis(axis):
+    """Create rotation matrix that aligns Z-axis to target axis direction.
+
+    This is a convenience wrapper around rotation_matrix_from_axis that
+    automatically selects an appropriate second axis (X or Y) to fully determine
+    the rotation matrix. The resulting rotation matrix will transform the Z-axis
+    [0, 0, 1] to point in the target axis direction.
+
+    Difference from rotation_matrix_from_axis:
+    - rotation_matrix_from_axis: Requires explicit specification of both axes
+    - rotation_matrix_z_to_axis: Only requires target axis, automatically selects second axis
+
+    This function is particularly useful for URDF cylinder primitives, which are
+    defined with their central axis along the Z-axis.
+
+    Parameters
+    ----------
+    axis : numpy.ndarray or list or tuple
+        Target axis direction for Z-axis alignment (will be normalized).
+        The Z-axis [0, 0, 1] of the resulting rotation matrix will be aligned
+        with this direction.
+
+    Returns
+    -------
+    rotation : numpy.ndarray
+        3x3 rotation matrix R such that R @ [0, 0, 1] is parallel to axis.
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import rotation_matrix_z_to_axis
+    >>> import numpy as np
+    >>> # Align Z-axis with X-axis [1, 0, 0]
+    >>> R = rotation_matrix_z_to_axis([1, 0, 0])
+    >>> np.allclose(R @ [0, 0, 1], [1, 0, 0])
+    True
+    >>> # Align Z-axis with diagonal direction [0, 1, 1]
+    >>> R = rotation_matrix_z_to_axis([0, 1, 1])
+    >>> np.allclose(R @ [0, 0, 1], [0, 1/np.sqrt(2), 1/np.sqrt(2)])
+    True
+
+    See Also
+    --------
+    rotation_matrix_from_axis : Create rotation matrix from two explicit axes
+
+    Notes
+    -----
+    The second axis is automatically chosen to avoid gimbal lock:
+    - If the target axis is close to the X-axis, Y-axis is used as a hint
+    - Otherwise, X-axis is used as a hint
+
+    This ensures a stable rotation even when the target axis is aligned with
+    or close to a cardinal axis.
+    """
+    axis = np.asarray(axis, dtype=float)
+    axis = axis / np.linalg.norm(axis)
+
+    # Select second axis hint to avoid gimbal lock
+    # If axis is close to X-axis, use Y-axis as hint; otherwise use X-axis
+    if abs(axis[0]) < 0.9:
+        second_axis = np.array([1, 0, 0])  # Use X-axis as hint
+    else:
+        second_axis = np.array([0, 1, 0])  # Use Y-axis as hint
+
+    # Create rotation matrix with Z-axis aligned to target and X-axis hint
+    return rotation_matrix_from_axis(
+        first_axis=axis,
+        second_axis=second_axis,
+        axes='zx'
+    )
+
+
 def rodrigues(axis, theta=None, skip_normalization=False):
     """Rodrigues formula.
 

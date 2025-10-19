@@ -1,6 +1,7 @@
 from .aggregate import aggregate_urdf_mesh_files
 from .modularize_urdf import find_root_link
 from .modularize_urdf import transform_urdf_to_macro
+from .primitives_converter import convert_meshes_to_primitives
 from .transform_urdf import transform_urdf_with_world_link
 from .wheel_collision_converter import convert_wheel_collisions_to_cylinders
 from .wheel_collision_converter import get_mesh_dimensions
@@ -16,5 +17,6 @@ __all__ = [
     'transform_urdf_with_world_link',
     'aggregate_urdf_mesh_files',
     'convert_wheel_collisions_to_cylinders',
+    'convert_meshes_to_primitives',
     'get_mesh_dimensions',
 ]
