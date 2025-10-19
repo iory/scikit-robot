@@ -14,6 +14,7 @@ def get_available_apps():
     app_metadata = {
         'visualize_urdf': ('Visualize URDF model', None),
         'convert_urdf_mesh': ('Convert URDF mesh files', (3, 6)),
+        'convert_urdf_to_primitives': ('Convert URDF meshes to primitive shapes', None),
         'modularize_urdf': ('Modularize URDF files', None),
         'change_urdf_root': ('Change URDF root link', None),
         'transform_urdf': ('Add world link with transform to URDF', None),
