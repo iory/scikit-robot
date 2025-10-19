@@ -146,10 +146,17 @@ resulting in less simplification. Default is None."""
                 yield enter_result
         force_visual_mesh_origin_to_zero_or_not = nullcontext
 
+    # Store source URDF path for mesh resolution
+    from skrobot.utils.urdf import _CONFIGURABLE_VALUES
+    # Convert to absolute path to ensure correct mesh resolution
+    urdf_path_abs = urdf_path.resolve()
+    source_urdf_dir = str(urdf_path_abs.parent)
+    _CONFIGURABLE_VALUES['_source_urdf_path'] = source_urdf_dir
+
     with force_visual_mesh_origin_to_zero_or_not():
         print(f"Loading URDF from: {urdf_path}")
         try:
-            r = RobotModel.from_urdf(urdf_path)
+            r = RobotModel.from_urdf(str(urdf_path_abs))
         except Exception as e:
             print(f"[ERROR] Failed to load URDF: {e}")
             sys.exit(1)
@@ -158,11 +165,6 @@ resulting in less simplification. Default is None."""
     if r.urdf_robot_model is None or not hasattr(r.urdf_robot_model, 'links') or len(r.urdf_robot_model.links) == 0:
         print("[ERROR] URDF does not contain any valid links. Cannot proceed.")
         sys.exit(1)
-
-    # Store source URDF path for mesh resolution
-    from skrobot.utils.urdf import _CONFIGURABLE_VALUES
-    source_urdf_dir = str(urdf_path.parent.resolve())
-    _CONFIGURABLE_VALUES['_source_urdf_path'] = source_urdf_dir
 
     with export_mesh_format(
             '.' + args.format,
