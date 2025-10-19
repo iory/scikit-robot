@@ -2558,15 +2558,20 @@ class RobotModel(CascadedLink):
 
         # Get joint information for the kinematic chain
         joint_list_without_fixed = self.joint_list_from_link_list(single_link_list, ignore_fixed_joint=True)
-        ndof = calc_target_joint_dimension(joint_list_without_fixed)
-        min_angles, max_angles = self.joint_limits_from_joint_list(joint_list_without_fixed)
 
         # Map kinematic chain joints to full robot joint indices
+        # Filter out mimic joints that are not in robot.joint_list
         robot_joint_list = self.joint_list
         joint_indices = []
+        actual_joint_list = []
         for joint in joint_list_without_fixed:
             if joint in robot_joint_list:
                 joint_indices.append(robot_joint_list.index(joint))
+                actual_joint_list.append(joint)
+
+        # Use actual joint list (excluding mimic joints) for ndof calculation
+        ndof = calc_target_joint_dimension(actual_joint_list)
+        min_angles, max_angles = self.joint_limits_from_joint_list(actual_joint_list)
 
         if initial_angles is None or (isinstance(initial_angles, str) and initial_angles == "random"):
             joint_angles_current = np.random.uniform(min_angles, max_angles, (n_poses, ndof))
@@ -2596,12 +2601,13 @@ class RobotModel(CascadedLink):
         solutions, success_flags, attempt_counts = self._solve_batch_ik(
             single_link_list, target_poses_xyz_qwxyz, joint_angles_current, ndof, min_angles, max_angles,
             stop, thre, rthre, alpha, base_to_source,
-            rotation_axis, translation_axis, joint_list_without_fixed,
+            rotation_axis, translation_axis, actual_joint_list,
             attempts_per_pose, random_initial_range
         )
 
         full_solutions = []
         full_av_org = self.angle_vector()
+
         for solution in solutions:
             full_av = full_av_org.copy()
             for i, joint_idx in enumerate(joint_indices):
@@ -2732,63 +2738,89 @@ class RobotModel(CascadedLink):
             else:
                 translation_axis_unsolved = [translation_axis] * len(unsolved_indices)
 
-            joint_angles_updated, pose_errors = self._batch_ik_step_with_constraints(
+            joint_angles_updated, pose_errors_before_update = self._batch_ik_step_with_constraints(
                 link_list, target_poses_unsolved, joint_angles_unsolved,
                 alpha, base_to_source,
                 rotation_axis_unsolved, translation_axis_unsolved,
-                joint_list_without_fixed, min_angles, max_angles
+                joint_list_without_fixed, min_angles, max_angles,
+                joint_list_for_fk=None  # Will be derived from link_list in the function
             )
+
+            # Update current angles first
+            joint_angles_current[unsolved_mask] = joint_angles_updated
+
+            # Recalculate pose errors after update for convergence check
+            # First derive full joint list from link_list (including mimic and fixed joints)
+            full_joint_list_for_convergence = self.joint_list_from_link_list(link_list, ignore_fixed_joint=False)
+
+            joint_angles_with_mimic_updated = self._expand_joint_angles_for_mimic(
+                joint_angles_updated, joint_list_without_fixed, full_joint_list_for_convergence
+            )
+            current_poses_updated = self._forward_kinematics_batch(
+                link_list, joint_angles_with_mimic_updated, return_quaternion=True,
+                base_to_source=base_to_source, joint_list_override=full_joint_list_for_convergence
+            )
+
+            # Calculate pose errors for updated angles
+            pose_errors = np.zeros((len(unsolved_indices), 6))
+            translation_errors = target_poses_unsolved[:, :3] - current_poses_updated[:, :3]
+            pose_errors[:, :3] = translation_errors
+            # Rotation errors (simplified - assume no rotation constraint for now)
+            pose_errors[:, 3:] = 0
 
             # Check convergence with respect to constraints
             converged = np.zeros(len(unsolved_indices), dtype=bool)
 
             for i, global_idx in enumerate(unsolved_indices):
                 # Apply the same constraints as used in IK
+                # Note: pose_errors is in [translation, rotation] order
+                # after reordering in _batch_ik_step_with_constraints
                 constrained_pose_error = pose_errors[i].copy()
 
-                # Handle rotation constraints
-                if isinstance(rotation_axis, list):
-                    rot_axis = rotation_axis[global_idx]
-                else:
-                    rot_axis = rotation_axis
-
-                if rot_axis is False:
-                    constrained_pose_error[:3] = 0
-                elif isinstance(rot_axis, str):
-                    # For mirror constraints (xm, ym, zm), don't zero out any rotation errors
-                    # since we want to converge on the mirrored solution
-                    if rot_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in rot_axis.lower():
-                            constrained_pose_error[0] = 0
-                        if 'y' not in rot_axis.lower():
-                            constrained_pose_error[1] = 0
-                        if 'z' not in rot_axis.lower():
-                            constrained_pose_error[2] = 0
-
-                # Handle translation constraints
+                # Handle translation constraints (indices 0-2)
                 if isinstance(translation_axis, list):
                     trans_axis = translation_axis[global_idx]
                 else:
                     trans_axis = translation_axis
 
                 if trans_axis is False:
-                    constrained_pose_error[3:] = 0
+                    constrained_pose_error[:3] = 0
                 elif isinstance(trans_axis, str):
                     # For mirror constraints (xm, ym, zm), don't zero out any translation errors
                     # since we want to converge on the mirrored solution
                     if trans_axis.lower() not in ['xm', 'ym', 'zm']:
                         # Standard axis constraints
                         if 'x' not in trans_axis.lower():
-                            constrained_pose_error[3] = 0
+                            constrained_pose_error[0] = 0
                         if 'y' not in trans_axis.lower():
-                            constrained_pose_error[4] = 0
+                            constrained_pose_error[1] = 0
                         if 'z' not in trans_axis.lower():
+                            constrained_pose_error[2] = 0
+
+                # Handle rotation constraints (indices 3-5)
+                if isinstance(rotation_axis, list):
+                    rot_axis = rotation_axis[global_idx]
+                else:
+                    rot_axis = rotation_axis
+
+                if rot_axis is False:
+                    constrained_pose_error[3:] = 0
+                elif isinstance(rot_axis, str):
+                    # For mirror constraints (xm, ym, zm), don't zero out any rotation errors
+                    # since we want to converge on the mirrored solution
+                    if rot_axis.lower() not in ['xm', 'ym', 'zm']:
+                        # Standard axis constraints
+                        if 'x' not in rot_axis.lower():
+                            constrained_pose_error[3] = 0
+                        if 'y' not in rot_axis.lower():
+                            constrained_pose_error[4] = 0
+                        if 'z' not in rot_axis.lower():
                             constrained_pose_error[5] = 0
 
                 # Check convergence only for active constraints
-                position_error = np.linalg.norm(constrained_pose_error[3:])
-                rotation_error = np.linalg.norm(constrained_pose_error[:3])
+                # Note: pose_errors is in [translation, rotation] order after reordering
+                position_error = np.linalg.norm(constrained_pose_error[:3])
+                rotation_error = np.linalg.norm(constrained_pose_error[3:])
 
                 converged[i] = position_error < thre and rotation_error < rthre
 
@@ -2798,9 +2830,6 @@ class RobotModel(CascadedLink):
                 local_idx = np.where(unsolved_indices == idx)[0][0]
                 solutions[idx] = joint_angles_updated[local_idx].copy()
                 success_flags[idx] = True
-
-            # Update current angles
-            joint_angles_current[unsolved_mask] = joint_angles_updated
 
             # Update unsolved mask
             unsolved_mask[converged_global_indices] = False
@@ -2812,25 +2841,161 @@ class RobotModel(CascadedLink):
 
         return solutions, success_flags
 
+    def _reduce_jacobian_for_mimic(self, jacobian_full, actual_joint_list, full_joint_list):
+        """Reduce Jacobian by merging mimic joint contributions to parent joints.
+
+        Parameters
+        ----------
+        jacobian_full : np.ndarray
+            Full Jacobian matrix (shape: batch_size x 6 x n_full_joints)
+        actual_joint_list : list
+            List of actual joints (excluding mimic joints)
+        full_joint_list : list
+            Full list of joints (including mimic joints)
+
+        Returns
+        -------
+        np.ndarray
+            Reduced Jacobian (shape: batch_size x 6 x n_actual_joints)
+        """
+        batch_size = jacobian_full.shape[0]
+        n_actual = len(actual_joint_list)
+
+        # Create mapping from actual joints to their indices
+        actual_joint_map = {joint: i for i, joint in enumerate(actual_joint_list)}
+
+        # Initialize reduced Jacobian
+        jacobian_reduced = np.zeros((batch_size, 6, n_actual))
+
+        # Process each joint in full list
+        # Track Jacobian column index separately from joint index
+        jac_col_idx = 0
+        for j, joint in enumerate(full_joint_list):
+            # Skip fixed joints (they don't have Jacobian columns)
+            if joint.__class__.__name__ == 'FixedJoint':
+                continue
+
+            # Check if this is a mimic joint
+            if hasattr(joint, 'mimic') and joint.mimic is not None:
+                # Get parent joint
+                parent_joint = joint.mimic['joint']
+                multiplier = joint.mimic.get('multiplier', 1.0)
+
+                # Find parent joint index in actual_joint_list
+                if parent_joint in actual_joint_map:
+                    parent_idx = actual_joint_map[parent_joint]
+                    # Add mimic joint's contribution to parent joint's column
+                    # J_parent += J_mimic * multiplier (chain rule)
+                    jacobian_reduced[:, :, parent_idx] += jacobian_full[:, :, jac_col_idx] * multiplier
+                jac_col_idx += 1
+            elif joint in actual_joint_map:
+                # Regular joint, copy column
+                actual_idx = actual_joint_map[joint]
+                jacobian_reduced[:, :, actual_idx] = jacobian_full[:, :, jac_col_idx]
+                jac_col_idx += 1
+            else:
+                # Joint not in actual_joint_list (shouldn't happen for non-fixed joints)
+                jac_col_idx += 1
+
+        return jacobian_reduced
+
+    def _expand_joint_angles_for_mimic(self, joint_angles, actual_joint_list, full_joint_list):
+        """Expand joint angles to include mimic joint values.
+
+        Parameters
+        ----------
+        joint_angles : np.ndarray
+            Joint angles for actual joints (shape: batch_size x n_actual_joints)
+        actual_joint_list : list
+            List of actual joints (excluding mimic joints)
+        full_joint_list : list
+            Full list of joints (including mimic joints)
+
+        Returns
+        -------
+        np.ndarray
+            Expanded joint angles (shape: batch_size x n_full_joints)
+        """
+
+        batch_size = joint_angles.shape[0]
+        n_full = len(full_joint_list)
+
+        # Create mapping from actual joints to their indices
+        actual_joint_map = {joint: i for i, joint in enumerate(actual_joint_list)}
+
+        # Initialize expanded array
+        expanded_angles = np.zeros((batch_size, n_full))
+
+        # Fill in angles for each joint in full list
+        for i, joint in enumerate(full_joint_list):
+            # Check if this is a mimic joint
+            if hasattr(joint, 'mimic') and joint.mimic is not None:
+                # Get parent joint
+                parent_joint = joint.mimic['joint']
+                multiplier = joint.mimic.get('multiplier', 1.0)
+                offset = joint.mimic.get('offset', 0.0)
+
+                # Find parent joint index in actual_joint_list
+                if parent_joint in actual_joint_map:
+                    parent_idx = actual_joint_map[parent_joint]
+                    # Calculate mimic joint angle
+                    expanded_angles[:, i] = joint_angles[:, parent_idx] * multiplier + offset
+                else:
+                    # Parent joint not in actual list, use 0
+                    expanded_angles[:, i] = offset
+            elif joint in actual_joint_map:
+                # Regular joint, copy angle
+                actual_idx = actual_joint_map[joint]
+                expanded_angles[:, i] = joint_angles[:, actual_idx]
+            else:
+                # Fixed joint or unknown - keep as 0
+                pass
+
+        return expanded_angles
+
     def _batch_ik_step_with_constraints(
             self, link_list, target_poses, joint_angles_current, alpha, base_to_source,
             rotation_axis_list, translation_axis_list,
-            joint_list_without_fixed, min_angles, max_angles):
-        """Batch IK step with per-problem axis constraints."""
+            actual_joint_list, min_angles, max_angles,
+            joint_list_for_fk=None):
+        """Batch IK step with per-problem axis constraints.
+
+        Args:
+            actual_joint_list: Joint list excluding mimic joints (used for angle updates)
+            joint_list_for_fk: Full joint list including mimic joints (used for FK/Jacobian)
+        """
         # Use integrated batch IK functions
 
         batch_size = joint_angles_current.shape[0]
         ndof = joint_angles_current.shape[1]
 
-        # Get jacobians
-        jacobian_matrices = self._jacobian_batch(link_list, joint_angles_current, base_to_source=base_to_source)
+        # Use joint_list_for_fk if provided, otherwise let FK/Jacobian use their defaults
+        # (_forward_kinematics_batch and _jacobian_batch use ignore_fixed_joint=False by default)
+        if joint_list_for_fk is None:
+            joint_list_for_fk = self.joint_list_from_link_list(link_list, ignore_fixed_joint=False)
 
-        # Calculate current poses
-        current_poses = self._forward_kinematics_batch(
-            link_list, joint_angles_current, return_quaternion=True, base_to_source=base_to_source
+        # Expand joint angles to include mimic joints
+        joint_angles_with_mimic = self._expand_joint_angles_for_mimic(
+            joint_angles_current, actual_joint_list, joint_list_for_fk
         )
 
-        # Calculate pose errors
+        # Get current poses for error calculation
+        current_poses = self._forward_kinematics_batch(
+            link_list, joint_angles_with_mimic, return_quaternion=True, base_to_source=base_to_source,
+            joint_list_override=joint_list_for_fk
+        )
+
+        # Get jacobians (using full joint list including mimic)
+        jacobian_matrices_full = self._jacobian_batch(
+            link_list, joint_angles_with_mimic, base_to_source=base_to_source,
+            joint_list_override=joint_list_for_fk)
+
+        # Reduce Jacobian to actual joints (merge mimic joint contributions)
+        jacobian_matrices = self._reduce_jacobian_for_mimic(
+            jacobian_matrices_full, actual_joint_list, joint_list_for_fk
+        )
+
+        # Calculate pose errors (current_poses already calculated above)
         pose_errors = np.zeros((batch_size, 6))
 
         # Calculate translation errors, potentially with mirroring
@@ -3635,7 +3800,8 @@ class RobotModel(CascadedLink):
     def _forward_kinematics_batch(
             link_list, x, dtype=np.float64,
             return_quaternion=True, return_full_joint_fk=False,
-            return_full_link_fk=False, base_to_source=None):
+            return_full_link_fk=False, base_to_source=None,
+            joint_list_override=None):
         """Batch forward kinematics computation."""
 
         batch_size = x.shape[0]
@@ -3645,21 +3811,29 @@ class RobotModel(CascadedLink):
         base_T_joints = [base_T_joint]
         base_T_links = [base_T_joint]
 
-        i = 0
-        joint_list = RobotModel.joint_list_from_link_list(link_list, ignore_fixed_joint=False)
-        ndof = calc_target_joint_dimension(joint_list)
+        i = 0  # Index in x array (expanded angles including fixed joints)
+        if joint_list_override is not None:
+            joint_list = joint_list_override
+        else:
+            joint_list = RobotModel.joint_list_from_link_list(link_list, ignore_fixed_joint=False)
+        calc_target_joint_dimension(joint_list)
         for joint in joint_list:
-            i = min(i, ndof - 1)
-            base_T_joint_new = RobotModel._batch_fk_iteration(joint, x[:, i], base_T_joint)
-            base_T_links.append(base_T_joint_new)
             if joint.__class__.__name__ == 'RotationalJoint':
+                base_T_joint_new = RobotModel._batch_fk_iteration(joint, x[:, i], base_T_joint)
+                base_T_links.append(base_T_joint_new)
                 base_T_joints.append(base_T_joint_new)
                 i += 1
-            if joint.__class__.__name__ == "LinearJoint":
+            elif joint.__class__.__name__ == "LinearJoint":
+                base_T_joint_new = RobotModel._batch_fk_iteration(joint, x[:, i], base_T_joint)
+                base_T_links.append(base_T_joint_new)
                 base_T_joints.append(base_T_joint_new)
                 i += 1
-            if joint.__class__.__name__ == "FixedJoint":
-                base_T_joints[-1] = base_T_joint_new
+            elif joint.__class__.__name__ == "FixedJoint":
+                # Fixed joints use x[:, i] which should be 0 in expanded array
+                base_T_joint_new = RobotModel._batch_fk_iteration(joint, x[:, i], base_T_joint)
+                base_T_links.append(base_T_joint_new)
+                base_T_joints.append(base_T_joint_new)
+                i += 1
             base_T_joint = base_T_joint_new
 
         if return_quaternion:
@@ -3675,29 +3849,48 @@ class RobotModel(CascadedLink):
 
     @staticmethod
     def _jacobian_batch(links, x: np.ndarray,
-                        base_to_source=None) -> np.ndarray:
+                        base_to_source=None,
+                        joint_list_override=None) -> np.ndarray:
         """Batch Jacobian computation."""
         batch_size = x.shape[0]
 
-        joint_list = RobotModel.joint_list_from_link_list(links, ignore_fixed_joint=False)
+        if joint_list_override is not None:
+            joint_list = joint_list_override
+        else:
+            joint_list = RobotModel.joint_list_from_link_list(links, ignore_fixed_joint=False)
         ndof = calc_target_joint_dimension(joint_list)
 
         base_T_joints = RobotModel._forward_kinematics_batch(
             links, x, return_full_joint_fk=True, dtype=np.float64,
-            base_to_source=base_to_source)
-        base_T_joints = base_T_joints[:, 1:, :, :]  # remove the base link
+            base_to_source=base_to_source,
+            joint_list_override=joint_list_override)
+        # Don't remove base_to_source transform - keep all transforms
+        # base_T_joints[0] = base_to_source (initial transform)
+        # base_T_joints[1] = first joint transform
+        # ...
 
         J = np.zeros((batch_size, 6, ndof), dtype=np.float64)
-        x_i = 0
+        x_i = 0  # Index in Jacobian (movable joints only)
+        base_T_idx = 1  # Index in base_T_joints (skip base_to_source at 0)
         for joint in joint_list:
             if joint.__class__.__name__ == "RotationalJoint":
                 axis = np.tile(joint.axis, (batch_size, 1, 1))
-                J[:, :3, x_i] = np.matmul(base_T_joints[:, x_i, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
-                d = base_T_joints[:, -1, :3, 3] - base_T_joints[:, x_i, :3, 3]
-                world_axis = np.matmul(base_T_joints[:, x_i, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
-                J[:, 3:6, x_i] = np.cross(world_axis, d, axis=1)
+                # Use base_T_idx for correct position in base_T_joints
+                world_axis = np.matmul(base_T_joints[:, base_T_idx, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
+                d = base_T_joints[:, -1, :3, 3] - base_T_joints[:, base_T_idx, :3, 3]
+                # Jacobian structure: [rotation (rows 0-2), translation (rows 3-5)]
+                # pose_errors is reordered to [rotation, translation] in line 3168
+                J[:, :3, x_i] = world_axis  # rotation = axis
+                J[:, 3:6, x_i] = np.cross(world_axis, d, axis=1)  # translation = axis × distance
                 x_i += 1
+                base_T_idx += 1
             elif joint.__class__.__name__ == "LinearJoint":
-                J[:, 3, x_i], J[:, 4, x_i], J[:, 5, x_i] = joint.axis
+                # Linear joint: translation only
+                J[:, 3:6, x_i] = joint.axis  # translation = axis
+                # rotation = 0 (already initialized)
                 x_i += 1
+                base_T_idx += 1
+            elif joint.__class__.__name__ == "FixedJoint":
+                # Fixed joint: skip in Jacobian but advance base_T_idx
+                base_T_idx += 1
         return J
