@@ -75,6 +75,20 @@ class TestConsoleScripts(unittest.TestCase):
                 'cd .. && convert-urdf-mesh {} --output {}'.format(
                     relative_input_path, relative_output_path),
             ]
+
+            # Add Blender remesh tests if Blender is available
+            from skrobot.utils.blender_mesh import _find_blender_executable
+            if _find_blender_executable() is not None:
+                out_blender_dae = osp.join(urdf_dir, 'fetch_blender.urdf')
+                out_blender_stl = osp.join(urdf_dir, 'fetch_blender_stl.urdf')
+                blender_cmds = [
+                    'convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 --output {}'.format(
+                        urdfpath, out_blender_dae),
+                    ('convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 '
+                     '--collision-mesh-format stl --output {}').format(
+                        urdfpath, out_blender_stl),
+                ]
+                cmds.extend(blender_cmds)
             failures = []
             env = os.environ.copy()
 

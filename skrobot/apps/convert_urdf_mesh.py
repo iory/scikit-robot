@@ -78,6 +78,24 @@ resulting in less simplification. Default is None."""
         '--scale', type=float, default=1.0,
         help='Scale factor for link lengths and mesh geometries. '
         'Default is 1.0 (no scaling).')
+    parser.add_argument(
+        '--blender-remesh', action='store_true',
+        help='Use Blender voxel remesher to create cleaner mesh topology '
+        'while preserving colors. Requires Blender to be installed.')
+    parser.add_argument(
+        '--blender-voxel-size', type=float, default=0.002,
+        help='Voxel size for Blender remeshing. Smaller values create more '
+        'detailed meshes. Default is 0.002. Only used with --blender-remesh.')
+    parser.add_argument(
+        '--blender-executable', type=str, default=None,
+        help='Path to Blender executable. If not specified, automatically '
+        'searches for Blender in common installation locations. '
+        'Only used with --blender-remesh.')
+    parser.add_argument(
+        '--remeshed-suffix', type=str, default='_remeshed',
+        help='Suffix to append to remeshed mesh filenames. '
+        'Default is "_remeshed". Specify empty string "" to overwrite '
+        'original files. Only used with --blender-remesh.')
 
     args = parser.parse_args()
 
@@ -130,7 +148,21 @@ resulting in less simplification. Default is None."""
 
     with force_visual_mesh_origin_to_zero_or_not():
         print(f"Loading URDF from: {urdf_path}")
-        r = RobotModel.from_urdf(urdf_path)
+        try:
+            r = RobotModel.from_urdf(urdf_path)
+        except Exception as e:
+            print(f"[ERROR] Failed to load URDF: {e}")
+            sys.exit(1)
+
+    # Verify that the robot model has valid links
+    if r.urdf_robot_model is None or not hasattr(r.urdf_robot_model, 'links') or len(r.urdf_robot_model.links) == 0:
+        print("[ERROR] URDF does not contain any valid links. Cannot proceed.")
+        sys.exit(1)
+
+    # Store source URDF path for mesh resolution
+    from skrobot.utils.urdf import _CONFIGURABLE_VALUES
+    source_urdf_dir = str(urdf_path.parent.resolve())
+    _CONFIGURABLE_VALUES['_source_urdf_path'] = source_urdf_dir
 
     with export_mesh_format(
             '.' + args.format,
@@ -138,7 +170,11 @@ resulting in less simplification. Default is None."""
             simplify_vertex_clustering_voxel_size=args.voxel_size,
             target_triangles=args.target_triangles,
             overwrite_mesh=args.overwrite_mesh,
-            collision_mesh_format='.' + args.collision_mesh_format), apply_scale(args.scale):
+            collision_mesh_format='.' + args.collision_mesh_format,
+            blender_remesh=args.blender_remesh,
+            blender_voxel_size=args.blender_voxel_size,
+            blender_executable=args.blender_executable,
+            remeshed_suffix=args.remeshed_suffix), apply_scale(args.scale):
         print(f"Saving new URDF to: {output_path}")
         # Ensure output directory exists
         output_dir = output_path.parent

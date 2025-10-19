@@ -13,3 +13,5 @@ from skrobot.utils.visualization import auto_ik_hook
 from skrobot.utils.visualization import get_trajectory_optimization_callback
 from skrobot.utils.visualization import set_ik_visualization_enabled
 from skrobot.utils.visualization import get_ik_visualization_enabled
+
+from skrobot.utils.blender_mesh import remesh_with_blender
