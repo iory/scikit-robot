@@ -172,6 +172,15 @@ jobs:
         sudo apt-get update -qq -y
         sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev libsuitesparse-dev libblas-dev liblapack-dev
         sudo apt-get install -qq -y xvfb # for headless testing
+    - name: Install Blender
+      run: |
+        sudo apt-get install -qq -y wget
+        BLENDER_VERSION="4.2.0"
+        BLENDER_URL="https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+        wget -q ${BLENDER_URL} -O /tmp/blender.tar.xz
+        sudo tar -xf /tmp/blender.tar.xz -C /opt
+        sudo ln -s /opt/blender-${BLENDER_VERSION}-linux-x64/blender /usr/local/bin/blender
+        blender --version
     - name: Install Pytestp
       run: |
         python -m pip install --upgrade pip setuptools wheel

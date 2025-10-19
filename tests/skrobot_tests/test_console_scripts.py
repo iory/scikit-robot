@@ -58,9 +58,6 @@ class TestConsoleScripts(unittest.TestCase):
             out_stl_urdfpath = osp.join(
                 urdf_dir, 'fetch_stl.urdf')
 
-            relative_input_path = osp.join(osp.basename(urdf_dir), osp.basename(urdfpath))
-            relative_output_path = osp.join(osp.basename(urdf_dir), osp.basename(out_urdfpath))
-
             cmds = [
                 'convert-urdf-mesh {}'.format(urdfpath),
                 'convert-urdf-mesh {} --voxel-size 0.001'.format(urdfpath),
@@ -72,16 +69,26 @@ class TestConsoleScripts(unittest.TestCase):
                 'convert-urdf-mesh {} --output {} -f stl'.format(
                     out_urdfpath, out_stl_urdfpath),
                 'convert-urdf-mesh {} --inplace'.format(out_urdfpath),
-                'cd .. && convert-urdf-mesh {} --output {}'.format(
-                    relative_input_path, relative_output_path),
             ]
+
+            # Add Blender remesh tests if Blender is available
+            from skrobot.utils.blender_mesh import _find_blender_executable
+            if _find_blender_executable() is not None:
+                out_blender_dae = osp.join(urdf_dir, 'fetch_blender.urdf')
+                out_blender_stl = osp.join(urdf_dir, 'fetch_blender_stl.urdf')
+                blender_cmds = [
+                    'convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 --output {}'.format(
+                        urdfpath, out_blender_dae),
+                    ('convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 '
+                     '--collision-mesh-format stl --output {}').format(
+                        urdfpath, out_blender_stl),
+                ]
+                cmds.extend(blender_cmds)
             failures = []
             env = os.environ.copy()
 
             for cmd in cmds:
                 print("Executing: {}".format(cmd))
-
-                exec_dir = osp.dirname(urdf_dir) if 'cd ..' in cmd else urdf_dir
 
                 result = subprocess.run(
                     cmd,
@@ -89,7 +96,7 @@ class TestConsoleScripts(unittest.TestCase):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env=env,
-                    cwd=exec_dir
+                    cwd=urdf_dir
                 )
 
                 if result.returncode != 0:
