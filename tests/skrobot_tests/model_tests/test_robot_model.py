@@ -908,3 +908,39 @@ class TestRobotModel(unittest.TestCase):
                     diff = np.linalg.norm(successful_solutions[i] - successful_solutions[0])
                     # Solutions should be identical when starting from same initial pose
                     self.assertLess(diff, 1e-6, "Solutions should be identical with same initial pose")
+
+    def test_batch_inverse_kinematics_r8_6_mimic_joints(self):
+        """Test batch IK with R8_6 robot which has mimic joints.
+
+        R8_6 robot has mimic joints in its elbow mechanism, making it a good
+        test case for verifying that mimic joints are handled correctly in
+        batch inverse kinematics.
+        """
+        r8_6 = skrobot.models.R8_6()
+        r8_6.reset_pose()
+
+        # Create target poses near current position
+        current_pos = r8_6.rarm.end_coords.worldpos()
+        target_coords = [
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.05, 0.0, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.05, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.0, 0.05]),
+        ]
+
+        solutions, success_flags, _ = r8_6.batch_inverse_kinematics(
+            target_coords,
+            move_target=r8_6.rarm.end_coords,
+            stop=100,
+            attempts_per_pose=10
+        )
+
+        # Verify at least some poses were solved
+        self.assertGreater(sum(success_flags), 0, "At least one pose should be solved")
+
+        # Verify position accuracy for successful solutions
+        for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+            if success:
+                r8_6.angle_vector(solution)
+                achieved_pos = r8_6.rarm.end_coords.worldpos()
+                pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
+                self.assertLess(pos_error, 0.01, f"Position error too large for pose {i}: {pos_error}m")
