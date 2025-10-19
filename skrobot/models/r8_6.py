@@ -41,9 +41,8 @@ class R8_6(skrobot.model.RobotModel):
             parent=self.elv_camera_link,
             name='elv_camera_end_coords')
 
-        # Define joint lists
+        # Define joint lists (arm only, without torso z-axis)
         self.larm_links = [
-            self.l_zaxis_link,
             self.l_shoulder_y_link,
             self.l_elbow_p1_link,
             self.l_elbow_connector_link,
@@ -55,7 +54,6 @@ class R8_6(skrobot.model.RobotModel):
         ]
 
         self.rarm_links = [
-            self.r_zaxis_link,
             self.r_shoulder_y_link,
             self.r_elbow_p1_link,
             self.r_elbow_connector_link,
@@ -67,7 +65,6 @@ class R8_6(skrobot.model.RobotModel):
         ]
 
         self.larm_joints = [
-            self.l_zaxis_joint,
             self.l_shoulder_y_joint,
             self.l_elbow_p1_joint,
             self.l_elbow_p2_joint,
@@ -77,7 +74,6 @@ class R8_6(skrobot.model.RobotModel):
         ]
 
         self.rarm_joints = [
-            self.r_zaxis_joint,
             self.r_shoulder_y_joint,
             self.r_elbow_p1_joint,
             self.r_elbow_p2_joint,
@@ -86,6 +82,23 @@ class R8_6(skrobot.model.RobotModel):
             self.r_wrist_r_joint
         ]
 
+        # Define joint lists with torso (including z-axis)
+        self.larm_with_torso_links = [
+            self.l_zaxis_link,
+        ] + self.larm_links
+
+        self.rarm_with_torso_links = [
+            self.r_zaxis_link,
+        ] + self.rarm_links
+
+        self.larm_with_torso_joints = [
+            self.l_zaxis_joint,
+        ] + self.larm_joints
+
+        self.rarm_with_torso_joints = [
+            self.r_zaxis_joint,
+        ] + self.rarm_joints
+
         self.elv_joints = [
             self.elv_zaxis_joint,
             self.elv_storage_y_joint
@@ -93,12 +106,14 @@ class R8_6(skrobot.model.RobotModel):
 
         # Joint groups
         self.joint_list = (
-            self.larm_joints + self.rarm_joints +
+            self.larm_with_torso_joints + self.rarm_with_torso_joints +
             self.elv_joints)
 
         # Cache for arm models
         self._larm = None
         self._rarm = None
+        self._larm_with_torso = None
+        self._rarm_with_torso = None
 
         # Define mimic joint relationships for batch IK
         # Format: {mimic_joint: {'joint': parent_joint, 'multiplier': value, 'offset': value}}
@@ -132,8 +147,9 @@ class R8_6(skrobot.model.RobotModel):
 
     @property
     def larm(self):
+        """Left arm model (without torso z-axis)"""
         if self._larm is None:
-            link_list = [self.l_arm_link] + self.larm_links
+            link_list = [self.l_zaxis_link] + self.larm_links
             joint_list = self.larm_joints
             self._larm = skrobot.model.RobotModel(link_list=link_list,
                                                    joint_list=joint_list)
@@ -151,8 +167,9 @@ class R8_6(skrobot.model.RobotModel):
 
     @property
     def rarm(self):
+        """Right arm model (without torso z-axis)"""
         if self._rarm is None:
-            link_list = [self.r_arm_link] + self.rarm_links
+            link_list = [self.r_zaxis_link] + self.rarm_links
             joint_list = self.rarm_joints
             self._rarm = skrobot.model.RobotModel(link_list=link_list,
                                                    joint_list=joint_list)
@@ -167,6 +184,48 @@ class R8_6(skrobot.model.RobotModel):
                 'translation_axis': True,
             }
         return self._rarm
+
+    @property
+    def larm_with_torso(self):
+        """Left arm model with torso z-axis"""
+        if self._larm_with_torso is None:
+            link_list = [self.l_arm_link] + self.larm_with_torso_links
+            joint_list = self.larm_with_torso_joints
+            self._larm_with_torso = skrobot.model.RobotModel(
+                link_list=link_list,
+                joint_list=joint_list)
+            self._larm_with_torso.name = self.name + '_larm_with_torso'
+            self._larm_with_torso.end_coords = self.larm_end_coords
+
+            # Setup inverse kinematics defaults
+            self._larm_with_torso.inverse_kinematics_defaults = {
+                'link_list': self.larm_with_torso_links,
+                'move_target': self._larm_with_torso.end_coords,
+                'rotation_axis': True,
+                'translation_axis': True,
+            }
+        return self._larm_with_torso
+
+    @property
+    def rarm_with_torso(self):
+        """Right arm model with torso z-axis"""
+        if self._rarm_with_torso is None:
+            link_list = [self.r_arm_link] + self.rarm_with_torso_links
+            joint_list = self.rarm_with_torso_joints
+            self._rarm_with_torso = skrobot.model.RobotModel(
+                link_list=link_list,
+                joint_list=joint_list)
+            self._rarm_with_torso.name = self.name + '_rarm_with_torso'
+            self._rarm_with_torso.end_coords = self.rarm_end_coords
+
+            # Setup inverse kinematics defaults
+            self._rarm_with_torso.inverse_kinematics_defaults = {
+                'link_list': self.rarm_with_torso_links,
+                'move_target': self._rarm_with_torso.end_coords,
+                'rotation_axis': True,
+                'translation_axis': True,
+            }
+        return self._rarm_with_torso
 
     def reset_pose(self):
         """Reset robot to initial pose"""
