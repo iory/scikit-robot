@@ -36,6 +36,7 @@ def main():
         viewer = skrobot.viewers.TrimeshSceneViewer()
     elif args.viewer == 'pyrender':
         viewer = skrobot.viewers.PyrenderViewer()
+    loaded_count = 0
     for mesh_path in args.input_mesh_paths:
         if not osp.exists(mesh_path):
             print(f"Warning: Mesh file not found at {mesh_path}. Skipping.")
@@ -46,8 +47,13 @@ def main():
             print(mesh)
             link = skrobot.model.Link(collision_mesh=mesh, visual_mesh=mesh)
             viewer.add(link)
+            loaded_count += 1
         except Exception as e:
             print(f"Error loading mesh {mesh_path}: {e}. Skipping.")
+
+    if loaded_count == 0:
+        print("Error: No mesh files could be loaded. Exiting.")
+        return
 
     axis = Axis(pos=np.array([0, 0, 0]),
                 rot=np.eye(3),
