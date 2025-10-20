@@ -944,3 +944,47 @@ class TestRobotModel(unittest.TestCase):
                 achieved_pos = r8_6.rarm.end_coords.worldpos()
                 pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
                 self.assertLess(pos_error, 0.01, f"Position error too large for pose {i}: {pos_error}m")
+
+    def test_batch_inverse_kinematics_rotated_base_with_linear_joint(self):
+        """Test batch IK with rotated base for robot with LinearJoint.
+
+        This test verifies that the batch Jacobian computation correctly
+        transforms LinearJoint axes to world coordinates. When the robot base
+        is rotated, the joint axes must be transformed to world coordinates
+        for correct IK computation.
+
+        Without proper coordinate transformation (bug in Line 3889), this test
+        would fail because the Jacobian would use the local axis incorrectly.
+        """
+        r8_6 = skrobot.models.R8_6()
+        r8_6.reset_pose()
+
+        # Rotate the robot base by 90 degrees around Y axis FIRST
+        r8_6.rotate(np.pi / 2, 'y')
+
+        # Create target poses near current position (after rotation)
+        current_pos = r8_6.rarm.end_coords.worldpos()
+        target_coords = [
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.05, 0.0, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.05, 0.0]),
+            skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.0, 0.05]),
+        ]
+
+        # Run batch IK with rotated robot
+        solutions, success_flags, _ = r8_6.batch_inverse_kinematics(
+            target_coords,
+            move_target=r8_6.rarm.end_coords,
+            stop=100,
+            attempts_per_pose=10
+        )
+
+        # Verify at least some poses were solved
+        self.assertGreater(sum(success_flags), 0, "At least one pose should be solved with rotated base")
+
+        # Verify position accuracy for successful solutions
+        for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+            if success:
+                r8_6.angle_vector(solution)
+                achieved_pos = r8_6.rarm.end_coords.worldpos()
+                pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
+                self.assertLess(pos_error, 0.01, f"Position error too large for pose {i}: {pos_error}m")
