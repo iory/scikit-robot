@@ -3886,7 +3886,9 @@ class RobotModel(CascadedLink):
                 base_T_idx += 1
             elif joint.__class__.__name__ == "LinearJoint":
                 # Linear joint: translation only
-                J[:, 3:6, x_i] = joint.axis  # translation = axis
+                axis = np.tile(joint.axis, (batch_size, 1, 1))
+                world_axis = np.matmul(base_T_joints[:, base_T_idx, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
+                J[:, 3:6, x_i] = world_axis  # translation = axis (in world frame)
                 # rotation = 0 (already initialized)
                 x_i += 1
                 base_T_idx += 1
