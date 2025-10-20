@@ -3468,7 +3468,7 @@ class RobotModel(CascadedLink):
             child_link = joint.child_link
 
             # Joint axis in world coordinates
-            joint_axis = parent_link.worldrot().dot(joint.axis)
+            joint_axis = joint.world_axis
 
             # Propagate angular velocity
             if joint.__class__.__name__ == 'LinearJoint':
@@ -3478,7 +3478,7 @@ class RobotModel(CascadedLink):
                                                 joint_velocities[joint_idx] * joint_axis)
 
             # Propagate spatial velocity
-            joint_pos = joint.parent_link.worldpos()
+            joint_pos = joint.world_position
             child_pos = child_link.worldpos()
             r = child_pos - joint_pos
 
@@ -3627,8 +3627,8 @@ class RobotModel(CascadedLink):
 
                 # Use joint position for moment calculation if available
                 if connecting_joint:
-                    # The joint position is at the child link's origin in the default pose
-                    joint_pos = child_link.worldpos()
+                    # The joint position is at the parent link
+                    joint_pos = connecting_joint.world_position
                     r_child = joint_pos - link.worldpos()
                 else:
                     # Fallback to link position
@@ -3648,8 +3648,8 @@ class RobotModel(CascadedLink):
 
             child_link = joint.child_link
             # Get joint axis in world coordinates
-            # The axis is defined in the child link's local frame
-            joint_axis = child_link.worldrot().dot(joint.axis)
+            # The axis is defined in the joint frame (fixed to parent link)
+            joint_axis = joint.world_axis
 
             # Project force/moment onto joint axis
             # Check if it's a linear joint by class type
