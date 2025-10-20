@@ -330,8 +330,8 @@ class Link(CascadedCoords):
                 current_link = current_link.parent_link
 
             if is_relevant:
-                joint_pos = joint.parent_link.worldpos()
-                joint_axis = joint.parent_link.worldrot().dot(joint.axis)
+                joint_pos = joint.world_position
+                joint_axis = joint.world_axis
 
                 if joint.__class__.__name__ == 'LinearJoint':
                     jacobian[:, i] = joint_axis

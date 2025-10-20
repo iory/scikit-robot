@@ -63,7 +63,8 @@ def calc_target_joint_dimension(joint_list):
     """
     n = 0
     for j in joint_list:
-        n += j.joint_dof
+        if j is not None:
+            n += j.joint_dof
     return n
 
 
@@ -198,6 +199,53 @@ class Joint(object):
         # be deepcopied correctly.
         mimic_joint_hook = _MimicJointHook(self, joint, multiplier, offset)
         self.register_hook(mimic_joint_hook)
+
+    @property
+    def world_axis(self):
+        """Return joint axis in world coordinate system.
+
+        For rotational and linear joints, this converts the local axis
+        to world coordinates using the parent link's world transformation
+        and the joint's default coordinates (initial pose).
+
+        This follows the same calculation as the non-batch Jacobian:
+        world_default_coords = parent_link.worldcoords().transform(default_coords)
+        world_axis = world_default_coords.rotate_vector(axis)
+
+        Returns
+        -------
+        axis : numpy.ndarray
+            Joint axis in world coordinate system.
+        """
+        if not hasattr(self, 'axis'):
+            return np.array([0, 0, 1])
+
+        if hasattr(self, 'parent_link') and self.parent_link is not None \
+           and hasattr(self, 'default_coords'):
+            from skrobot.coordinates import Coordinates
+            world_default_coords = Coordinates()
+            self.parent_link.worldcoords().transform(
+                self.default_coords, out=world_default_coords)
+            return world_default_coords.rotate_vector(self.axis)
+
+        return self.axis
+
+    @property
+    def world_position(self):
+        """Return joint position in world coordinate system.
+
+        The joint position is defined as the world position of the parent link.
+
+        Returns
+        -------
+        position : numpy.ndarray
+            Joint position in world coordinate system.
+        """
+        if hasattr(self, 'parent_link') and self.parent_link is not None:
+            return self.parent_link.worldpos()
+        elif hasattr(self, 'child_link') and self.child_link is not None:
+            return self.child_link.worldpos()
+        return np.array([0, 0, 0])
 
 
 class RotationalJoint(Joint):
