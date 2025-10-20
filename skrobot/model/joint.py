@@ -63,7 +63,8 @@ def calc_target_joint_dimension(joint_list):
     """
     n = 0
     for j in joint_list:
-        n += j.joint_dof
+        if j is not None:
+            n += j.joint_dof
     return n
 
 
