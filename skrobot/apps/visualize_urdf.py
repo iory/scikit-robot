@@ -41,6 +41,8 @@ def main():
     if args.ros is not None:
         robot_model = RobotModel.from_robot_description(args.ros)
     else:
+        if not osp.exists(args.input_urdfpath):
+            parser.error(f"URDF file not found: {args.input_urdfpath}")
         robot_model = RobotModel.from_urdf(osp.abspath(args.input_urdfpath))
 
     viewer.add(robot_model)
