@@ -105,7 +105,7 @@ def find_root_link(input_path):
         raise ValueError("Could not determine root link. Check that the URDF contains valid joint definitions.")
 
 
-def transform_urdf_to_macro(input_path, connector_link, no_prefix):
+def transform_urdf_to_macro(input_path, connector_link, no_prefix, macro_name=None):
     """Transform a URDF file into a Xacro macro with connector joint.
 
     This function converts a URDF file into a reusable Xacro macro that can be
@@ -120,11 +120,13 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
         Name of link to connect to parent robot
     no_prefix : bool
         If True, don't add prefixes to element names
+    macro_name : str, optional
+        Name for the xacro macro. If None, uses the robot name from the URDF.
 
     Returns
     -------
     tuple[lxml.etree.Element, str]
-        Tuple of (xacro_root_element, robot_name)
+        Tuple of (xacro_root_element, final_macro_name)
     """
     XACRO_NS = "http://ros.org/wiki/xacro"
     NSMAP = {"xacro": XACRO_NS}
@@ -155,9 +157,12 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
         # Provide a default empty string for the prefix.
         macro_params.insert(0, "prefix:=''")
 
+    # Use provided macro_name, otherwise fall back to the robot name
+    final_macro_name = macro_name if macro_name else robot_name
+
     # Create macro element
     macro = etree.Element("{}macro".format("{" + XACRO_NS + "}"))
-    macro.set("name", robot_name)
+    macro.set("name", final_macro_name)
     macro.set("params", " ".join(macro_params))
     xacro_root.append(macro)
 
@@ -216,7 +221,7 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix):
     indent_element(xacro_root, level=0)
     xacro_root.tail = None  # Ensure no tail text at the root level
 
-    return xacro_root, robot_name
+    return xacro_root, final_macro_name
 
 
 def print_xacro_usage_instructions(output_path, robot_name, no_prefix=False):
