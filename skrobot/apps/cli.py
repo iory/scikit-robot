@@ -21,6 +21,7 @@ def get_available_apps():
         'visualize_mesh': ('Visualize mesh file', None),
         'urdf_hash': ('Calculate URDF hash', None),
         'convert_wheel_collision': ('Convert wheel collision model', None),
+        'extract_sub_urdf': ('Extract sub-URDF from a root link', None),
     }
 
     for filename in os.listdir(apps_dir):
