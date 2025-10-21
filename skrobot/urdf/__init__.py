@@ -1,4 +1,5 @@
 from .aggregate import aggregate_urdf_mesh_files
+from .extract_sub_urdf import extract_sub_urdf
 from .modularize_urdf import find_root_link
 from .modularize_urdf import transform_urdf_to_macro
 from .primitives_converter import convert_meshes_to_primitives
@@ -19,4 +20,5 @@ __all__ = [
     'convert_wheel_collisions_to_cylinders',
     'convert_meshes_to_primitives',
     'get_mesh_dimensions',
+    'extract_sub_urdf',
 ]
