@@ -16,10 +16,12 @@ def main():
     parser.add_argument("--no-prefix", action="store_true",
                         help="Remove 'prefix' parameter and do not use ${prefix} in names")
     parser.add_argument("--output", help="Output file path")
+    parser.add_argument("--macro-name", help="Name for the xacro macro. Defaults to the robot name in the URDF.")
     args = parser.parse_args()
 
     root_link = find_root_link(args.input_urdf)
-    xacro_root, robot_name = transform_urdf_to_macro(args.input_urdf, root_link, args.no_prefix)
+    xacro_root, final_macro_name = transform_urdf_to_macro(
+        args.input_urdf, root_link, args.no_prefix, macro_name=args.macro_name)
 
     if args.output:
         output_path = args.output
@@ -29,7 +31,7 @@ def main():
 
     etree.ElementTree(xacro_root).write(output_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
 
-    print_xacro_usage_instructions(output_path, robot_name, args.no_prefix)
+    print_xacro_usage_instructions(output_path, final_macro_name, args.no_prefix)
 
 
 if __name__ == "__main__":
