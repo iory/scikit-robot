@@ -172,6 +172,52 @@ class Joint(object):
         raise NotImplementedError('Joint type must be defined')
 
     @property
+    def joint_type(self):
+        """Alias for type property for better clarity.
+
+        Using joint_type makes it more explicit that this is a joint property,
+        reducing confusion with other 'type' attributes in the codebase.
+
+        Returns
+        -------
+        str
+            Joint type ('revolute', 'continuous', 'prismatic', 'fixed', etc.)
+        """
+        return self.type
+
+    @property
+    def min_joint_angle(self):
+        """Alias for min_angle property for better clarity.
+
+        Returns
+        -------
+        float
+            Minimum joint angle
+        """
+        return self.min_angle
+
+    @min_joint_angle.setter
+    def min_joint_angle(self, value):
+        """Setter for min_joint_angle (updates min_angle)."""
+        self.min_angle = value
+
+    @property
+    def max_joint_angle(self):
+        """Alias for max_angle property for better clarity.
+
+        Returns
+        -------
+        float
+            Maximum joint angle
+        """
+        return self.max_angle
+
+    @max_joint_angle.setter
+    def max_joint_angle(self, value):
+        """Setter for max_joint_angle (updates max_angle)."""
+        self.max_angle = value
+
+    @property
     def joint_dof(self):
         raise NotImplementedError
 
@@ -277,6 +323,22 @@ class RotationalJoint(Joint):
         if np.isinf(self.min_angle) or np.isinf(self.max_angle):
             return 'continuous'
         return 'revolute'
+
+    @property
+    def joint_axis(self):
+        """Alias for axis property for better clarity.
+
+        Returns
+        -------
+        numpy.ndarray
+            Joint rotation axis (normalized 3D vector)
+        """
+        return self.axis
+
+    @joint_axis.setter
+    def joint_axis(self, value):
+        """Setter for joint_axis (updates axis)."""
+        self.axis = normalize_vector(convert_to_axis_vector(value))
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return joint angle.
@@ -446,6 +508,22 @@ class LinearJoint(Joint):
     @property
     def type(self):
         return 'prismatic'
+
+    @property
+    def joint_axis(self):
+        """Alias for axis property for better clarity.
+
+        Returns
+        -------
+        numpy.ndarray
+            Joint translation axis (normalized 3D vector)
+        """
+        return self.axis
+
+    @joint_axis.setter
+    def joint_axis(self, value):
+        """Setter for joint_axis (updates axis)."""
+        self.axis = normalize_vector(convert_to_axis_vector(value))
 
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         """Return this joint's linear translation (joint angle).

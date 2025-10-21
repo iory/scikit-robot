@@ -10,6 +10,7 @@ from numpy import testing
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import Transform
+from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy_matrix
 
@@ -216,7 +217,6 @@ class TestCoordinates(unittest.TestCase):
         c.translate([0.1, 0.2, 0.3], c2)
         testing.assert_almost_equal(
             c.translation, [0.3, 0.2, -0.1])
-        from skrobot.coordinates.math import matrix2ypr
         testing.assert_almost_equal(
             matrix2ypr(c.rotation), [pi / 3.0, 0, 0])
 
@@ -441,6 +441,54 @@ class TestCoordinates(unittest.TestCase):
         dif_rot = coord1.difference_rotation(coord2, 'xz')
         testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
 
+    def test_rotation_matrix_alias(self):
+        """Test that rotation_matrix is an alias for rotation."""
+        coords = make_coords()
+        testing.assert_array_equal(coords.rotation, coords.rotation_matrix)
+        testing.assert_array_equal(coords.rotation_matrix, np.eye(3))
+
+    def test_rotation_matrix_setter(self):
+        """Test that rotation_matrix setter works."""
+        coords = make_coords()
+        rot_z = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
+        coords.rotation_matrix = rot_z
+        testing.assert_array_almost_equal(coords.rotation, rot_z)
+        rot_x = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=float)
+        coords.rotation = rot_x
+        testing.assert_array_almost_equal(coords.rotation_matrix, rot_x)
+
+    def test_translation_vector_alias(self):
+        """Test that translation_vector is an alias for translation."""
+        coords = make_coords()
+        testing.assert_array_equal(coords.translation, coords.translation_vector)
+        testing.assert_array_equal(coords.translation_vector, np.zeros(3))
+
+    def test_translation_vector_setter(self):
+        """Test that translation_vector setter works."""
+        coords = make_coords()
+        vec1 = np.array([1.0, 2.0, 3.0])
+        coords.translation_vector = vec1
+        testing.assert_array_equal(coords.translation, vec1)
+        vec2 = np.array([4.0, 5.0, 6.0])
+        coords.translation = vec2
+        testing.assert_array_equal(coords.translation_vector, vec2)
+
+    def test_aliases_mixed_usage(self):
+        """Test that old and new attribute names can be used interchangeably."""
+        coords = make_coords()
+        coords.translation = [1.0, 2.0, 3.0]
+        testing.assert_array_equal(coords.translation_vector, [1.0, 2.0, 3.0])
+        coords.rotation_matrix = np.eye(3)
+        testing.assert_array_equal(coords.rotation, np.eye(3))
+
+    def test_aliases_with_transformations(self):
+        """Test aliases work with coordinate transformations."""
+        coords = make_coords()
+        coords.rotate(pi / 2, 'z')
+        testing.assert_array_almost_equal(coords.rotation, coords.rotation_matrix)
+        coords.translate([1.0, 2.0, 3.0])
+        testing.assert_array_almost_equal(coords.translation, coords.translation_vector)
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 
@@ -617,7 +665,6 @@ class TestCascadedCoordinates(unittest.TestCase):
 
     def test_newcoords_cascaded_relative_coords(self):
         # Test CascadedCoords.newcoords with relative_coords parameter
-        from skrobot.coordinates import make_cascoords
 
         # Create parent and child coordinates
         parent = make_cascoords(pos=[1, 0, 0])

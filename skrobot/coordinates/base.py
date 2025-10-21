@@ -285,6 +285,29 @@ class Coordinates(object):
             self._hook()
         return self._rotation
 
+    @property
+    def rotation_matrix(self):
+        """Alias for rotation property for better clarity.
+
+        Using rotation_matrix makes it more explicit that this returns
+        a 3x3 rotation matrix, not angles or quaternions.
+
+        Returns
+        -------
+        numpy.ndarray
+            3x3 rotation matrix
+
+        See Also
+        --------
+        rotation : The original property (same as rotation_matrix)
+        """
+        return self.rotation
+
+    @rotation_matrix.setter
+    def rotation_matrix(self, value):
+        """Setter for rotation_matrix (updates rotation)."""
+        self.rotation = value
+
     @rotation.setter
     def rotation(self, rotation):
         """Set rotation of this coordinate
@@ -341,6 +364,29 @@ class Coordinates(object):
         if self._hook is not None:
             self._hook()
         return self._translation
+
+    @property
+    def translation_vector(self):
+        """Alias for translation property for better clarity.
+
+        Using translation_vector makes it more explicit that this returns
+        a 3D translation vector, providing consistency with rotation_matrix.
+
+        Returns
+        -------
+        numpy.ndarray
+            3D translation vector [x, y, z] in meters
+
+        See Also
+        --------
+        translation : The original property (same as translation_vector)
+        """
+        return self.translation
+
+    @translation_vector.setter
+    def translation_vector(self, value):
+        """Setter for translation_vector (updates translation)."""
+        self.translation = value
 
     @translation.setter
     def translation(self, translation):
