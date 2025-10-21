@@ -12,7 +12,10 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_coords
 from skrobot.model import calc_dif_with_axis
 from skrobot.model import joint_angle_limit_weight
+from skrobot.model import LinearJoint
+from skrobot.model import Link
 from skrobot.model import RotationalJoint
+from skrobot.model.joint import calc_target_joint_dimension
 
 
 class TestRobotModel(unittest.TestCase):
@@ -726,7 +729,6 @@ class TestRobotModel(unittest.TestCase):
         # Test with numpy array
         link_list = fetch.link_lists(fetch.rarm.end_coords.parent)
         joint_list_without_fixed = fetch.joint_list_from_link_list(link_list, ignore_fixed_joint=True)
-        from skrobot.model.joint import calc_target_joint_dimension
         ndof = calc_target_joint_dimension(joint_list_without_fixed)
 
         initial_angles_array = np.random.uniform(-1, 1, (1, ndof))
@@ -988,3 +990,53 @@ class TestRobotModel(unittest.TestCase):
                 achieved_pos = r8_6.rarm.end_coords.worldpos()
                 pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
                 self.assertLess(pos_error, 0.01, f"Position error too large for pose {i}: {pos_error}m")
+
+    def test_joint_type_alias(self):
+        """Test that joint_type is an alias for type."""
+        parent_link = Link(name='parent')
+        child_link = Link(name='child')
+        child_link.translate([0.1, 0, 0])
+
+        joint = RotationalJoint(name='test_joint', parent_link=parent_link,
+                                child_link=child_link, axis='z')
+        self.assertIn(joint.type, ['revolute', 'continuous'])
+        self.assertEqual(joint.type, joint.joint_type)
+
+        linear_joint = LinearJoint(name='test_joint', parent_link=parent_link,
+                                   child_link=child_link, axis='z')
+        self.assertEqual(linear_joint.type, 'prismatic')
+        self.assertEqual(linear_joint.joint_type, 'prismatic')
+
+    def test_joint_axis_alias(self):
+        """Test that joint_axis is an alias for axis."""
+        parent_link = Link(name='parent')
+        child_link = Link(name='child')
+        child_link.translate([0.1, 0, 0])
+
+        joint = RotationalJoint(name='test_joint', parent_link=parent_link,
+                                child_link=child_link, axis='x')
+        testing.assert_array_almost_equal(joint.axis, joint.joint_axis)
+        testing.assert_array_almost_equal(joint.axis, [1, 0, 0])
+
+        joint.joint_axis = 'y'
+        testing.assert_array_almost_equal(joint.axis, [0, 1, 0])
+        testing.assert_array_almost_equal(joint.joint_axis, [0, 1, 0])
+
+    def test_joint_angle_limits_alias(self):
+        """Test that min_joint_angle and max_joint_angle are aliases."""
+        parent_link = Link(name='parent')
+        child_link = Link(name='child')
+        child_link.translate([0.1, 0, 0])
+
+        joint = RotationalJoint(name='test_joint', parent_link=parent_link,
+                                child_link=child_link, min_angle=-1.5, max_angle=1.5)
+        self.assertEqual(joint.min_angle, joint.min_joint_angle)
+        self.assertAlmostEqual(joint.min_angle, -1.5)
+
+        joint.min_joint_angle = -2.0
+        self.assertAlmostEqual(joint.min_angle, -2.0)
+        self.assertAlmostEqual(joint.min_joint_angle, -2.0)
+
+        self.assertEqual(joint.max_angle, joint.max_joint_angle)
+        joint.max_joint_angle = 2.0
+        self.assertAlmostEqual(joint.max_angle, 2.0)
