@@ -220,15 +220,11 @@ class Joint(object):
         if not hasattr(self, 'axis'):
             return np.array([0, 0, 1])
 
-        if hasattr(self, 'parent_link') and self.parent_link is not None \
-           and hasattr(self, 'default_coords'):
-            from skrobot.coordinates import Coordinates
-            world_default_coords = Coordinates()
-            self.parent_link.worldcoords().transform(
-                self.default_coords, out=world_default_coords)
-            return world_default_coords.rotate_vector(self.axis)
+        if self.parent_link is not None:
+            return self.parent_link.copy_worldcoords().transform(
+                self.default_coords).rotate_vector(self.axis)
 
-        return self.axis
+        return self.default_coords.rotate_vector(self.axis)
 
     @property
     def world_position(self):
@@ -241,11 +237,10 @@ class Joint(object):
         position : numpy.ndarray
             Joint position in world coordinate system.
         """
-        if hasattr(self, 'parent_link') and self.parent_link is not None:
-            return self.parent_link.worldpos()
-        elif hasattr(self, 'child_link') and self.child_link is not None:
-            return self.child_link.worldpos()
-        return np.array([0, 0, 0])
+        if self.parent_link is not None:
+            return self.parent_link.copy_worldcoords().transform(
+                self.default_coords).worldpos()
+        return self.default_coords.worldpos()
 
 
 class RotationalJoint(Joint):
