@@ -3,6 +3,7 @@ from .extract_sub_urdf import extract_sub_urdf
 from .modularize_urdf import find_root_link
 from .modularize_urdf import transform_urdf_to_macro
 from .primitives_converter import convert_meshes_to_primitives
+from .scale_urdf import scale_urdf
 from .transform_urdf import transform_urdf_with_world_link
 from .wheel_collision_converter import convert_wheel_collisions_to_cylinders
 from .wheel_collision_converter import get_mesh_dimensions
@@ -21,4 +22,5 @@ __all__ = [
     'convert_meshes_to_primitives',
     'get_mesh_dimensions',
     'extract_sub_urdf',
+    'scale_urdf',
 ]
