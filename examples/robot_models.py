@@ -40,6 +40,7 @@ def main():
     robots = [
         skrobot.models.Kuka(),
         skrobot.models.Fetch(),
+        skrobot.models.Nextage(),
         skrobot.models.PR2(),
         skrobot.models.Panda(),
     ]
