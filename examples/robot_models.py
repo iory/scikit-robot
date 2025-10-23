@@ -49,7 +49,7 @@ def main():
     for i in range(nrow):
         for j in range(ncol):
             try:
-                robot = robots[i * nrow + j]
+                robot = robots[i * ncol + j]
             except IndexError:
                 break
             plane = skrobot.model.Box(extents=(row - 0.01, col - 0.01, 0.01))
