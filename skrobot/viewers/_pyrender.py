@@ -87,6 +87,9 @@ class PyrenderViewer(pyrender.Viewer):
 
     Keyboard Controls
     -----------------
+    j : Toggle joint axes display (shows/hides joint positions and axes)
+        Joint positions are displayed as blue spheres
+        Joint axes are displayed as red cylinders
     v : Toggle between visual and collision meshes (if enable_collision_toggle=True)
         Collision meshes are displayed in orange/transparent color
     """
@@ -103,6 +106,11 @@ class PyrenderViewer(pyrender.Viewer):
 
         self.thread = None
         self._visual_mesh_map = collections.OrderedDict()
+        self._joint_axis_map = collections.OrderedDict()
+
+        # Joint axis toggle functionality
+        self._stored_robots = []
+        self.show_joint_axes = False
 
         # Collision toggle functionality
         self.enable_collision_toggle = enable_collision_toggle
@@ -226,6 +234,51 @@ class PyrenderViewer(pyrender.Viewer):
                     link._visual_mesh_changed = False
                 else:
                     node.matrix = transform
+
+            # update joint axis transforms
+            for joint_id, (sphere_node, axis_node, joint) in self._joint_axis_map.items():
+                # Update joint position and axis
+                position = joint.world_position
+                axis = joint.world_axis
+
+                # Update sphere position
+                sphere_transform = np.eye(4)
+                sphere_transform[:3, 3] = position
+                sphere_node.matrix = sphere_transform
+
+                # Update axis cylinder position and orientation
+                if axis_node is not None and axis is not None:
+                    # Calculate rotation matrix to align cylinder with axis
+                    # Default cylinder is along Z-axis, need to rotate to align with joint axis
+                    z_axis = np.array([0, 0, 1])
+                    axis_normalized = axis / np.linalg.norm(axis)
+
+                    # Calculate rotation axis and angle
+                    rotation_axis = np.cross(z_axis, axis_normalized)
+                    rotation_axis_norm = np.linalg.norm(rotation_axis)
+
+                    if rotation_axis_norm > 1e-6:
+                        rotation_axis = rotation_axis / rotation_axis_norm
+                        angle = np.arccos(np.clip(np.dot(z_axis, axis_normalized), -1.0, 1.0))
+                        # Create rotation matrix using Rodrigues' formula
+                        K = np.array([
+                            [0, -rotation_axis[2], rotation_axis[1]],
+                            [rotation_axis[2], 0, -rotation_axis[0]],
+                            [-rotation_axis[1], rotation_axis[0], 0]
+                        ])
+                        rotation_matrix = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+                    else:
+                        # Axis is already aligned with z-axis or opposite
+                        if np.dot(z_axis, axis_normalized) > 0:
+                            rotation_matrix = np.eye(3)
+                        else:
+                            rotation_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
+
+                    axis_transform = np.eye(4)
+                    axis_transform[:3, :3] = rotation_matrix
+                    axis_transform[:3, 3] = position
+                    axis_node.matrix = axis_transform
+
             super(PyrenderViewer, self).on_draw()
 
         self._redraw = False
@@ -259,6 +312,19 @@ class PyrenderViewer(pyrender.Viewer):
 
                 self._redraw = True
                 return True
+
+        # Handle 'j' key for joint axis toggle
+        from pyglet.window import key
+        if symbol == key.J:
+            # Toggle joint axis display mode
+            self.show_joint_axes = not self.show_joint_axes
+            self._toggle_joint_axes()
+
+            mode_text = "on" if self.show_joint_axes else "off"
+            print(f"Joint axes display: {mode_text}")
+
+            self._redraw = True
+            return True
 
         self._redraw = True
         return super(PyrenderViewer, self).on_key_press(symbol, modifiers, *args, **kwargs)
@@ -311,6 +377,9 @@ class PyrenderViewer(pyrender.Viewer):
             links = [geometry]
         elif isinstance(geometry, model_module.CascadedLink):
             links = geometry.link_list
+            # Store robot for joint axis toggle
+            if geometry not in self._stored_robots:
+                self._stored_robots.append(geometry)
         else:
             raise TypeError('geometry must be Link or CascadedLink')
 
@@ -344,6 +413,167 @@ class PyrenderViewer(pyrender.Viewer):
                 all_links = all_links[1:]
                 all_links.extend(link.child_links)
         self._redraw = True
+
+    def add_joint_axis(self, joint, sphere_radius=0.01, axis_length=0.1,
+                       axis_radius=0.003, axis_color=None):
+        """Add joint axis visualization to the scene.
+
+        Visualizes the joint position (world_position) as a sphere and
+        the joint axis (world_axis) as a cylinder.
+
+        Parameters
+        ----------
+        joint : Joint
+            Joint object to visualize
+        sphere_radius : float, optional
+            Radius of the sphere representing the joint position.
+            Default is 0.01.
+        axis_length : float, optional
+            Length of the cylinder representing the joint axis.
+            Default is 0.1.
+        axis_radius : float, optional
+            Radius of the cylinder representing the joint axis.
+            Default is 0.003.
+        axis_color : array-like, optional
+            RGBA color for the axis cylinder. Default is [1.0, 0.0, 0.0, 1.0] (red).
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        >>> from skrobot.viewers import PyrenderViewer
+        >>> from skrobot.models import PR2
+        >>> viewer = PyrenderViewer()
+        >>> robot = PR2()
+        >>> viewer.add(robot)
+        >>> viewer.add_joint_axis(robot.r_shoulder_pan_joint)
+        >>> viewer.show()
+        """
+        from skrobot.model import Joint
+
+        if not isinstance(joint, Joint):
+            raise TypeError('joint must be a Joint object')
+
+        if axis_color is None:
+            axis_color = [1.0, 0.0, 0.0, 1.0]
+
+        with self._render_lock:
+            joint_id = str(id(joint))
+            position = joint.world_position
+            axis = joint.world_axis
+
+            # Create sphere for joint position
+            sphere_mesh = trimesh.creation.uv_sphere(radius=sphere_radius)
+            sphere_mesh.visual.vertex_colors = [100, 100, 255, 255]  # Blue color
+            pyrender_sphere = pyrender.Mesh.from_trimesh(sphere_mesh, smooth=False)
+
+            sphere_transform = np.eye(4)
+            sphere_transform[:3, 3] = position
+            sphere_node = self.scene.add(pyrender_sphere, pose=sphere_transform)
+
+            # Create cylinder for joint axis
+            axis_node = None
+            if axis is not None:
+                cylinder_mesh = trimesh.creation.cylinder(
+                    radius=axis_radius,
+                    height=axis_length,
+                    sections=16
+                )
+                cylinder_mesh.visual.vertex_colors = [
+                    int(axis_color[0] * 255),
+                    int(axis_color[1] * 255),
+                    int(axis_color[2] * 255),
+                    int(axis_color[3] * 255)
+                ]
+                pyrender_cylinder = pyrender.Mesh.from_trimesh(cylinder_mesh, smooth=False)
+
+                # Calculate rotation matrix to align cylinder with axis
+                z_axis = np.array([0, 0, 1])
+                axis_normalized = axis / np.linalg.norm(axis)
+
+                rotation_axis = np.cross(z_axis, axis_normalized)
+                rotation_axis_norm = np.linalg.norm(rotation_axis)
+
+                if rotation_axis_norm > 1e-6:
+                    rotation_axis = rotation_axis / rotation_axis_norm
+                    angle = np.arccos(np.clip(np.dot(z_axis, axis_normalized), -1.0, 1.0))
+                    K = np.array([
+                        [0, -rotation_axis[2], rotation_axis[1]],
+                        [rotation_axis[2], 0, -rotation_axis[0]],
+                        [-rotation_axis[1], rotation_axis[0], 0]
+                    ])
+                    rotation_matrix = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+                else:
+                    if np.dot(z_axis, axis_normalized) > 0:
+                        rotation_matrix = np.eye(3)
+                    else:
+                        rotation_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
+
+                axis_transform = np.eye(4)
+                axis_transform[:3, :3] = rotation_matrix
+                axis_transform[:3, 3] = position
+                axis_node = self.scene.add(pyrender_cylinder, pose=axis_transform)
+
+            # Store in joint axis map
+            self._joint_axis_map[joint_id] = (sphere_node, axis_node, joint)
+
+        self._redraw = True
+
+    def delete_joint_axis(self, joint):
+        """Delete joint axis visualization from the scene.
+
+        Parameters
+        ----------
+        joint : Joint
+            Joint object whose axis visualization should be deleted
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        >>> from skrobot.viewers import PyrenderViewer
+        >>> from skrobot.models import PR2
+        >>> viewer = PyrenderViewer()
+        >>> robot = PR2()
+        >>> viewer.add(robot)
+        >>> viewer.add_joint_axis(robot.r_shoulder_pan_joint)
+        >>> viewer.show()
+        >>> viewer.delete_joint_axis(robot.r_shoulder_pan_joint)
+        """
+        with self._render_lock:
+            joint_id = str(id(joint))
+            if joint_id in self._joint_axis_map:
+                sphere_node, axis_node, _ = self._joint_axis_map[joint_id]
+                self.scene.remove_node(sphere_node)
+                if axis_node is not None:
+                    self.scene.remove_node(axis_node)
+                self._joint_axis_map.pop(joint_id)
+        self._redraw = True
+
+    def _toggle_joint_axes(self):
+        """Toggle joint axes display for all stored robots."""
+        if self.show_joint_axes:
+            # Add joint axes for all robots
+            for robot in self._stored_robots:
+                for joint in robot.joint_list:
+                    # Skip if already added
+                    if str(id(joint)) not in self._joint_axis_map:
+                        self.add_joint_axis(
+                            joint,
+                            sphere_radius=0.015,
+                            axis_length=0.2,
+                            axis_radius=0.005,
+                            axis_color=[1.0, 0.0, 0.0, 1.0]
+                        )
+        else:
+            # Remove all joint axes
+            joints_to_remove = list(self._joint_axis_map.values())
+            for sphere_node, axis_node, joint in joints_to_remove:
+                self.delete_joint_axis(joint)
 
     def set_camera(self, angles=None, distance=None, center=None,
                    resolution=None, fov=None, coords_or_transform=None):

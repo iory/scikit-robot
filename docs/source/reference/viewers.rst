@@ -130,6 +130,8 @@ The PyrenderViewer provides extensive keyboard controls for interactive manipula
      - Toggle shadow rendering (may impact performance)
    * - ``i``
      - Cycle through axis display modes (none → world → mesh → all)
+   * - ``j``
+     - **Toggle joint axes display** (shows/hides joint positions and axes for all robots)
    * - ``l``
      - Cycle lighting modes (scene → Raymond → direct)
    * - ``m``
