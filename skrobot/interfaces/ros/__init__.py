@@ -1,5 +1,6 @@
 from skrobot._lazy_imports import LazyImportClass
 
+
 NextageROSRobotInterface = LazyImportClass(
     ".nextage", "NextageROSRobotInterface", "skrobot.interfaces.ros")
 PandaROSRobotInterface = LazyImportClass(
