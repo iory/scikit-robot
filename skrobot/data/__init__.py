@@ -88,7 +88,7 @@ def nextage_urdfpath():
     if osp.exists(path):
         return path
     _download(
-        url='https://github.com/Michi-Tsubaki/scikit-robot-models/raw/refs/heads/add-nextage/nextage_description.tar.gz',  # NOQA
+        url='https://github.com/iory/scikit-robot-models/raw/refs/heads/master/nextage_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'nextage_description.tar.gz'),
         md5='9805ac9cd97b67056dde31aa88762ec7',
         postprocess='extractall',
