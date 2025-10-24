@@ -134,7 +134,7 @@ def main():
         if 'link_list' in ik_defaults:
             ik_kwargs['link_list'] = ik_defaults['link_list']
 
-    solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
+    solutions, success_flags, attempt_counts = arm.batch_inverse_kinematics(
         target_poses,
         **ik_kwargs
     )
@@ -157,7 +157,7 @@ def main():
 
         successful_solutions = []
         successful_indices = []
-        original_angles = robot.angle_vector()
+        original_angles = arm.angle_vector()
 
         for i, (solution, success) in enumerate(zip(solutions, success_flags)):
             if success:
@@ -165,7 +165,7 @@ def main():
                 successful_indices.append(i)
 
                 # Test the solution
-                robot.angle_vector(solution)
+                arm.angle_vector(solution)
                 achieved_coords = arm.end_coords.copy_worldcoords()
                 achieved_pos = achieved_coords.worldpos()
                 target_pos = target_poses[i].worldpos()
@@ -220,7 +220,7 @@ def main():
                 print(f"  [OK] Pose {i}: Pos = {pos_error_norm:.4f}m{rot_error_details}")
 
                 # Restore for next test
-                robot.angle_vector(original_angles)
+                arm.angle_vector(original_angles)
 
         if not args.no_interactive:
             print(f"\nAttempting visualization of {len(successful_solutions)} solutions...")
@@ -300,7 +300,7 @@ def main():
 
                         if current_time - last_change_time > 0.5:
                             if len(successful_solutions) > 0:
-                                robot.angle_vector(successful_solutions[solution_idx])
+                                arm.angle_vector(successful_solutions[solution_idx])
                                 orig_idx = successful_indices[solution_idx]
 
                                 end_effector_axis.newcoords(arm.end_coords.copy_worldcoords())
