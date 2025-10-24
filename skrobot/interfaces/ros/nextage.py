@@ -8,7 +8,7 @@ class NextageROSRobotInterface(ROSRobotInterfaceBase):
 
     def __init__(self, *args, **kwargs):
         super(NextageROSRobotInterface, self).__init__(*args, **kwargs)
-        
+
         self.rarm_move = actionlib.SimpleActionClient(
             '/rarm_controller/follow_joint_trajectory_action',
             control_msgs.msg.FollowJointTrajectoryAction

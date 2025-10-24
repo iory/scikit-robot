@@ -28,7 +28,7 @@ class Nextage(RobotModelFromURDF):
     def reset_pose(self):
         import numpy as np
         angle_vector = [
-            0.0, 
+            0.0,
             -0.5, 0.0, np.deg2rad(-100), np.deg2rad(15.2), np.deg2rad(9.4), np.deg2rad(3.2),
             0.5, 0.0, np.deg2rad(-100), np.deg2rad(-15.2), np.deg2rad(9.4), np.deg2rad(-3.2),
             0.0, 0.0
@@ -48,7 +48,7 @@ class Nextage(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.rarm_end_coords
         return model
-    
+
     @cached_property
     def larm(self):
         link_names = ['LARM_JOINT{}_Link'.format(i) for i in range(6)]
@@ -57,7 +57,7 @@ class Nextage(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.larm_end_coords
         return model
-    
+
     @cached_property
     def head(self):
         link_names = ['HEAD_JOINT{}_Link'.format(i) for i in range(2)]
@@ -66,15 +66,15 @@ class Nextage(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.head_end_coords
         return model
-    
+
     @cached_property
     def rarm_end_coords(self):
         return self.RARM_JOINT5_Link
-    
+
     @cached_property
     def larm_end_coords(self):
         return self.LARM_JOINT5_Link
-    
+
     @cached_property
     def head_end_coords(self):
         return self.HEAD_JOINT1_Link
