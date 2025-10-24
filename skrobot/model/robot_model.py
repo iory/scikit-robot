@@ -2531,6 +2531,38 @@ class RobotModel(CascadedLink):
         else:
             single_link_list = link_list
 
+        # Check if move_target has offset from link_list's last link
+        move_target_offset_pos = None
+        move_target_offset_rot = None
+        if isinstance(move_target, CascadedCoords) and single_link_list:
+            last_link = single_link_list[-1]
+
+            # Check if move_target's parent is the same as last_link or connected via fixed joints
+            if move_target.parent == last_link:
+                # Direct parent-child: use move_target's local offset
+                if hasattr(move_target, '_translation'):
+                    move_target_offset_pos = move_target._translation.copy()
+                if hasattr(move_target, '_rotation'):
+                    move_target_offset_rot = move_target._rotation.copy()
+            else:
+                # Use find_link_path to check if connected via fixed joints
+                path = self.find_link_path(last_link, move_target.parent)
+
+                if path and len(path) > 1:
+                    # Check if all intermediate joints are fixed
+                    all_fixed = all(
+                        link.joint and link.joint.joint_type == 'fixed'
+                        for link in path[1:]
+                    )
+
+                    if all_fixed:
+                        # Calculate relative transformation using coordinate transformation
+                        relative_coords = last_link.worldcoords().inverse_transformation().transform(
+                            move_target.worldcoords()
+                        )
+                        move_target_offset_pos = relative_coords.worldpos()
+                        move_target_offset_rot = relative_coords.worldrot()
+
         # Convert input to consistent format: [x, y, z, qw, qx, qy, qz]
         if isinstance(target_coords, list) and all(isinstance(coord, Coordinates) for coord in target_coords):
             n_poses = len(target_coords)
@@ -2602,7 +2634,8 @@ class RobotModel(CascadedLink):
             single_link_list, target_poses_xyz_qwxyz, joint_angles_current, ndof, min_angles, max_angles,
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis, actual_joint_list,
-            attempts_per_pose, random_initial_range
+            attempts_per_pose, random_initial_range,
+            move_target_offset_pos, move_target_offset_rot
         )
 
         full_solutions = []
@@ -2621,7 +2654,8 @@ class RobotModel(CascadedLink):
             self, link_list, target_poses_xyz_qwxyz, initial_angles, ndof, min_angles, max_angles,
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis, joint_list_without_fixed,
-            attempts_per_pose, random_initial_range):
+            attempts_per_pose, random_initial_range,
+            move_target_offset_pos=None, move_target_offset_rot=None):
         """Batch IK solver using batch expansion for multiple attempts."""
 
         n_poses = target_poses_xyz_qwxyz.shape[0]
@@ -2669,7 +2703,8 @@ class RobotModel(CascadedLink):
             link_list, expanded_targets, expanded_initials,
             stop, thre, rthre, alpha, base_to_source,
             expanded_rotation_axis, expanded_translation_axis,
-            joint_list_without_fixed, min_angles, max_angles
+            joint_list_without_fixed, min_angles, max_angles,
+            move_target_offset_pos, move_target_offset_rot
         )
 
         solutions = []
@@ -2704,7 +2739,8 @@ class RobotModel(CascadedLink):
             self, link_list, target_poses_xyz_qwxyz, joint_angles_current,
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis,
-            joint_list_without_fixed, min_angles, max_angles):
+            joint_list_without_fixed, min_angles, max_angles,
+            move_target_offset_pos=None, move_target_offset_rot=None):
         """Internal batch IK solver."""
         # Use integrated batch IK functions
 
@@ -2743,7 +2779,9 @@ class RobotModel(CascadedLink):
                 alpha, base_to_source,
                 rotation_axis_unsolved, translation_axis_unsolved,
                 joint_list_without_fixed, min_angles, max_angles,
-                joint_list_for_fk=None  # Will be derived from link_list in the function
+                joint_list_for_fk=None,  # Will be derived from link_list in the function
+                move_target_offset_pos=move_target_offset_pos,
+                move_target_offset_rot=move_target_offset_rot
             )
 
             # Update current angles first
@@ -2758,7 +2796,9 @@ class RobotModel(CascadedLink):
             )
             current_poses_updated = self._forward_kinematics_batch(
                 link_list, joint_angles_with_mimic_updated, return_quaternion=True,
-                base_to_source=base_to_source, joint_list_override=full_joint_list_for_convergence
+                base_to_source=base_to_source, joint_list_override=full_joint_list_for_convergence,
+                move_target_offset_pos=move_target_offset_pos,
+                move_target_offset_rot=move_target_offset_rot
             )
 
             # Calculate pose errors for updated angles
@@ -2957,7 +2997,8 @@ class RobotModel(CascadedLink):
             self, link_list, target_poses, joint_angles_current, alpha, base_to_source,
             rotation_axis_list, translation_axis_list,
             actual_joint_list, min_angles, max_angles,
-            joint_list_for_fk=None):
+            joint_list_for_fk=None,
+            move_target_offset_pos=None, move_target_offset_rot=None):
         """Batch IK step with per-problem axis constraints.
 
         Args:
@@ -2982,13 +3023,17 @@ class RobotModel(CascadedLink):
         # Get current poses for error calculation
         current_poses = self._forward_kinematics_batch(
             link_list, joint_angles_with_mimic, return_quaternion=True, base_to_source=base_to_source,
-            joint_list_override=joint_list_for_fk
+            joint_list_override=joint_list_for_fk,
+            move_target_offset_pos=move_target_offset_pos,
+            move_target_offset_rot=move_target_offset_rot
         )
 
         # Get jacobians (using full joint list including mimic)
         jacobian_matrices_full = self._jacobian_batch(
             link_list, joint_angles_with_mimic, base_to_source=base_to_source,
-            joint_list_override=joint_list_for_fk)
+            joint_list_override=joint_list_for_fk,
+            move_target_offset_pos=move_target_offset_pos,
+            move_target_offset_rot=move_target_offset_rot)
 
         # Reduce Jacobian to actual joints (merge mimic joint contributions)
         jacobian_matrices = self._reduce_jacobian_for_mimic(
@@ -3801,7 +3846,8 @@ class RobotModel(CascadedLink):
             link_list, x, dtype=np.float64,
             return_quaternion=True, return_full_joint_fk=False,
             return_full_link_fk=False, base_to_source=None,
-            joint_list_override=None):
+            joint_list_override=None,
+            move_target_offset_pos=None, move_target_offset_rot=None):
         """Batch forward kinematics computation."""
 
         batch_size = x.shape[0]
@@ -3836,6 +3882,17 @@ class RobotModel(CascadedLink):
                 i += 1
             base_T_joint = base_T_joint_new
 
+        # Apply move_target offset if provided
+        if move_target_offset_pos is not None or move_target_offset_rot is not None:
+            # Create local transformation matrix for the offset
+            offset_T = np.tile(np.eye(4, dtype=dtype), (batch_size, 1, 1))
+            if move_target_offset_pos is not None:
+                offset_T[:, :3, 3] = move_target_offset_pos
+            if move_target_offset_rot is not None:
+                offset_T[:, :3, :3] = move_target_offset_rot
+            # Apply offset: base_T_move_target = base_T_last_link * offset_T
+            base_T_joint = np.matmul(base_T_joint, offset_T)
+
         if return_quaternion:
             quaternions = matrix2quaternion(base_T_joint[:, 0:3, 0:3])
             translations = base_T_joint[:, 0:3, 3]
@@ -3850,7 +3907,9 @@ class RobotModel(CascadedLink):
     @staticmethod
     def _jacobian_batch(links, x: np.ndarray,
                         base_to_source=None,
-                        joint_list_override=None) -> np.ndarray:
+                        joint_list_override=None,
+                        move_target_offset_pos=None,
+                        move_target_offset_rot=None) -> np.ndarray:
         """Batch Jacobian computation."""
         batch_size = x.shape[0]
 
@@ -3869,6 +3928,19 @@ class RobotModel(CascadedLink):
         # base_T_joints[1] = first joint transform
         # ...
 
+        # Compute end effector position (with offset if provided)
+        end_effector_pos = base_T_joints[:, -1, :3, 3].copy()
+        if move_target_offset_pos is not None or move_target_offset_rot is not None:
+            # Apply offset to get move_target position
+            offset_T = np.tile(np.eye(4, dtype=np.float64), (batch_size, 1, 1))
+            if move_target_offset_pos is not None:
+                offset_T[:, :3, 3] = move_target_offset_pos
+            if move_target_offset_rot is not None:
+                offset_T[:, :3, :3] = move_target_offset_rot
+            # Compute move_target transform
+            move_target_T = np.matmul(base_T_joints[:, -1], offset_T)
+            end_effector_pos = move_target_T[:, :3, 3]
+
         J = np.zeros((batch_size, 6, ndof), dtype=np.float64)
         x_i = 0  # Index in Jacobian (movable joints only)
         base_T_idx = 1  # Index in base_T_joints (skip base_to_source at 0)
@@ -3877,7 +3949,7 @@ class RobotModel(CascadedLink):
                 axis = np.tile(joint.axis, (batch_size, 1, 1))
                 # Use base_T_idx for correct position in base_T_joints
                 world_axis = np.matmul(base_T_joints[:, base_T_idx, :3, :3], axis.reshape(batch_size, 3, 1))[:, :, 0]
-                d = base_T_joints[:, -1, :3, 3] - base_T_joints[:, base_T_idx, :3, 3]
+                d = end_effector_pos - base_T_joints[:, base_T_idx, :3, 3]
                 # Jacobian structure: [rotation (rows 0-2), translation (rows 3-5)]
                 # pose_errors is reordered to [rotation, translation] in line 3168
                 J[:, :3, x_i] = world_axis  # rotation = axis
