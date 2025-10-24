@@ -265,12 +265,12 @@ def main():
                 robot.reset_pose()
                 viewer.add(robot)
 
-                end_effector_axis = Axis.from_coords(
-                    arm.end_coords,
+                end_effector_axis = Axis(
                     axis_radius=0.006,
                     axis_length=0.10,
                     alpha=1.0
                 )
+                end_effector_axis.newcoords(arm.end_coords.copy_worldcoords())
                 viewer.add(end_effector_axis)
 
                 print(f"Added robot (will cycle through {len(successful_solutions)} solutions)")
@@ -303,7 +303,7 @@ def main():
                                 robot.angle_vector(successful_solutions[solution_idx])
                                 orig_idx = successful_indices[solution_idx]
 
-                                end_effector_axis.newcoords(arm.end_coords)
+                                end_effector_axis.newcoords(arm.end_coords.copy_worldcoords())
 
                                 for i, axis in enumerate(axis_objects):
                                     if success_flags[i]:
