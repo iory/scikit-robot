@@ -110,6 +110,42 @@ class PR2(RobotModelFromURDF):
         return r
 
     @cached_property
+    def rarm_with_torso(self):
+        rarm_with_torso_links = [
+            self.torso_lift_link,
+            self.r_shoulder_pan_link, self.r_shoulder_lift_link,
+            self.r_upper_arm_roll_link, self.r_elbow_flex_link,
+            self.r_forearm_roll_link, self.r_wrist_flex_link,
+            self.r_wrist_roll_link
+        ]
+
+        rarm_with_torso_joints = []
+        for link in rarm_with_torso_links:
+            rarm_with_torso_joints.append(link.joint)
+        r = RobotModel(link_list=rarm_with_torso_links, joint_list=rarm_with_torso_joints)
+        r.end_coords = self.rarm_end_coords
+        return r
+
+    @cached_property
+    def larm_with_torso(self):
+        larm_with_torso_links = [
+            self.torso_lift_link,
+            self.l_shoulder_pan_link,
+            self.l_shoulder_lift_link,
+            self.l_upper_arm_roll_link,
+            self.l_elbow_flex_link,
+            self.l_forearm_roll_link,
+            self.l_wrist_flex_link,
+            self.l_wrist_roll_link,
+        ]
+        larm_with_torso_joints = []
+        for link in larm_with_torso_links:
+            larm_with_torso_joints.append(link.joint)
+        r = RobotModel(link_list=larm_with_torso_links, joint_list=larm_with_torso_joints)
+        r.end_coords = self.larm_end_coords
+        return r
+
+    @cached_property
     def head(self):
         links = [
             self.head_pan_link,
