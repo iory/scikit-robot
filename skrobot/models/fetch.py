@@ -68,3 +68,21 @@ class Fetch(RobotModelFromURDF):
                        joint_list=rarm_joints)
         r.end_coords = self.rarm_end_coords
         return r
+
+    @cached_property
+    def rarm_with_torso(self):
+        rarm_with_torso_links = [self.torso_lift_link,
+                                 self.shoulder_pan_link,
+                                 self.shoulder_lift_link,
+                                 self.upperarm_roll_link,
+                                 self.elbow_flex_link,
+                                 self.forearm_roll_link,
+                                 self.wrist_flex_link,
+                                 self.wrist_roll_link]
+        rarm_with_torso_joints = []
+        for link in rarm_with_torso_links:
+            rarm_with_torso_joints.append(link.joint)
+        r = RobotModel(link_list=rarm_with_torso_links,
+                       joint_list=rarm_with_torso_joints)
+        r.end_coords = self.rarm_end_coords
+        return r

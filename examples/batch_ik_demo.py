@@ -49,6 +49,8 @@ def main():
     parser.add_argument('--viewer', type=str,
                         choices=['pyrender', 'trimesh'], default='trimesh',
                         help='Choose the viewer type: trimesh or pyrender. Default: trimesh')
+    parser.add_argument('--with-torso', action='store_true',
+                        help='Include torso in IK (PR2 and Fetch only)')
 
     args = parser.parse_args()
 
@@ -60,6 +62,8 @@ def main():
     print("=" * 55)
     print("Configuration:")
     print(f"   Robot: {args.robot.upper()}")
+    if args.with_torso and args.robot in ['pr2', 'fetch']:
+        print("   With torso: Yes")
     print(f"   Rotation axis: {rotation_axis}")
     print(f"   Translation axis: {translation_axis}")
     print(f"   Attempts per pose: {args.attempts_per_pose}")
@@ -70,10 +74,10 @@ def main():
     # Initialize robot based on selection
     if args.robot == 'fetch':
         robot = Fetch()
-        arm = robot.rarm
+        arm = robot.rarm_with_torso if args.with_torso else robot.rarm
     elif args.robot == 'pr2':
         robot = PR2()
-        arm = robot.rarm
+        arm = robot.rarm_with_torso if args.with_torso else robot.rarm
     elif args.robot == 'panda':
         robot = Panda()
         arm = robot.rarm
