@@ -8,6 +8,7 @@ import numpy as np
 from skrobot.coordinates import Coordinates
 from skrobot.model.primitives import Axis
 from skrobot.models import Fetch
+from skrobot.models import Nextage
 from skrobot.models import Panda
 from skrobot.models import PR2
 from skrobot.models import R8_6
@@ -27,7 +28,7 @@ def parse_axis_constraint(axis_str):
 def main():
     parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with axis constraints')
     parser.add_argument('--robot', type=str, default='pr2',
-                        choices=['fetch', 'pr2', 'panda', 'r8_6'],
+                        choices=['fetch', 'pr2', 'panda', 'r8_6', 'nextage'],
                         help='Robot model to use. Default: fetch')
     parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
                         default='True',
@@ -84,6 +85,9 @@ def main():
     elif args.robot == 'r8_6':
         robot = R8_6()
         arm = robot.rarm
+    elif args.robot == 'nextage':
+        robot = Nextage()
+        arm = robot.rarm
 
     robot.reset_pose()
 
@@ -101,6 +105,23 @@ def main():
             Coordinates(pos=(0.78, -0.28, 0.93)).rotate(np.deg2rad(-5), 'y'),
             Coordinates(pos=(0.46, -0.24, 0.89)).rotate(np.deg2rad(8), 'z').rotate(np.deg2rad(3), 'x'),
             Coordinates(pos=(0.56, -0.24, 0.89)),
+        ]
+    elif args.robot == 'nextage':
+        target_poses = [
+            Coordinates(pos=(0.3, -0.25, -0.1)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-25), 'z'),
+            Coordinates(pos=(0.3, -0.25, -0.15)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-30), 'z'),
+            Coordinates(pos=(0.4, -0.2, -0.1)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(15), 'y').rotate(
+                np.deg2rad(-15), 'z'),
+            Coordinates(pos=(0.28, -0.18, -0.08)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(90), 'x'),
+            Coordinates(pos=(0.35, -0.2, -0.12)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(45), 'x'),
+            Coordinates(pos=(0.35, -0.22, -0.08)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-30), 'y').rotate(
+                np.deg2rad(15), 'z'),
         ]
     else:
         # Default target poses for Fetch/PR2/Panda
