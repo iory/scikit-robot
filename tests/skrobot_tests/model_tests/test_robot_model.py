@@ -1040,3 +1040,49 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(joint.max_angle, joint.max_joint_angle)
         joint.max_joint_angle = 2.0
         self.assertAlmostEqual(joint.max_angle, 2.0)
+
+    def test_batch_inverse_kinematics_with_offset_end_coords(self):
+        """Test batch IK with offset end_coords (e.g., tool offset).
+
+        This test verifies that batch IK correctly handles cases where
+        end_coords has a local offset from the last link. This simulates
+        scenarios like tool offsets or gripper tips.
+        """
+        pr2 = self.pr2
+        pr2.init_pose()
+
+        # Create a custom end_coords with 100mm offset in X direction
+        offset_end_coords = CascadedCoords(
+            parent=pr2.rarm.end_coords.parent,
+            name='offset_tool'
+        )
+        offset_end_coords.translate([0.1, 0, 0])  # 100mm offset
+
+        # Use current robot pose as the target (should be reachable)
+        target_coords = [
+            skrobot.coordinates.Coordinates().newcoords(offset_end_coords)
+        ]
+
+        # Run batch IK with offset end_coords
+        solutions, success_flags, _ = pr2.batch_inverse_kinematics(
+            target_coords,
+            move_target=offset_end_coords,
+            rotation_axis=False,  # Only position
+            stop=200,
+            attempts_per_pose=10,
+            thre=0.001
+        )
+
+        # Verify at least some poses were solved
+        self.assertGreater(sum(success_flags), 0, "At least one pose should be solved")
+
+        # Verify position accuracy for successful solutions
+        for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+            if success:
+                pr2.angle_vector(solution)
+                achieved_pos = offset_end_coords.worldpos()
+                pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
+                self.assertLess(
+                    pos_error, 0.01,
+                    f"Position error too large for pose {i} with offset end_coords: {pos_error * 1000:.1f}mm"
+                )
