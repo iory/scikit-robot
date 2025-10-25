@@ -108,12 +108,20 @@ def main():
         ]
     elif args.robot == 'nextage':
         target_poses = [
-            Coordinates(pos=(0.3, -0.25, -0.1)).rotate(np.pi, 'y').rotate(np.deg2rad(-25), 'z'),
-            Coordinates(pos=(0.3, -0.25, -0.15)).rotate(np.pi, 'y').rotate(np.deg2rad(-30), 'z'),
-            Coordinates(pos=(0.4, -0.2, -0.1)).rotate(np.pi, 'y').rotate(np.deg2rad(15), 'y').rotate(np.deg2rad(-15), 'z'),
-            Coordinates(pos=(0.28, -0.18, -0.08)).rotate(np.pi, 'y').rotate(np.deg2rad(90), 'x'),
-            Coordinates(pos=(0.35, -0.2, -0.12)).rotate(np.pi, 'y').rotate(np.deg2rad(45), 'x'),
-            Coordinates(pos=(0.35, -0.22, -0.08)).rotate(np.pi, 'y').rotate(np.deg2rad(-30), 'y').rotate(np.deg2rad(15), 'z'),
+            Coordinates(pos=(0.3, -0.25, -0.1)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-25), 'z'),
+            Coordinates(pos=(0.3, -0.25, -0.15)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-30), 'z'),
+            Coordinates(pos=(0.4, -0.2, -0.1)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(15), 'y').rotate(
+                np.deg2rad(-15), 'z'),
+            Coordinates(pos=(0.28, -0.18, -0.08)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(90), 'x'),
+            Coordinates(pos=(0.35, -0.2, -0.12)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(45), 'x'),
+            Coordinates(pos=(0.35, -0.22, -0.08)).rotate(
+                np.pi, 'y').rotate(np.deg2rad(-30), 'y').rotate(
+                np.deg2rad(15), 'z'),
         ]
     else:
         # Default target poses for Fetch/PR2/Panda

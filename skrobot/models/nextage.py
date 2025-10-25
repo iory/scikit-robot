@@ -97,4 +97,3 @@ class Nextage(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.head_end_coords
         return model
-
