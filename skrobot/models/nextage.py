@@ -1,7 +1,7 @@
 from cached_property import cached_property
 import numpy as np
 
-from ..coordinates import Coordinates
+from ..coordinates import CascadedCoords
 from ..data import nextage_urdfpath
 from ..model import RobotModel
 from .urdf import RobotModelFromURDF
@@ -20,6 +20,26 @@ class Nextage(RobotModelFromURDF):
 
     def __init__(self, *args, **kwargs):
         super(Nextage, self).__init__(*args, **kwargs)
+
+        # End effector coordinates
+        self.rarm_end_coords = CascadedCoords(
+            pos=[-0.185, 0.0, -0.01],
+            parent=self.RARM_JOINT5_Link,
+            name='rarm_end_coords')
+        self.rarm_end_coords.rotate(-np.pi / 2.0, 'y')
+
+        self.larm_end_coords = CascadedCoords(
+            pos=[-0.185, 0.0, -0.01],
+            parent=self.LARM_JOINT5_Link,
+            name='larm_end_coords')
+        self.larm_end_coords.rotate(-np.pi / 2.0, 'y')
+
+        self.head_end_coords = CascadedCoords(
+            pos=[0.06, 0, 0.025],
+            parent=self.HEAD_JOINT1_Link,
+            name='head_end_coords')
+        self.head_end_coords.rotate(np.deg2rad(90), 'y')
+
         self.reset_pose()
 
     @cached_property
@@ -78,24 +98,3 @@ class Nextage(RobotModelFromURDF):
         model.end_coords = self.head_end_coords
         return model
 
-    @cached_property
-    def rarm_end_coords(self):
-        end_coords = Coordinates()
-        self.RARM_JOINT5_Link.assoc(end_coords)
-        end_coords.newcoords(self.RARM_JOINT5_Link.copy_worldcoords())
-        end_coords.translate([-0.185, 0.0, -0.01])
-        end_coords.rotate(-np.pi / 2.0, 'y')
-        return end_coords
-
-    @cached_property
-    def larm_end_coords(self):
-        end_coords = Coordinates()
-        self.LARM_JOINT5_Link.assoc(end_coords)
-        end_coords.newcoords(self.LARM_JOINT5_Link.copy_worldcoords())
-        end_coords.translate([-0.185, 0.0, -0.01])
-        end_coords.rotate(-np.pi / 2.0, 'y')
-        return end_coords
-
-    @cached_property
-    def head_end_coords(self):
-        return self.HEAD_JOINT1_Link
