@@ -60,3 +60,9 @@ except ImportError as error_log:
     warn_gl(error_log)
     class PyrenderViewer(DummyViewer):
         pass
+
+try:
+    from ._notebook import JupyterNotebookViewer
+except ImportError:
+    class JupyterNotebookViewer(DummyViewer):
+        pass
