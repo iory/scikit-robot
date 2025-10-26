@@ -3,6 +3,7 @@
 ![PyPI](https://img.shields.io/pypi/v/scikit-robot.svg)
 ![Python Versions](https://img.shields.io/pypi/pyversions/scikit-robot.svg)
 [![Build Status](https://github.com/iory/scikit-robot/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/iory/scikit-robot/actions)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/iory/scikit-robot/blob/main/examples/notebooks/colab_jupyter_viewer_demo.ipynb)
 
 
 <h4>
