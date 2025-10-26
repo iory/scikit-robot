@@ -103,12 +103,46 @@ If you want to build your own robot from scratch, you can refer to the [How to C
 ![Create URDF from Solidworks](docs/image/urdf-from-solidworks.png)
 
 
+## Try it in Google Colab!
+
+You can try scikit-robot directly in your browser without any installation:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/iory/scikit-robot/blob/main/examples/notebooks/colab_jupyter_viewer_demo.ipynb)
+
+This interactive notebook demonstrates:
+- Multiple robot models (Kuka, Fetch, Nextage, PR2, Panda) with synchronized animation
+- Grasp and pull manipulation task with inverse kinematics
+- 3D visualization in Jupyter/Colab with smooth updates
+
+## Jupyter Notebook Viewer
+
+Scikit-robot includes `JupyterNotebookViewer` for interactive 3D visualization in Jupyter notebooks and Google Colab:
+
+```python
+import skrobot
+
+# Create robot and viewer
+robot = skrobot.models.PR2()
+viewer = skrobot.viewers.JupyterNotebookViewer(height=600)
+viewer.add(robot)
+
+# Display and animate
+viewer.show()
+
+for _ in range(10):
+    robot.rarm.angle_vector([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+    viewer.redraw()  # Smooth updates without flickering
+```
+
+See [examples/notebooks/](examples/notebooks/) for more examples.
+
 ## Features
 
 - [x] Loading robot model from URDF ([examples/robot_models.py](examples/robot_models.py))
 - [x] Forward and inverse kinematics ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py) [examples/pr2_inverse_kinematics.py](examples/pr2_inverse_kinematics.py))
 - [x] Collision detection
 - [x] Interactive viewer ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
+- [x] Jupyter notebook viewer ([examples/notebooks/](examples/notebooks/))
 - [x] Pybullet and ROS command interface ([examples/pybullet_robot_interface.py](examples/pybullet_robot_interface.py))
 - [x] Forward and inverse dynamics
 - [x] Path planning ([examples/collision_free_trajectory.py](examples/collision_free_trajectory.py))

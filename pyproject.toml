@@ -1,6 +1,6 @@
 [tool.ruff]
-# Exclude directories from linting
-extend-exclude = [".?*", "src/", "build", "docs"]
+# Exclude directories and file types from linting
+extend-exclude = [".?*", "src/", "build", "docs", "*.ipynb"]
 line-length = 120
 
 [tool.ruff.lint]
