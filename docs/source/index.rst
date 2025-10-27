@@ -18,11 +18,36 @@ robot moving after being loaded by this library.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Getting Started
 
    install/index.rst
-   cli.rst
+   tutorials/quickstart.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Understanding Scikit-Robot
+
+   overview/index.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User Guide
+
+   tutorials/index.rst
    examples/index.rst
+   examples_guide/index.rst
+   cli.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
    reference/index.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Development
+
    development/index.rst
 
 
