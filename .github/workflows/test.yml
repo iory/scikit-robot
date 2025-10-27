@@ -55,11 +55,19 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install --no-cache-dir .\[all\]
-    - name: Build Sphinx Documentation
+    - name: Build Sphinx Documentation (HTML)
       working-directory: ./docs/source
       run: |
         mkdir -p _build/doctrees
         sphinx-build -T -W --keep-going -b html -d _build/doctrees -D language=en . _build/html
+    - name: Install LaTeX dependencies
+      run: |
+        sudo apt-get update -qq -y
+        sudo apt-get install -qq -y texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended latexmk
+    - name: Build Sphinx Documentation (PDF)
+      working-directory: ./docs
+      run: |
+        make latexpdf
 
   requirements-formatting:
     name: Check Requirements Formatting
