@@ -149,7 +149,10 @@ latex_elements = {
 
     # Additional stuff for the LaTeX preamble.
     #
-    # 'preamble': '',
+    'preamble': r'''
+\usepackage{enumitem}
+\setlistdepth{99}
+''',
 
     # Latex figure (float) alignment
     #
