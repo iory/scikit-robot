@@ -3344,8 +3344,19 @@ class URDF(URDFType):
 
         This method handles empty material names and duplicate names
         by creating unique internal names while preserving the original behavior.
+
+        It also caches materials based on content (color and texture)
+        to reuse existing material instances if they are visually identical.
         """
         material_name_counter = {}
+
+        # Build content-based cache from top-level materials
+        content_cache = {}
+        for material in self._materials:
+            color_key = tuple(material.color) if material.color is not None else None
+            cache_key = (color_key, material.texture)
+            if cache_key not in content_cache:
+                content_cache[cache_key] = material
 
         for link in self.links:
             for v in link.visuals:
@@ -3353,7 +3364,24 @@ class URDF(URDFType):
                     continue
 
                 # Get the original material name
-                original_name = v.material.name
+                current_material = v.material
+                original_name = current_material.name
+
+                # Check content-based cache first
+                color_key = tuple(current_material.color) if current_material.color is not None else None
+                cache_key = (color_key, current_material.texture)
+
+                if cache_key in content_cache:
+                    # Reuse existing material with matching content
+                    v.material = content_cache[cache_key]
+
+                    if original_name and \
+                       original_name not in material_name_counter and \
+                       original_name not in self._material_map:
+
+                        material_name_counter[original_name] = 0
+
+                    continue
 
                 # If the name is empty or we need to handle duplicates
                 if not original_name or original_name in material_name_counter:
@@ -3372,22 +3400,29 @@ class URDF(URDFType):
                     # but keeping all other properties
                     new_material = Material(
                         name=unique_name,
-                        color=v.material.color,
-                        texture=v.material.texture
+                        color=current_material.color,
+                        texture=current_material.texture
                     )
                     v.material = new_material
 
                     # Add to materials list and map
                     self._materials.append(v.material)
                     self._material_map[unique_name] = v.material
+
+                    # Add to content cache
+                    content_cache[cache_key] = v.material
+
                 else:
-                    # First occurrence of this name - use original behavior
+                    # First occurrence of this name with new content
                     if original_name in self.material_map:
                         v.material = self._material_map[original_name]
                     else:
                         self._materials.append(v.material)
                         self._material_map[original_name] = v.material
                         material_name_counter[original_name] = 0
+
+                        # Add to content cache
+                        content_cache[cache_key] = v.material
 
     @staticmethod
     def load(file_obj):
