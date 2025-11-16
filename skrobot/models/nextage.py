@@ -97,3 +97,11 @@ class Nextage(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.head_end_coords
         return model
+
+    @cached_property
+    def torso(self):
+        link_names = ["CHEST_JOINT0_Link"]
+        links = [getattr(self, n) for n in link_names]
+        joints = [l.joint for l in links]
+        model = RobotModel(link_list=links, joint_list=joints)
+        return model
