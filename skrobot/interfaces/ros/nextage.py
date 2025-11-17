@@ -155,11 +155,11 @@ class LHandInterface:
     def stop_grasp(self, **kwargs):
         return self.move_hand(0.0, **kwargs)
 
-    def open_forceps(self, wait=False, tm=1.0):
+    def open_forceps(self, wait=False, tm=0.2):
         return self.move_hand(-2.2, wait, tm)
 
-    def close_forceps(self, wait=False, tm=1.0):
-        return self.move_hand(-2.7, wait, tm)
+    def close_forceps(self, wait=False, tm=0.2):
+        return self.move_hand(-3.2, wait, tm)
 
 
 class RHandInterface:
@@ -188,8 +188,8 @@ class RHandInterface:
     def stop_grasp(self, **kwargs):
         return self.move_hand(0.0, **kwargs)
 
-    def open_holder(self, wait=True, tm=1.0):
-        return self.move_hand(-0.1, wait, tm)
+    def open_holder(self, wait=True, tm=0.2):
+        return self.move_hand(-0.20, wait, tm)
 
-    def close_holder(self, wait=True, tm=1.0):
+    def close_holder(self, wait=True, tm=0.2):
         return self.move_hand(0.08, wait, tm)
