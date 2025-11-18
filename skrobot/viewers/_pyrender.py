@@ -12,29 +12,27 @@ import pyglet
 from pyglet import compat_platform
 
 
-# WSL2 Ubuntu 20.04 specific fix for pyrender
-# Check if running in WSL2 environment
+# WSL2 and Wayland specific fix for pyrender
+# Set PYOPENGL_PLATFORM to GLX for proper OpenGL context management
 if platform.system() == 'Linux':
-    # Check for WSL-specific indicators
+    needs_glx = False
+
+    # Check for WSL2 environment
     if os.path.exists('/proc/version'):
         try:
             with open('/proc/version', 'r') as f:
                 version_info = f.read().lower()
+            if 'microsoft' in version_info or 'wsl' in version_info:
+                needs_glx = True
         except (OSError, IOError, PermissionError):
-            version_info = ""
-        if 'microsoft' in version_info or 'wsl' in version_info:
-            # Check Ubuntu version
-            if os.path.exists('/etc/os-release'):
-                try:
-                    with open('/etc/os-release', 'r') as f:
-                        os_info = f.read()
-                except (OSError, IOError, PermissionError):
-                    os_info = ""
-                if '20.04' in os_info:
-                    # Set PYOPENGL_PLATFORM to GLX for WSL2 Ubuntu 20.04
-                    # This ensures proper rendering with X11 forwarding
-                    if 'PYOPENGL_PLATFORM' not in os.environ:
-                        os.environ['PYOPENGL_PLATFORM'] = 'glx'
+            pass
+
+    # Check for Wayland session (Ubuntu 24.04+ default)
+    if os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland':
+        needs_glx = True
+
+    if needs_glx and 'PYOPENGL_PLATFORM' not in os.environ:
+        os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import pyrender
 from pyrender.trackball import Trackball
@@ -119,6 +117,7 @@ class PyrenderViewer(pyrender.Viewer):
             self.show_collision = False
 
         self._redraw = True
+        self._context_initialized = False
 
         refresh_rate = 1.0 / update_interval
         self._kwargs = dict(
@@ -143,6 +142,8 @@ class PyrenderViewer(pyrender.Viewer):
     def show(self):
         if self.thread is not None and self.thread.is_alive():
             return
+        # Reset rendering flag for new viewer session
+        self._allow_rendering = False
         distance = self._calculate_camera_distance()
         self.set_camera([np.deg2rad(45), -np.deg2rad(0), np.deg2rad(135)],
                         distance=distance)
@@ -167,6 +168,10 @@ class PyrenderViewer(pyrender.Viewer):
         from pyrender.constants import TARGET_OPEN_GL_MAJOR
         from pyrender.constants import TARGET_OPEN_GL_MINOR
         from pyrender.viewer import Viewer
+
+        # Block rendering during window creation
+        self._allow_rendering = False
+
         confs = [Config(sample_buffers=1, samples=4,
                         depth_size=24,
                         double_buffer=True,
@@ -205,6 +210,16 @@ class PyrenderViewer(pyrender.Viewer):
         )
         self.switch_to()
         self.set_caption(self.viewer_flags['window_title'])
+        # Mark context as initialized
+        self._context_initialized = True
+
+        # Schedule _allow_rendering=True after event loop starts
+        # This ensures pending on_resize events are skipped
+        def enable_rendering(dt):
+            self._allow_rendering = True
+
+        clock.schedule_once(enable_rendering, 0.1)
+
         if compat_platform != 'darwin':
             pyglet.app.run()
 
@@ -214,12 +229,23 @@ class PyrenderViewer(pyrender.Viewer):
             _redraw_all_windows()
 
     def on_draw(self):
-        if not self._redraw:
-            with self._render_lock:
-                super(PyrenderViewer, self).on_draw()
+        # Block rendering until initialization is complete
+        if not getattr(self, '_allow_rendering', False):
+            return
+
+        # Ensure context is ready before drawing
+        if not self.context:
+            return
+        try:
+            self.switch_to()
+        except Exception:
+            # Context not ready yet, skip this draw event
             return
 
         with self._render_lock:
+            if not self._redraw:
+                super(PyrenderViewer, self).on_draw()
+                return
             # apply latest angle-vector
             for link_id, (node, link) in self._visual_mesh_map.items():
                 link.update(force=True)
@@ -330,6 +356,21 @@ class PyrenderViewer(pyrender.Viewer):
         return super(PyrenderViewer, self).on_key_press(symbol, modifiers, *args, **kwargs)
 
     def on_resize(self, *args, **kwargs):
+        # Block rendering until initialization is complete
+        if not getattr(self, '_allow_rendering', False):
+            # Still need to set viewport size even if we skip rendering
+            if self.context:
+                self._viewport_size = args if args else (self.width, self.height)
+            return
+
+        # Ensure context is current before handling resize
+        if not self.context:
+            return
+        try:
+            self.switch_to()
+        except Exception:
+            # Context not ready yet, skip this resize event
+            return
         self._redraw = True
         return super(PyrenderViewer, self).on_resize(*args, **kwargs)
 
