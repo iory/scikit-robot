@@ -66,3 +66,9 @@ try:
 except ImportError:
     class JupyterNotebookViewer(DummyViewer):
         pass
+
+try:
+    from ._viser import ViserVisualizer
+except ImportError:
+    class ViserVisualizer(DummyViewer):
+        pass
