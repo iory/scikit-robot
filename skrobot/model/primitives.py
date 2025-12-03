@@ -101,6 +101,16 @@ class Axis(Link):
 
         super(Axis, self).__init__(pos=pos, rot=rot, name=name,
                                    visual_mesh=visual_mesh)
+        self._axis_length = axis_length
+        self._axis_radius = axis_radius
+
+    @property
+    def axis_length(self):
+        return self._axis_length
+
+    @property
+    def axis_radius(self):
+        return self._axis_radius
 
     @classmethod
     def from_coords(cls, coords, **kwargs):
@@ -136,14 +146,17 @@ class Box(Link, SDFImplemented):
         super(Box, self).__init__(pos=pos, rot=rot, name=name,
                                   collision_mesh=mesh,
                                   visual_mesh=mesh)
-        self.extents = extents
-        self._extents = extents  # for backward compatibility
+        self._extents = extents
         if with_sdf:
             sdf = BoxSDF(extents)
             self.assoc(sdf, relative_coords="local")
             self._sdf = sdf
         else:
             self._sdf = None
+
+    @property
+    def extents(self):
+        return self._extents
 
 
 class CameraMarker(Link):
@@ -244,13 +257,17 @@ class Sphere(Link, SDFImplemented):
                                      collision_mesh=mesh,
                                      visual_mesh=mesh)
 
-        self.radius = radius
+        self._radius = radius
         if with_sdf:
             sdf = SphereSDF(radius)
             self.assoc(sdf, relative_coords="local")
             self._sdf = sdf
         else:
             self._sdf = None
+
+    @property
+    def radius(self):
+        return self._radius
 
 
 class Annulus(Link):

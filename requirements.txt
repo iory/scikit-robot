@@ -26,3 +26,4 @@ scipy<=1.2.3;python_version<"3.0"
 scipy>=1.6.3;python_version>="3.8"
 six
 trimesh>=3.9.0,!=3.23.0
+viser
