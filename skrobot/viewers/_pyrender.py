@@ -218,9 +218,12 @@ class PyrenderViewer(pyrender.Viewer):
         def enable_rendering(dt):
             self._allow_rendering = True
 
-        clock.schedule_once(enable_rendering, 0.1)
-
-        if compat_platform != 'darwin':
+        if compat_platform == 'darwin':
+            # On macOS, pyglet.app.run() is not called, so we enable rendering directly
+            # after a short delay via multiple redraw cycles in show()
+            self._allow_rendering = True
+        else:
+            clock.schedule_once(enable_rendering, 0.1)
             pyglet.app.run()
 
     def redraw(self):
