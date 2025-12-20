@@ -1,6 +1,47 @@
 # flake8: noqa
 
 import sys
+import warnings
+
+
+def _check_correct_package_installed():
+    """Check if scikit-robot is correctly installed instead of wrong 'skrobot' package."""
+    try:
+        if sys.version_info >= (3, 7):
+            import importlib.metadata
+            try:
+                importlib.metadata.version('scikit-robot')
+                return True
+            except importlib.metadata.PackageNotFoundError:
+                pass
+        else:
+            import pkg_resources
+            try:
+                pkg_resources.get_distribution('scikit-robot')
+                return True
+            except pkg_resources.DistributionNotFound:
+                pass
+    except Exception:
+        return True
+
+    warnings.warn(
+        "\n"
+        "=" * 70 + "\n"
+        "WARNING: Wrong 'skrobot' package detected!\n"
+        "=" * 70 + "\n"
+        "It appears you have installed the wrong package.\n"
+        "You may have run 'pip install skrobot' instead of 'pip install scikit-robot'.\n\n"
+        "To fix this, please run:\n"
+        "    pip uninstall skrobot\n"
+        "    pip install scikit-robot\n"
+        "=" * 70,
+        UserWarning,
+        stacklevel=2
+    )
+    return False
+
+
+_check_correct_package_installed()
 
 
 if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
