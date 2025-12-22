@@ -110,15 +110,16 @@ class ROSRobotInterfaceBase(object):
         self.namespace = namespace
         self._joint_state_msg = None
         if self.namespace:
-            rospy.Subscriber('{}/{}'.format(
+            self.joint_states_sub = rospy.Subscriber('{}/{}'.format(
                 self.namespace, joint_states_topic),
                 JointState,
                 callback=self.joint_state_callback,
                 queue_size=joint_states_queue_size)
         else:
-            rospy.Subscriber(joint_states_topic, JointState,
-                             callback=self.joint_state_callback,
-                             queue_size=joint_states_queue_size)
+            self.joint_states_sub = rospy.Subscriber(
+                joint_states_topic, JointState,
+                callback=self.joint_state_callback,
+                queue_size=joint_states_queue_size)
 
         self.controller_table = {}
         self.controller_param_table = {}
