@@ -187,17 +187,42 @@ class ROSRobotInterfaceBase(object):
                 'time is invalid type. {}'.format(time))
         return time
 
-    def wait_until_update_all_joints(self, tgt_tm):
-        """TODO"""
+    def wait_until_update_all_joints(self, tgt_tm, timeout=3.0):
+        """Wait until all joints have been updated.
+
+        Parameters
+        ----------
+        tgt_tm : rospy.Time or bool
+            Target time to compare against joint update timestamps.
+        timeout : float
+            Maximum time to wait in seconds. Default is 3.0.
+        """
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
             initial_time = rospy.Time.now().to_nsec()
-        while True:
+        start_wait = rospy.get_time()
+        while not rospy.is_shutdown():
             if 'stamp_list' in self.robot_state \
-               and all(map(lambda ts: ts.to_nsec() > initial_time,
+               and all(map(lambda ts: ts is not None
+                           and ts.to_nsec() > initial_time,
                            self.robot_state['stamp_list'])):
-                return
+                return True
+            if (rospy.get_time() - start_wait) > timeout:
+                not_updated_joints = []
+                if 'stamp_list' in self.robot_state \
+                   and 'name' in self.robot_state:
+                    stamp_list = self.robot_state['stamp_list']
+                    joint_names = self.robot_state['name']
+                    for name, ts in zip(joint_names, stamp_list):
+                        if ts is None or ts.to_nsec() <= initial_time:
+                            not_updated_joints.append(name)
+                rospy.logwarn(
+                    "wait_until_update_all_joints timeout. "
+                    "Not updated joints: {}".format(not_updated_joints))
+                return False
+            rospy.sleep(0.01)
+        return False
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
@@ -237,7 +262,8 @@ class ROSRobotInterfaceBase(object):
         TODO
         """
         if wait_until_update:
-            self.wait_until_update_all_joints(wait_until_update)
+            if not self.wait_until_update_all_joints(wait_until_update):
+                return False
         if not self.robot_state:
             return False
         joint_names = self.robot_state['name']
@@ -266,7 +292,8 @@ class ROSRobotInterfaceBase(object):
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
-            robot_state_names = msg.name
+            # Initialize with all joint names from the robot model
+            robot_state_names = [j.name for j in self.robot.joint_list]
             self.robot_state['name'] = robot_state_names
             for key in ['position', 'velocity', 'effort']:
                 self.robot_state[key] = np.zeros(len(robot_state_names))
@@ -281,6 +308,10 @@ class ROSRobotInterfaceBase(object):
             if len(joint_names) == len(joint_data):
                 data = self.robot_state[key]
                 for jn in joint_names:
+                    # Skip joint names that are not in the robot model
+                    if jn not in robot_state_names:
+                        index += 1
+                        continue
                     joint_index = robot_state_names.index(jn)
                     data[joint_index] = joint_data[index]
                     index += 1
@@ -317,7 +348,8 @@ class ROSRobotInterfaceBase(object):
         if create_actions:
             for controller in self.default_controller():
                 controller_action = controller['controller_action']
-                if self.namespace is not None:
+                if self.namespace is not None \
+                   and not controller_action.startswith('/'):
                     controller_action = '{}/{}'.format(
                         self.namespace,
                         controller_action)
@@ -358,15 +390,19 @@ class ROSRobotInterfaceBase(object):
                 controller_state = param['controller_state']
                 trajectory_status = '{}/status'.format(
                     param['controller_action'])
-                if self.namespace is not None:
+                if self.namespace is not None \
+                   and not controller_state.startswith('/'):
                     controller_state_topic_name = '{}/{}'.format(
                         self.namespace,
                         controller_state)
+                else:
+                    controller_state_topic_name = controller_state
+                if self.namespace is not None \
+                   and not trajectory_status.startswith('/'):
                     trajectory_status_topic_name = '{}/{}'.format(
                         self.namespace,
                         trajectory_status)
                 else:
-                    controller_state_topic_name = controller_state
                     trajectory_status_topic_name = trajectory_status
                 rospy.Subscriber(
                     controller_state_topic_name,
@@ -460,7 +496,10 @@ class ROSRobotInterfaceBase(object):
             angle-vector of real robots
         """
         if av is None:
-            self.update_robot_state(wait_until_update=True)
+            if not self.update_robot_state(wait_until_update=True):
+                raise RuntimeError(
+                    "Failed to get joint states: "
+                    "joint state update timed out")
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
