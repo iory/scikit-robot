@@ -1,5 +1,9 @@
 # flake8: noqa
 
 from skrobot.planner.collision_checker import SweptSphereSdfCollisionChecker
+from skrobot.planner.smooth_trajectory import compute_trajectory_smoothness
+from skrobot.planner.smooth_trajectory import generate_initial_trajectory_seeded_ik
+from skrobot.planner.smooth_trajectory import interpolate_waypoints
+from skrobot.planner.smooth_trajectory import plan_smooth_trajectory_ik
 from skrobot.planner.sqp_based import sqp_plan_trajectory
 from skrobot.planner import trajectory_optimization
