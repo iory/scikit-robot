@@ -1,5 +1,7 @@
 from cached_property import cached_property
+import numpy as np
 
+from ..coordinates import CascadedCoords
 from ..data import panda_urdfpath
 from ..model import RobotModel
 from .urdf import RobotModelFromURDF
@@ -14,6 +16,15 @@ class Panda(RobotModelFromURDF):
 
     def __init__(self, *args, **kwargs):
         super(Panda, self).__init__(*args, **kwargs)
+
+        # End effector coordinate frame
+        # Based on franka_ros configuration:
+        # https://github.com/frankaemika/franka_ros/blob/0.10.1/franka_description/robots/common/franka_robot.xacro#L8
+        self.rarm_end_coords = CascadedCoords(
+            pos=[0, 0, 0.1034],
+            parent=self.panda_hand,
+            name='rarm_end_coords')
+        self.rarm_end_coords.rotate(np.deg2rad(-90), 'y')
         self.reset_pose()
 
     @cached_property
@@ -44,5 +55,5 @@ class Panda(RobotModelFromURDF):
         links = [getattr(self, n) for n in link_names]
         joints = [l.joint for l in links]
         model = RobotModel(link_list=links, joint_list=joints)
-        model.end_coords = self.panda_hand
+        model.end_coords = self.rarm_end_coords
         return model
