@@ -537,6 +537,7 @@ def optimize_wall_mount_base(robot, wall, target_poses,
                              max_suction_radius=0.30,
                              min_protrusion_distance=0.08,
                              min_protrusion_area=0.04,
+                             symmetric_protrusions=False,
                              max_iterations=200,
                              verbose=False,
                              callback=None):
@@ -576,6 +577,9 @@ def optimize_wall_mount_base(robot, wall, target_poses,
         Minimum distance between protrusions
     min_protrusion_area : float
         Minimum area of protrusion quadrilateral in m^2 (default: 0.005 = 50 cm^2)
+    symmetric_protrusions : bool
+        If True, constrain protrusions to form a symmetric rectangle.
+        Only 2 parameters (half_width_x, half_width_y) are optimized instead of 8.
     max_iterations : int
         Maximum optimization iterations
     verbose : bool
@@ -632,43 +636,80 @@ def optimize_wall_mount_base(robot, wall, target_poses,
         initial_base_position = np.array([initial_x, initial_y])
 
     # Build initial x vector
-    # x = [base_x, base_y, suction_radius (optional), p1_x, p1_y, p2_x, p2_y, p3_x, p3_y, p4_x, p4_y]
     s = initial_protrusion_size / 2
-    initial_protrusions = np.array([
-        [-s, -s],
-        [s, -s],
-        [s, s],
-        [-s, s]
-    ])
 
-    if optimize_suction_radius:
-        x0 = np.concatenate([
-            initial_base_position,
-            [initial_suction_radius],
-            initial_protrusions.flatten()
-        ])
-        n_base = 3  # base_x, base_y, suction_radius
+    if symmetric_protrusions:
+        # Symmetric mode: x = [base_x, base_y, suction_radius (opt), half_w_x, half_w_y]
+        # Protrusions at: (-hw_x, -hw_y), (+hw_x, -hw_y), (+hw_x, +hw_y), (-hw_x, +hw_y)
+        if optimize_suction_radius:
+            x0 = np.concatenate([
+                initial_base_position,
+                [initial_suction_radius],
+                [s, s]  # half_width_x, half_width_y
+            ])
+            n_base = 3  # base_x, base_y, suction_radius
+        else:
+            x0 = np.concatenate([
+                initial_base_position,
+                [s, s]
+            ])
+            n_base = 2
+            fixed_suction_radius = initial_suction_radius
+
+        # Bounds
+        base_bounds = [
+            (-wall.x_length / 2, wall.x_length / 2),
+            (-wall.y_length / 2, wall.y_length / 2),
+        ]
+        if optimize_suction_radius:
+            base_bounds.append((min_suction_radius, max_suction_radius))
+
+        # Symmetric protrusion bounds (half-widths must be positive)
+        min_half_width = np.sqrt(min_protrusion_area) / 2
+        max_prot_dist = 0.3
+        prot_bounds = [(min_half_width, max_prot_dist)] * 2
+
+        bounds = base_bounds + prot_bounds
+        n_prot_params = 2
     else:
-        x0 = np.concatenate([
-            initial_base_position,
-            initial_protrusions.flatten()
+        # Full mode: x = [base_x, base_y, suction_radius (opt),
+        #                 p1_x, p1_y, p2_x, p2_y, p3_x, p3_y, p4_x, p4_y]
+        initial_protrusions = np.array([
+            [-s, -s],
+            [s, -s],
+            [s, s],
+            [-s, s]
         ])
-        n_base = 2  # base_x, base_y
-        fixed_suction_radius = initial_suction_radius
 
-    # Bounds
-    base_bounds = [
-        (-wall.x_length / 2, wall.x_length / 2),
-        (-wall.y_length / 2, wall.y_length / 2),
-    ]
-    if optimize_suction_radius:
-        base_bounds.append((min_suction_radius, max_suction_radius))
+        if optimize_suction_radius:
+            x0 = np.concatenate([
+                initial_base_position,
+                [initial_suction_radius],
+                initial_protrusions.flatten()
+            ])
+            n_base = 3  # base_x, base_y, suction_radius
+        else:
+            x0 = np.concatenate([
+                initial_base_position,
+                initial_protrusions.flatten()
+            ])
+            n_base = 2  # base_x, base_y
+            fixed_suction_radius = initial_suction_radius
 
-    # Protrusion bounds (relative to base, within reasonable range)
-    max_prot_dist = 0.3  # Max 30cm from center
-    prot_bounds = [(-max_prot_dist, max_prot_dist)] * 8
+        # Bounds
+        base_bounds = [
+            (-wall.x_length / 2, wall.x_length / 2),
+            (-wall.y_length / 2, wall.y_length / 2),
+        ]
+        if optimize_suction_radius:
+            base_bounds.append((min_suction_radius, max_suction_radius))
 
-    bounds = base_bounds + prot_bounds
+        # Protrusion bounds (relative to base, within reasonable range)
+        max_prot_dist = 0.3  # Max 30cm from center
+        prot_bounds = [(-max_prot_dist, max_prot_dist)] * 8
+
+        bounds = base_bounds + prot_bounds
+        n_prot_params = 8
 
     # Create wall-mounted model
     model = WallMountedRobotModel(robot, wall, end_coords=end_coords)
@@ -678,10 +719,22 @@ def optimize_wall_mount_base(robot, wall, target_poses,
         base_pos = x[:2]
         if optimize_suction_radius:
             suction_r = x[2]
-            prot_pos = x[3:].reshape(4, 2)
+            prot_start = 3
         else:
             suction_r = fixed_suction_radius
-            prot_pos = x[2:].reshape(4, 2)
+            prot_start = 2
+
+        if symmetric_protrusions:
+            # Convert half-widths to 4 symmetric positions
+            hw_x, hw_y = x[prot_start], x[prot_start + 1]
+            prot_pos = np.array([
+                [-hw_x, -hw_y],
+                [+hw_x, -hw_y],
+                [+hw_x, +hw_y],
+                [-hw_x, +hw_y]
+            ])
+        else:
+            prot_pos = x[prot_start:].reshape(4, 2)
         return base_pos, suction_r, prot_pos
 
     def objective(x):
