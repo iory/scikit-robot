@@ -220,10 +220,11 @@ def main():
         initial_suction_radius=0.20,
         initial_protrusion_size=0.45,
         optimize_suction_radius=True,
+        symmetric_protrusions=False,
         min_suction_radius=0.15,
         max_suction_radius=0.35,
         min_protrusion_area=0.06,
-        max_iterations=200,
+        max_iterations=1000,
         verbose=not args.visualize_optimization,
         callback=callback
     )
