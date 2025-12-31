@@ -165,7 +165,23 @@ def main():
         action='store_true',
         help="Skip the revert_if_fail demonstration"
     )
+    parser.add_argument(
+        '--translation-tolerance', '--translation_tolerance',
+        type=float, nargs=3, default=None, metavar=('X', 'Y', 'Z'),
+        help='Translation tolerance per axis in meters (e.g., 0.05 0.05 0.05)'
+    )
+    parser.add_argument(
+        '--rotation-tolerance', '--rotation_tolerance',
+        type=float, nargs=3, default=None, metavar=('R', 'P', 'Y'),
+        help='Rotation tolerance per axis in degrees (e.g., 10 10 10)'
+    )
     args = parser.parse_args()
+
+    # Process tolerance arguments
+    translation_tolerance = args.translation_tolerance
+    rotation_tolerance = None
+    if args.rotation_tolerance is not None:
+        rotation_tolerance = [np.deg2rad(v) for v in args.rotation_tolerance]
 
     # Create robot model
     robot_model = skrobot.models.PR2()
@@ -196,6 +212,10 @@ def main():
     # Define target position
     target_pos = [0.7, -0.2, 0.8]
     print("Solving inverse kinematics for target: {}".format(target_pos))
+    if translation_tolerance is not None:
+        print("Translation tolerance: {}m".format(translation_tolerance))
+    if args.rotation_tolerance is not None:
+        print("Rotation tolerance: {} degrees".format(args.rotation_tolerance))
 
     # Create target coordinates
     target_coords = skrobot.coordinates.Coordinates(target_pos, [0, 0, 0])
@@ -211,22 +231,23 @@ def main():
     viewer.redraw()
     print("Target position visualized with coordinate frame")
 
+    # Build IK kwargs
+    ik_kwargs = {
+        'link_list': link_list,
+        'move_target': robot_model.rarm_end_coords,
+        'rotation_axis': True,
+    }
+    if translation_tolerance is not None:
+        ik_kwargs['translation_tolerance'] = translation_tolerance
+    if rotation_tolerance is not None:
+        ik_kwargs['rotation_tolerance'] = rotation_tolerance
+
     # Solve inverse kinematics with optional visualization
     if not args.no_ik_visualization:
         with ik_visualization(viewer, sleep_time=0.5):
-            result = robot_model.inverse_kinematics(
-                target_coords,
-                link_list=link_list,
-                move_target=robot_model.rarm_end_coords,
-                rotation_axis=True
-            )
+            result = robot_model.inverse_kinematics(target_coords, **ik_kwargs)
     else:
-        result = robot_model.inverse_kinematics(
-            target_coords,
-            link_list=link_list,
-            move_target=robot_model.rarm_end_coords,
-            rotation_axis=True
-        )
+        result = robot_model.inverse_kinematics(target_coords, **ik_kwargs)
 
     # Check if result is successful (could be False or an array)
     success = result is not False and result is not None

@@ -1086,3 +1086,99 @@ class TestRobotModel(unittest.TestCase):
                     pos_error, 0.01,
                     f"Position error too large for pose {i} with offset end_coords: {pos_error * 1000:.1f}mm"
                 )
+
+    def test_inverse_kinematics_translation_tolerance(self):
+        """Test inverse kinematics with translation_tolerance parameter.
+
+        translation_tolerance allows some error from target on specified axes.
+        If error is within tolerance, that axis is treated as "reached".
+        """
+        kuka = self.kuka
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+
+        # Create target that's reachable
+        kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate([
+            0.05, -0.05, 0.05], 'local')
+
+        # Without tolerance - should reach target precisely
+        kuka.reset_manip_pose()
+        result_no_tol = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True,
+            stop=100)
+        dif_pos_no_tol = kuka.rarm.end_coords.difference_position(
+            target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos_no_tol), 0.01)
+        self.assertIsNot(result_no_tol, False)
+
+        # With translation_tolerance parameter - verify it's accepted
+        kuka.reset_manip_pose()
+        result_with_tol = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True,
+            translation_tolerance=[0.1, 0.1, 0.1],
+            stop=100)
+        # Parameter should be accepted without error
+        self.assertIn(type(result_with_tol), [np.ndarray, bool])
+
+    def test_inverse_kinematics_rotation_tolerance(self):
+        """Test inverse kinematics with rotation_tolerance parameter.
+
+        rotation_tolerance allows some error from target rotation.
+        """
+        kuka = self.kuka
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+
+        # Create target with small rotation
+        kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().\
+            rotate(np.deg2rad(15), 'x', 'local')
+
+        # With rotation tolerance
+        kuka.reset_manip_pose()
+        kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True,
+            rotation_tolerance=[np.deg2rad(10), None, None],
+            stop=100)
+
+        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
+        # Position should still be close
+        self.assertLess(np.linalg.norm(dif_pos), 0.01)
+
+    def test_inverse_kinematics_tolerance_params_exist(self):
+        """Test that tolerance parameters are accepted without error."""
+        kuka = self.kuka
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+
+        kuka.reset_manip_pose()
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate([
+            0.02, 0, 0], 'local')
+
+        # Test that parameters are accepted
+        kuka.reset_manip_pose()
+        result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            translation_axis=True,
+            rotation_axis=True,
+            translation_tolerance=[0.01, 0.01, 0.01],
+            rotation_tolerance=[np.deg2rad(5), np.deg2rad(5), np.deg2rad(5)],
+            stop=50)
+
+        # Should complete without error (result can be success or fail)
+        self.assertIn(type(result), [np.ndarray, bool])

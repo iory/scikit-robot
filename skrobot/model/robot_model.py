@@ -980,7 +980,44 @@ class CascadedLink(CascadedCoords):
             check_collision=None,
             additional_jacobi=None,
             additional_vel=None,
+            translation_tolerance=None,
+            rotation_tolerance=None,
             **kwargs):
+        """Solve inverse kinematics to reach target coordinates.
+
+        Parameters
+        ----------
+        target_coords : skrobot.coordinates.Coordinates or list
+            Target coordinate(s) for the end-effector(s).
+        stop : int
+            Maximum number of iterations.
+        link_list : list
+            List of links to use for IK.
+        move_target : skrobot.coordinates.Coordinates or list
+            End-effector coordinate frame(s).
+        revert_if_fail : bool
+            If True, revert to initial joint angles on failure.
+        rotation_axis : bool, str, or list
+            Which rotation axes to constrain. True=all, False=none,
+            'x'/'y'/'z'=single axis, 'xy'/'yz'/'zx'=two axes.
+        translation_axis : bool, str, or list
+            Which translation axes to constrain. Same format as rotation_axis.
+        translation_tolerance : list or None
+            Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
+            in meters. If error on an axis is within tolerance, it's treated
+            as reached. Use None for no tolerance on an axis.
+        rotation_tolerance : list or None
+            Per-axis rotation tolerance from target as
+            [roll_tol, pitch_tol, yaw_tol] in radians. If error on an axis
+            is within tolerance, it's treated as reached.
+        **kwargs
+            Additional keyword arguments passed to inverse_kinematics_loop.
+
+        Returns
+        -------
+        numpy.ndarray or False
+            Joint angle vector if successful, False otherwise.
+        """
         additional_jacobi = additional_jacobi or []
         additional_vel = additional_vel or []
         target_coords = listify(target_coords)
@@ -1079,11 +1116,37 @@ class CascadedLink(CascadedCoords):
             dif_pos = list(map(lambda mv, tc, trans_axis:
                                mv.difference_position(
                                    tc, translation_axis=trans_axis),
-                               move_target, target_coords, translation_axis))
+                               move_target, target_coords,
+                               translation_axis))
             dif_rot = list(map(lambda mv, tc, rot_axis:
                                mv.difference_rotation(
                                    tc, rotation_axis=rot_axis),
-                               move_target, target_coords, rotation_axis))
+                               move_target, target_coords,
+                               rotation_axis))
+
+            # Apply translation tolerance in target_coords' local frame
+            # Note: tol > 0 check ensures 0.0 means "no special tolerance"
+            if translation_tolerance is not None:
+                for i, (mt, tc) in enumerate(zip(move_target, target_coords)):
+                    # Calculate error in target_coords' local frame
+                    world_error = tc.worldpos() - mt.worldpos()
+                    local_error = tc.worldrot().T @ world_error
+                    for axis_idx, tol in enumerate(translation_tolerance):
+                        if tol is not None and tol > 0:
+                            if abs(local_error[axis_idx]) <= tol:
+                                # Zero out the corresponding dif_pos component
+                                # dif_pos is in move_target's frame, so transform
+                                target_axis_in_mt = mt.worldrot().T @ tc.worldrot()[:, axis_idx]
+                                dif_pos[i] -= (dif_pos[i] @ target_axis_in_mt) * target_axis_in_mt
+
+            # Apply rotation tolerance: if error is within tolerance,
+            # treat as reached (set dif to 0)
+            if rotation_tolerance is not None:
+                for i, dr in enumerate(dif_rot):
+                    for axis_idx, tol in enumerate(rotation_tolerance):
+                        if tol is not None and tol > 0 and abs(dr[axis_idx]) <= tol:
+                            dif_rot[i][axis_idx] = 0.0
+
             if loop == 1 and self.ik_convergence_check(
                     dif_pos, dif_rot, rotation_axis, translation_axis,
                     thre, rthre, centroid_thre, target_centroid_pos,
@@ -2434,6 +2497,8 @@ class RobotModel(CascadedLink):
             alpha=1.0,
             attempts_per_pose=1,
             random_initial_range=0.7,
+            translation_tolerance=None,
+            rotation_tolerance=None,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -2474,6 +2539,14 @@ class RobotModel(CascadedLink):
             Number of attempts with different random initial poses per target (default: 1)
         random_initial_range : float
             Range for random initial poses as fraction of joint limits (0.0-1.0, default: 0.7)
+        translation_tolerance : list or None
+            Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
+            in meters. If error on an axis is within tolerance, it's treated
+            as reached. Use None for no tolerance on an axis.
+        rotation_tolerance : list or None
+            Per-axis rotation tolerance from target as
+            [roll_tol, pitch_tol, yaw_tol] in radians. If error on an axis
+            is within tolerance, it's treated as reached.
         **kwargs : dict
             Additional keyword arguments
 
@@ -2506,12 +2579,14 @@ class RobotModel(CascadedLink):
         return self._batch_inverse_kinematics_impl(
             target_coords, move_target, link_list,
             rotation_axis, translation_axis, stop, thre, rthre,
-            initial_angles, alpha, attempts_per_pose, random_initial_range, **kwargs)
+            initial_angles, alpha, attempts_per_pose, random_initial_range,
+            translation_tolerance, rotation_tolerance, **kwargs)
 
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
             rotation_axis, translation_axis, stop, thre, rthre,
-            initial_angles, alpha, attempts_per_pose, random_initial_range, **kwargs):
+            initial_angles, alpha, attempts_per_pose, random_initial_range,
+            translation_tolerance, rotation_tolerance, **kwargs):
         """Internal implementation of batch inverse kinematics."""
         # Auto-adjust initial_angles based on attempts_per_pose
         if isinstance(initial_angles, str) and initial_angles == "current" and attempts_per_pose > 1:
@@ -2635,7 +2710,8 @@ class RobotModel(CascadedLink):
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis, actual_joint_list,
             attempts_per_pose, random_initial_range,
-            move_target_offset_pos, move_target_offset_rot
+            move_target_offset_pos, move_target_offset_rot,
+            translation_tolerance, rotation_tolerance
         )
 
         full_solutions = []
@@ -2655,7 +2731,8 @@ class RobotModel(CascadedLink):
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis, joint_list_without_fixed,
             attempts_per_pose, random_initial_range,
-            move_target_offset_pos=None, move_target_offset_rot=None):
+            move_target_offset_pos=None, move_target_offset_rot=None,
+            translation_tolerance=None, rotation_tolerance=None):
         """Batch IK solver using batch expansion for multiple attempts."""
 
         n_poses = target_poses_xyz_qwxyz.shape[0]
@@ -2704,7 +2781,8 @@ class RobotModel(CascadedLink):
             stop, thre, rthre, alpha, base_to_source,
             expanded_rotation_axis, expanded_translation_axis,
             joint_list_without_fixed, min_angles, max_angles,
-            move_target_offset_pos, move_target_offset_rot
+            move_target_offset_pos, move_target_offset_rot,
+            translation_tolerance, rotation_tolerance
         )
 
         solutions = []
@@ -2740,7 +2818,8 @@ class RobotModel(CascadedLink):
             stop, thre, rthre, alpha, base_to_source,
             rotation_axis, translation_axis,
             joint_list_without_fixed, min_angles, max_angles,
-            move_target_offset_pos=None, move_target_offset_rot=None):
+            move_target_offset_pos=None, move_target_offset_rot=None,
+            translation_tolerance=None, rotation_tolerance=None):
         """Internal batch IK solver."""
         # Use integrated batch IK functions
 
@@ -2781,7 +2860,9 @@ class RobotModel(CascadedLink):
                 joint_list_without_fixed, min_angles, max_angles,
                 joint_list_for_fk=None,  # Will be derived from link_list in the function
                 move_target_offset_pos=move_target_offset_pos,
-                move_target_offset_rot=move_target_offset_rot
+                move_target_offset_rot=move_target_offset_rot,
+                translation_tolerance=translation_tolerance,
+                rotation_tolerance=rotation_tolerance
             )
 
             # Update current angles first
@@ -2805,8 +2886,12 @@ class RobotModel(CascadedLink):
             pose_errors = np.zeros((len(unsolved_indices), 6))
             translation_errors = target_poses_unsolved[:, :3] - current_poses_updated[:, :3]
             pose_errors[:, :3] = translation_errors
-            # Rotation errors (simplified - assume no rotation constraint for now)
-            pose_errors[:, 3:] = 0
+            # Calculate rotation errors using quaternion difference
+            current_quat_inv = quaternion_inverse(current_poses_updated[:, 3:])
+            rotation_error_quat = quaternion_multiply(
+                target_poses_unsolved[:, 3:], current_quat_inv)
+            rotation_error_rpy = quaternion2rpy(rotation_error_quat)[0][:, ::-1]
+            pose_errors[:, 3:] = rotation_error_rpy
 
             # Check convergence with respect to constraints
             converged = np.zeros(len(unsolved_indices), dtype=bool)
@@ -2856,6 +2941,31 @@ class RobotModel(CascadedLink):
                             constrained_pose_error[4] = 0
                         if 'z' not in rot_axis.lower():
                             constrained_pose_error[5] = 0
+
+                # Apply translation tolerance in target's local frame
+                # Note: tol > 0 check ensures 0.0 means "no special tolerance"
+                if translation_tolerance is not None:
+                    # Get target rotation matrix
+                    target_rot = quaternion2matrix(target_poses_unsolved[i, 3:])
+                    # Calculate error in target's local frame
+                    world_error = target_poses_unsolved[i, :3] - current_poses_updated[i, :3]
+                    local_error = target_rot.T @ world_error
+                    for axis_idx, tol in enumerate(translation_tolerance):
+                        if tol is not None and tol > 0:
+                            if abs(local_error[axis_idx]) <= tol:
+                                # Zero out this axis in constrained_pose_error
+                                # by projecting out the target axis component
+                                target_axis = target_rot[:, axis_idx]
+                                proj = (constrained_pose_error[:3] @ target_axis)
+                                constrained_pose_error[:3] -= proj * target_axis
+
+                # Apply rotation tolerance: if error is within tolerance,
+                # treat as reached (set to 0)
+                if rotation_tolerance is not None:
+                    for axis_idx, tol in enumerate(rotation_tolerance):
+                        if tol is not None and tol > 0:
+                            if abs(constrained_pose_error[3 + axis_idx]) <= tol:
+                                constrained_pose_error[3 + axis_idx] = 0.0
 
                 # Check convergence only for active constraints
                 # Note: pose_errors is in [translation, rotation] order after reordering
@@ -2998,7 +3108,8 @@ class RobotModel(CascadedLink):
             rotation_axis_list, translation_axis_list,
             actual_joint_list, min_angles, max_angles,
             joint_list_for_fk=None,
-            move_target_offset_pos=None, move_target_offset_rot=None):
+            move_target_offset_pos=None, move_target_offset_rot=None,
+            translation_tolerance=None, rotation_tolerance=None):
         """Batch IK step with per-problem axis constraints.
 
         Args:
@@ -3139,6 +3250,32 @@ class RobotModel(CascadedLink):
         rotation_error_rpy = quaternion2rpy(rotation_error_quat)[0][:, ::-1]
         pose_errors[:, 3:] = rotation_error_rpy
         pose_errors = pose_errors[:, [3, 4, 5, 0, 1, 2]]
+
+        # Apply tolerance in target's local frame
+        # pose_errors is now in [rot, rot, rot, trans, trans, trans] order
+        # Note: tol > 0 check ensures 0.0 means "no special tolerance"
+        if translation_tolerance is not None:
+            for b in range(batch_size):
+                # Get target rotation matrix
+                target_rot = quaternion2matrix(target_poses[b, 3:])
+                # Calculate error in target's local frame
+                world_error = target_poses[b, :3] - current_poses[b, :3]
+                local_error = target_rot.T @ world_error
+                for axis_idx, tol in enumerate(translation_tolerance):
+                    if tol is not None and tol > 0:
+                        if abs(local_error[axis_idx]) <= tol:
+                            # Zero out this axis by projecting out the target axis
+                            target_axis = target_rot[:, axis_idx]
+                            # Translation is at indices 3, 4, 5 after reordering
+                            proj = pose_errors[b, 3:6] @ target_axis
+                            pose_errors[b, 3:6] -= proj * target_axis
+
+        if rotation_tolerance is not None:
+            for axis_idx, tol in enumerate(rotation_tolerance):
+                if tol is not None and tol > 0:
+                    # Rotation is at indices 0, 1, 2 after reordering
+                    mask = np.abs(pose_errors[:, axis_idx]) <= tol
+                    pose_errors[mask, axis_idx] = 0.0
 
         # Apply constraints and calculate delta for each problem
         joint_angle_deltas = np.zeros((batch_size, ndof))

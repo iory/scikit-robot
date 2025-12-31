@@ -45,6 +45,12 @@ def main():
                         help='Position error threshold in meters. Default: 0.001')
     parser.add_argument('--rthre', type=float, default=1.0,
                         help='Rotation error threshold in degrees. Default: 1.0')
+    parser.add_argument('--translation-tolerance', '--translation_tolerance',
+                        type=float, nargs=3, default=None, metavar=('X', 'Y', 'Z'),
+                        help='Translation tolerance per axis in meters (e.g., 0.05 0.05 0.05)')
+    parser.add_argument('--rotation-tolerance', '--rotation_tolerance',
+                        type=float, nargs=3, default=None, metavar=('R', 'P', 'Y'),
+                        help='Rotation tolerance per axis in degrees (e.g., 10 10 10)')
     parser.add_argument('--no-interactive', action='store_true',
                         help='Disable interactive visualization')
     parser.add_argument('--viewer', type=str,
@@ -59,6 +65,12 @@ def main():
     rotation_axis = parse_axis_constraint(args.rotation_axis)
     translation_axis = parse_axis_constraint(args.translation_axis)
 
+    # Process tolerance arguments
+    translation_tolerance = args.translation_tolerance
+    rotation_tolerance = None
+    if args.rotation_tolerance is not None:
+        rotation_tolerance = [np.deg2rad(v) for v in args.rotation_tolerance]
+
     print("ADVANCED BATCH IK - WITH AXIS CONSTRAINTS")
     print("=" * 55)
     print("Configuration:")
@@ -71,6 +83,10 @@ def main():
     print(f"   Max iterations: {args.stop}")
     print(f"   Position threshold: {args.thre}m")
     print(f"   Rotation threshold: {args.rthre} degrees")
+    if translation_tolerance is not None:
+        print(f"   Translation tolerance: {translation_tolerance}m")
+    if args.rotation_tolerance is not None:
+        print(f"   Rotation tolerance: {args.rotation_tolerance} degrees")
 
     # Initialize robot based on selection
     if args.robot == 'fetch':
@@ -152,6 +168,10 @@ def main():
         'rthre': np.deg2rad(args.rthre),
         'attempts_per_pose': args.attempts_per_pose,
     }
+    if translation_tolerance is not None:
+        ik_kwargs['translation_tolerance'] = translation_tolerance
+    if rotation_tolerance is not None:
+        ik_kwargs['rotation_tolerance'] = rotation_tolerance
 
     # For robots with inverse_kinematics_defaults, use those settings
     if hasattr(arm, 'inverse_kinematics_defaults'):
@@ -362,9 +382,9 @@ def main():
                 print(f"Visualization error: {e}")
 
         else:
-            print("No successful solutions to visualize")
+            print("Interactive visualization skipped (--no-interactive)")
     else:
-        print("Interactive visualization skipped (--no-interactive)")
+        print("No successful solutions to verify")
 
 
 if __name__ == '__main__':
