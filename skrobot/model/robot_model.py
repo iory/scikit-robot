@@ -1834,6 +1834,26 @@ class RobotModel(CascadedLink):
 
     def __init__(self, link_list=None, joint_list=None,
                  root_link=None, urdf=None, include_mimic_joints=True):
+        """Initialize a RobotModel instance.
+
+        Parameters
+        ----------
+        link_list : list of Link, optional
+            Initial list of links to register in the model.
+            If None, an empty list is used.
+        joint_list : list of Joint, optional
+            Initial list of joints to register in the model.
+            If None, an empty list is used.
+        root_link : Link, optional
+            Root link of the robot model.
+        urdf : str, optional
+            URDF input used to build the robot model. This can be either a
+            file system path to a URDF file or a string containing URDF XML.
+            If None (the default), the model is not initialized from URDF.
+        include_mimic_joints : bool, optional (default: True)
+            Whether to include mimic joints defined in the URDF when loading
+            the model.
+        """
         link_list = link_list or []
         joint_list = joint_list or []
         super(RobotModel, self).__init__(link_list, joint_list)
@@ -1866,22 +1886,14 @@ class RobotModel(CascadedLink):
         urdf_input : str
             Either the URDF model description as a string, or the path to a
             URDF file.
-        include_mimic_joints : bool, optional
+        include_mimic_joints : bool, optional (default: True)
             If True, mimic joints are included in the resulting
             `RobotModel`'s `joint_list`.
         """
         if os.path.isfile(urdf_input):
-            try:
-                with open(urdf_input, 'r') as f:
-                    self.load_urdf_file(
-                        file_obj=f, include_mimic_joints=include_mimic_joints)
-            except Exception as e:
-                logger.error(
-                    "Failed to load URDF from file: %s. Error: %s",
-                    urdf_input, e)
-                logger.error("Attempting to load as URDF string instead.")
-                self.load_urdf(
-                    urdf_input, include_mimic_joints=include_mimic_joints)
+            with open(urdf_input, 'r') as f:
+                self.load_urdf_file(
+                    file_obj=f, include_mimic_joints=include_mimic_joints)
         else:
             self.load_urdf(urdf_input,
                            include_mimic_joints=include_mimic_joints)
