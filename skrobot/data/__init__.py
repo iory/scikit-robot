@@ -56,7 +56,7 @@ def bunny_objpath():
     if osp.exists(path):
         return path
     _download(
-        url='https://raw.githubusercontent.com/iory/scikit-robot-models/master/data/bunny.obj',  # NOQA
+        url='https://raw.githubusercontent.com/iory/scikit-robot-models/main/data/bunny.obj',  # NOQA
         path=path,
         md5='19bd31bde1fcf5242a8a82ed4ac03c72',
         quiet=True,
@@ -70,7 +70,7 @@ def fetch_urdfpath():
     if osp.exists(path):
         return path
     _download(
-        url='https://github.com/iory/scikit-robot-models/raw/master/fetch_description.tar.gz',  # NOQA
+        url='https://github.com/iory/scikit-robot-models/raw/main/fetch_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'fetch_description.tar.gz'),
         md5='fbe29ab5f3d029d165a625175b43a265',
         postprocess='extractall',
@@ -88,7 +88,7 @@ def nextage_urdfpath():
     if osp.exists(path):
         return path
     _download(
-        url='https://github.com/iory/scikit-robot-models/raw/refs/heads/master/nextage_description.tar.gz',  # NOQA
+        url='https://github.com/iory/scikit-robot-models/raw/refs/heads/main/nextage_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'nextage_description.tar.gz'),
         md5='9805ac9cd97b67056dde31aa88762ec7',
         postprocess='extractall',
@@ -101,7 +101,7 @@ def panda_urdfpath():
     path = osp.join(get_cache_dir(),
                     'franka_description', 'panda.urdf')
     _download(
-        url='https://github.com/iory/scikit-robot-models/raw/master/franka_description.tar.gz',  # NOQA
+        url='https://github.com/iory/scikit-robot-models/raw/main/franka_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'franka_description.tar.gz'),
         md5='3de5bd15262b519e3beb88f1422032ac',
         postprocess='extractall',
@@ -115,7 +115,7 @@ def pr2_urdfpath():
     if osp.exists(path):
         return path
     _download(
-        url='https://github.com/iory/scikit-robot-models/raw/master/pr2_description.tar.gz',  # NOQA
+        url='https://github.com/iory/scikit-robot-models/raw/main/pr2_description.tar.gz',  # NOQA
         path=osp.join(get_cache_dir(), 'pr2_description.tar.gz'),
         md5='6e6e2d4f38e2c5c0a93f44b67962b98a',
         postprocess='extractall',
