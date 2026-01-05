@@ -76,10 +76,6 @@ class PR2(RobotModel):
                 j.max_angle = max_angle
 
     @cached_property
-    def default_urdf_path(self):
-        return pr2_urdfpath()
-
-    @cached_property
     def rarm(self):
         rarm_links = [
             self.r_shoulder_pan_link, self.r_shoulder_lift_link,
