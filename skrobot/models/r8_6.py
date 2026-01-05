@@ -5,17 +5,18 @@ from skrobot.data import r8_6_urdfpath
 
 class R8_6(skrobot.model.RobotModel):
 
-    def __init__(self, urdf=None, urdf_file=None, urdf_path=None):
-        # For backward compatibility, support urdf, urdf_file, and urdf_path
-        # urdf_path is treated as an alias for urdf_file for backward compatibility
-        specified_sources = [
-            src for src in (urdf, urdf_file, urdf_path) if src is not None
-        ]
-        if len(specified_sources) > 1:
+    def __init__(self, urdf=None, urdf_file=None):
+        # For backward compatibility, support both urdf and urdf_file
+        if urdf is not None and urdf_file is not None:
             raise ValueError(
-                "Only one of 'urdf', 'urdf_file', or 'urdf_path' can be specified"
+                "'urdf' and 'urdf_file' cannot be given at the same time"
             )
-        urdf_input = urdf or urdf_file or urdf_path or r8_6_urdfpath()
+        if urdf is not None:
+            urdf_input = urdf
+        elif urdf_file is not None:
+            urdf_input = urdf_file
+        else:
+            urdf_input = r8_6_urdfpath()
         super(R8_6, self).__init__(urdf=urdf_input)
 
         # Define end effector coordinates for left arm

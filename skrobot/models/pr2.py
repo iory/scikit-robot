@@ -18,7 +18,12 @@ class PR2(RobotModel):
             raise ValueError(
                 "'urdf' and 'urdf_file' cannot be given at the same time"
             )
-        urdf_input = urdf or urdf_file or pr2_urdfpath()
+        if urdf is not None:
+            urdf_input = urdf
+        elif urdf_file is not None:
+            urdf_input = urdf_file
+        else:
+            urdf_input = pr2_urdfpath()
         super(PR2, self).__init__(urdf=urdf_input)
 
         self.rarm_end_coords = CascadedCoords(

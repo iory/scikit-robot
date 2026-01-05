@@ -1847,9 +1847,13 @@ class RobotModel(CascadedLink):
         root_link : Link, optional
             Root link of the robot model.
         urdf : str, optional
-            URDF input used to build the robot model. This can be either a
-            file system path to a URDF file or a string containing URDF XML.
-            If None (the default), the model is not initialized from URDF.
+            URDF input used to build the robot model. The value is interpreted
+            automatically: if the input looks like XML content (starts with
+            '<?xml' or '<robot'), it is treated as a string containing URDF
+            XML; otherwise, if ``os.path.isfile`` returns True, it is treated
+            as a file system path to a URDF file; otherwise it is treated as
+            URDF XML string. If None (the default), the model is not
+            initialized from URDF.
         include_mimic_joints : bool, optional (default: True)
             Whether to include mimic joints defined in the URDF when loading
             the model.
@@ -1880,6 +1884,9 @@ class RobotModel(CascadedLink):
         """Load URDF from a string or a file path.
 
         Automatically detects if the input is a URDF string or a file path.
+        If the input looks like XML content (starts with '<?xml' or '<robot'),
+        it is treated as URDF XML string. Otherwise, if the input is an
+        existing file path, it is loaded as a file.
 
         Parameters
         ----------
@@ -1890,6 +1897,15 @@ class RobotModel(CascadedLink):
             If True, mimic joints are included in the resulting
             `RobotModel`'s `joint_list`.
         """
+        # First, check if the input looks like URDF/XML content
+        if isinstance(urdf_input, str):
+            stripped = urdf_input.lstrip()
+            if stripped.startswith('<?xml') or stripped.startswith('<robot'):
+                self.load_urdf(
+                    urdf_input, include_mimic_joints=include_mimic_joints)
+                return
+
+        # If it doesn't look like XML, check if it's a file path
         if os.path.isfile(urdf_input):
             with open(urdf_input, 'r') as f:
                 self.load_urdf_file(

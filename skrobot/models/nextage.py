@@ -23,7 +23,12 @@ class Nextage(RobotModel):
             raise ValueError(
                 "'urdf' and 'urdf_file' cannot be given at the same time"
             )
-        urdf_input = urdf or urdf_file or nextage_urdfpath()
+        if urdf is not None:
+            urdf_input = urdf
+        elif urdf_file is not None:
+            urdf_input = urdf_file
+        else:
+            urdf_input = nextage_urdfpath()
         super(Nextage, self).__init__(urdf=urdf_input)
 
         # End effector coordinates

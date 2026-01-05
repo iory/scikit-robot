@@ -20,7 +20,8 @@ class RobotModelFromURDF(RobotModel):
         )
         if urdf is not None and urdf_file is not None:
             raise ValueError(
-                "'urdf' and 'urdf_file' cannot be given at the same time"
+                "'urdf' and 'urdf_file' cannot be given at the same time; "
+                "received both 'urdf' and 'urdf_file' arguments."
             )
         if urdf is not None:
             urdf_input = urdf
