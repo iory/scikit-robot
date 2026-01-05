@@ -4,18 +4,23 @@ import numpy as np
 from ..coordinates import CascadedCoords
 from ..data import panda_urdfpath
 from ..model import RobotModel
-from .urdf import RobotModelFromURDF
 
 
-class Panda(RobotModelFromURDF):
+class Panda(RobotModel):
 
     """Panda Robot Model.
 
     https://frankaemika.github.io/docs/control_parameters.html
     """
 
-    def __init__(self, *args, **kwargs):
-        super(Panda, self).__init__(*args, **kwargs)
+    def __init__(self, urdf=None, urdf_file=None):
+        # For backward compatibility, support both urdf and urdf_file
+        if urdf is not None and urdf_file is not None:
+            raise ValueError(
+                "'urdf' and 'urdf_file' cannot be given at the same time"
+            )
+        urdf_input = urdf or urdf_file or panda_urdfpath()
+        super(Panda, self).__init__(urdf=urdf_input)
 
         # End effector coordinate frame
         # Based on franka_ros configuration:
@@ -26,10 +31,6 @@ class Panda(RobotModelFromURDF):
             name='rarm_end_coords')
         self.rarm_end_coords.rotate(np.deg2rad(-90), 'y')
         self.reset_pose()
-
-    @cached_property
-    def default_urdf_path(self):
-        return panda_urdfpath()
 
     def reset_pose(self):
         angle_vector = [

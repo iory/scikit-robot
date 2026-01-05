@@ -1,5 +1,3 @@
-import os.path as osp
-
 import skrobot
 from skrobot.coordinates import CascadedCoords
 from skrobot.data import r8_6_urdfpath
@@ -7,13 +5,15 @@ from skrobot.data import r8_6_urdfpath
 
 class R8_6(skrobot.model.RobotModel):
 
-    def __init__(self, urdf_path=None, *args, **kwargs):
-        super(R8_6, self).__init__(*args, **kwargs)
-        urdf_path = r8_6_urdfpath() if urdf_path is None else urdf_path
-        if osp.exists(urdf_path):
-            self.load_urdf_file(open(urdf_path, 'r'))
-        else:
-            raise ValueError()
+    def __init__(self, urdf=None, urdf_file=None):
+        # For backward compatibility, support both urdf and urdf_file
+        # Also support legacy urdf_path argument via urdf_file
+        if urdf is not None and urdf_file is not None:
+            raise ValueError(
+                "'urdf' and 'urdf_file' cannot be given at the same time"
+            )
+        urdf_input = urdf or urdf_file or r8_6_urdfpath()
+        super(R8_6, self).__init__(urdf=urdf_input)
 
         # Define end effector coordinates for left arm
         self.larm_end_coords = CascadedCoords(

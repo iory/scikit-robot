@@ -1833,7 +1833,7 @@ class CascadedLink(CascadedCoords):
 class RobotModel(CascadedLink):
 
     def __init__(self, link_list=None, joint_list=None,
-                 root_link=None):
+                 root_link=None, urdf=None, include_mimic_joints=True):
         link_list = link_list or []
         joint_list = joint_list or []
         super(RobotModel, self).__init__(link_list, joint_list)
@@ -1852,6 +1852,39 @@ class RobotModel(CascadedLink):
 
         self._relevance_predicate_table = \
             self._compute_relevance_predicate_table()
+
+        if urdf is not None:
+            self._load_from_urdf(urdf, include_mimic_joints=include_mimic_joints)
+
+    def _load_from_urdf(self, urdf_input, include_mimic_joints=True):
+        """Load URDF from a string or a file path.
+
+        Automatically detects if the input is a URDF string or a file path.
+
+        Parameters
+        ----------
+        urdf_input : str
+            Either the URDF model description as a string, or the path to a
+            URDF file.
+        include_mimic_joints : bool, optional
+            If True, mimic joints are included in the resulting
+            `RobotModel`'s `joint_list`.
+        """
+        if os.path.isfile(urdf_input):
+            try:
+                with open(urdf_input, 'r') as f:
+                    self.load_urdf_file(
+                        file_obj=f, include_mimic_joints=include_mimic_joints)
+            except Exception as e:
+                logger.error(
+                    "Failed to load URDF from file: %s. Error: %s",
+                    urdf_input, e)
+                logger.error("Attempting to load as URDF string instead.")
+                self.load_urdf(
+                    urdf_input, include_mimic_joints=include_mimic_joints)
+        else:
+            self.load_urdf(urdf_input,
+                           include_mimic_joints=include_mimic_joints)
 
     def reset_pose(self):
         raise NotImplementedError()
@@ -2133,7 +2166,7 @@ class RobotModel(CascadedLink):
 
         Parameters
         ----------
-        urdf_string : str
+        urdf_input : str
             Either the URDF model description as a string, or the path to a
             URDF file.
         include_mimic_joints : bool, optional
@@ -2145,21 +2178,8 @@ class RobotModel(CascadedLink):
         RobotModel
             Robot model loaded from the URDF.
         """
-        robot_model = RobotModel()
-        if os.path.isfile(urdf_input):
-            try:
-                with open(urdf_input, 'r') as f:
-                    robot_model.load_urdf_file(
-                        file_obj=f, include_mimic_joints=include_mimic_joints)
-            except Exception as e:
-                logger.error("Failed to load URDF from file: %s. Error: %s", urdf_input, e)
-                logger.error("Attempting to load as URDF string instead.")
-                robot_model.load_urdf(
-                    urdf_input, include_mimic_joints=include_mimic_joints)
-        else:
-            robot_model.load_urdf(urdf_input,
-                                  include_mimic_joints=include_mimic_joints)
-        return robot_model
+        return RobotModel(urdf=urdf_input,
+                          include_mimic_joints=include_mimic_joints)
 
     def load_urdf(self, urdf, include_mimic_joints=True):
         is_python3 = sys.version_info.major > 2

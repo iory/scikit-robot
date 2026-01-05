@@ -5,26 +5,26 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import fetch_urdfpath
 from skrobot.model import RobotModel
 
-from .urdf import RobotModelFromURDF
 
-
-class Fetch(RobotModelFromURDF):
+class Fetch(RobotModel):
     """Fetch Robot Model.
 
     http://docs.fetchrobotics.com/robot_hardware.html
     """
 
-    def __init__(self, *args, **kwargs):
-        super(Fetch, self).__init__(*args, **kwargs)
+    def __init__(self, urdf=None, urdf_file=None):
+        # For backward compatibility, support both urdf and urdf_file
+        if urdf is not None and urdf_file is not None:
+            raise ValueError(
+                "'urdf' and 'urdf_file' cannot be given at the same time"
+            )
+        urdf_input = urdf or urdf_file or fetch_urdfpath()
+        super(Fetch, self).__init__(urdf=urdf_input)
         self.rarm_end_coords = CascadedCoords(parent=self.gripper_link,
                                               name='rarm_end_coords')
         self.rarm_end_coords.translate([0, 0, 0])
         self.rarm_end_coords.rotate(0, axis='z')
         self.end_coords = [self.rarm_end_coords]
-
-    @cached_property
-    def default_urdf_path(self):
-        return fetch_urdfpath()
 
     def reset_pose(self):
         self.torso_lift_joint.joint_angle(0)

@@ -5,14 +5,18 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import kuka_urdfpath
 from skrobot.model import RobotModel
 
-from .urdf import RobotModelFromURDF
 
-
-class Kuka(RobotModelFromURDF):
+class Kuka(RobotModel):
     """Kuka Robot Model."""
 
-    def __init__(self, *args, **kwargs):
-        super(Kuka, self).__init__(*args, **kwargs)
+    def __init__(self, urdf=None, urdf_file=None):
+        # For backward compatibility, support both urdf and urdf_file
+        if urdf is not None and urdf_file is not None:
+            raise ValueError(
+                "'urdf' and 'urdf_file' cannot be given at the same time"
+            )
+        urdf_input = urdf or urdf_file or kuka_urdfpath()
+        super(Kuka, self).__init__(urdf=urdf_input)
         self.rarm_end_coords = CascadedCoords(
             parent=self.lbr_iiwa_with_wsg50__lbr_iiwa_link_7,
             name='rarm_end_coords')
@@ -21,10 +25,6 @@ class Kuka(RobotModelFromURDF):
         self.rarm_end_coords.rotate(- np.pi / 2.0, axis='y')
         self.rarm_end_coords.rotate(- np.pi / 2.0, axis='x')
         self.end_coords = [self.rarm_end_coords]
-
-    @cached_property
-    def default_urdf_path(self):
-        return kuka_urdfpath()
 
     def reset_manip_pose(self):
         return self.angle_vector([0, np.deg2rad(10), 0,

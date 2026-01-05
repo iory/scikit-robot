@@ -5,17 +5,21 @@ from skrobot.coordinates import CascadedCoords
 from skrobot.data import pr2_urdfpath
 from skrobot.model import RobotModel
 
-from .urdf import RobotModelFromURDF
 
-
-class PR2(RobotModelFromURDF):
+class PR2(RobotModel):
 
     """PR2 Robot Model.
 
     """
 
-    def __init__(self, use_tight_joint_limit=True):
-        super(PR2, self).__init__()
+    def __init__(self, urdf=None, urdf_file=None, use_tight_joint_limit=True):
+        # For backward compatibility, support both urdf and urdf_file
+        if urdf is not None and urdf_file is not None:
+            raise ValueError(
+                "'urdf' and 'urdf_file' cannot be given at the same time"
+            )
+        urdf_input = urdf or urdf_file or pr2_urdfpath()
+        super(PR2, self).__init__(urdf=urdf_input)
 
         self.rarm_end_coords = CascadedCoords(
             parent=self.r_gripper_tool_frame,
