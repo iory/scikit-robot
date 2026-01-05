@@ -2,7 +2,7 @@ import control_msgs.action
 import rclpy
 from rclpy.action import ActionClient
 
-from .base import ROS2RobotInterfaceBase
+from skrobot.interfaces.ros2.base import ROS2RobotInterfaceBase
 
 
 try:

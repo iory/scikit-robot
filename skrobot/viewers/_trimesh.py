@@ -13,7 +13,7 @@ from trimesh.transformations import euler_from_matrix
 import trimesh.viewer
 from trimesh.viewer.trackball import Trackball
 
-from .. import model as model_module
+from skrobot import model as model_module
 
 
 logger = logging.getLogger('trimesh')

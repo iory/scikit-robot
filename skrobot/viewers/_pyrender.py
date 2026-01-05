@@ -40,9 +40,8 @@ import trimesh
 from trimesh import transformations
 from trimesh.scene import cameras
 
+from skrobot import model as model_module
 from skrobot.coordinates import Coordinates
-
-from .. import model as model_module
 
 
 def _redraw_all_windows():

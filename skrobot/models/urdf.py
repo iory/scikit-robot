@@ -1,4 +1,4 @@
-from ..model import RobotModel
+from skrobot.model import RobotModel
 
 
 class RobotModelFromURDF(RobotModel):

@@ -1,22 +1,22 @@
 # flake8: noqa
 
-from .base import CascadedCoords
-from .base import Coordinates
-from .base import Transform
-from .base import make_coords
-from .base import make_cascoords
+from skrobot.coordinates.base import CascadedCoords
+from skrobot.coordinates.base import Coordinates
+from skrobot.coordinates.base import Transform
+from skrobot.coordinates.base import make_coords
+from skrobot.coordinates.base import make_cascoords
 
-from .geo import convert_to_axis_vector
-from .geo import midcoords
-from .geo import midpoint
-from .geo import orient_coords_to_axis
-from .geo import rotate_points
+from skrobot.coordinates.geo import convert_to_axis_vector
+from skrobot.coordinates.geo import midcoords
+from skrobot.coordinates.geo import midpoint
+from skrobot.coordinates.geo import orient_coords_to_axis
+from skrobot.coordinates.geo import rotate_points
 
-from .math import matrix2quaternion
-from .math import quaternion2rpy
-from .math import make_matrix
-from .math import manipulability
-from .math import normalize_vector
-from .math import rpy_angle
-from .math import rpy_matrix
-from .math import sr_inverse
+from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import quaternion2rpy
+from skrobot.coordinates.math import make_matrix
+from skrobot.coordinates.math import manipulability
+from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import rpy_angle
+from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import sr_inverse

@@ -5,7 +5,7 @@ import collections
 import numpy as np
 import trimesh
 
-from .. import model as model_module
+from skrobot import model as model_module
 
 
 class JupyterNotebookViewer(object):

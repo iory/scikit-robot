@@ -6,8 +6,8 @@ import numpy as np
 import pr2_controllers_msgs.msg
 import rospy
 
-from ...model import RotationalJoint
-from .move_base import ROSRobotMoveBaseInterface
+from skrobot.interfaces.ros.move_base import ROSRobotMoveBaseInterface
+from skrobot.model import RotationalJoint
 
 
 class PR2ROSRobotInterface(ROSRobotMoveBaseInterface):

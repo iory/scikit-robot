@@ -4,8 +4,7 @@ import numpy as np
 from skrobot.coordinates import CascadedCoords
 from skrobot.data import pr2_urdfpath
 from skrobot.model import RobotModel
-
-from .urdf import RobotModelFromURDF
+from skrobot.models.urdf import RobotModelFromURDF
 
 
 class PR2(RobotModelFromURDF):

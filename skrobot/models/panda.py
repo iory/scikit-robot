@@ -1,10 +1,10 @@
 from cached_property import cached_property
 import numpy as np
 
-from ..coordinates import CascadedCoords
-from ..data import panda_urdfpath
-from ..model import RobotModel
-from .urdf import RobotModelFromURDF
+from skrobot.coordinates import CascadedCoords
+from skrobot.data import panda_urdfpath
+from skrobot.model import RobotModel
+from skrobot.models.urdf import RobotModelFromURDF
 
 
 class Panda(RobotModelFromURDF):
