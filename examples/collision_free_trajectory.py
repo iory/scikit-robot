@@ -79,13 +79,13 @@ joint_angles = np.deg2rad([-60, 74, -70, -120, -20, -30, 180])
 set_robot_config(robot_model, joint_list, joint_angles)
 target_coords = skrobot.coordinates.Coordinates([0.8, -0.6, 0.8], [0, 0, 0])
 
-rarm_end_coords = skrobot.coordinates.CascadedCoords(
+right_arm_end_coords = skrobot.coordinates.CascadedCoords(
     parent=robot_model.r_gripper_tool_frame,
-    name='rarm_end_coords')
+    name='right_arm_end_coords')
 robot_model.inverse_kinematics(
     target_coords=target_coords,
     link_list=link_list,
-    move_target=robot_model.rarm_end_coords, rotation_axis=True)
+    move_target=robot_model.right_arm_end_coords, rotation_axis=True)
 av_goal = get_robot_config(robot_model, joint_list, with_base=with_base)
 
 # collision checker setup
@@ -134,17 +134,17 @@ else:
 
 print("solving time : {0} sec".format(time.time() - ts))
 
-rarm_point_history = []
+arm_point_history = []
 line_string = None
 for av in av_seq:
     set_robot_config(robot_model, joint_list, av, with_base=with_base)
-    rarm_point_history.append(rarm_end_coords.worldpos())
+    arm_point_history.append(right_arm_end_coords.worldpos())
 
-    # update rarm trajectory visualization
+    # update arm trajectory visualization
     if line_string is not None:
         viewer.delete(line_string)
-    if len(rarm_point_history) > 1:
-        line_string = LineString(np.array(rarm_point_history))
+    if len(arm_point_history) > 1:
+        line_string = LineString(np.array(arm_point_history))
         viewer.add(line_string)
 
     sscc.update_color()

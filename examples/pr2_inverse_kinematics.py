@@ -19,8 +19,8 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     print("=" * 60)
 
     # Get the correct end-effector position after first IK
-    actual_end_pos = robot_model.rarm_end_coords.worldpos()
-    actual_end_rot = robot_model.rarm_end_coords.worldrot()
+    actual_end_pos = robot_model.right_arm_end_coords.worldpos()
+    actual_end_rot = robot_model.right_arm_end_coords.worldrot()
 
     # Visualize current end-effector position with green coordinate frame
     current_ee_axis = skrobot.model.Axis(
@@ -58,12 +58,12 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     result_standard = robot_model.inverse_kinematics(
         unreachable_coords,
         link_list=link_list,
-        move_target=robot_model.rarm_end_coords,
+        move_target=robot_model.right_arm_end_coords,
         rotation_axis=True,
         revert_if_fail=True  # Default behavior
     )
 
-    standard_end_pos = robot_model.rarm_end_coords.worldpos()
+    standard_end_pos = robot_model.right_arm_end_coords.worldpos()
     success_standard = result_standard is not False and result_standard is not None
     print("   Result: {}".format("Success" if success_standard else "Failed"))
     print("   End-effector position: {}".format(standard_end_pos))
@@ -73,7 +73,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     robot_model.inverse_kinematics(
         target_coords,  # The original successful target
         link_list=link_list,
-        move_target=robot_model.rarm_end_coords,
+        move_target=robot_model.right_arm_end_coords,
         rotation_axis=True
     )
 
@@ -86,7 +86,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
             result_progressive = robot_model.inverse_kinematics(
                 unreachable_coords,
                 link_list=link_list,
-                move_target=robot_model.rarm_end_coords,
+                move_target=robot_model.right_arm_end_coords,
                 rotation_axis=True,
                 revert_if_fail=False  # Keep partial progress
             )
@@ -94,13 +94,13 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
         result_progressive = robot_model.inverse_kinematics(
             unreachable_coords,
             link_list=link_list,
-            move_target=robot_model.rarm_end_coords,
+            move_target=robot_model.right_arm_end_coords,
             rotation_axis=True,
             revert_if_fail=False  # Keep partial progress
         )
 
-    progressive_end_pos = robot_model.rarm_end_coords.worldpos()
-    progressive_end_rot = robot_model.rarm_end_coords.worldrot()
+    progressive_end_pos = robot_model.right_arm_end_coords.worldpos()
+    progressive_end_rot = robot_model.right_arm_end_coords.worldrot()
     success_progressive = result_progressive is not False and result_progressive is not None
     print("   Result: {}".format("Success" if success_progressive else "Failed (but kept progress)"))
     print("   End-effector position: {}".format(progressive_end_pos))
@@ -234,7 +234,7 @@ def main():
     # Build IK kwargs
     ik_kwargs = {
         'link_list': link_list,
-        'move_target': robot_model.rarm_end_coords,
+        'move_target': robot_model.right_arm_end_coords,
         'rotation_axis': True,
     }
     if translation_tolerance is not None:

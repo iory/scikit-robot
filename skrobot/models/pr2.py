@@ -220,26 +220,27 @@ class PR2(RobotModelFromURDF):
             If dist is None, return gripper distance.
             If float value is given, change joint angle.
         arm : str
-            Specify target arm.  You can specify 'larm', 'rarm', 'arms'.
+            Specify target arm.  You can specify 'left_arm', 'right_arm',
+            'arms', or legacy names 'larm', 'rarm'.
 
         Returns
         -------
         dist : float or list of float
             The current gripper distance in meters.
-            - If arm is 'larm' or 'rarm', returns a single float.
+            - If arm is 'left_arm' or 'right_arm', returns a single float.
             - If arm is 'arms', returns a list of two floats
             [right_dist, left_dist].
         """
-        if arm == 'larm':
+        if arm in ('larm', 'left_arm'):
             joints = [self.l_gripper_l_finger_joint]
-        elif arm == 'rarm':
+        elif arm in ('rarm', 'right_arm'):
             joints = [self.r_gripper_l_finger_joint]
         elif arm == 'arms':
             joints = [self.r_gripper_l_finger_joint,
                       self.l_gripper_l_finger_joint]
         else:
-            raise ValueError('Invalid arm arm argument. You can specify '
-                             "'larm', 'rarm' or 'arms'.")
+            raise ValueError('Invalid arm argument. You can specify '
+                             "'left_arm', 'right_arm', 'arms', 'larm', or 'rarm'.")
 
         def _dist(angle):
             return 0.0099 * (18.4586 * np.sin(angle) + np.cos(angle) - 1.0101)
