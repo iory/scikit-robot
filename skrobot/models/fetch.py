@@ -87,8 +87,13 @@ class Fetch(RobotModelFromURDF):
         return r
 
     # New naming convention aliases (backward compatible)
-    arm = rarm
-    arm_with_torso = rarm_with_torso
+    @property
+    def arm(self):
+        return self.rarm
+
+    @property
+    def arm_with_torso(self):
+        return self.rarm_with_torso
 
     @property
     def arm_end_coords(self):

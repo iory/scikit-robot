@@ -1866,9 +1866,10 @@ class RobotModel(CascadedLink):
                                 self.joint_max_angles)
         return self.angle_vector(target_angles)
 
-    # New naming convention properties (forward compatibility)
+    # New naming convention properties with more intuitive full names.
     # These provide access using full names (right_arm, left_arm, etc.)
-    # while maintaining backward compatibility with abbreviated names.
+    # while keeping the abbreviated names (rarm, larm, etc.) available for
+    # backward compatibility.
 
     def _get_limb(self, attr_name):
         """Get limb by attribute name, returning None if not available."""
@@ -1877,6 +1878,7 @@ class RobotModel(CascadedLink):
             if isinstance(limb, RobotModel):
                 return limb
         except NotImplementedError:
+            # Some robot models raise NotImplementedError for unsupported limbs
             pass
         return None
 
@@ -1887,6 +1889,7 @@ class RobotModel(CascadedLink):
             if isinstance(coords, CascadedCoords):
                 return coords
         except NotImplementedError:
+            # Some robot models raise NotImplementedError for unsupported coords
             pass
         return None
 

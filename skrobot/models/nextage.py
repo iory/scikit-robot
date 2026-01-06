@@ -107,8 +107,13 @@ class Nextage(RobotModelFromURDF):
         return model
 
     # New naming convention aliases (backward compatible)
-    right_arm = rarm
-    left_arm = larm
+    @property
+    def right_arm(self):
+        return self.rarm
+
+    @property
+    def left_arm(self):
+        return self.larm
 
     @property
     def right_arm_end_coords(self):

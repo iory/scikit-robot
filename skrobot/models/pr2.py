@@ -157,10 +157,21 @@ class PR2(RobotModelFromURDF):
         return r
 
     # New naming convention aliases (backward compatible)
-    right_arm = rarm
-    left_arm = larm
-    right_arm_with_torso = rarm_with_torso
-    left_arm_with_torso = larm_with_torso
+    @property
+    def right_arm(self):
+        return self.rarm
+
+    @property
+    def left_arm(self):
+        return self.larm
+
+    @property
+    def right_arm_with_torso(self):
+        return self.rarm_with_torso
+
+    @property
+    def left_arm_with_torso(self):
+        return self.larm_with_torso
 
     @property
     def right_arm_end_coords(self):

@@ -63,7 +63,9 @@ class Kuka(RobotModelFromURDF):
         return self.angle_vector(av)
 
     # New naming convention aliases (backward compatible)
-    arm = rarm
+    @property
+    def arm(self):
+        return self.rarm
 
     @property
     def arm_end_coords(self):
