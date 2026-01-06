@@ -89,7 +89,6 @@ console_scripts.append("change-urdf-root=skrobot.apps.change_urdf_root:main")
 console_scripts.append("visualize-mesh=skrobot.apps.visualize_mesh:main")
 console_scripts.append("urdf-hash=skrobot.apps.urdf_hash:main")
 console_scripts.append("convert-wheel-collision=skrobot.apps.convert_wheel_collision:main")
-console_scripts.append("generate-robot-class=skrobot.apps.generate_robot_class:main")
 
 
 setup(
