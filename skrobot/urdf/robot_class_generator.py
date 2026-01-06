@@ -40,6 +40,10 @@ def _convert_to_ros_package_path(urdf_path):
     if urdf_path is None:
         return None
 
+    # Already a package:// path, return as-is
+    if urdf_path.startswith('package://'):
+        return urdf_path
+
     urdf_path = os.path.abspath(urdf_path)
 
     # Walk up the directory tree to find package.xml
