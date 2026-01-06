@@ -407,14 +407,25 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                         y_axis_local = -y_axis_local
                     y_axis_local = y_axis_local / np.linalg.norm(y_axis_local)
 
-                    # x-axis: forward direction (toward midpoint from origin)
+                    # x-axis: forward direction (toward TCP from origin)
                     # Use the direction from parent origin to midpoint
                     if np.linalg.norm(midpoint_local) > 1e-6:
                         x_axis_local = midpoint_local / np.linalg.norm(
                             midpoint_local)
                     else:
-                        # Fallback: use parent's z-axis
-                        x_axis_local = np.array([0.0, 0.0, 1.0])
+                        # Link origins are at parent origin.
+                        # Use fingertip positions to determine approach direction.
+                        tip1 = _get_fingertip_position(child1)
+                        tip2 = _get_fingertip_position(child2)
+                        tip1_local = parent_rot_inv.dot(tip1 - parent_pos)
+                        tip2_local = parent_rot_inv.dot(tip2 - parent_pos)
+                        tip_midpoint = (tip1_local + tip2_local) / 2
+                        if np.linalg.norm(tip_midpoint) > 1e-6:
+                            x_axis_local = tip_midpoint / np.linalg.norm(
+                                tip_midpoint)
+                        else:
+                            # Fallback: use parent's x-axis (common convention)
+                            x_axis_local = np.array([1.0, 0.0, 0.0])
 
                     # Make x orthogonal to y
                     x_axis_local = x_axis_local - np.dot(
