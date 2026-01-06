@@ -396,8 +396,15 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                     midpoint_local = (pos1 + pos2) / 2
 
                     # Calculate orientation in parent's local frame
-                    # y-axis: opening direction (child1 -> child2)
+                    # y-axis: opening direction between the two fingers
+                    # Ensure consistent direction by pointing toward positive
+                    # direction of the axis with largest absolute component
                     y_axis_local = pos2 - pos1
+                    # Find the axis with largest absolute value
+                    max_axis = np.argmax(np.abs(y_axis_local))
+                    # Flip if pointing in negative direction of that axis
+                    if y_axis_local[max_axis] < 0:
+                        y_axis_local = -y_axis_local
                     y_axis_local = y_axis_local / np.linalg.norm(y_axis_local)
 
                     # x-axis: forward direction (toward midpoint from origin)
