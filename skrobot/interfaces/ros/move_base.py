@@ -14,12 +14,11 @@ import trajectory_msgs.msg
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import rotate_vector
 from skrobot.coordinates.math import rotation_distance
-
-from .base import ROSRobotInterfaceBase
-from .tf_utils import coords_to_geometry_pose
-from .tf_utils import geometry_pose_to_coords
-from .tf_utils import tf_pose_to_coords
-from .transform_listener import TransformListener
+from skrobot.interfaces.ros.base import ROSRobotInterfaceBase
+from skrobot.interfaces.ros.tf_utils import coords_to_geometry_pose
+from skrobot.interfaces.ros.tf_utils import geometry_pose_to_coords
+from skrobot.interfaces.ros.tf_utils import tf_pose_to_coords
+from skrobot.interfaces.ros.transform_listener import TransformListener
 
 
 class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):

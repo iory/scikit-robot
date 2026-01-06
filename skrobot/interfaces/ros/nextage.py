@@ -3,7 +3,7 @@ import control_msgs.msg
 import rospy
 import trajectory_msgs.msg
 
-from .base import ROSRobotInterfaceBase
+from skrobot.interfaces.ros.base import ROSRobotInterfaceBase
 
 
 class NextageROSRobotInterface(ROSRobotInterfaceBase):

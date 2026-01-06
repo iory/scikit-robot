@@ -2,7 +2,7 @@ import math
 import os
 import xml.etree.ElementTree as ET
 
-from .modularize_urdf import find_root_link
+from skrobot.urdf.modularize_urdf import find_root_link
 
 
 def transform_urdf_with_world_link(input_file, output_file,

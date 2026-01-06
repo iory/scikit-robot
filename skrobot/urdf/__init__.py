@@ -1,14 +1,14 @@
-from .aggregate import aggregate_urdf_mesh_files
-from .extract_sub_urdf import extract_sub_urdf
-from .modularize_urdf import find_root_link
-from .modularize_urdf import transform_urdf_to_macro
-from .primitives_converter import convert_meshes_to_primitives
-from .scale_urdf import scale_urdf
-from .transform_urdf import transform_urdf_with_world_link
-from .wheel_collision_converter import convert_wheel_collisions_to_cylinders
-from .wheel_collision_converter import get_mesh_dimensions
-from .xml_root_link_changer import change_urdf_root_link
-from .xml_root_link_changer import URDFXMLRootLinkChanger
+from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
+from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
+from skrobot.urdf.modularize_urdf import find_root_link
+from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
+from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
+from skrobot.urdf.scale_urdf import scale_urdf
+from skrobot.urdf.transform_urdf import transform_urdf_with_world_link
+from skrobot.urdf.wheel_collision_converter import convert_wheel_collisions_to_cylinders
+from skrobot.urdf.wheel_collision_converter import get_mesh_dimensions
+from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
+from skrobot.urdf.xml_root_link_changer import URDFXMLRootLinkChanger
 
 
 __all__ = [

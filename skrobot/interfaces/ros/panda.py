@@ -2,7 +2,7 @@ import actionlib
 import control_msgs.msg
 import franka_gripper.msg
 
-from .base import ROSRobotInterfaceBase
+from skrobot.interfaces.ros.base import ROSRobotInterfaceBase
 
 
 WIDTH_MAX = 0.08

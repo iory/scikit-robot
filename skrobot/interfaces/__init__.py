@@ -33,4 +33,4 @@ def __getattr__(name):
     raise AttributeError(f"module 'skrobot.interfaces' has no attribute '{name}'")
 
 
-from .ros import *
+from skrobot.interfaces.ros import *
