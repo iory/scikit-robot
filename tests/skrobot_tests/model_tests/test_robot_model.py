@@ -1182,3 +1182,60 @@ class TestRobotModel(unittest.TestCase):
 
         # Should complete without error (result can be success or fail)
         self.assertIn(type(result), [np.ndarray, bool])
+
+    def test_limb_naming_convention_aliases(self):
+        """Test new naming convention aliases (right_arm, left_arm, arm, etc.)."""
+        from skrobot.model import RobotModel
+
+        # Test PR2 (dual-arm robot)
+        pr2 = self.pr2
+
+        # Test right_arm / left_arm aliases
+        self.assertIsNotNone(pr2.right_arm)
+        self.assertIsNotNone(pr2.left_arm)
+        self.assertIsInstance(pr2.right_arm, RobotModel)
+        self.assertIsInstance(pr2.left_arm, RobotModel)
+
+        # Verify right_arm and rarm return functionally equivalent models
+        self.assertEqual(
+            [j.name for j in pr2.right_arm.joint_list],
+            [j.name for j in pr2.rarm.joint_list])
+        self.assertEqual(
+            [j.name for j in pr2.left_arm.joint_list],
+            [j.name for j in pr2.larm.joint_list])
+
+        # Test end_coords aliases
+        self.assertIsNotNone(pr2.right_arm_end_coords)
+        self.assertIsNotNone(pr2.left_arm_end_coords)
+        self.assertIsInstance(pr2.right_arm_end_coords, CascadedCoords)
+        self.assertIsInstance(pr2.left_arm_end_coords, CascadedCoords)
+
+        # Verify end_coords are the same
+        self.assertIs(pr2.right_arm_end_coords, pr2.rarm_end_coords)
+        self.assertIs(pr2.left_arm_end_coords, pr2.larm_end_coords)
+
+        # Test Fetch (single-arm robot)
+        fetch = self.fetch
+
+        # Test arm alias for single-arm robots
+        self.assertIsNotNone(fetch.arm)
+        self.assertIsInstance(fetch.arm, RobotModel)
+        self.assertEqual(
+            [j.name for j in fetch.arm.joint_list],
+            [j.name for j in fetch.rarm.joint_list])
+
+        # Test arm_end_coords alias
+        self.assertIsNotNone(fetch.arm_end_coords)
+        self.assertIsInstance(fetch.arm_end_coords, CascadedCoords)
+        self.assertIs(fetch.arm_end_coords, fetch.rarm_end_coords)
+
+        # Test Kuka (single-arm robot)
+        kuka = self.kuka
+        self.assertIsNotNone(kuka.arm)
+        self.assertIsInstance(kuka.arm, RobotModel)
+
+        # Test that non-existent limbs return None
+        self.assertIsNone(pr2.right_leg)
+        self.assertIsNone(pr2.left_leg)
+        self.assertIsNone(fetch.right_leg)
+        self.assertIsNone(fetch.left_leg)
