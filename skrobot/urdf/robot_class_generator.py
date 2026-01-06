@@ -23,6 +23,59 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _convert_to_ros_package_path(urdf_path):
+    """Convert absolute path to ROS package:// path if possible.
+
+    Parameters
+    ----------
+    urdf_path : str
+        Absolute path to URDF file.
+
+    Returns
+    -------
+    str
+        ROS package path (package://pkg_name/path) if inside a ROS package,
+        otherwise returns the original path.
+    """
+    if urdf_path is None:
+        return None
+
+    urdf_path = os.path.abspath(urdf_path)
+
+    # Walk up the directory tree to find package.xml
+    current_dir = os.path.dirname(urdf_path)
+    package_root = None
+    package_name = None
+
+    while current_dir and current_dir != os.path.dirname(current_dir):
+        package_xml = os.path.join(current_dir, 'package.xml')
+        if os.path.exists(package_xml):
+            # Found a ROS package, extract package name
+            package_root = current_dir
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(package_xml)
+                root = tree.getroot()
+                name_elem = root.find('name')
+                if name_elem is not None and name_elem.text:
+                    package_name = name_elem.text.strip()
+                else:
+                    # Fallback to directory name
+                    package_name = os.path.basename(current_dir)
+            except Exception:
+                # Fallback to directory name
+                package_name = os.path.basename(current_dir)
+            break
+        current_dir = os.path.dirname(current_dir)
+
+    if package_root and package_name:
+        # Calculate relative path from package root
+        rel_path = os.path.relpath(urdf_path, package_root)
+        return f"package://{package_name}/{rel_path}"
+
+    return urdf_path
+
+
 class GroupDefinition:
     """Container for robot group definitions.
 
@@ -1057,6 +1110,9 @@ def generate_robot_class_from_geometry(robot, output_path=None,
                 urdf_path = urdf_path()
             except NotImplementedError:
                 urdf_path = None
+
+    # Convert to ROS package:// path if inside a ROS package
+    urdf_path = _convert_to_ros_package_path(urdf_path)
 
     group_def = GroupDefinition(
         robot_name=robot_name,
