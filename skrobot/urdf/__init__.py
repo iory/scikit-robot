@@ -3,6 +3,8 @@ from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
+from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
+from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometry
 from skrobot.urdf.scale_urdf import scale_urdf
 from skrobot.urdf.transform_urdf import transform_urdf_with_world_link
 from skrobot.urdf.wheel_collision_converter import convert_wheel_collisions_to_cylinders
@@ -23,4 +25,6 @@ __all__ = [
     'get_mesh_dimensions',
     'extract_sub_urdf',
     'scale_urdf',
+    'generate_groups_from_geometry',
+    'generate_robot_class_from_geometry',
 ]
