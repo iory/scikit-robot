@@ -3407,6 +3407,14 @@ class URDF(URDFType):
             The parsed URDF.
         """
         if isinstance(file_obj, six.string_types):
+            # Handle package:// URLs
+            if file_obj.startswith('package://'):
+                resolved_path = resolve_filepath(os.getcwd(), file_obj)
+                if resolved_path is None:
+                    raise ValueError(
+                        'Could not resolve package path: {}'.format(file_obj))
+                file_obj = resolved_path
+
             if os.path.isfile(file_obj):
                 parser = ET.XMLParser(remove_comments=True,
                                       remove_blank_text=True)
