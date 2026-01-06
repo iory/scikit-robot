@@ -156,6 +156,20 @@ class PR2(RobotModelFromURDF):
         r.end_coords = self.head_end_coords
         return r
 
+    # New naming convention aliases (backward compatible)
+    right_arm = rarm
+    left_arm = larm
+    right_arm_with_torso = rarm_with_torso
+    left_arm_with_torso = larm_with_torso
+
+    @property
+    def right_arm_end_coords(self):
+        return self.rarm_end_coords
+
+    @property
+    def left_arm_end_coords(self):
+        return self.larm_end_coords
+
     def reset_manip_pose(self):
         self.torso_lift_joint.joint_angle(0.3)
         self.l_shoulder_pan_joint.joint_angle(np.deg2rad(75))

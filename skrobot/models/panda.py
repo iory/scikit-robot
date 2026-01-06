@@ -57,3 +57,10 @@ class Panda(RobotModelFromURDF):
         model = RobotModel(link_list=links, joint_list=joints)
         model.end_coords = self.rarm_end_coords
         return model
+
+    # New naming convention aliases (backward compatible)
+    arm = rarm
+
+    @property
+    def arm_end_coords(self):
+        return self.rarm_end_coords

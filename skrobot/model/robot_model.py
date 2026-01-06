@@ -1866,6 +1866,80 @@ class RobotModel(CascadedLink):
                                 self.joint_max_angles)
         return self.angle_vector(target_angles)
 
+    # New naming convention properties (forward compatibility)
+    # These provide access using full names (right_arm, left_arm, etc.)
+    # while maintaining backward compatibility with abbreviated names.
+
+    def _get_limb(self, attr_name):
+        """Get limb by attribute name, returning None if not available."""
+        try:
+            limb = getattr(self, attr_name, None)
+            if isinstance(limb, RobotModel):
+                return limb
+        except NotImplementedError:
+            pass
+        return None
+
+    def _get_end_coords(self, attr_name):
+        """Get end coords by attribute name, returning None if not available."""
+        try:
+            coords = getattr(self, attr_name, None)
+            if isinstance(coords, CascadedCoords):
+                return coords
+        except NotImplementedError:
+            pass
+        return None
+
+    @property
+    def right_arm(self):
+        """Right arm kinematic chain (alias for rarm)."""
+        return self._get_limb('rarm')
+
+    @property
+    def left_arm(self):
+        """Left arm kinematic chain (alias for larm)."""
+        return self._get_limb('larm')
+
+    @property
+    def right_leg(self):
+        """Right leg kinematic chain (alias for rleg)."""
+        return self._get_limb('rleg')
+
+    @property
+    def left_leg(self):
+        """Left leg kinematic chain (alias for lleg)."""
+        return self._get_limb('lleg')
+
+    @property
+    def right_arm_end_coords(self):
+        """Right arm end effector coordinates (alias for rarm_end_coords)."""
+        return self._get_end_coords('rarm_end_coords')
+
+    @property
+    def left_arm_end_coords(self):
+        """Left arm end effector coordinates (alias for larm_end_coords)."""
+        return self._get_end_coords('larm_end_coords')
+
+    @property
+    def right_leg_end_coords(self):
+        """Right leg end effector coordinates (alias for rleg_end_coords)."""
+        return self._get_end_coords('rleg_end_coords')
+
+    @property
+    def left_leg_end_coords(self):
+        """Left leg end effector coordinates (alias for lleg_end_coords)."""
+        return self._get_end_coords('lleg_end_coords')
+
+    @property
+    def arm(self):
+        """Arm kinematic chain for single-arm robots (alias for rarm)."""
+        return self._get_limb('rarm')
+
+    @property
+    def arm_end_coords(self):
+        """Arm end effector coordinates for single-arm robots."""
+        return self._get_end_coords('rarm_end_coords')
+
     def _meshes_from_urdf_visuals(self, visuals):
         meshes = []
         for visual in visuals:

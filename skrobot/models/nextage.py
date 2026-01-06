@@ -105,3 +105,15 @@ class Nextage(RobotModelFromURDF):
         joints = [l.joint for l in links]
         model = RobotModel(link_list=links, joint_list=joints)
         return model
+
+    # New naming convention aliases (backward compatible)
+    right_arm = rarm
+    left_arm = larm
+
+    @property
+    def right_arm_end_coords(self):
+        return self.rarm_end_coords
+
+    @property
+    def left_arm_end_coords(self):
+        return self.larm_end_coords
