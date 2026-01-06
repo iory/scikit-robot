@@ -122,7 +122,7 @@ def _is_tool_frame(link_name):
     tool_keywords = [
         'tool_frame', 'tool_link', 'tcp', 'end_effector', 'ee_link',
         'optical_frame', 'finger_tip_frame', 'tip_frame', 'sensor_frame',
-        'camera_frame', 'hand_tcp', 'gripper_link', 'gripper_tool_frame',
+        'camera_frame', 'hand_tcp', 'gripper_tool_frame',
     ]
     link_lower = link_name.lower()
     return any(keyword in link_lower for keyword in tool_keywords)
@@ -144,6 +144,83 @@ def _is_hand_link(link_name):
     hand_keywords = ['hand', 'flange', 'palm', 'wrist_roll', 'ee_link']
     link_lower = link_name.lower()
     return any(keyword in link_lower for keyword in hand_keywords)
+
+
+def _find_symmetric_gripper_midpoint(descendants, link_map):
+    """Find symmetric gripper links and return their midpoint.
+
+    Detects gripper fingers geometrically by finding links that:
+    1. Share the same parent
+    2. Have symmetric positions (opposite signs in x or y)
+
+    Parameters
+    ----------
+    descendants : set
+        Set of descendant link names.
+    link_map : dict
+        Dictionary mapping link names to Link objects.
+
+    Returns
+    -------
+    dict or None
+        If symmetric gripper found, returns:
+        {'parent_link': str, 'pos': list, 'rot': None}
+        Otherwise None.
+    """
+    # Group descendants by parent
+    parent_to_children = {}
+    for desc_name in descendants:
+        desc_link = link_map.get(desc_name)
+        if desc_link is None or desc_link.parent_link is None:
+            continue
+        parent_name = desc_link.parent_link.name
+        if parent_name not in parent_to_children:
+            parent_to_children[parent_name] = []
+        parent_to_children[parent_name].append(desc_link)
+
+    # Find parent with multiple children that are symmetric
+    for parent_name, children in parent_to_children.items():
+        if len(children) < 2:
+            continue
+
+        parent_link = link_map.get(parent_name)
+        if parent_link is None:
+            continue
+
+        # Get positions in parent's local frame
+        parent_pos = parent_link.worldpos()
+        parent_rot_inv = parent_link.worldrot().T
+
+        local_positions = []
+        for child in children:
+            child_world = child.worldpos()
+            local = parent_rot_inv.dot(child_world - parent_pos)
+            local_positions.append((child, local))
+
+        # Check for symmetric pairs (opposite x or y coordinates)
+        for i, (child1, pos1) in enumerate(local_positions):
+            for child2, pos2 in local_positions[i + 1:]:
+                # Check if symmetric in x or y (signs opposite, similar magnitude)
+                x_symmetric = (abs(pos1[0] + pos2[0]) < 0.01
+                               and abs(pos1[0]) > 0.005)
+                y_symmetric = (abs(pos1[1] + pos2[1]) < 0.01
+                               and abs(pos1[1]) > 0.005)
+                # z should be similar
+                z_similar = abs(pos1[2] - pos2[2]) < 0.02
+
+                if (x_symmetric or y_symmetric) and z_similar:
+                    # Found symmetric pair - calculate midpoint
+                    midpoint_local = (pos1 + pos2) / 2
+                    midpoint_local = [
+                        round(v, 6) if abs(v) > 1e-6 else 0.0
+                        for v in midpoint_local]
+                    return {
+                        'parent_link': parent_name,
+                        'pos': midpoint_local,
+                        'rot': None,
+                    }
+
+    return None
 
 
 def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
@@ -218,6 +295,12 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
                             }
             except nx.NetworkXNoPath:
                 continue
+
+    # Check for symmetric child links (e.g., gripper fingers)
+    # Detect geometrically: same parent, symmetric positions
+    result = _find_symmetric_gripper_midpoint(descendants, link_map)
+    if result is not None:
+        return result
 
     # Second: Search ANCESTORS for tool frame or hand link
     undirected = G.to_undirected()
