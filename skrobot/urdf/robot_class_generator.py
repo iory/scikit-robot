@@ -209,12 +209,9 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                 z_similar = abs(pos1[2] - pos2[2]) < 0.02
 
                 if (x_symmetric or y_symmetric) and z_similar:
-                    # Found symmetric pair - calculate midpoint using mesh
-                    tip1 = _get_fingertip_position(child1)
-                    tip2 = _get_fingertip_position(child2)
-                    midpoint_world = (tip1 + tip2) / 2
-                    midpoint_local = parent_rot_inv.dot(
-                        midpoint_world - parent_pos)
+                    # Found symmetric pair - use link origins midpoint
+                    # (mesh-based tips don't work well for opposing fingers)
+                    midpoint_local = (pos1 + pos2) / 2
                     midpoint_local = [
                         round(v, 6) if abs(v) > 1e-6 else 0.0
                         for v in midpoint_local]
