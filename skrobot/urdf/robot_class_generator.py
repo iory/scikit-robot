@@ -23,6 +23,179 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# Pattern Configuration
+# ============================================================================
+
+class PatternConfig:
+    """Configuration for link/joint name pattern matching.
+
+    This class externalizes all "magic words" used for detecting limb types,
+    end-effector links, and other robot parts. Users can customize patterns
+    for robots with non-standard naming conventions.
+
+    Parameters
+    ----------
+    patterns : dict, optional
+        Dictionary of pattern lists to override defaults. Keys include:
+        - 'right_arm', 'left_arm', 'right_leg', 'left_leg'
+        - 'head', 'torso', 'gripper', 'finger'
+        - 'tool_frame', 'hand_link', 'arm_tip_priority'
+    force_groups : dict, optional
+        Force specific links into groups, bypassing auto-detection.
+        Example: {'head': ['neck_link', 'head_link']}
+
+    Examples
+    --------
+    >>> config = PatternConfig(
+    ...     patterns={
+    ...         'right_arm': ['RA_', 'right_arm_j'],
+    ...         'left_arm': ['LA_', 'left_arm_j'],
+    ...     },
+    ...     force_groups={
+    ...         'head': ['neck_link', 'head_link'],
+    ...     }
+    ... )
+    >>> generate_robot_class_from_geometry(robot, config=config)
+    """
+
+    # Default patterns for various limb types and components
+    DEFAULT_PATTERNS = {
+        'right_arm': [
+            'r_shoulder', 'r_upper_arm', 'r_elbow', 'r_forearm', 'r_wrist',
+            'rarm', 'right_arm', 'right_shoulder',
+        ],
+        'left_arm': [
+            'l_shoulder', 'l_upper_arm', 'l_elbow', 'l_forearm', 'l_wrist',
+            'larm', 'left_arm', 'left_shoulder',
+        ],
+        'right_leg': [
+            'r_hip', 'r_thigh', 'r_knee', 'r_ankle', 'r_foot',
+            'rleg', 'right_leg', 'right_hip',
+        ],
+        'left_leg': [
+            'l_hip', 'l_thigh', 'l_knee', 'l_ankle', 'l_foot',
+            'lleg', 'left_leg', 'left_hip',
+        ],
+        'head': ['head', 'neck'],
+        'head_tip': ['range', 'camera', 'sensor', 'optical', 'rgb', 'depth'],
+        'torso': ['torso', 'chest', 'body', 'trunk'],
+        'gripper': ['hand', 'gripper', 'finger', 'palm'],
+        'finger': [
+            'finger', 'leftfinger', 'rightfinger', 'l_finger', 'r_finger',
+        ],
+        'tool_frame': [
+            'tool_frame', 'tool_link', 'tcp', 'end_effector', 'ee_link',
+            'optical_frame', 'finger_tip_frame', 'tip_frame', 'sensor_frame',
+            'camera_frame', 'hand_tcp', 'gripper_tool_frame',
+        ],
+        'hand_link': ['hand', 'flange', 'palm', 'wrist_roll', 'ee_link'],
+        'arm_tip_priority': [
+            'tool_frame', 'ee_link', 'end_effector', 'hand_link',
+        ],
+    }
+
+    def __init__(self, patterns=None, force_groups=None):
+        # Start with defaults
+        self._patterns = {k: list(v) for k, v in self.DEFAULT_PATTERNS.items()}
+
+        # Override/extend with user patterns
+        if patterns:
+            for key, values in patterns.items():
+                if key in self._patterns:
+                    # Extend existing patterns
+                    self._patterns[key] = list(values) + self._patterns[key]
+                else:
+                    self._patterns[key] = list(values)
+
+        self.force_groups = force_groups or {}
+
+        # Pre-compile regex patterns for performance
+        self._compiled_patterns = {}
+        self._compile_patterns()
+
+    def _compile_patterns(self):
+        """Compile patterns into regex for faster matching."""
+        for key, patterns in self._patterns.items():
+            # Create a single regex that matches any pattern
+            escaped = [re.escape(p) for p in patterns]
+            pattern_str = '|'.join(escaped)
+            self._compiled_patterns[key] = re.compile(
+                pattern_str, re.IGNORECASE)
+
+    def get_patterns(self, key):
+        """Get pattern list for a key.
+
+        Parameters
+        ----------
+        key : str
+            Pattern category name.
+
+        Returns
+        -------
+        list of str
+            List of patterns.
+        """
+        return self._patterns.get(key, [])
+
+    def matches(self, key, text):
+        """Check if text matches any pattern in category.
+
+        Parameters
+        ----------
+        key : str
+            Pattern category name.
+        text : str
+            Text to match against.
+
+        Returns
+        -------
+        bool
+            True if any pattern matches.
+        """
+        if key not in self._compiled_patterns:
+            return False
+        return self._compiled_patterns[key].search(text) is not None
+
+    def count_matches(self, key, texts):
+        """Count how many texts match patterns in category.
+
+        Parameters
+        ----------
+        key : str
+            Pattern category name.
+        texts : iterable of str
+            Texts to match against.
+
+        Returns
+        -------
+        int
+            Number of texts that match.
+        """
+        if key not in self._compiled_patterns:
+            return 0
+        pattern = self._compiled_patterns[key]
+        return sum(1 for text in texts if pattern.search(text))
+
+
+# Global default config (used when no config is provided)
+_default_config = None
+
+
+def get_default_config():
+    """Get the global default PatternConfig.
+
+    Returns
+    -------
+    PatternConfig
+        The default configuration instance.
+    """
+    global _default_config
+    if _default_config is None:
+        _default_config = PatternConfig()
+    return _default_config
+
+
 def _convert_to_ros_package_path(urdf_path):
     """Convert absolute path to ROS package:// path if possible.
 
@@ -110,44 +283,44 @@ class GroupDefinition:
 # End-effector estimation utilities
 # ============================================================================
 
-def _is_tool_frame(link_name):
+def _is_tool_frame(link_name, config=None):
     """Check if link name suggests it's a tool frame.
 
     Parameters
     ----------
     link_name : str
         Name of the link.
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
     bool
         True if link name suggests it's a tool frame.
     """
-    tool_keywords = [
-        'tool_frame', 'tool_link', 'tcp', 'end_effector', 'ee_link',
-        'optical_frame', 'finger_tip_frame', 'tip_frame', 'sensor_frame',
-        'camera_frame', 'hand_tcp', 'gripper_tool_frame',
-    ]
-    link_lower = link_name.lower()
-    return any(keyword in link_lower for keyword in tool_keywords)
+    if config is None:
+        config = get_default_config()
+    return config.matches('tool_frame', link_name)
 
 
-def _is_hand_link(link_name):
+def _is_hand_link(link_name, config=None):
     """Check if link name suggests it's a hand/flange link.
 
     Parameters
     ----------
     link_name : str
         Name of the link.
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
     bool
         True if link name suggests it's a hand/flange link.
     """
-    hand_keywords = ['hand', 'flange', 'palm', 'wrist_roll', 'ee_link']
-    link_lower = link_name.lower()
-    return any(keyword in link_lower for keyword in hand_keywords)
+    if config is None:
+        config = get_default_config()
+    return config.matches('hand_link', link_name)
 
 
 def _find_symmetric_gripper_midpoint(descendants, link_map):
@@ -276,7 +449,8 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
     return None
 
 
-def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
+def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type,
+                                  config=None):
     """Find the best parent link for end_coords.
 
     Searches both descendants and ancestors of tip_link for tool frames
@@ -292,6 +466,8 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
         Name of the tip link.
     group_type : str
         Type of the group (arm, head, gripper, etc.).
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
@@ -299,10 +475,13 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
         Dictionary containing:
         - 'parent_link': str, name of the best parent link
         - 'pos': list, position offset [x, y, z]
-        - 'rot': list or None, rotation offset [rx, ry, rz] in degrees
+        - 'rot': list or None, rotation offset [rx, ry, rz] in radians
     """
+    if config is None:
+        config = get_default_config()
+
     # If tip link itself is a tool frame, use it directly
-    if _is_tool_frame(tip_link_name):
+    if _is_tool_frame(tip_link_name, config):
         return {
             'parent_link': tip_link_name,
             'pos': [0.0, 0.0, 0.0],
@@ -332,13 +511,13 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
             try:
                 path_len = nx.shortest_path_length(G, tip_link_name, desc)
                 if path_len == depth:
-                    if _is_tool_frame(desc):
+                    if _is_tool_frame(desc, config):
                         return {
                             'parent_link': desc,
                             'pos': [0.0, 0.0, 0.0],
                             'rot': None,
                         }
-                    if _is_hand_link(desc):
+                    if _is_hand_link(desc, config):
                         hand_link = link_map.get(desc)
                         if hand_link is not None:
                             return {
@@ -370,13 +549,13 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type):
             break
 
         for parent in parent_candidates:
-            if _is_tool_frame(parent):
+            if _is_tool_frame(parent, config):
                 return {
                     'parent_link': parent,
                     'pos': [0.0, 0.0, 0.0],
                     'rot': None,
                 }
-            if _is_hand_link(parent):
+            if _is_hand_link(parent, config):
                 hand_link = link_map.get(parent)
                 tip_link = link_map.get(tip_link_name)
                 if hand_link is not None and tip_link is not None:
@@ -422,31 +601,47 @@ def _calculate_relative_offset(parent_link, child_link):
     return offset
 
 
-def _get_link_mesh(link):
-    """Get mesh from link (collision or visual).
+def _get_link_mesh(link, prefer_visual=True):
+    """Get mesh from link for TCP estimation.
 
     Parameters
     ----------
     link : Link
         Robot link object.
+    prefer_visual : bool, optional
+        If True, prefer visual mesh over collision mesh.
+        Visual meshes often have more accurate vertex positions for
+        fingertips, while collision meshes may be simplified convex hulls.
+        Default is True.
 
     Returns
     -------
     trimesh.Trimesh or None
         Mesh object if available.
     """
-    if link.collision_mesh is not None:
-        return link.collision_mesh
-    if link.visual_mesh is not None:
-        from skrobot._lazy_imports import _lazy_trimesh
-        trimesh = _lazy_trimesh()
-        mesh = link.visual_mesh
+    from skrobot._lazy_imports import _lazy_trimesh
+    trimesh = _lazy_trimesh()
+
+    def _process_mesh(mesh):
+        if mesh is None:
+            return None
         if isinstance(mesh, (list, tuple)):
             if len(mesh) == 0:
                 return None
             return trimesh.util.concatenate(mesh)
         return mesh
-    return None
+
+    if prefer_visual:
+        # Visual mesh often has more accurate geometry for fingertips
+        visual = _process_mesh(link.visual_mesh)
+        if visual is not None:
+            return visual
+        return link.collision_mesh
+    else:
+        # Collision mesh first (legacy behavior)
+        if link.collision_mesh is not None:
+            return link.collision_mesh
+        return _process_mesh(link.visual_mesh)
 
 
 def _get_fingertip_position(link):
@@ -482,7 +677,7 @@ def _get_fingertip_position(link):
         return link.worldpos()
 
 
-def _calculate_gripper_tcp_offset(G, link_map, parent_link_name):
+def _calculate_gripper_tcp_offset(G, link_map, parent_link_name, config=None):
     """Calculate TCP offset by finding gripper finger tips.
 
     From a parent link (e.g., panda_hand), find descendant finger links
@@ -496,6 +691,8 @@ def _calculate_gripper_tcp_offset(G, link_map, parent_link_name):
         Dictionary mapping link names to Link objects.
     parent_link_name : str
         Name of the parent link (e.g., hand, gripper base).
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
@@ -503,6 +700,9 @@ def _calculate_gripper_tcp_offset(G, link_map, parent_link_name):
         Position offset [x, y, z] in parent's local frame, or None if
         no fingers found.
     """
+    if config is None:
+        config = get_default_config()
+
     parent_link = link_map.get(parent_link_name)
     if parent_link is None:
         return None
@@ -514,9 +714,8 @@ def _calculate_gripper_tcp_offset(G, link_map, parent_link_name):
         descendants = set()
 
     finger_links = []
-    finger_patterns = ['finger', 'leftfinger', 'rightfinger', 'l_finger', 'r_finger']
     for desc_name in descendants:
-        if any(p in desc_name.lower() for p in finger_patterns):
+        if config.matches('finger', desc_name):
             desc_link = link_map.get(desc_name)
             if desc_link is not None:
                 finger_links.append(desc_link)
@@ -599,7 +798,7 @@ def _estimate_tcp_from_mesh(link):
     return None
 
 
-def _find_gripper_midpoint(link, link_map):
+def _find_gripper_midpoint(link, link_map, config=None):
     """Find midpoint between gripper fingertips if applicable.
 
     Uses mesh geometry to find actual fingertip positions for
@@ -611,6 +810,8 @@ def _find_gripper_midpoint(link, link_map):
         The tip link (potentially a finger).
     link_map : dict
         Dictionary mapping link names to Link objects.
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
@@ -619,16 +820,16 @@ def _find_gripper_midpoint(link, link_map):
         {'parent_link': str, 'pos': list, 'rot': None}
         Otherwise None.
     """
-    link_name = link.name.lower()
+    if config is None:
+        config = get_default_config()
 
     # If this is already a tool frame, don't try to find gripper midpoint
-    if _is_tool_frame(link.name):
+    if _is_tool_frame(link.name, config):
         return None
 
     # Check if this looks like a finger link
     # Note: 'gripper' alone is not enough - need actual finger patterns
-    finger_patterns = ['finger', 'leftfinger', 'rightfinger', 'l_finger', 'r_finger']
-    if not any(p in link_name for p in finger_patterns):
+    if not config.matches('finger', link.name):
         return None
 
     # Get parent link
@@ -637,7 +838,7 @@ def _find_gripper_midpoint(link, link_map):
         return None
 
     # Check if parent is a tool frame
-    if _is_tool_frame(parent.name):
+    if _is_tool_frame(parent.name, config):
         return {
             'parent_link': parent.name,
             'pos': [0.0, 0.0, 0.0],
@@ -650,8 +851,7 @@ def _find_gripper_midpoint(link, link_map):
         for child in parent.child_links:
             if child is None or child is link:
                 continue
-            child_name = child.name.lower()
-            if any(p in child_name for p in finger_patterns):
+            if config.matches('finger', child.name):
                 sibling_fingers.append(child)
 
     if not sibling_fingers:
@@ -712,7 +912,7 @@ def _find_base_link(G):
 
 
 def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
-                      movable_joint_count=0):
+                      movable_joint_count=0, config=None):
     """Detect what type of limb a set of links represents.
 
     Parameters
@@ -723,8 +923,12 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
         Name of the tip link.
     tip_y_coord : float, optional
         Y coordinate of tip link relative to base (for left/right detection).
+        Note: This depends on the robot's initial pose (typically T-pose).
+        For robots in non-standard initial poses, this may not work correctly.
     movable_joint_count : int, optional
         Number of movable joints in this chain (for geometric detection).
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
 
     Returns
     -------
@@ -732,51 +936,23 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
         One of 'right_arm', 'left_arm', 'arm', 'right_leg', 'left_leg',
         'head', 'torso', 'gripper', or None.
     """
-    right_arm_count = 0
-    left_arm_count = 0
-    right_leg_count = 0
-    left_leg_count = 0
-    head_count = 0
-    torso_count = 0
+    if config is None:
+        config = get_default_config()
+
+    # Count pattern matches using pre-compiled regex
+    right_arm_count = config.count_matches('right_arm', link_names)
+    left_arm_count = config.count_matches('left_arm', link_names)
+    right_leg_count = config.count_matches('right_leg', link_names)
+    left_leg_count = config.count_matches('left_leg', link_names)
+    head_count = config.count_matches('head', link_names)
+    torso_count = config.count_matches('torso', link_names)
+    gripper_count = config.count_matches('gripper', link_names)
     single_arm_count = 0
-    gripper_count = 0
-
-    right_arm_patterns = ['r_shoulder', 'r_upper_arm', 'r_elbow', 'r_forearm',
-                          'r_wrist', 'rarm', 'right_arm', 'right_shoulder']
-    left_arm_patterns = ['l_shoulder', 'l_upper_arm', 'l_elbow', 'l_forearm',
-                         'l_wrist', 'larm', 'left_arm', 'left_shoulder']
-    right_leg_patterns = ['r_hip', 'r_thigh', 'r_knee', 'r_ankle', 'r_foot',
-                          'rleg', 'right_leg', 'right_hip']
-    left_leg_patterns = ['l_hip', 'l_thigh', 'l_knee', 'l_ankle', 'l_foot',
-                         'lleg', 'left_leg', 'left_hip']
-    head_patterns = ['head', 'neck']
-    torso_patterns = ['torso', 'chest', 'body', 'trunk']
-    head_tip_patterns = ['range', 'camera', 'sensor', 'optical', 'rgb', 'depth']
-    gripper_patterns = ['hand', 'gripper', 'finger', 'palm']
-
-    for link_name in link_names:
-        name_lower = link_name.lower()
-
-        if any(p in name_lower for p in right_arm_patterns):
-            right_arm_count += 1
-        if any(p in name_lower for p in left_arm_patterns):
-            left_arm_count += 1
-        if any(p in name_lower for p in right_leg_patterns):
-            right_leg_count += 1
-        if any(p in name_lower for p in left_leg_patterns):
-            left_leg_count += 1
-        if any(p in name_lower for p in head_patterns):
-            head_count += 1
-        if any(p in name_lower for p in torso_patterns):
-            torso_count += 1
-        if any(p in name_lower for p in gripper_patterns):
-            gripper_count += 1
 
     if tip_link:
-        tip_lower = tip_link.lower()
-        if any(p in tip_lower for p in head_tip_patterns):
+        if config.matches('head_tip', tip_link):
             head_count += 2
-        if any(p in tip_lower for p in gripper_patterns):
+        if config.matches('gripper', tip_link):
             gripper_count += 2
 
     # Geometric detection: long kinematic chain without left/right pattern
@@ -800,6 +976,8 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
     }
 
     # Use Y coordinate for geometric left/right detection
+    # WARNING: This assumes the robot is in T-pose or similar standard pose.
+    # For robots with non-standard initial poses, this detection may fail.
     y_threshold = 0.05
     if tip_y_coord is not None:
         has_arm_pattern = (right_arm_count >= 1 or left_arm_count >= 1
@@ -825,8 +1003,7 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
     # Special rule: don't mix head and torso
     if head_count >= 1 and torso_count > 0:
         for link_name in link_names:
-            name_lower = link_name.lower()
-            if any(p in name_lower for p in head_patterns):
+            if config.matches('head', link_name):
                 counts['torso'] = 0
                 break
 
@@ -849,16 +1026,30 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
     return None
 
 
-def _find_limb_chains(G, base_link, link_map):
-    """Find all limb chains from the base."""
+def _find_limb_chains(G, base_link, link_map, config=None):
+    """Find all limb chains from the base.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        Robot link graph.
+    base_link : str
+        Base link name.
+    link_map : dict
+        Mapping from link names to Link objects.
+    config : PatternConfig, optional
+        Pattern configuration. If None, uses default config.
+    """
+    if config is None:
+        config = get_default_config()
+
     limbs = {}
     leaves = [n for n in G.nodes() if G.out_degree(n) == 0]
-    arm_tip_priority = ['tool_frame', 'ee_link', 'end_effector', 'hand_link']
 
     preferred_leaves = []
     other_leaves = []
     for leaf in leaves:
-        if any(p in leaf.lower() for p in arm_tip_priority):
+        if config.matches('arm_tip_priority', leaf):
             preferred_leaves.append(leaf)
         else:
             other_leaves.append(leaf)
@@ -896,7 +1087,7 @@ def _find_limb_chains(G, base_link, link_map):
 
         limb_type = _detect_limb_type(
             path, tip_link=leaf, tip_y_coord=tip_y_coord,
-            movable_joint_count=len(movable_links))
+            movable_joint_count=len(movable_links), config=config)
         if limb_type is None:
             continue
 
@@ -905,22 +1096,20 @@ def _find_limb_chains(G, base_link, link_map):
 
         if limb_type in limbs:
             existing_tip = limbs[limb_type]['tip_link']
-            existing_is_preferred = any(p in existing_tip.lower() for p in arm_tip_priority)
-            current_is_preferred = any(p in leaf.lower() for p in arm_tip_priority)
+            existing_is_preferred = config.matches('arm_tip_priority', existing_tip)
+            current_is_preferred = config.matches('arm_tip_priority', leaf)
             if existing_is_preferred and not current_is_preferred:
                 continue
 
-        gripper_patterns = ['hand', 'gripper', 'finger', 'palm']
         actual_tip = leaf
-        leaf_is_preferred = any(p in leaf.lower() for p in arm_tip_priority)
+        leaf_is_preferred = config.matches('arm_tip_priority', leaf)
 
         if limb_type in ['right_arm', 'left_arm']:
             arm_movable = []
             for link_name in movable_links:
-                name_lower = link_name.lower()
-                if any(p in name_lower for p in ['torso', 'chest', 'body']):
+                if config.matches('torso', link_name):
                     continue
-                if any(p in name_lower for p in gripper_patterns):
+                if config.matches('gripper', link_name):
                     continue
                 arm_movable.append(link_name)
             if arm_movable:
@@ -930,10 +1119,9 @@ def _find_limb_chains(G, base_link, link_map):
         elif limb_type == 'arm':
             arm_movable = []
             for link_name in movable_links:
-                name_lower = link_name.lower()
-                if any(p in name_lower for p in ['torso', 'chest', 'body']):
+                if config.matches('torso', link_name):
                     continue
-                if any(p in name_lower for p in gripper_patterns):
+                if config.matches('gripper', link_name):
                     continue
                 arm_movable.append(link_name)
             if arm_movable:
@@ -947,8 +1135,8 @@ def _find_limb_chains(G, base_link, link_map):
             should_update = True
         else:
             existing_tip = limbs[limb_type]['tip_link']
-            existing_is_preferred = any(p in existing_tip.lower() for p in arm_tip_priority)
-            current_is_preferred = any(p in leaf.lower() for p in arm_tip_priority)
+            existing_is_preferred = config.matches('arm_tip_priority', existing_tip)
+            current_is_preferred = config.matches('arm_tip_priority', leaf)
             if current_is_preferred and not existing_is_preferred:
                 should_update = True
             elif current_is_preferred == existing_is_preferred:
@@ -1054,13 +1242,16 @@ def _find_gripper_chains(G, arm_tip, link_map):
     }
 
 
-def generate_groups_from_geometry(robot):
+def generate_groups_from_geometry(robot, config=None):
     """Generate robot groups from URDF geometry without LLM.
 
     Parameters
     ----------
     robot : RobotModel
         Robot model instance.
+    config : PatternConfig, optional
+        Pattern configuration for customizing detection.
+        If None, uses default patterns.
 
     Returns
     -------
@@ -1072,11 +1263,21 @@ def generate_groups_from_geometry(robot):
         Dictionary of end_coords info (parent_link, pos, rot).
     str
         Robot name.
+
+    Notes
+    -----
+    Left/right detection uses Y-coordinate comparison, which assumes
+    the robot is in a T-pose or similar standard initial pose.
+    For robots with non-standard initial poses, detection may fail.
+    Use PatternConfig.force_groups to override auto-detection.
     """
+    if config is None:
+        config = get_default_config()
+
     G, link_map = _build_link_graph(robot)
     base_link = _find_base_link(G)
 
-    limbs = _find_limb_chains(G, base_link, link_map)
+    limbs = _find_limb_chains(G, base_link, link_map, config)
 
     groups = {}
     end_effectors = {}
@@ -1165,7 +1366,7 @@ def generate_groups_from_geometry(robot):
 
         # Find best parent for end_coords first
         ec_info = _find_best_end_coords_parent(
-            G, link_map, tip_link_name, group_name)
+            G, link_map, tip_link_name, group_name, config)
 
         # For arm groups, try to calculate gripper TCP offset
         # Skip if offset already set (e.g., by symmetric gripper detection)
@@ -1177,7 +1378,7 @@ def generate_groups_from_geometry(robot):
             if parent_link is not None:
                 # Try to find gripper midpoint from the end_coords parent
                 tcp_offset = _calculate_gripper_tcp_offset(
-                    G, link_map, parent_link_name)
+                    G, link_map, parent_link_name, config)
                 if tcp_offset is not None:
                     ec_info['pos'] = tcp_offset
 
@@ -1208,7 +1409,8 @@ def _sanitize_attr_name(name):
 def generate_robot_class_from_geometry(robot, output_path=None,
                                         class_name=None,
                                         urdf_path_function=None,
-                                        urdf_path=None):
+                                        urdf_path=None,
+                                        config=None):
     """Generate a Python class from robot geometry without LLM.
 
     Parameters
@@ -1224,6 +1426,9 @@ def generate_robot_class_from_geometry(robot, output_path=None,
     urdf_path : str, optional
         Explicit URDF path to use. If not provided, will try to get from
         robot.default_urdf_path or robot.urdf_path.
+    config : PatternConfig, optional
+        Pattern configuration for customizing link name detection.
+        Use this for robots with non-standard naming conventions.
 
     Returns
     -------
@@ -1236,8 +1441,21 @@ def generate_robot_class_from_geometry(robot, output_path=None,
     >>> from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometry
     >>> robot = Panda()
     >>> code = generate_robot_class_from_geometry(robot, output_path='/tmp/MyPanda.py')
+
+    >>> # Custom patterns for non-standard naming
+    >>> from skrobot.urdf.robot_class_generator import PatternConfig
+    >>> config = PatternConfig(
+    ...     patterns={'right_arm': ['RA_', 'right_arm_j']},
+    ...     force_groups={'head': ['neck_link', 'head_link']}
+    ... )
+    >>> code = generate_robot_class_from_geometry(robot, config=config)
+
+    Notes
+    -----
+    Left/right detection uses Y-coordinate comparison, assuming a T-pose.
+    For robots with non-standard poses, use PatternConfig.force_groups.
     """
-    result = generate_groups_from_geometry(robot)
+    result = generate_groups_from_geometry(robot, config)
     groups, end_effectors, end_coords_info, robot_name = result
 
     if urdf_path is None:
