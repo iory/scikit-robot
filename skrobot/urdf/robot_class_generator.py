@@ -24,6 +24,33 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# Geometric Detection Constants
+# ============================================================================
+
+# Symmetry detection thresholds for gripper finger detection
+SYMMETRY_POSITION_TOLERANCE = 0.01  # Max deviation for symmetric positions (m)
+MIN_POSITION_OFFSET = 0.005  # Min offset to consider as valid finger position (m)
+Z_SIMILARITY_TOLERANCE = 0.02  # Max Z-axis difference for symmetric fingers (m)
+
+# Search depth for finding end-effector links
+MAX_SEARCH_DEPTH = 5
+
+# Mesh analysis thresholds
+POSITION_EPSILON = 1e-6  # Threshold for near-zero position values
+FINGERTIP_RATIO = 0.1  # Top percentage of vertices considered as fingertip
+ASYMMETRY_RATIO = 2.0  # Ratio to determine asymmetric mesh extension
+
+# Y-coordinate thresholds for left/right limb detection (assumes T-pose)
+Y_THRESHOLD_WEAK = 0.05  # Weak threshold for Y-coordinate detection (m)
+Y_THRESHOLD_STRONG = 0.1  # Strong threshold for Y-coordinate detection (m)
+
+# Joint count thresholds for limb classification
+MIN_ARM_JOINTS = 5  # Minimum joints to classify as arm
+MIN_LEG_JOINTS = 2  # Minimum joints to classify as leg
+MIN_HEAD_JOINTS = 4  # Minimum joints to classify as head (with torso)
+
+
+# ============================================================================
 # Pattern Configuration
 # ============================================================================
 
@@ -384,12 +411,12 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
         for i, (child1, pos1) in enumerate(local_positions):
             for child2, pos2 in local_positions[i + 1:]:
                 # Check if symmetric in x or y (signs opposite, similar magnitude)
-                x_symmetric = (abs(pos1[0] + pos2[0]) < 0.01
-                               and abs(pos1[0]) > 0.005)
-                y_symmetric = (abs(pos1[1] + pos2[1]) < 0.01
-                               and abs(pos1[1]) > 0.005)
+                x_symmetric = (abs(pos1[0] + pos2[0]) < SYMMETRY_POSITION_TOLERANCE
+                               and abs(pos1[0]) > MIN_POSITION_OFFSET)
+                y_symmetric = (abs(pos1[1] + pos2[1]) < SYMMETRY_POSITION_TOLERANCE
+                               and abs(pos1[1]) > MIN_POSITION_OFFSET)
                 # z should be similar
-                z_similar = abs(pos1[2] - pos2[2]) < 0.02
+                z_similar = abs(pos1[2] - pos2[2]) < Z_SIMILARITY_TOLERANCE
 
                 if (x_symmetric or y_symmetric) and z_similar:
                     # Found symmetric pair - use link origins midpoint
@@ -409,7 +436,7 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
 
                     # x-axis: forward direction (toward TCP from origin)
                     # Use the direction from parent origin to midpoint
-                    if np.linalg.norm(midpoint_local) > 1e-6:
+                    if np.linalg.norm(midpoint_local) > POSITION_EPSILON:
                         x_axis_local = midpoint_local / np.linalg.norm(
                             midpoint_local)
                     else:
@@ -420,7 +447,7 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                         tip1_local = parent_rot_inv.dot(tip1 - parent_pos)
                         tip2_local = parent_rot_inv.dot(tip2 - parent_pos)
                         tip_midpoint = (tip1_local + tip2_local) / 2
-                        if np.linalg.norm(tip_midpoint) > 1e-6:
+                        if np.linalg.norm(tip_midpoint) > POSITION_EPSILON:
                             x_axis_local = tip_midpoint / np.linalg.norm(
                                 tip_midpoint)
                         else:
@@ -431,7 +458,7 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                     x_axis_local = x_axis_local - np.dot(
                         x_axis_local, y_axis_local) * y_axis_local
                     x_norm = np.linalg.norm(x_axis_local)
-                    if x_norm > 1e-6:
+                    if x_norm > POSITION_EPSILON:
                         x_axis_local = x_axis_local / x_norm
                     else:
                         # x and y are parallel, use perpendicular
@@ -514,8 +541,6 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type,
             'rot': None,
         }
 
-    max_depth = 5
-
     # First: Search DESCENDANTS for tool frame or hand link
     # (e.g., panda_link7 -> panda_hand)
     try:
@@ -523,8 +548,8 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type,
     except nx.NetworkXError:
         descendants = set()
 
-    # Check descendants up to max_depth
-    for depth in range(1, max_depth + 1):
+    # Check descendants up to MAX_SEARCH_DEPTH
+    for depth in range(1, MAX_SEARCH_DEPTH + 1):
         for desc in descendants:
             try:
                 path_len = nx.shortest_path_length(G, tip_link_name, desc)
@@ -557,7 +582,7 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type,
     visited = set()
     current = tip_link_name
 
-    for _ in range(max_depth):
+    for _ in range(MAX_SEARCH_DEPTH):
         visited.add(current)
         neighbors = list(undirected.neighbors(current))
         parent_candidates = [n for n in neighbors if n not in visited
@@ -685,7 +710,7 @@ def _get_fingertip_position(link):
 
         # Get the centroid of vertices at the tip (max along primary axis)
         max_val = np.max(vertices[:, primary_axis])
-        threshold = max_val - extents[primary_axis] * 0.1  # Top 10%
+        threshold = max_val - extents[primary_axis] * FINGERTIP_RATIO
         tip_vertices = vertices[vertices[:, primary_axis] > threshold]
         tip_local = np.mean(tip_vertices, axis=0)
 
@@ -792,14 +817,14 @@ def _estimate_tcp_from_mesh(link):
 
     # Check if mesh extends significantly more in one direction
     # (asymmetric = likely end effector direction)
-    (bounds[0] + bounds[1]) / 2
     min_dist = abs(bounds[0][primary_axis])
     max_dist = abs(bounds[1][primary_axis])
 
     # If asymmetric (one side extends more), use that as TCP direction
-    asymmetry_ratio = max(min_dist, max_dist) / (min(min_dist, max_dist) + 1e-6)
+    asymmetry_ratio = (max(min_dist, max_dist)
+                       / (min(min_dist, max_dist) + POSITION_EPSILON))
 
-    if asymmetry_ratio > 2.0:  # Significant asymmetry
+    if asymmetry_ratio > ASYMMETRY_RATIO:  # Significant asymmetry
         # TCP is at the extended end
         if min_dist > max_dist:
             # Extends in negative direction
@@ -975,7 +1000,7 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
 
     # Geometric detection: long kinematic chain without left/right pattern
     # is likely a single arm (serial manipulator)
-    if movable_joint_count >= 5:
+    if movable_joint_count >= MIN_ARM_JOINTS:
         has_lr_pattern = (right_arm_count >= 2 or left_arm_count >= 2
                           or right_leg_count >= 2 or left_leg_count >= 2)
         if not has_lr_pattern:
@@ -996,23 +1021,20 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
     # Use Y coordinate for geometric left/right detection
     # WARNING: This assumes the robot is in T-pose or similar standard pose.
     # For robots with non-standard initial poses, this detection may fail.
-    y_threshold = 0.05
     if tip_y_coord is not None:
         has_arm_pattern = (right_arm_count >= 1 or left_arm_count >= 1
                            or single_arm_count >= 2)
         has_leg_pattern = right_leg_count >= 1 or left_leg_count >= 1
 
-        strong_y_threshold = 0.1
-
         if has_arm_pattern or has_leg_pattern:
-            if tip_y_coord > y_threshold:
-                boost = 4 if tip_y_coord > strong_y_threshold else 2
+            if tip_y_coord > Y_THRESHOLD_WEAK:
+                boost = 4 if tip_y_coord > Y_THRESHOLD_STRONG else 2
                 if has_arm_pattern:
                     counts['left_arm'] += boost
                 if has_leg_pattern:
                     counts['left_leg'] += boost
-            elif tip_y_coord < -y_threshold:
-                boost = 4 if tip_y_coord < -strong_y_threshold else 2
+            elif tip_y_coord < -Y_THRESHOLD_WEAK:
+                boost = 4 if tip_y_coord < -Y_THRESHOLD_STRONG else 2
                 if has_arm_pattern:
                     counts['right_arm'] += boost
                 if has_leg_pattern:
