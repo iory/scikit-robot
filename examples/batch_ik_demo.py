@@ -91,19 +91,19 @@ def main():
     # Initialize robot based on selection
     if args.robot == 'fetch':
         robot = Fetch()
-        arm = robot.rarm_with_torso if args.with_torso else robot.rarm
+        arm = robot.arm_with_torso if args.with_torso else robot.arm
     elif args.robot == 'pr2':
         robot = PR2()
-        arm = robot.rarm_with_torso if args.with_torso else robot.rarm
+        arm = robot.right_arm_with_torso if args.with_torso else robot.right_arm
     elif args.robot == 'panda':
         robot = Panda()
-        arm = robot.rarm
+        arm = robot.arm
     elif args.robot == 'r8_6':
         robot = R8_6()
-        arm = robot.rarm
+        arm = robot.right_arm
     elif args.robot == 'nextage':
         robot = Nextage()
-        arm = robot.rarm
+        arm = robot.right_arm
 
     robot.reset_pose()
 

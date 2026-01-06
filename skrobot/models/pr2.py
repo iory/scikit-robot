@@ -156,6 +156,31 @@ class PR2(RobotModelFromURDF):
         r.end_coords = self.head_end_coords
         return r
 
+    # New naming convention aliases (backward compatible)
+    @property
+    def right_arm(self):
+        return self.rarm
+
+    @property
+    def left_arm(self):
+        return self.larm
+
+    @property
+    def right_arm_with_torso(self):
+        return self.rarm_with_torso
+
+    @property
+    def left_arm_with_torso(self):
+        return self.larm_with_torso
+
+    @property
+    def right_arm_end_coords(self):
+        return self.rarm_end_coords
+
+    @property
+    def left_arm_end_coords(self):
+        return self.larm_end_coords
+
     def reset_manip_pose(self):
         self.torso_lift_joint.joint_angle(0.3)
         self.l_shoulder_pan_joint.joint_angle(np.deg2rad(75))
@@ -206,26 +231,27 @@ class PR2(RobotModelFromURDF):
             If dist is None, return gripper distance.
             If float value is given, change joint angle.
         arm : str
-            Specify target arm.  You can specify 'larm', 'rarm', 'arms'.
+            Specify target arm.  You can specify 'left_arm', 'right_arm',
+            'arms', or legacy names 'larm', 'rarm'.
 
         Returns
         -------
         dist : float or list of float
             The current gripper distance in meters.
-            - If arm is 'larm' or 'rarm', returns a single float.
+            - If arm is 'left_arm' or 'right_arm', returns a single float.
             - If arm is 'arms', returns a list of two floats
             [right_dist, left_dist].
         """
-        if arm == 'larm':
+        if arm in ('larm', 'left_arm'):
             joints = [self.l_gripper_l_finger_joint]
-        elif arm == 'rarm':
+        elif arm in ('rarm', 'right_arm'):
             joints = [self.r_gripper_l_finger_joint]
         elif arm == 'arms':
             joints = [self.r_gripper_l_finger_joint,
                       self.l_gripper_l_finger_joint]
         else:
-            raise ValueError('Invalid arm arm argument. You can specify '
-                             "'larm', 'rarm' or 'arms'.")
+            raise ValueError('Invalid arm argument. You can specify '
+                             "'left_arm', 'right_arm', 'arms', 'larm', or 'rarm'.")
 
         def _dist(angle):
             return 0.0099 * (18.4586 * np.sin(angle) + np.cos(angle) - 1.0101)

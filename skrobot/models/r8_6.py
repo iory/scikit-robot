@@ -263,3 +263,28 @@ class R8_6(skrobot.model.RobotModel):
         elv_model.name = self.name + '_elv'
         elv_model.end_coords = self.elv_attach_obj_link
         return elv_model
+
+    # New naming convention aliases (backward compatible)
+    @property
+    def right_arm(self):
+        return self.rarm
+
+    @property
+    def left_arm(self):
+        return self.larm
+
+    @property
+    def right_arm_with_torso(self):
+        return self.rarm_with_torso
+
+    @property
+    def left_arm_with_torso(self):
+        return self.larm_with_torso
+
+    @property
+    def right_arm_end_coords(self):
+        return self.rarm_end_coords
+
+    @property
+    def left_arm_end_coords(self):
+        return self.larm_end_coords

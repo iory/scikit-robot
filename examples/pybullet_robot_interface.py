@@ -51,8 +51,8 @@ def main():
     skrobot.interfaces.pybullet.draw(target_coords)
     robot.inverse_kinematics(
         target_coords,
-        link_list=robot.rarm.link_list,
-        move_target=robot.rarm_end_coords,
+        link_list=robot.arm.link_list,
+        move_target=robot.arm_end_coords,
         rotation_axis=True,
         stop=1000,
     )

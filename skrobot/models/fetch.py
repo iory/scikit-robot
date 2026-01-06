@@ -85,3 +85,16 @@ class Fetch(RobotModelFromURDF):
                        joint_list=rarm_with_torso_joints)
         r.end_coords = self.rarm_end_coords
         return r
+
+    # New naming convention aliases (backward compatible)
+    @property
+    def arm(self):
+        return self.rarm
+
+    @property
+    def arm_with_torso(self):
+        return self.rarm_with_torso
+
+    @property
+    def arm_end_coords(self):
+        return self.rarm_end_coords

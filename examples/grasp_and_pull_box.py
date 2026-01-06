@@ -25,22 +25,22 @@ def init_pose():
 
 
 def open_right_gripper():
-    robot_model.gripper_distance(0.093, arm='rarm')
+    robot_model.gripper_distance(0.093, arm='right_arm')
     viewer.redraw()
 
 
 def close_right_gripper():
-    robot_model.gripper_distance(0.0, arm='rarm')
+    robot_model.gripper_distance(0.0, arm='right_arm')
     viewer.redraw()
 
 
 def open_left_gripper():
-    robot_model.gripper_distance(0.093, arm='larm')
+    robot_model.gripper_distance(0.093, arm='left_arm')
     viewer.redraw()
 
 
 def close_left_gripper():
-    robot_model.gripper_distance(0.0, arm='larm')
+    robot_model.gripper_distance(0.0, arm='left_arm')
     viewer.redraw()
 
 
@@ -66,7 +66,7 @@ def move_to_box(box):
 
 
 def grasp_box(box):
-    robot_model.gripper_distance(0.036, arm='rarm')
+    robot_model.gripper_distance(0.036, arm='right_arm')
     move_target.assoc(box)
     viewer.redraw()
 
@@ -109,10 +109,10 @@ link_list = [
     robot_model.r_forearm_roll_link,
     robot_model.r_wrist_flex_link,
     robot_model.r_wrist_roll_link]
-rarm_end_coords = skrobot.coordinates.CascadedCoords(
+right_arm_end_coords = skrobot.coordinates.CascadedCoords(
     parent=robot_model.r_gripper_tool_frame,
-    name='rarm_end_coords')
-move_target = rarm_end_coords
+    name='right_arm_end_coords')
+move_target = right_arm_end_coords
 
 # Create viewer
 if args.viewer == 'trimesh':
