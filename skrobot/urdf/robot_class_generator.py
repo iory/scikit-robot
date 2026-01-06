@@ -151,11 +151,16 @@ def _is_hand_link(link_name):
 
 
 def _find_symmetric_gripper_midpoint(descendants, link_map):
-    """Find symmetric gripper links and return their midpoint.
+    """Find symmetric gripper links and return their midpoint and orientation.
 
     Detects gripper fingers geometrically by finding links that:
     1. Share the same parent
     2. Have symmetric positions (opposite signs in x or y)
+
+    The orientation is computed so that:
+    - x-axis: gripper forward direction (from parent to midpoint)
+    - y-axis: gripper opening direction (from child1 to child2)
+    - z-axis: x cross y
 
     Parameters
     ----------
@@ -168,7 +173,7 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
     -------
     dict or None
         If symmetric gripper found, returns:
-        {'parent_link': str, 'pos': list, 'rot': None}
+        {'parent_link': str, 'pos': list, 'rot': list or None}
         Otherwise None.
     """
     # Group descendants by parent
@@ -193,7 +198,8 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
 
         # Get positions in parent's local frame
         parent_pos = parent_link.worldpos()
-        parent_rot_inv = parent_link.worldrot().T
+        parent_rot = parent_link.worldrot()
+        parent_rot_inv = parent_rot.T
 
         local_positions = []
         for child in children:
@@ -214,15 +220,57 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
 
                 if (x_symmetric or y_symmetric) and z_similar:
                     # Found symmetric pair - use link origins midpoint
-                    # (mesh-based tips don't work well for opposing fingers)
                     midpoint_local = (pos1 + pos2) / 2
+
+                    # Calculate orientation in parent's local frame
+                    # y-axis: opening direction (child1 -> child2)
+                    y_axis_local = pos2 - pos1
+                    y_axis_local = y_axis_local / np.linalg.norm(y_axis_local)
+
+                    # x-axis: forward direction (toward midpoint from origin)
+                    # Use the direction from parent origin to midpoint
+                    if np.linalg.norm(midpoint_local) > 1e-6:
+                        x_axis_local = midpoint_local / np.linalg.norm(
+                            midpoint_local)
+                    else:
+                        # Fallback: use parent's z-axis
+                        x_axis_local = np.array([0.0, 0.0, 1.0])
+
+                    # Make x orthogonal to y
+                    x_axis_local = x_axis_local - np.dot(
+                        x_axis_local, y_axis_local) * y_axis_local
+                    x_norm = np.linalg.norm(x_axis_local)
+                    if x_norm > 1e-6:
+                        x_axis_local = x_axis_local / x_norm
+                    else:
+                        # x and y are parallel, use perpendicular
+                        x_axis_local = np.array([0.0, 0.0, 1.0])
+                        x_axis_local = x_axis_local - np.dot(
+                            x_axis_local, y_axis_local) * y_axis_local
+                        x_axis_local = x_axis_local / np.linalg.norm(
+                            x_axis_local)
+
+                    # z-axis: x cross y
+                    z_axis_local = np.cross(x_axis_local, y_axis_local)
+
+                    # Build rotation matrix (columns are axes)
+                    rot_local = np.column_stack(
+                        [x_axis_local, y_axis_local, z_axis_local])
+
+                    # Convert to RPY (roll, pitch, yaw) in radians
+                    from skrobot.coordinates.math import matrix2rpy
+                    rpy = matrix2rpy(rot_local)
+                    rpy_rad = [round(r, 6) if abs(r) > 1e-6 else 0.0
+                               for r in rpy]
+
                     midpoint_local = [
                         round(v, 6) if abs(v) > 1e-6 else 0.0
                         for v in midpoint_local]
+
                     return {
                         'parent_link': parent_name,
                         'pos': midpoint_local,
-                        'rot': None,
+                        'rot': rpy_rad,
                     }
 
     return None
@@ -1249,7 +1297,7 @@ def generate_robot_class_from_geometry(robot, output_path=None,
 
         parent_link = ec_info['parent_link']
         pos = ec_info.get('pos', [0.0, 0.0, 0.0])
-        ec_info.get('rot')
+        rot = ec_info.get('rot')
 
         parent_attr = _sanitize_attr_name(parent_link)
         # Use underscore prefix to avoid conflict with base class properties
@@ -1258,12 +1306,18 @@ def generate_robot_class_from_geometry(robot, output_path=None,
 
         # Check if we need pos argument
         has_offset = any(abs(v) > 1e-6 for v in pos)
+        # Check if we have rotation
+        has_rot = rot is not None and any(abs(v) > 1e-6 for v in rot)
 
-        if has_offset:
-            pos_str = f"[{pos[0]}, {pos[1]}, {pos[2]}]"
+        if has_offset or has_rot:
             init_lines.append(f"        self.{end_coords_attr} = CascadedCoords(")
             init_lines.append(f"            parent=self.{parent_attr},")
-            init_lines.append(f"            pos={pos_str},")
+            if has_offset:
+                pos_str = f"[{pos[0]}, {pos[1]}, {pos[2]}]"
+                init_lines.append(f"            pos={pos_str},")
+            if has_rot:
+                rot_str = f"[{rot[0]}, {rot[1]}, {rot[2]}]"
+                init_lines.append(f"            rot={rot_str},")
             init_lines.append(f"            name='{end_coords_name}')")
         else:
             init_lines.append(f"        self.{end_coords_attr} = CascadedCoords(")
