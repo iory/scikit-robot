@@ -209,8 +209,12 @@ def _find_symmetric_gripper_midpoint(descendants, link_map):
                 z_similar = abs(pos1[2] - pos2[2]) < 0.02
 
                 if (x_symmetric or y_symmetric) and z_similar:
-                    # Found symmetric pair - calculate midpoint
-                    midpoint_local = (pos1 + pos2) / 2
+                    # Found symmetric pair - calculate midpoint using mesh
+                    tip1 = _get_fingertip_position(child1)
+                    tip2 = _get_fingertip_position(child2)
+                    midpoint_world = (tip1 + tip2) / 2
+                    midpoint_local = parent_rot_inv.dot(
+                        midpoint_world - parent_pos)
                     midpoint_local = [
                         round(v, 6) if abs(v) > 1e-6 else 0.0
                         for v in midpoint_local]
@@ -1115,7 +1119,10 @@ def generate_groups_from_geometry(robot):
             G, link_map, tip_link_name, group_name)
 
         # For arm groups, try to calculate gripper TCP offset
-        if 'arm' in group_name.lower() and 'torso' not in group_name.lower():
+        # Skip if offset already set (e.g., by symmetric gripper detection)
+        has_offset = any(abs(v) > 1e-6 for v in ec_info.get('pos', [0, 0, 0]))
+        if ('arm' in group_name.lower() and 'torso' not in group_name.lower()
+                and not has_offset):
             parent_link_name = ec_info['parent_link']
             parent_link = link_map.get(parent_link_name)
             if parent_link is not None:
