@@ -67,6 +67,9 @@ skr visualize-mesh mesh_file.stl
 
 # Convert wheel collision models
 skr convert-wheel-collision robot.urdf --output converted.urdf
+
+# Generate robot class from URDF geometry
+skr generate-robot-class robot.urdf --output MyRobot.py
 ```
 
 ### Legacy Commands (still supported)

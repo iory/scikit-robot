@@ -109,6 +109,29 @@ Convert wheel collision models in URDF files.
 
    skr convert-wheel-collision robot.urdf --output converted.urdf
 
+generate-robot-class
+~~~~~~~~~~~~~~~~~~~~
+
+Generate Python robot class from URDF geometry. This tool automatically detects
+kinematic chains (arms, legs, head, torso) and generates a Python class with
+appropriate properties and end-effector coordinates.
+
+No LLM or API keys required - uses only URDF structure and geometry.
+
+.. code-block:: bash
+
+   # Generate robot class and print to stdout
+   skr generate-robot-class robot.urdf
+
+   # Save to file
+   skr generate-robot-class robot.urdf --output MyRobot.py
+
+   # Specify custom class name
+   skr generate-robot-class robot.urdf --class-name MyCustomRobot --output MyRobot.py
+
+   # Show detected groups without generating code
+   skr generate-robot-class robot.urdf --show-groups
+
 Backward Compatibility
 ----------------------
 
@@ -124,6 +147,7 @@ For backward compatibility, all original individual commands are still available
    urdf-hash robot.urdf
    visualize-mesh mesh_file.stl
    convert-wheel-collision robot.urdf --output converted.urdf
+   generate-robot-class robot.urdf --output MyRobot.py
 
 Getting Help
 ------------
