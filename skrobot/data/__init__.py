@@ -126,3 +126,18 @@ def pr2_urdfpath():
 
 def r8_6_urdfpath():
     return osp.join(data_dir, 'robot_descriptions', 'urdf', 'r8_6.urdf')
+
+
+def rover_armed_tycoon_urdfpath():
+    path = osp.join(get_cache_dir(),
+                    'tycoon_description', 'urdf', 'tycoon_arm_assem.urdf')
+    if osp.exists(path):
+        return path
+    _download(
+        url='https://github.com/iory/scikit-robot-models/raw/main/tycoon_description.tar.gz',
+        path=osp.join(get_cache_dir(), 'tycoon_description.tar.gz'),
+        md5='166ab45ed6e9b24bfb8d0f7a7eb19186',
+        postprocess='extractall',
+        quiet=True,
+    )
+    return path
