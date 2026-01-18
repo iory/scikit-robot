@@ -54,7 +54,7 @@ class TestSDF(unittest.TestCase):
         cls.sphere_sdf = SphereSDF(radius=radius)
         cls.cylinder_sdf = CylinderSDF(radius=radius, height=height)
 
-        # preapare UnionSDF
+        # prepare UnionSDF
         unionsdf = UnionSDF(sdf_list=[boxsdf, gridsdf])
         cls.unionsdf = unionsdf
 

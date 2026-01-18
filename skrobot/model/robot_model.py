@@ -2540,7 +2540,7 @@ class RobotModel(CascadedLink):
         """Solve inverse kinematics.
 
         solve inverse kinematics, move move-target to target-coords look-at-
-        target suppots t, nil, float-vector, coords, list of float-vector, list
+        target supports t, nil, float-vector, coords, list of float-vector, list
         of coords link-list is set by default based on move-target -> root link
         link-list.
         """
