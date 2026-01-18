@@ -9,6 +9,7 @@ import skrobot
 from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
 from skrobot.model.primitives import LineString
+from skrobot.model.primitives import Sphere
 from skrobot.planner import sqp_plan_trajectory
 from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import get_robot_config
@@ -41,6 +42,17 @@ parser.add_argument(
     action='store_true',
     help="Enable trajectory optimization visualization"
 )
+parser.add_argument(
+    '--solver', type=str,
+    choices=['sqp', 'jax', 'jaxls', 'gradient_descent', 'scipy'], default='sqp',
+    help='Trajectory optimization solver: sqp (default), jax (deprecated, use gradient_descent), '
+         'jaxls (JAX nonlinear least squares), gradient_descent (JAX autodiff), '
+         'scipy (SciPy SLSQP with unified interface)'
+)
+parser.add_argument(
+    '--jax-iterations', type=int, default=300,
+    help='Number of iterations for JAX optimizer (more = smoother trajectory)'
+)
 args = parser.parse_args()
 
 # initialization stuff
@@ -53,6 +65,13 @@ robot_model.init_pose()
 box_center = np.array([0.9, -0.2, 0.9])
 box = Box(extents=[0.7, 0.5, 0.6], with_sdf=True)
 box.translate(box_center)
+
+# Additional sphere obstacles for JAX-based solvers
+# Positioned in the trajectory path but not at start/goal positions
+additional_sphere_obstacles = [
+    {'center': [0.55, -0.35, 0.85], 'radius': 0.08},  # In arm path
+    {'center': [0.7, -0.45, 0.75], 'radius': 0.1},    # Near target area
+]
 
 link_list = [
     robot_model.r_shoulder_pan_link, robot_model.r_shoulder_lift_link,
@@ -85,7 +104,7 @@ right_arm_end_coords = skrobot.coordinates.CascadedCoords(
 robot_model.inverse_kinematics(
     target_coords=target_coords,
     link_list=link_list,
-    move_target=robot_model.right_arm_end_coords, rotation_axis=True)
+    move_target=right_arm_end_coords, rotation_axis=True)
 av_goal = get_robot_config(robot_model, joint_list, with_base=with_base)
 
 # collision checker setup
@@ -104,33 +123,170 @@ viewer.add(robot_model)
 viewer.add(box)
 viewer.add(Axis(pos=target_coords.worldpos(), rot=target_coords.worldrot()))
 
+# Add visual spheres for additional obstacles
+for obs in additional_sphere_obstacles:
+    sphere = Sphere(radius=obs['radius'], color=[1.0, 0.3, 0.3, 0.7])
+    sphere.translate(obs['center'])
+    viewer.add(sphere)
+
 sscc.add_coll_spheres_to_viewer(viewer)
 viewer.show()
 viewer.set_camera([0, 0, np.pi / 2.0])
-
 # motion planning
 ts = time.time()
 n_waypoint = args.n
 
-# Trajectory planning with optional visualization
-if args.trajectory_visualization:
-    with trajectory_visualization(
-        viewer=viewer,
+if args.solver == 'jax':
+    # Deprecated: redirect to gradient_descent
+    import warnings
+    warnings.warn(
+        "--solver jax is deprecated. Use --solver gradient_descent instead. "
+        "Automatically redirecting to gradient_descent solver.",
+        DeprecationWarning,
+    )
+    args.solver = 'gradient_descent'
+
+if args.solver in ['jaxls', 'gradient_descent', 'scipy']:
+    # New unified trajectory optimization interface
+    print(f"Using {args.solver} solver with unified interface...")
+    from skrobot.planner.trajectory_optimization import TrajectoryProblem
+    from skrobot.planner.trajectory_optimization.solvers import create_solver
+    from skrobot.planner.trajectory_optimization.trajectory import interpolate_trajectory
+
+    # Convert box obstacle to sphere approximation
+    box_half_diag = np.sqrt(np.sum((np.array([0.7, 0.5, 0.6]) / 2) ** 2))
+    world_obstacles = [
+        {'type': 'sphere', 'center': box_center.tolist(), 'radius': box_half_diag * 0.8},
+    ]
+    # Add additional sphere obstacles
+    for obs in additional_sphere_obstacles:
+        world_obstacles.append({
+            'type': 'sphere',
+            'center': obs['center'],
+            'radius': obs['radius'],
+        })
+
+    # Create problem definition (backend-agnostic)
+    problem = TrajectoryProblem(
         robot_model=robot_model,
-        joint_list=joint_list,
-        sleep_time=0.3,
-        with_base=with_base,
-        update_every_n_iterations=1,
-        debug=False,  # Disable debug for normal use
-        waypoint_mode='cycle',  # Cycle through waypoints to see trajectory evolution
-    ):
+        link_list=link_list,
+        n_waypoints=n_waypoint,
+        dt=0.1,
+        move_target=right_arm_end_coords,
+    )
+
+    # Add costs and constraints
+    problem.add_smoothness_cost(weight=1.0)
+    problem.add_acceleration_cost(weight=0.1)
+    problem.add_collision_cost(
+        collision_link_list=coll_link_list,
+        world_obstacles=world_obstacles,
+        weight=1000.0,
+        activation_distance=0.15,
+    )
+    problem.add_self_collision_cost(
+        weight=1000.0,
+        activation_distance=0.02,
+    )
+
+    # Create solver
+    if args.solver == 'jaxls':
+        solver = create_solver('jaxls', max_iterations=100, verbose=True)
+    elif args.solver == 'scipy':
+        solver = create_solver(
+            'scipy',
+            max_iterations=100,
+            safety_margin=5e-2,  # Same as original sqp
+            verbose=True,
+        )
+    else:
+        solver = create_solver(
+            'gradient_descent',
+            max_iterations=args.jax_iterations,
+            learning_rate=0.001,
+            verbose=True,
+        )
+
+    # Create initial trajectory (linear interpolation)
+    av_start_arm = av_start[:7]
+    av_goal_arm = av_goal[:7]
+    initial_traj = interpolate_trajectory(av_start_arm, av_goal_arm, n_waypoint)
+
+    # Solve (scipy solver can use SDF collision checker for more accurate collision)
+    if args.solver == 'scipy':
+        # Use full trajectory with base for scipy to match original sqp behavior
+        initial_traj_full = interpolate_trajectory(av_start, av_goal, n_waypoint)
+        # Create a problem with full DOF for scipy
+        from copy import deepcopy
+        problem_full = deepcopy(problem)
+        problem_full.n_joints = len(av_start)
+        problem_full.joint_list = joint_list
+        problem_full.joint_limits_lower = np.array([
+            j.min_angle if j.min_angle is not None else -np.inf
+            for j in joint_list
+        ])
+        problem_full.joint_limits_upper = np.array([
+            j.max_angle if j.max_angle is not None else np.inf
+            for j in joint_list
+        ])
+        if with_base:
+            # Add base limits (no limits for base)
+            problem_full.joint_limits_lower = np.concatenate([
+                problem_full.joint_limits_lower, [-np.inf, -np.inf, -np.inf]
+            ])
+            problem_full.joint_limits_upper = np.concatenate([
+                problem_full.joint_limits_upper, [np.inf, np.inf, np.inf]
+            ])
+        result = solver.solve(
+            problem_full, initial_traj_full,
+            collision_checker=sscc,
+            with_base=with_base,
+            joint_list=joint_list,
+        )
+    else:
+        result = solver.solve(problem, initial_traj)
+    print(f"Solver result: success={result.success}, "
+          f"iterations={result.iterations}, message={result.message}")
+
+    # Convert to av_seq with optional base pose
+    if args.solver == 'scipy':
+        # scipy solver already optimizes full trajectory including base
+        av_seq = result.trajectory
+    else:
+        # JAX solvers optimize arm only, need to add base pose
+        av_seq = []
+        for i in range(n_waypoint):
+            if with_base:
+                t = i / (n_waypoint - 1)
+                base_pose = (1 - t) * np.array(av_start[7:]) + t * np.array(av_goal[7:])
+                av = np.concatenate([result.trajectory[i], base_pose])
+            else:
+                av = result.trajectory[i]
+            av_seq.append(av)
+        av_seq = np.array(av_seq)
+
+else:
+    # SQP-based trajectory planning (original method)
+    print("Using SQP-based trajectory optimizer...")
+    # Trajectory planning with optional visualization
+    if args.trajectory_visualization:
+        with trajectory_visualization(
+            viewer=viewer,
+            robot_model=robot_model,
+            joint_list=joint_list,
+            sleep_time=0.3,
+            with_base=with_base,
+            update_every_n_iterations=1,
+            debug=False,  # Disable debug for normal use
+            waypoint_mode='cycle',  # Cycle through waypoints to see trajectory evolution
+        ):
+            av_seq = sqp_plan_trajectory(
+                sscc, av_start, av_goal, joint_list, n_waypoint,
+                safety_margin=5.0e-2, with_base=with_base)
+    else:
         av_seq = sqp_plan_trajectory(
             sscc, av_start, av_goal, joint_list, n_waypoint,
             safety_margin=5.0e-2, with_base=with_base)
-else:
-    av_seq = sqp_plan_trajectory(
-        sscc, av_start, av_goal, joint_list, n_waypoint,
-        safety_margin=5.0e-2, with_base=with_base)
 
 print("solving time : {0} sec".format(time.time() - ts))
 
