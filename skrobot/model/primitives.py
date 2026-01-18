@@ -240,6 +240,70 @@ class Cylinder(Link, SDFImplemented):
             self._sdf = None
 
 
+class Capsule(Link):
+    """A capsule (cylinder with hemispherical caps) primitive.
+
+    The capsule is oriented along the Z-axis, with the cylinder portion
+    centered at the origin and hemispherical caps at both ends.
+
+    Parameters
+    ----------
+    radius : float
+        Radius of the capsule (cylinder and hemisphere radius).
+    height : float
+        Height of the cylindrical portion (total height = height + 2*radius).
+    sections : int, optional
+        Number of sections for the cylinder and hemisphere.
+        Default is 32.
+    vertex_colors : array-like, optional
+        Color for each vertex.
+    face_colors : array-like, optional
+        Color for each face.
+    pos : tuple or np.ndarray, optional
+        Position of the capsule center.
+    rot : np.ndarray, optional
+        Rotation matrix of the capsule.
+    name : str, optional
+        Name of the link.
+    """
+
+    def __init__(self, radius, height,
+                 sections=32,
+                 vertex_colors=None, face_colors=None,
+                 pos=(0, 0, 0), rot=np.eye(3), name=None):
+        trimesh = _lazy_trimesh()
+        if name is None:
+            name = 'capsule_{}'.format(str(uuid.uuid1()).replace('-', '_'))
+
+        self._radius = radius
+        self._height = height
+
+        mesh = trimesh.creation.capsule(
+            radius=radius,
+            height=height,
+            count=[sections, sections],
+        )
+
+        if vertex_colors is not None:
+            mesh.visual.vertex_colors = vertex_colors
+        if face_colors is not None:
+            mesh.visual.face_colors = face_colors
+
+        super(Capsule, self).__init__(pos=pos, rot=rot, name=name,
+                                      collision_mesh=mesh,
+                                      visual_mesh=mesh)
+
+    @property
+    def radius(self):
+        """Return the radius of the capsule."""
+        return self._radius
+
+    @property
+    def height(self):
+        """Return the height of the cylindrical portion."""
+        return self._height
+
+
 class Sphere(Link, SDFImplemented):
 
     def __init__(self, radius, subdivisions=3, color=None,
@@ -360,9 +424,9 @@ class PointCloudLink(Link):
                  colors=None,
                  pos=(0, 0, 0), rot=np.eye(3), name=None):
         trimesh = _lazy_trimesh()
-        accep_types = (type(None), np.ndarray, trimesh.PointCloud)
-        if not isinstance(point_cloud_like, accep_types):
-            message = "point cloud must be either of {}".format(accep_types)
+        accept_types = (type(None), np.ndarray, trimesh.PointCloud)
+        if not isinstance(point_cloud_like, accept_types):
+            message = "point cloud must be either of {}".format(accept_types)
             raise TypeError(message)
 
         if isinstance(point_cloud_like, np.ndarray):

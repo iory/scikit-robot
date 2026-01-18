@@ -2,3 +2,4 @@
 
 from skrobot.planner.collision_checker import SweptSphereSdfCollisionChecker
 from skrobot.planner.sqp_based import sqp_plan_trajectory
+from skrobot.planner import trajectory_optimization

@@ -1010,7 +1010,7 @@ def matrix2quaternion(m):
         q3 = np.sqrt(q3)
 
         ones = np.ones_like(r11)
-        aranges = np.arange(ones.shape[0])
+        indices = np.arange(ones.shape[0])
         signs_array = np.array([
             [ones, np.sign(r32 - r23), np.sign(r13 - r31), np.sign(r21 - r12)],
             [np.sign(r32 - r23), ones, np.sign(r21 + r12), np.sign(r13 + r31)],
@@ -1019,7 +1019,7 @@ def matrix2quaternion(m):
         ])
 
         argmaxes = np.argmax(np.array([q0, q1, q2, q3]), axis=0)
-        signs = signs_array[:, argmaxes, aranges]
+        signs = signs_array[:, argmaxes, indices]
 
         res = np.array([q0, q1, q2, q3]).T * signs.T
         resq = res / np.linalg.norm(res, axis=1, keepdims=True)
