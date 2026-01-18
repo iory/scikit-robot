@@ -34,5 +34,5 @@ default.extend-ignore-re = [
 ]
 
 default.extend-ignore-identifiers-re = [
-    # Add individual words here to ignore them
+    "iy",  # y-index variable (ix, iy, iz pattern)
 ]

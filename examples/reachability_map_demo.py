@@ -1,0 +1,305 @@
+#!/usr/bin/env python
+"""Demonstration of fast reachability map computation.
+
+This example shows how to compute and visualize a robot's workspace
+reachability map using batch forward kinematics (JAX or NumPy backend).
+
+Usage:
+    python examples/reachability_map_demo.py
+    python examples/reachability_map_demo.py --robot panda --samples 500000
+    python examples/reachability_map_demo.py --color manipulability
+"""
+
+import argparse
+import time
+
+import numpy as np
+
+import skrobot
+from skrobot.kinematics import ReachabilityMap
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compute and visualize robot reachability map",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        '--robot', type=str, default='pr2',
+        choices=['pr2', 'panda', 'fetch', 'r8', 'nextage'],
+        help='Robot model to use'
+    )
+    parser.add_argument(
+        '--backend', type=str, default=None,
+        choices=['jax', 'numpy'],
+        help='Backend to use for computation (default: auto-select best available)'
+    )
+    parser.add_argument(
+        '--samples', type=int, default=2000000,
+        help='Number of samples for random sampling'
+    )
+    parser.add_argument(
+        '--sampling', type=str, default='random',
+        choices=['random', 'grid'],
+        help='Sampling method: random or grid'
+    )
+    parser.add_argument(
+        '--bins', type=int, default=10,
+        help='Bins per joint for grid sampling (total = bins^n_joints)'
+    )
+    parser.add_argument(
+        '--voxel-size', type=float, default=0.05,
+        help='Voxel size in meters'
+    )
+    parser.add_argument(
+        '--color', type=str, default='reachability_index',
+        choices=['reachability_index', 'reachability', 'manipulability'],
+        help='Coloring mode: reachability_index (orientation diversity), '
+             'reachability (raw count), manipulability'
+    )
+    parser.add_argument(
+        '--orientation-bins', type=int, default=50,
+        help='Number of orientation bins for Reachability Index calculation. '
+             'Set to 0 for position-only mode.'
+    )
+    parser.add_argument(
+        '--save', type=str, default=None,
+        help='Save reachability map to file (.npz)'
+    )
+    parser.add_argument(
+        '--load', type=str, default=None,
+        help='Load reachability map from file (.npz)'
+    )
+    parser.add_argument(
+        '--no-viz', action='store_true',
+        help='Skip visualization'
+    )
+    parser.add_argument(
+        '--viz-points', type=int, default=30000,
+        help='Number of points to visualize (more = denser but slower)'
+    )
+    parser.add_argument(
+        '--z-slice', type=float, nargs=2, default=None,
+        metavar=('Z_MIN', 'Z_MAX'),
+        help='Show only points within Z range (e.g., --z-slice 0.5 1.0)'
+    )
+    parser.add_argument(
+        '--alpha', type=float, default=0.3,
+        help='Sphere opacity (0.0=transparent, 1.0=opaque)'
+    )
+    parser.add_argument(
+        '--no-interactive', action='store_true',
+        help='Run in non-interactive mode (exit after computation)'
+    )
+    args = parser.parse_args()
+
+    # Use minimal settings for non-interactive mode (CI testing)
+    if args.no_interactive:
+        if args.samples == 2000000:
+            args.samples = 1000
+        args.no_viz = True
+
+    # Setup robot
+    print(f"Loading {args.robot} robot...")
+    if args.robot == 'pr2':
+        robot = skrobot.models.PR2()
+        robot.init_pose()
+    elif args.robot == 'panda':
+        robot = skrobot.models.Panda()
+    elif args.robot == 'fetch':
+        robot = skrobot.models.Fetch()
+    elif args.robot == 'r8':
+        robot = skrobot.models.R8_6()
+    elif args.robot == 'nextage':
+        robot = skrobot.models.Nextage()
+
+    link_list = robot.rarm.link_list
+    end_coords = robot.rarm.end_coords
+
+    # Create reachability map
+    rmap = ReachabilityMap(
+        robot, link_list, end_coords,
+        voxel_size=args.voxel_size,
+        backend=args.backend,
+    )
+
+    # Load or compute
+    if args.load:
+        print(f"Loading reachability map from {args.load}...")
+        rmap.load(args.load)
+        print(f"  Loaded {rmap.n_reachable_voxels:,} reachable voxels")
+    else:
+        print()
+        rmap.compute(
+            n_samples=args.samples,
+            sampling=args.sampling,
+            bins_per_joint=args.bins,
+            orientation_bins=args.orientation_bins,
+            verbose=True
+        )
+
+    # Save if requested
+    if args.save:
+        print(f"\nSaving reachability map to {args.save}...")
+        rmap.save(args.save)
+
+    # Print summary
+    print()
+    print("=" * 50)
+    print("Reachability Map Summary")
+    print("=" * 50)
+    print(f"Robot: {args.robot}")
+    print(f"Voxel size: {args.voxel_size * 100:.0f} cm")
+    print(f"Reachable voxels: {rmap.n_reachable_voxels:,}")
+    print(f"Reachable volume: {rmap.reachable_volume:.3f} m³")
+    print()
+    print("Workspace bounds:")
+    print(f"  X: [{rmap.bounds['x'][0]:.3f}, {rmap.bounds['x'][1]:.3f}] m")
+    print(f"  Y: [{rmap.bounds['y'][0]:.3f}, {rmap.bounds['y'][1]:.3f}] m")
+    print(f"  Z: [{rmap.bounds['z'][0]:.3f}, {rmap.bounds['z'][1]:.3f}] m")
+
+    # Visualization
+    if not args.no_viz:
+        print()
+        print("Visualizing reachability map...")
+        print("  (colored by", args.color + ")")
+
+        # Get point cloud
+        positions, colors = rmap.get_point_cloud(
+            color_by=args.color,
+            max_points=args.viz_points
+        )
+
+        # Apply Z-slice filter if specified
+        if args.z_slice is not None:
+            z_min, z_max = args.z_slice
+            mask = (positions[:, 2] >= z_min) & (positions[:, 2] <= z_max)
+            positions = positions[mask]
+            colors = colors[mask]
+            print(f"  Z-slice [{z_min:.2f}, {z_max:.2f}]: {len(positions)} points")
+
+        # Create viewer
+        viewer = skrobot.viewers.ViserVisualizer()
+
+        # Add robot
+        viewer.add(robot)
+
+        # Add reachability visualization using batched meshes
+        import trimesh as tm
+        server = viewer._server
+
+        # Create unit icosphere mesh
+        unit_sphere = tm.creation.icosphere(subdivisions=1, radius=1.0)
+        sphere_vertices = unit_sphere.vertices.astype(np.float32)
+        sphere_faces = unit_sphere.faces.astype(np.uint32)
+
+        # Prepare batched data
+        n_points = len(positions)
+        print(f"  Adding {n_points} visualization points...")
+        sphere_radius = args.voxel_size * 0.4
+        batched_positions = positions.astype(np.float32)
+        batched_wxyzs = np.tile([1.0, 0.0, 0.0, 0.0], (n_points, 1)).astype(np.float32)
+        batched_scales = np.full((n_points, 3), sphere_radius, dtype=np.float32)
+        batched_colors = (colors[:, :3] * 255).astype(np.uint8)
+
+        # Add batched spheres with opacity
+        reachability_mesh_handle = server.scene.add_batched_meshes_simple(
+            "reachability_spheres",
+            vertices=sphere_vertices,
+            faces=sphere_faces,
+            batched_wxyzs=batched_wxyzs,
+            batched_positions=batched_positions,
+            batched_scales=batched_scales,
+            batched_colors=batched_colors,
+            opacity=args.alpha,
+        )
+
+        # Show
+        viewer.show()
+        print()
+
+        print("Viser viewer opened in browser. Press Ctrl+C to exit.")
+        print("  Use the GUI sliders to adjust Z-slice range and opacity.")
+
+        # Get Z bounds
+        z_bounds = rmap.bounds['z']
+
+        # Store full point cloud data for filtering
+        full_positions, full_colors = rmap.get_point_cloud(
+            color_by=args.color,
+            max_points=args.viz_points * 2  # Get more points for filtering
+        )
+        full_colors_uint8 = (full_colors[:, :3] * 255).astype(np.uint8)
+
+        # Add GUI folder for controls
+        with server.gui.add_folder("Reachability Slice"):
+            z_min_slider = server.gui.add_slider(
+                "Z Min", min=z_bounds[0], max=z_bounds[1],
+                initial_value=z_bounds[0], step=0.01
+            )
+            z_max_slider = server.gui.add_slider(
+                "Z Max", min=z_bounds[0], max=z_bounds[1],
+                initial_value=z_bounds[1], step=0.01
+            )
+            sphere_size_slider = server.gui.add_slider(
+                "Sphere Size", min=0.005, max=0.1,
+                initial_value=args.voxel_size * 0.4, step=0.005
+            )
+            alpha_slider = server.gui.add_slider(
+                "Opacity", min=0.05, max=1.0,
+                initial_value=args.alpha, step=0.05
+            )
+
+        mesh_handle = reachability_mesh_handle
+
+        def update_mesh():
+            nonlocal mesh_handle
+            z_min = z_min_slider.value
+            z_max = z_max_slider.value
+            mask = (full_positions[:, 2] >= z_min) & (full_positions[:, 2] <= z_max)
+            filtered_positions = full_positions[mask].astype(np.float32)
+            filtered_colors = full_colors_uint8[mask]
+
+            if mesh_handle is not None:
+                mesh_handle.remove()
+
+            if len(filtered_positions) > 0:
+                n_filtered = len(filtered_positions)
+                sphere_size = sphere_size_slider.value
+                mesh_handle = server.scene.add_batched_meshes_simple(
+                    "reachability_spheres",
+                    vertices=sphere_vertices,
+                    faces=sphere_faces,
+                    batched_wxyzs=np.tile([1.0, 0.0, 0.0, 0.0], (n_filtered, 1)).astype(np.float32),
+                    batched_positions=filtered_positions,
+                    batched_scales=np.full((n_filtered, 3), sphere_size, dtype=np.float32),
+                    batched_colors=filtered_colors,
+                    opacity=alpha_slider.value,
+                )
+
+        @z_min_slider.on_update
+        def _(_):
+            update_mesh()
+
+        @z_max_slider.on_update
+        def _(_):
+            update_mesh()
+
+        @sphere_size_slider.on_update
+        def _(_):
+            update_mesh()
+
+        @alpha_slider.on_update
+        def _(_):
+            update_mesh()
+
+        if not args.no_interactive:
+            try:
+                while True:
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                pass
+
+
+if __name__ == '__main__':
+    main()
