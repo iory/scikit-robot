@@ -61,6 +61,73 @@ class ViserVisualizer:
         self._is_active = False
         self._server.stop()
 
+    def _find_existing_end_coords(self, robot_model: RobotModel, group_name: str):
+        """Find existing end_coords in robot model for a given group.
+
+        Parameters
+        ----------
+        robot_model : RobotModel
+            The robot model to search.
+        group_name : str
+            The group name (e.g., 'arm', 'right_arm', 'left_arm', 'head').
+
+        Returns
+        -------
+        CascadedCoords or None
+            The existing end_coords if found, None otherwise.
+        """
+        # Map group names to possible attribute names
+        attr_candidates = []
+        if group_name == 'arm':
+            attr_candidates = ['arm_end_coords', 'rarm_end_coords', 'end_coords']
+        elif group_name == 'right_arm':
+            attr_candidates = ['rarm_end_coords', 'right_arm_end_coords']
+        elif group_name == 'left_arm':
+            attr_candidates = ['larm_end_coords', 'left_arm_end_coords']
+        elif group_name == 'right_leg':
+            attr_candidates = ['rleg_end_coords', 'right_leg_end_coords']
+        elif group_name == 'left_leg':
+            attr_candidates = ['lleg_end_coords', 'left_leg_end_coords']
+        elif group_name == 'head':
+            attr_candidates = ['head_end_coords']
+        elif group_name == 'torso':
+            attr_candidates = ['torso_end_coords']
+        else:
+            attr_candidates = [f'{group_name}_end_coords']
+
+        # Check direct attributes on robot model
+        for attr_name in attr_candidates:
+            if hasattr(robot_model, attr_name):
+                end_coords = getattr(robot_model, attr_name)
+                if isinstance(end_coords, CascadedCoords):
+                    return end_coords
+
+        # Check if robot model has a limb attribute with end_coords
+        limb_attr_map = {
+            'arm': ['arm', 'rarm'],
+            'right_arm': ['rarm', 'right_arm'],
+            'left_arm': ['larm', 'left_arm'],
+            'right_leg': ['rleg', 'right_leg'],
+            'left_leg': ['lleg', 'left_leg'],
+            'head': ['head'],
+            'torso': ['torso'],
+        }
+        limb_attrs = limb_attr_map.get(group_name, [group_name])
+
+        for limb_attr in limb_attrs:
+            try:
+                if hasattr(robot_model, limb_attr):
+                    limb = getattr(robot_model, limb_attr)
+                    if hasattr(limb, 'end_coords'):
+                        end_coords = limb.end_coords
+                        if isinstance(end_coords, CascadedCoords):
+                            return end_coords
+            except NotImplementedError:
+                # Some robot models raise NotImplementedError for unimplemented limbs
+                continue
+
+        return None
+
     def _setup_ik_controls(self, robot_model: RobotModel):
         """Set up interactive IK controls for detected end-effectors."""
         from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
@@ -112,25 +179,29 @@ class ViserVisualizer:
             if not link_list:
                 continue
 
-            # Create end_coords
-            parent_link_name = ec_info.get('parent_link', link_names[-1])
-            parent_link = None
-            for link in robot_model.link_list:
-                if link.name == parent_link_name:
-                    parent_link = link
-                    break
-            if parent_link is None:
-                parent_link = link_list[-1]
+            # Try to use existing end_coords from robot model
+            end_coords = self._find_existing_end_coords(robot_model, group_name)
 
-            pos = ec_info.get('pos', [0.0, 0.0, 0.0])
-            rot = ec_info.get('rot')
+            if end_coords is None:
+                # Create end_coords from detected info
+                parent_link_name = ec_info.get('parent_link', link_names[-1])
+                parent_link = None
+                for link in robot_model.link_list:
+                    if link.name == parent_link_name:
+                        parent_link = link
+                        break
+                if parent_link is None:
+                    parent_link = link_list[-1]
 
-            end_coords = CascadedCoords(
-                parent=parent_link,
-                pos=pos,
-                rot=rot,
-                name=f"{group_name}_end_coords",
-            )
+                pos = ec_info.get('pos', [0.0, 0.0, 0.0])
+                rot = ec_info.get('rot')
+
+                end_coords = CascadedCoords(
+                    parent=parent_link,
+                    pos=pos,
+                    rot=rot,
+                    name=f"{group_name}_end_coords",
+                )
 
             # Add transform control at end-effector position
             ee_pos = end_coords.worldpos()

@@ -215,6 +215,70 @@ Collision/Visual mesh toggle example:
         transparent_background=True  # Render with transparent background
     )
 
+ViserVisualizer
+---------------
+
+**Description:**
+  The ``ViserVisualizer`` is a web-based 3D viewer built on the `Viser <https://viser.studio/>`_ library. It provides an interactive browser interface with GUI controls for manipulating robot joint angles and real-time inverse kinematics (IK).
+
+**Key Functionalities:**
+
+- **Web-based Interface:**
+  Opens in your web browser, allowing remote access and cross-platform compatibility without requiring native window dependencies.
+
+- **Interactive Joint Control:**
+  Provides GUI sliders for each robot joint, organized by joint groups. Adjusting a slider immediately updates the robot visualization in real-time.
+
+- **Interactive Inverse Kinematics:**
+  When ``enable_ik=True``, the viewer automatically detects end-effectors (arms, head, etc.) and adds transform controls at each end-effector position. Dragging these controls solves IK in real-time, updating both the robot pose and joint sliders.
+
+.. figure:: ../../image/viser-viewer.jpg
+    :scale: 80%
+    :align: center
+
+    Viser viewer with joint angle sliders
+
+**Interactive IK Demo:**
+
+The following video demonstrates the interactive IK feature, where dragging the transform controls at each end-effector solves inverse kinematics in real-time:
+
+.. raw:: html
+
+   <video width="100%" controls>
+     <source src="../../image/viser-interactive-ik.mp4" type="video/mp4">
+     Your browser does not support the video tag.
+   </video>
+
+**Example Usage:**
+
+.. code-block:: python
+
+    from skrobot.viewers import ViserVisualizer
+    from skrobot.models import Panda
+
+    # Create viewer with interactive IK enabled
+    viewer = ViserVisualizer(enable_ik=True)
+
+    # Load and add robot model
+    robot = Panda()
+    viewer.add(robot)
+
+    # Open browser to view
+    viewer.show()
+
+    # Keep the viewer running
+    import time
+    while viewer.is_active:
+        viewer.redraw()
+        time.sleep(0.1)
+
+**Command Line Usage:**
+
+.. code-block:: bash
+
+    # Use viser viewer with visualize-urdf command (IK is enabled by default)
+    skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer viser
+
 .. caution::
 
   To speed up the rendering cycle in **TrimeshSceneViewer** and **PyrenderViewer**, adjust the ``update_interval`` to the reciprocal of the desired frequency. For example, to achieve updates at 30 Hz, set the ``update_interval`` to 1/30. This change will increase the frequency at which the ``redraw()`` function is called, making the rendering process faster.
