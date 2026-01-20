@@ -110,16 +110,14 @@ class ROSRobotInterfaceBase(object):
         self.namespace = namespace
         self._joint_state_msg = None
         if self.namespace:
-            self.joint_states_sub = rospy.Subscriber('{}/{}'.format(
-                self.namespace, joint_states_topic),
-                JointState,
-                callback=self.joint_state_callback,
-                queue_size=joint_states_queue_size)
+            self.joint_states_topic = '{}/{}'.format(
+                self.namespace, joint_states_topic)
         else:
-            self.joint_states_sub = rospy.Subscriber(
-                joint_states_topic, JointState,
-                callback=self.joint_state_callback,
-                queue_size=joint_states_queue_size)
+            self.joint_states_topic = joint_states_topic
+        self.joint_states_sub = rospy.Subscriber(
+            self.joint_states_topic, JointState,
+            callback=self.joint_state_callback,
+            queue_size=joint_states_queue_size)
 
         self.controller_table = {}
         self.controller_param_table = {}
@@ -498,8 +496,9 @@ class ROSRobotInterfaceBase(object):
         if av is None:
             if not self.update_robot_state(wait_until_update=True):
                 raise RuntimeError(
-                    "Failed to get joint states: "
-                    "joint state update timed out")
+                    "Failed to get joint states from topic '{}': "
+                    "joint state update timed out".format(
+                        self.joint_states_topic))
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
