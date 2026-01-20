@@ -13,6 +13,9 @@ import rospy
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
 
+from skrobot.interpolator import LinearInterpolator
+from skrobot.interpolator import MinjerkInterpolator
+from skrobot.interpolator import position_list_interpolation
 from skrobot.model import LinearJoint
 from skrobot.model import RotationalJoint
 
@@ -524,7 +527,9 @@ class ROSRobotInterfaceBase(object):
                      controller_type=None,
                      start_time=0.0,
                      time_scale=5.0,
-                     velocities=None):
+                     velocities=None,
+                     interpolation=None,
+                     interpolation_dt=0.01):
         """Send joint angle to robot
 
         Send joint angle to robot. this method returns immediately, so use
@@ -547,6 +552,15 @@ class ROSRobotInterfaceBase(object):
             if time is not specified,
             it will use 1/time_scale of the fastest speed.
             time_scale must be >=1. (default: 5.0)
+        velocities : numpy.ndarray or None
+            velocities at goal position
+        interpolation : str or None
+            interpolation method. 'linear' or 'minjerk'.
+            If None, send single trajectory point (default behavior).
+            If specified, interpolate trajectory and send via
+            angle_vector_sequence.
+        interpolation_dt : float
+            time step for interpolation in [sec]. (default: 0.01)
 
         Returns
         -------
@@ -576,6 +590,12 @@ class ROSRobotInterfaceBase(object):
             return_joint_names=True)
         time = self._check_time(time, fastest_time, time_scale=time_scale)
 
+        # Use interpolation if specified
+        if interpolation is not None:
+            return self._angle_vector_with_interpolation(
+                av, time, controller_type, start_time,
+                interpolation, interpolation_dt)
+
         self.robot.angle_vector(av)
         cacts = self.controller_table[controller_type]
 
@@ -593,6 +613,69 @@ class ROSRobotInterfaceBase(object):
                 start_time,
                 traj_points)
         return av
+
+    def _angle_vector_with_interpolation(
+            self, av, time, controller_type, start_time,
+            interpolation, interpolation_dt):
+        """Send angle vector using interpolation method.
+
+        Parameters
+        ----------
+        av : numpy.ndarray
+            target joint angle vector
+        time : float
+            time to goal in [sec]
+        controller_type : string
+            controller method name
+        start_time : float
+            time to start moving
+        interpolation : str
+            interpolation method. 'linear' or 'minjerk'.
+        interpolation_dt : float
+            time step for interpolation in [sec].
+
+        Returns
+        -------
+        av : np.ndarray
+            angle-vector
+        """
+        # Select interpolator
+        if interpolation == 'linear':
+            interpolator = LinearInterpolator()
+        elif interpolation == 'minjerk':
+            interpolator = MinjerkInterpolator()
+        else:
+            raise ValueError(
+                "Unknown interpolation method: {}. "
+                "Use 'linear' or 'minjerk'.".format(interpolation))
+
+        # Get current angle vector
+        current_av = self.robot.angle_vector()
+        position_list = [current_av, av]
+        time_list = [time]
+
+        # Generate interpolated trajectory
+        result = position_list_interpolation(
+            position_list, time_list, interpolation_dt,
+            interpolator=interpolator,
+            neglect_first=True)
+
+        positions = result['position']
+        times = result['time']
+
+        # Convert to avs and tms for angle_vector_sequence
+        avs = [np.array(pos) for pos in positions]
+
+        # Calculate time differences (tms is duration from previous to next)
+        tms = []
+        prev_time = 0.0
+        for t in times:
+            tms.append(t - prev_time)
+            prev_time = t
+
+        # Use angle_vector_sequence to send interpolated trajectory
+        return self.angle_vector_sequence(
+            avs, tms, controller_type, start_time, time_scale=1.0)
 
     def potentio_vector(self):
         """Returns current robot angle vector, This method uses caced data."""
