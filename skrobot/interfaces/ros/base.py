@@ -280,6 +280,8 @@ class ROSRobotInterfaceBase(object):
             if not self.wait_until_update_all_joints(wait_until_update):
                 return False
         if not self.robot_state:
+            self._timeout_reason = \
+                "robot_state is empty (no joint_states callback received)"
             return False
         joint_names = self.robot_state['name']
         positions = self.robot_state['position']
