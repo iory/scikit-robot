@@ -35,10 +35,35 @@ Visualize URDF robot models in an interactive 3D viewer.
 
    # Basic usage
    skr visualize-urdf robot.urdf
-   
+
    # With specific viewer
    skr visualize-urdf robot.urdf --viewer trimesh
    skr visualize-urdf robot.urdf --viewer pyrender
+   skr visualize-urdf robot.urdf --viewer viser
+
+Available Viewers
+^^^^^^^^^^^^^^^^^
+
+- **pyrender** (default): OpenGL-based viewer with keyboard shortcuts for joint axis display and collision mesh toggling.
+- **trimesh**: Trimesh-based viewer using the trimesh rendering engine.
+- **viser**: Web-based viewer that opens in your browser. Provides interactive GUI sliders for manipulating joint angles in real-time. Ideal for remote visualization and environments without display servers.
+
+Viser Viewer
+^^^^^^^^^^^^
+
+The viser viewer provides a browser-based 3D visualization with an interactive GUI panel for controlling robot joint angles.
+
+.. image:: ../image/viser-viewer.jpg
+   :width: 800px
+   :align: center
+   :alt: Viser viewer with joint angle sliders
+
+Features:
+
+- **Web-based**: Opens automatically in your default browser
+- **Joint Sliders**: Each joint has a slider to control its angle in real-time
+- **Grouped Controls**: Joints are organized into collapsible folders by module/link group
+- **Remote Access**: Can be accessed from other devices on the network
 
 convert-urdf-mesh
 ~~~~~~~~~~~~~~~~~
