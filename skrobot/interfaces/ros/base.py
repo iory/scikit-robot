@@ -303,6 +303,7 @@ class ROSRobotInterfaceBase(object):
             joint.joint_angle(position)
             joint.joint_velocity = velocity
             joint.joint_torque = effort
+        return True
 
     def joint_state_callback(self, msg):
         self._joint_state_msg = msg
