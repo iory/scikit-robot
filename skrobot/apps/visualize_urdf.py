@@ -13,8 +13,8 @@ def main():
     parser.add_argument('input_urdfpath', type=str, nargs='?', help='Input URDF path')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender'], default='pyrender',
-        help='Choose the viewer type: trimesh or pyrender')
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender, or viser')
     parser.add_argument(
         '--interactive', '-i',
         action='store_true',
@@ -36,6 +36,8 @@ def main():
         viewer = skrobot.viewers.TrimeshSceneViewer(update_interval=0.1)
     elif args.viewer == 'pyrender':
         viewer = skrobot.viewers.PyrenderViewer(update_interval=0.1)
+    elif args.viewer == 'viser':
+        viewer = skrobot.viewers.ViserVisualizer()
 
     # Load robot model from ROS parameter or file
     if args.ros is not None:

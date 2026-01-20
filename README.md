@@ -96,9 +96,19 @@ If you experience performance issues with the default viewer, try pyrender for s
 skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer pyrender
 ```
 
+For a web-based viewer with interactive joint angle sliders, use viser:
+
+```bash
+skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer viser
+```
+
 Running these commands should open a viewer displaying your robot's 3D model. Below is a sample image of what you should expect.
 
 ![Viewer Example](docs/image/viewer.jpg)
+
+The viser viewer opens in your browser and provides GUI sliders for manipulating joint angles in real-time:
+
+![Viser Viewer](docs/image/viser-viewer.jpg)
 
 ## Create Your Own Robot Model (URDF)
 
