@@ -109,6 +109,7 @@ class ROSRobotInterfaceBase(object):
         self.joint_action_enable = True
         self.namespace = namespace
         self._joint_state_msg = None
+        self._received_joint_names = set()
         if self.namespace:
             self.joint_states_topic = '{}/{}'.format(
                 self.namespace, joint_states_topic)
@@ -124,6 +125,34 @@ class ROSRobotInterfaceBase(object):
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
+        self._additional_joint_states_subs = []
+
+    def add_joint_states_topic(self, topic_name, queue_size=1):
+        """Subscribe to an additional joint_states topic.
+
+        This allows combining joint states from multiple topics
+        (e.g., when controlling multiple robots or robot parts).
+
+        Parameters
+        ----------
+        topic_name : str
+            The topic name to subscribe to.
+        queue_size : int
+            Queue size for the subscriber. Default is 1.
+
+        Returns
+        -------
+        subscriber : rospy.Subscriber
+            The created subscriber.
+        """
+        sub = rospy.Subscriber(
+            topic_name, JointState,
+            callback=self.joint_state_callback,
+            queue_size=queue_size)
+        self._additional_joint_states_subs.append(sub)
+        rospy.loginfo(
+            "Added additional joint_states topic: {}".format(topic_name))
+        return sub
 
     def _check_time(self, time, fastest_time, time_scale):
         """Check and Return send angle vector time
@@ -188,6 +217,9 @@ class ROSRobotInterfaceBase(object):
     def wait_until_update_all_joints(self, tgt_tm, timeout=3.0):
         """Wait until all joints have been updated.
 
+        Only joints that have been received from joint_states topics are
+        checked. Joints that are not published in any topic are ignored.
+
         Parameters
         ----------
         tgt_tm : rospy.Time or bool
@@ -203,11 +235,18 @@ class ROSRobotInterfaceBase(object):
             initial_time = rospy.Time.now().to_nsec()
         start_wait = rospy.get_time()
         while not rospy.is_shutdown():
-            if 'stamp_list' in self.robot_state \
-               and all(map(lambda ts: ts is not None
-                           and ts.to_nsec() > initial_time,
-                           self.robot_state['stamp_list'])):
-                return True
+            if 'stamp_list' in self.robot_state and self._received_joint_names:
+                model_names = self.robot_state['name']
+                stamps = self.robot_state['stamp_list']
+                # Only check joints that exist in subscribed topics
+                check_results = []
+                for i, name in enumerate(model_names):
+                    if name in self._received_joint_names:
+                        ts = stamps[i]
+                        check_results.append(
+                            ts is not None and ts.to_nsec() > initial_time)
+                if check_results and all(check_results):
+                    return True
             if (rospy.get_time() - start_wait) > timeout:
                 self._set_timeout_reason(initial_time)
                 rospy.logwarn(
@@ -307,6 +346,7 @@ class ROSRobotInterfaceBase(object):
 
     def joint_state_callback(self, msg):
         self._joint_state_msg = msg
+        self._received_joint_names.update(msg.name)
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
