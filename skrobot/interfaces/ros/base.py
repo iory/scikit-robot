@@ -196,7 +196,7 @@ class ROSRobotInterfaceBase(object):
             Maximum time to wait in seconds. Default is 3.0.
         """
         self._not_updated_joints = []
-        self._timeout_reason = None
+        self._timeout_reason = "wait_until_update_all_joints did not complete"
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
