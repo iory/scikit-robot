@@ -11,6 +11,8 @@ import viser.transforms as vtf
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2rpy
+from skrobot.coordinates.math import rotation_matrix_from_rpy
 from skrobot.model.joint import _MimicJointHook
 from skrobot.model.joint import FixedJoint
 from skrobot.model.link import Link
@@ -245,21 +247,74 @@ class ViserVisualizer:
                 make_visibility_callback(control, visibility_checkbox)
             )
 
+            # Add numeric input fields for position and rotation
+            with self._server.gui.add_folder(
+                f"{group_name} Target",
+                expand_by_default=False,
+            ):
+                # Position inputs (in meters)
+                pos_x = self._server.gui.add_number(
+                    "X [m]", initial_value=float(ee_pos[0]), step=0.01
+                )
+                pos_y = self._server.gui.add_number(
+                    "Y [m]", initial_value=float(ee_pos[1]), step=0.01
+                )
+                pos_z = self._server.gui.add_number(
+                    "Z [m]", initial_value=float(ee_pos[2]), step=0.01
+                )
+
+                # Get initial RPY from rotation matrix
+                # matrix2rpy returns [roll, pitch, yaw]
+                roll_init, pitch_init, yaw_init = matrix2rpy(ee_rot)
+
+                # Rotation inputs (in degrees for user convenience)
+                roll_input = self._server.gui.add_number(
+                    "Roll [deg]",
+                    initial_value=float(np.rad2deg(roll_init)),
+                    step=1.0,
+                )
+                pitch_input = self._server.gui.add_number(
+                    "Pitch [deg]",
+                    initial_value=float(np.rad2deg(pitch_init)),
+                    step=1.0,
+                )
+                yaw_input = self._server.gui.add_number(
+                    "Yaw [deg]",
+                    initial_value=float(np.rad2deg(yaw_init)),
+                    step=1.0,
+                )
+
             # Store target info
             self._ik_targets[group_name] = {
                 'link_list': link_list,
                 'end_coords': end_coords,
                 'control': control,
                 'visibility_checkbox': visibility_checkbox,
+                'pos_inputs': (pos_x, pos_y, pos_z),
+                'rot_inputs': (roll_input, pitch_input, yaw_input),
             }
 
-            # Callback for when control is moved
+            # Callback for when control is moved (updates numeric inputs)
             def make_ik_callback(gname):
                 def callback(_):
                     self._solve_ik(gname)
                 return callback
 
             control.on_update(make_ik_callback(group_name))
+
+            # Callback for numeric input changes
+            def make_numeric_ik_callback(gname):
+                def callback(_):
+                    self._solve_ik_from_numeric(gname)
+                return callback
+
+            numeric_callback = make_numeric_ik_callback(group_name)
+            pos_x.on_update(numeric_callback)
+            pos_y.on_update(numeric_callback)
+            pos_z.on_update(numeric_callback)
+            roll_input.on_update(numeric_callback)
+            pitch_input.on_update(numeric_callback)
+            yaw_input.on_update(numeric_callback)
 
     def _solve_ik(self, group_name: str):
         """Solve IK for a group when its target is moved."""
@@ -298,6 +353,129 @@ class ViserVisualizer:
             # Always exclude the current target to prevent it from moving
             # when IK doesn't reach the exact target position
             self._sync_ik_targets(exclude=group_name)
+            # Sync numeric inputs with the target position
+            self._sync_numeric_inputs(group_name)
+
+    def _solve_ik_from_numeric(self, group_name: str):
+        """Solve IK when numeric input fields are changed."""
+        if self._robot_model is None or self._updating_from_ik:
+            return
+
+        target = self._ik_targets.get(group_name)
+        if target is None:
+            return
+
+        # Get position from numeric inputs
+        pos_inputs = target['pos_inputs']
+        target_pos = np.array([
+            pos_inputs[0].value,
+            pos_inputs[1].value,
+            pos_inputs[2].value
+        ])
+
+        # Get rotation from numeric inputs (degrees to radians)
+        rot_inputs = target['rot_inputs']
+        roll = np.deg2rad(rot_inputs[0].value)
+        pitch = np.deg2rad(rot_inputs[1].value)
+        yaw = np.deg2rad(rot_inputs[2].value)
+
+        # Convert RPY to rotation matrix
+        target_rot = rotation_matrix_from_rpy([yaw, pitch, roll])
+        target_coords = Coordinates(pos=target_pos, rot=target_rot)
+
+        constrain_rot = self._ik_constrain_rotation.value
+
+        result = self._robot_model.inverse_kinematics(
+            target_coords,
+            link_list=target['link_list'],
+            move_target=target['end_coords'],
+            rotation_axis=constrain_rot,
+            stop=30,
+            revert_if_fail=True,
+        )
+
+        # If regular IK fails, try batch IK
+        if result is False or result is None:
+            result = self._solve_ik_batch(group_name, target_pos, target_rot)
+
+        if result is not False and result is not None:
+            self.redraw()
+            self._sync_joint_sliders()
+            # Update the transform control to match numeric inputs
+            self._updating_from_ik = True
+            try:
+                control = target['control']
+                control.position = target_pos
+                control.wxyz = matrix2quaternion(target_rot)
+            finally:
+                self._updating_from_ik = False
+            # Sync other IK targets
+            self._sync_ik_targets(exclude=group_name)
+        else:
+            # IK failed: revert numeric inputs and control to current pose
+            self._revert_ik_target(group_name)
+
+    def _revert_ik_target(self, group_name: str):
+        """Revert IK target to current end-effector pose when IK fails."""
+        target = self._ik_targets.get(group_name)
+        if target is None:
+            return
+
+        # Get current end-effector pose
+        pos = target['end_coords'].worldpos()
+        rot = target['end_coords'].worldrot()
+
+        self._updating_from_ik = True
+        try:
+            # Revert transform control
+            target['control'].position = pos
+            target['control'].wxyz = matrix2quaternion(rot)
+
+            # Revert numeric inputs
+            if 'pos_inputs' in target:
+                pos_inputs = target['pos_inputs']
+                pos_inputs[0].value = float(pos[0])
+                pos_inputs[1].value = float(pos[1])
+                pos_inputs[2].value = float(pos[2])
+
+            if 'rot_inputs' in target:
+                roll, pitch, yaw = matrix2rpy(rot)
+                rot_inputs = target['rot_inputs']
+                rot_inputs[0].value = float(np.rad2deg(roll))
+                rot_inputs[1].value = float(np.rad2deg(pitch))
+                rot_inputs[2].value = float(np.rad2deg(yaw))
+        finally:
+            self._updating_from_ik = False
+
+    def _sync_numeric_inputs(self, group_name: str):
+        """Sync numeric input fields with the transform control position."""
+        target = self._ik_targets.get(group_name)
+        if target is None:
+            return
+
+        control = target['control']
+        pos = np.array(control.position)
+        rot = vtf.SO3(control.wxyz).as_matrix()
+
+        # Update position inputs
+        self._updating_from_ik = True
+        try:
+            pos_inputs = target['pos_inputs']
+            pos_inputs[0].value = float(pos[0])
+            pos_inputs[1].value = float(pos[1])
+            pos_inputs[2].value = float(pos[2])
+
+            # Convert rotation matrix to RPY
+            # matrix2rpy returns [roll, pitch, yaw]
+            roll, pitch, yaw = matrix2rpy(rot)
+
+            # Update rotation inputs (radians to degrees)
+            rot_inputs = target['rot_inputs']
+            rot_inputs[0].value = float(np.rad2deg(roll))
+            rot_inputs[1].value = float(np.rad2deg(pitch))
+            rot_inputs[2].value = float(np.rad2deg(yaw))
+        finally:
+            self._updating_from_ik = False
 
     def _solve_ik_batch(self, group_name: str, target_pos: np.ndarray,
                         target_rot: np.ndarray):
@@ -437,6 +615,21 @@ class ViserVisualizer:
                 rot = target['end_coords'].worldrot()
                 target['control'].position = pos
                 target['control'].wxyz = matrix2quaternion(rot)
+
+                # Update numeric inputs if they exist
+                if 'pos_inputs' in target:
+                    pos_inputs = target['pos_inputs']
+                    pos_inputs[0].value = float(pos[0])
+                    pos_inputs[1].value = float(pos[1])
+                    pos_inputs[2].value = float(pos[2])
+
+                if 'rot_inputs' in target:
+                    # matrix2rpy returns [roll, pitch, yaw]
+                    roll, pitch, yaw = matrix2rpy(rot)
+                    rot_inputs = target['rot_inputs']
+                    rot_inputs[0].value = float(np.rad2deg(roll))
+                    rot_inputs[1].value = float(np.rad2deg(pitch))
+                    rot_inputs[2].value = float(np.rad2deg(yaw))
         finally:
             self._updating_from_ik = False
 
