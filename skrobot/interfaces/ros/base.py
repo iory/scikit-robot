@@ -195,6 +195,7 @@ class ROSRobotInterfaceBase(object):
         timeout : float
             Maximum time to wait in seconds. Default is 3.0.
         """
+        self._not_updated_joints = []
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
@@ -207,17 +208,16 @@ class ROSRobotInterfaceBase(object):
                            self.robot_state['stamp_list'])):
                 return True
             if (rospy.get_time() - start_wait) > timeout:
-                not_updated_joints = []
                 if 'stamp_list' in self.robot_state \
                    and 'name' in self.robot_state:
                     stamp_list = self.robot_state['stamp_list']
                     joint_names = self.robot_state['name']
                     for name, ts in zip(joint_names, stamp_list):
                         if ts is None or ts.to_nsec() <= initial_time:
-                            not_updated_joints.append(name)
+                            self._not_updated_joints.append(name)
                 rospy.logwarn(
                     "wait_until_update_all_joints timeout. "
-                    "Not updated joints: {}".format(not_updated_joints))
+                    "Not updated joints: {}".format(self._not_updated_joints))
                 return False
             rospy.sleep(0.01)
         return False
@@ -495,10 +495,12 @@ class ROSRobotInterfaceBase(object):
         """
         if av is None:
             if not self.update_robot_state(wait_until_update=True):
+                not_updated = getattr(self, '_not_updated_joints', [])
                 raise RuntimeError(
                     "Failed to get joint states from topic '{}': "
-                    "joint state update timed out".format(
-                        self.joint_states_topic))
+                    "joint state update timed out. "
+                    "Not updated joints: {}".format(
+                        self.joint_states_topic, not_updated))
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
