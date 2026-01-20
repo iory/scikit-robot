@@ -110,6 +110,10 @@ The viser viewer opens in your browser and provides GUI sliders for manipulating
 
 ![Viser Viewer](docs/image/viser-viewer.jpg)
 
+The viser viewer also supports interactive inverse kinematics (IK). Drag the transform controls at each end-effector to solve IK in real-time:
+
+https://github.com/user-attachments/assets/1294307e-a901-4f5f-aa4e-433cfbfacd03
+
 ## Create Your Own Robot Model (URDF)
 
 If you want to build your own robot from scratch, you can refer to the [How to Create URDF from CAD Software](https://scikit-robot.readthedocs.io/en/latest/reference/how_to_create_urdf_from_cad.html) documentation.

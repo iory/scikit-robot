@@ -1,10 +1,15 @@
+from typing import Dict
+from typing import Optional
 from typing import Union
 import webbrowser
 
 import numpy as np
 import trimesh
 import viser
+import viser.transforms as vtf
 
+from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.model.joint import _MimicJointHook
 from skrobot.model.joint import FixedJoint
@@ -18,13 +23,35 @@ from skrobot.model.robot_model import RobotModel
 
 
 class ViserVisualizer:
-    def __init__(self, draw_grid: bool = True):
+    """Viser-based 3D visualizer for scikit-robot.
+
+    Parameters
+    ----------
+    draw_grid : bool
+        Whether to draw the ground grid. Default is True.
+    enable_ik : bool
+        Whether to enable interactive IK controls. When enabled,
+        transform controls are added for each detected end-effector
+        and dragging them will solve IK in real-time. Default is False.
+    """
+
+    def __init__(
+        self,
+        draw_grid: bool = True,
+        enable_ik: bool = False,
+    ):
         self._server = viser.ViserServer()
         self._linkid_to_handle = dict()
         self._linkid_to_link = dict()
         self._is_active = True
         self._joint_sliders = dict()
         self._joint_folders = dict()
+
+        # IK state
+        self._enable_ik = enable_ik
+        self._ik_targets: Dict[str, dict] = {}
+        self._robot_model: Optional[RobotModel] = None
+        self._updating_from_ik = False
 
     @property
     def is_active(self) -> bool:
@@ -33,6 +60,246 @@ class ViserVisualizer:
     def close(self):
         self._is_active = False
         self._server.stop()
+
+    def _find_existing_end_coords(self, robot_model: RobotModel, group_name: str):
+        """Find existing end_coords in robot model for a given group.
+
+        Parameters
+        ----------
+        robot_model : RobotModel
+            The robot model to search.
+        group_name : str
+            The group name (e.g., 'arm', 'right_arm', 'left_arm', 'head').
+
+        Returns
+        -------
+        CascadedCoords or None
+            The existing end_coords if found, None otherwise.
+        """
+        # Map group names to possible attribute names
+        attr_candidates = []
+        if group_name == 'arm':
+            attr_candidates = ['arm_end_coords', 'rarm_end_coords', 'end_coords']
+        elif group_name == 'right_arm':
+            attr_candidates = ['rarm_end_coords', 'right_arm_end_coords']
+        elif group_name == 'left_arm':
+            attr_candidates = ['larm_end_coords', 'left_arm_end_coords']
+        elif group_name == 'right_leg':
+            attr_candidates = ['rleg_end_coords', 'right_leg_end_coords']
+        elif group_name == 'left_leg':
+            attr_candidates = ['lleg_end_coords', 'left_leg_end_coords']
+        elif group_name == 'head':
+            attr_candidates = ['head_end_coords']
+        elif group_name == 'torso':
+            attr_candidates = ['torso_end_coords']
+        else:
+            attr_candidates = [f'{group_name}_end_coords']
+
+        # Check direct attributes on robot model
+        for attr_name in attr_candidates:
+            if hasattr(robot_model, attr_name):
+                end_coords = getattr(robot_model, attr_name)
+                if isinstance(end_coords, CascadedCoords):
+                    return end_coords
+
+        # Check if robot model has a limb attribute with end_coords
+        limb_attr_map = {
+            'arm': ['arm', 'rarm'],
+            'right_arm': ['rarm', 'right_arm'],
+            'left_arm': ['larm', 'left_arm'],
+            'right_leg': ['rleg', 'right_leg'],
+            'left_leg': ['lleg', 'left_leg'],
+            'head': ['head'],
+            'torso': ['torso'],
+        }
+        limb_attrs = limb_attr_map.get(group_name, [group_name])
+
+        for limb_attr in limb_attrs:
+            try:
+                if hasattr(robot_model, limb_attr):
+                    limb = getattr(robot_model, limb_attr)
+                    if hasattr(limb, 'end_coords'):
+                        end_coords = limb.end_coords
+                        if isinstance(end_coords, CascadedCoords):
+                            return end_coords
+            except NotImplementedError:
+                # Some robot models raise NotImplementedError for unimplemented limbs
+                continue
+
+        return None
+
+    def _setup_ik_controls(self, robot_model: RobotModel):
+        """Set up interactive IK controls for detected end-effectors."""
+        from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
+
+        self._robot_model = robot_model
+
+        # Detect groups from geometry
+        groups, end_effectors, end_coords_info, _ = generate_groups_from_geometry(
+            robot_model
+        )
+
+        # Filter groups suitable for IK
+        ik_groups = {}
+        for group_name, group_data in groups.items():
+            if group_data is None:
+                continue
+            # Skip torso-only and gripper groups
+            if 'torso' in group_name and 'arm' not in group_name:
+                continue
+            if 'gripper' in group_name:
+                continue
+            # Need at least 3 joints
+            links = group_data.get('links', [])
+            if len(links) < 3:
+                continue
+            ik_groups[group_name] = (group_data, end_coords_info.get(group_name, {}))
+
+        if not ik_groups:
+            return
+
+        # Add GUI
+        self._server.gui.add_markdown("## IK Controls")
+        self._ik_constrain_rotation = self._server.gui.add_checkbox(
+            "Constrain Rotation", initial_value=True
+        )
+
+        # Create transform control for each group
+        for group_name, (group_data, ec_info) in ik_groups.items():
+            link_names = group_data.get('links', [])
+
+            # Get link objects
+            link_list = []
+            for name in link_names:
+                for link in robot_model.link_list:
+                    if link.name == name:
+                        link_list.append(link)
+                        break
+
+            if not link_list:
+                continue
+
+            # Try to use existing end_coords from robot model
+            end_coords = self._find_existing_end_coords(robot_model, group_name)
+
+            if end_coords is None:
+                # Create end_coords from detected info
+                parent_link_name = ec_info.get('parent_link', link_names[-1])
+                parent_link = None
+                for link in robot_model.link_list:
+                    if link.name == parent_link_name:
+                        parent_link = link
+                        break
+                if parent_link is None:
+                    parent_link = link_list[-1]
+
+                pos = ec_info.get('pos', [0.0, 0.0, 0.0])
+                rot = ec_info.get('rot')
+
+                end_coords = CascadedCoords(
+                    parent=parent_link,
+                    pos=pos,
+                    rot=rot,
+                    name=f"{group_name}_end_coords",
+                )
+
+            # Add transform control at end-effector position
+            ee_pos = end_coords.worldpos()
+            ee_rot = end_coords.worldrot()
+
+            control = self._server.scene.add_transform_controls(
+                f"ik_target/{group_name}",
+                scale=0.1,
+                position=ee_pos,
+                wxyz=matrix2quaternion(ee_rot),
+            )
+
+            # Add visibility checkbox for this target
+            visibility_checkbox = self._server.gui.add_checkbox(
+                f"Show {group_name}", initial_value=True
+            )
+
+            def make_visibility_callback(ctrl, checkbox):
+                def callback(_):
+                    ctrl.visible = checkbox.value
+                return callback
+
+            visibility_checkbox.on_update(
+                make_visibility_callback(control, visibility_checkbox)
+            )
+
+            # Store target info
+            self._ik_targets[group_name] = {
+                'link_list': link_list,
+                'end_coords': end_coords,
+                'control': control,
+                'visibility_checkbox': visibility_checkbox,
+            }
+
+            # Callback for when control is moved
+            def make_ik_callback(gname):
+                def callback(_):
+                    self._solve_ik(gname)
+                return callback
+
+            control.on_update(make_ik_callback(group_name))
+
+    def _solve_ik(self, group_name: str):
+        """Solve IK for a group when its target is moved."""
+        if self._robot_model is None or self._updating_from_ik:
+            return
+
+        target = self._ik_targets.get(group_name)
+        if target is None:
+            return
+
+        control = target['control']
+        target_pos = np.array(control.position)
+        target_rot = vtf.SO3(control.wxyz).as_matrix()
+        target_coords = Coordinates(pos=target_pos, rot=target_rot)
+
+        constrain_rot = self._ik_constrain_rotation.value
+
+        result = self._robot_model.inverse_kinematics(
+            target_coords,
+            link_list=target['link_list'],
+            move_target=target['end_coords'],
+            rotation_axis=constrain_rot,
+            stop=30,
+            revert_if_fail=True,
+        )
+
+        if result is not False and result is not None:
+            self.redraw()
+            self._sync_joint_sliders()
+            self._sync_ik_targets(exclude=group_name)
+
+    def _sync_joint_sliders(self):
+        """Sync joint sliders with current robot state."""
+        self._updating_from_ik = True
+        try:
+            for joint_name, slider in self._joint_sliders.items():
+                for joint in self._robot_model.joint_list:
+                    if joint.name == joint_name:
+                        angle = joint.joint_angle()
+                        slider.value = float(np.clip(angle, slider.min, slider.max))
+                        break
+        finally:
+            self._updating_from_ik = False
+
+    def _sync_ik_targets(self, exclude: Optional[str] = None):
+        """Sync IK target positions with current end-effector poses."""
+        self._updating_from_ik = True
+        try:
+            for name, target in self._ik_targets.items():
+                if name == exclude:
+                    continue
+                pos = target['end_coords'].worldpos()
+                rot = target['end_coords'].worldrot()
+                target['control'].position = pos
+                target['control'].wxyz = matrix2quaternion(rot)
+        finally:
+            self._updating_from_ik = False
 
     def _add_joint_sliders(self, robot_model: RobotModel):
         """Add GUI sliders for each joint in the robot model."""
@@ -110,8 +377,11 @@ class ViserVisualizer:
 
                     def make_callback(j):
                         def callback(_):
+                            if self._updating_from_ik:
+                                return
                             j.joint_angle(self._joint_sliders[j.name].value)
                             self.redraw()
+                            self._sync_ik_targets()
                         return callback
 
                     slider.on_update(make_callback(joint))
@@ -190,6 +460,8 @@ class ViserVisualizer:
                 self._add_link(link)
             if isinstance(geometry, RobotModel):
                 self._add_joint_sliders(geometry)
+                if self._enable_ik:
+                    self._setup_ik_controls(geometry)
         else:
             raise TypeError("geometry must be Link or CascadedLink")
 
