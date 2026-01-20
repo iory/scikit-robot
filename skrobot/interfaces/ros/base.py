@@ -196,6 +196,7 @@ class ROSRobotInterfaceBase(object):
             Maximum time to wait in seconds. Default is 3.0.
         """
         self._not_updated_joints = []
+        self._timeout_reason = None
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
@@ -208,16 +209,20 @@ class ROSRobotInterfaceBase(object):
                            self.robot_state['stamp_list'])):
                 return True
             if (rospy.get_time() - start_wait) > timeout:
-                if 'stamp_list' in self.robot_state \
-                   and 'name' in self.robot_state:
+                if 'stamp_list' not in self.robot_state \
+                   or 'name' not in self.robot_state:
+                    self._timeout_reason = "No joint_states message received"
+                else:
                     stamp_list = self.robot_state['stamp_list']
                     joint_names = self.robot_state['name']
                     for name, ts in zip(joint_names, stamp_list):
                         if ts is None or ts.to_nsec() <= initial_time:
                             self._not_updated_joints.append(name)
+                    self._timeout_reason = \
+                        "Not updated joints: {}".format(self._not_updated_joints)
                 rospy.logwarn(
                     "wait_until_update_all_joints timeout. "
-                    "Not updated joints: {}".format(self._not_updated_joints))
+                    "{}".format(self._timeout_reason))
                 return False
             rospy.sleep(0.01)
         return False
@@ -495,12 +500,11 @@ class ROSRobotInterfaceBase(object):
         """
         if av is None:
             if not self.update_robot_state(wait_until_update=True):
-                not_updated = getattr(self, '_not_updated_joints', [])
+                reason = getattr(self, '_timeout_reason', 'Unknown reason')
                 raise RuntimeError(
                     "Failed to get joint states from topic '{}': "
-                    "joint state update timed out. "
-                    "Not updated joints: {}".format(
-                        self.joint_states_topic, not_updated))
+                    "joint state update timed out. {}".format(
+                        self.joint_states_topic, reason))
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
