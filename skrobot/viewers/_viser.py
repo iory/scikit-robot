@@ -719,6 +719,54 @@ class ViserVisualizer:
                     slider.on_update(make_callback(joint))
                     self._joint_sliders[joint.name] = slider
 
+        # Add joint angle export feature
+        self._add_joint_angle_export(robot_model)
+
+    def _add_joint_angle_export(self, robot_model: RobotModel):
+        """Add GUI for exporting joint angles as Python code."""
+        self._server.gui.add_markdown("## Export Joint Angles")
+
+        # Prefix input field
+        self._export_prefix = self._server.gui.add_text(
+            "Variable prefix",
+            initial_value="robot_model.",
+        )
+
+        # Generate code button
+        generate_button = self._server.gui.add_button("Generate Code")
+
+        # Text area for generated code (initially empty)
+        self._export_code_text = self._server.gui.add_text(
+            "Code",
+            initial_value="",
+            multiline=True,
+        )
+
+        def generate_code_callback(_):
+            prefix = self._export_prefix.value
+            lines = []
+            for joint in robot_model.joint_list:
+                if isinstance(joint, FixedJoint):
+                    continue
+                if joint.name not in self._joint_sliders:
+                    continue
+                angle = joint.joint_angle()
+                # Format angle nicely
+                angle_deg = np.rad2deg(angle)
+                # Use np.deg2rad for cleaner code if angle is a nice degree value
+                if abs(angle_deg - round(angle_deg)) < 0.01:
+                    angle_deg_int = int(round(angle_deg))
+                    if angle_deg_int == 0:
+                        angle_str = "0"
+                    else:
+                        angle_str = f"np.deg2rad({angle_deg_int})"
+                else:
+                    angle_str = f"{angle:.6f}"
+                lines.append(f"{prefix}{joint.name}.joint_angle({angle_str})")
+            self._export_code_text.value = "\n".join(lines)
+
+        generate_button.on_click(generate_code_callback)
+
     def draw_grid(self, width: float = 20.0, height: float = -0.001):
         self._server.scene.add_grid(
             "/grid",
