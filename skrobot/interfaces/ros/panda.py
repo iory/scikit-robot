@@ -1,6 +1,7 @@
 import actionlib
 import control_msgs.msg
 import franka_gripper.msg
+import rospy
 
 from skrobot.interfaces.ros.base import ROSRobotInterfaceBase
 
@@ -13,15 +14,30 @@ class PandaROSRobotInterface(ROSRobotInterfaceBase):
     def __init__(self, *args, **kwargs):
         super(PandaROSRobotInterface, self).__init__(*args, **kwargs)
 
+        if self.namespace:
+            namespace_prefix = self.namespace.strip('/') + '/'
+        else:
+            namespace_prefix = ''
+
+        gripper_move_action = namespace_prefix + 'franka_gripper/move'
+        rospy.loginfo(
+            'Waiting for action server: {}'.format(gripper_move_action))
         self.gripper_move = actionlib.SimpleActionClient(
-            'franka_gripper/move',
+            gripper_move_action,
             franka_gripper.msg.MoveAction)
         self.gripper_move.wait_for_server()
+        rospy.loginfo(
+            'Action server {} is ready'.format(gripper_move_action))
 
+        gripper_stop_action = namespace_prefix + 'franka_gripper/stop'
+        rospy.loginfo(
+            'Waiting for action server: {}'.format(gripper_stop_action))
         self.gripper_stop = actionlib.SimpleActionClient(
-            'franka_gripper/stop',
+            gripper_stop_action,
             franka_gripper.msg.StopAction)
         self.gripper_stop.wait_for_server()
+        rospy.loginfo(
+            'Action server {} is ready'.format(gripper_stop_action))
 
     @property
     def rarm_controller(self):
@@ -52,6 +68,6 @@ class PandaROSRobotInterface(ROSRobotInterfaceBase):
     def stop_gripper(self, wait=True):
         goal = franka_gripper.msg.StopGoal()
         if wait:
-            self.gripper_move.send_goal_and_wait(goal)
+            self.gripper_stop.send_goal_and_wait(goal)
         else:
-            self.gripper_move.send_goal(goal)
+            self.gripper_stop.send_goal(goal)
