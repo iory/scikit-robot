@@ -53,6 +53,11 @@ class ViserVisualizer:
         self._robot_model: Optional[RobotModel] = None
         self._updating_from_ik = False
 
+        # Batch IK state
+        self._batch_ik_solvers: Dict[str, object] = {}
+        self._batch_ik_samples = None
+        self._jax_warning_shown = False
+
     @property
     def is_active(self) -> bool:
         return self._is_active
@@ -164,6 +169,18 @@ class ViserVisualizer:
             "Constrain Rotation", initial_value=True
         )
 
+        # Batch IK settings
+        self._batch_ik_samples = self._server.gui.add_slider(
+            "Batch IK Samples",
+            min=10,
+            max=500,
+            step=10,
+            initial_value=100,
+        )
+        self._server.gui.add_markdown(
+            "*Batch IK runs when regular IK fails*"
+        )
+
         # Create transform control for each group
         for group_name, (group_data, ec_info) in ik_groups.items():
             link_names = group_data.get('links', [])
@@ -269,10 +286,132 @@ class ViserVisualizer:
             revert_if_fail=True,
         )
 
+        # If regular IK fails, try batch IK
+        if result is False or result is None:
+            result = self._solve_ik_batch(group_name, target_pos, target_rot)
+            if result is not False and result is not None:
+                pass
+
         if result is not False and result is not None:
             self.redraw()
             self._sync_joint_sliders()
+            # Always exclude the current target to prevent it from moving
+            # when IK doesn't reach the exact target position
             self._sync_ik_targets(exclude=group_name)
+
+    def _solve_ik_batch(self, group_name: str, target_pos: np.ndarray,
+                        target_rot: np.ndarray):
+        """Solve IK using JAX batch solver with random initial configurations.
+
+        Parameters
+        ----------
+        group_name : str
+            Name of the IK group.
+        target_pos : np.ndarray
+            Target position (3,).
+        target_rot : np.ndarray
+            Target rotation matrix (3, 3).
+
+        Returns
+        -------
+        np.ndarray or False
+            Joint angles if successful, False otherwise.
+        """
+        if self._batch_ik_samples is None:
+            return False
+
+        target = self._ik_targets.get(group_name)
+        if target is None:
+            return False
+
+        link_list = target['link_list']
+        move_target = target['end_coords']
+
+        # Get or create batch IK solver for this group
+        if group_name not in self._batch_ik_solvers:
+            try:
+                from skrobot.backend import list_backends
+                if 'jax' not in list_backends():
+                    if not self._jax_warning_shown:
+                        print("[Batch IK] JAX not available. "
+                              "Install with: pip install jax jaxlib")
+                        self._jax_warning_shown = True
+                    return False
+                from skrobot.kinematics.differentiable import create_batch_ik_solver
+                solver = create_batch_ik_solver(
+                    self._robot_model, link_list, move_target,
+                    backend_name='jax'
+                )
+                self._batch_ik_solvers[group_name] = solver
+            except Exception:
+                return False
+        else:
+            solver = self._batch_ik_solvers[group_name]
+
+        # Get batch size from slider
+        batch_size = int(self._batch_ik_samples.value)
+
+        # Generate random initial configurations
+        lower = np.array(solver.joint_limits_lower)
+        upper = np.array(solver.joint_limits_upper)
+        n_joints = solver.n_joints
+
+        # Use current joint angles as one of the initial guesses
+        current_angles = np.array([link.joint.joint_angle() for link in link_list])
+        random_init = np.random.uniform(lower, upper, size=(batch_size - 1, n_joints))
+        initial_angles = np.vstack([current_angles.reshape(1, -1), random_init])
+
+        # Prepare target arrays (same target for all batch)
+        target_positions = np.tile(target_pos, (batch_size, 1))
+        target_rotations = np.tile(target_rot, (batch_size, 1, 1))
+
+        # Rotation weight based on constraint setting
+        constrain_rot = self._ik_constrain_rotation.value
+        rot_weight = 0.1 if constrain_rot else 0.0
+
+        # Solve batch IK
+        try:
+            solutions, success_flags, errors = solver(
+                target_positions,
+                target_rotations,
+                initial_angles=initial_angles,
+                max_iterations=100,
+                learning_rate=0.1,
+                pos_weight=1.0,
+                rot_weight=rot_weight,
+                pos_threshold=0.01,
+            )
+
+            # Convert JAX arrays to numpy if needed
+            success_flags = np.asarray(success_flags)
+            errors = np.asarray(errors)
+            solutions = np.asarray(solutions)
+
+            min_error = np.min(errors)
+            best_idx = np.argmin(errors)
+
+            # Find the best successful solution
+            if np.any(success_flags):
+                successful_indices = np.where(success_flags)[0]
+                best_idx = successful_indices[np.argmin(errors[successful_indices])]
+                best_solution = solutions[best_idx]
+
+                # Apply the solution to the robot
+                for i, link in enumerate(link_list):
+                    link.joint.joint_angle(float(best_solution[i]))
+
+                return best_solution
+            else:
+                # Even if no "success", use the best solution if error is reasonable
+                if min_error < 0.02:  # 2cm threshold for fallback
+                    best_solution = solutions[best_idx]
+                    for i, link in enumerate(link_list):
+                        link.joint.joint_angle(float(best_solution[i]))
+                    return best_solution
+        except Exception as e:
+            print(f"[Batch IK] Exception: {e}")
+
+        return False
 
     def _sync_joint_sliders(self):
         """Sync joint sliders with current robot state."""
