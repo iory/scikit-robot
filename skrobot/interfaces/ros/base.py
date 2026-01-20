@@ -209,23 +209,35 @@ class ROSRobotInterfaceBase(object):
                            self.robot_state['stamp_list'])):
                 return True
             if (rospy.get_time() - start_wait) > timeout:
-                if 'stamp_list' not in self.robot_state \
-                   or 'name' not in self.robot_state:
-                    self._timeout_reason = "No joint_states message received"
-                else:
-                    stamp_list = self.robot_state['stamp_list']
-                    joint_names = self.robot_state['name']
-                    for name, ts in zip(joint_names, stamp_list):
-                        if ts is None or ts.to_nsec() <= initial_time:
-                            self._not_updated_joints.append(name)
-                    self._timeout_reason = \
-                        "Not updated joints: {}".format(self._not_updated_joints)
+                self._set_timeout_reason(initial_time)
                 rospy.logwarn(
                     "wait_until_update_all_joints timeout. "
                     "{}".format(self._timeout_reason))
                 return False
             rospy.sleep(0.01)
+        self._timeout_reason = "rospy is shutdown"
         return False
+
+    def _set_timeout_reason(self, initial_time):
+        """Set the timeout reason based on robot_state."""
+        if 'stamp_list' not in self.robot_state \
+           or 'name' not in self.robot_state:
+            self._timeout_reason = \
+                "No joint_states message received. " \
+                "robot_state keys: {}".format(list(self.robot_state.keys()))
+        else:
+            stamp_list = self.robot_state['stamp_list']
+            joint_names = self.robot_state['name']
+            for name, ts in zip(joint_names, stamp_list):
+                if ts is None or ts.to_nsec() <= initial_time:
+                    self._not_updated_joints.append(name)
+            if self._not_updated_joints:
+                self._timeout_reason = \
+                    "Not updated joints: {}".format(self._not_updated_joints)
+            else:
+                self._timeout_reason = \
+                    "All joints received but timestamps not newer than " \
+                    "initial_time. Check /use_sim_time parameter."
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
