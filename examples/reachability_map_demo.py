@@ -207,7 +207,7 @@ def main():
     )
     parser.add_argument(
         '--robot', type=str, default='pr2',
-        choices=['pr2', 'panda', 'fetch', 'r8', 'nextage'],
+        choices=['pr2', 'panda', 'fetch', 'r8', 'nextage', 'tycoon'],
         help='Robot model to use (ignored if --urdf is specified)'
     )
     parser.add_argument(
@@ -305,9 +305,16 @@ def main():
             robot = skrobot.models.R8_6()
         elif args.robot == 'nextage':
             robot = skrobot.models.Nextage()
+        elif args.robot == 'tycoon':
+            robot = skrobot.models.RoverArmedTycoon()
 
-        link_list = robot.rarm.link_list
-        end_coords = robot.rarm.end_coords
+        # tycoon uses 'arm' instead of 'rarm'
+        if args.robot == 'tycoon':
+            link_list = robot.arm.link_list
+            end_coords = robot.arm.end_coords
+        else:
+            link_list = robot.rarm.link_list
+            end_coords = robot.rarm.end_coords
 
     # Create reachability map
     rmap = ReachabilityMap(
