@@ -355,6 +355,12 @@ class ViserVisualizer:
             self._sync_ik_targets(exclude=group_name)
             # Sync numeric inputs with the target position
             self._sync_numeric_inputs(group_name)
+        else:
+            # IK failed: force update all link coordinates and redraw
+            # This ensures cached worldcoords are recomputed after revert
+            for link in self._robot_model.link_list:
+                link.update(force=True)
+            self.redraw()
 
     def _solve_ik_from_numeric(self, group_name: str):
         """Solve IK when numeric input fields are changed."""
