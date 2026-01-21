@@ -47,39 +47,21 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     """
     n_joints = len(link_list)
 
-    # Extract static transforms for each link from joint.default_coords
-    # This gives us the zero-angle transform for each joint
-    link_translations = []
-    link_rotations = []
-    joint_axes = []
-    joint_types = []
+    # Save original joint angles
+    original_angles = [link.joint.joint_angle() for link in link_list]
+
+    # Determine reference angles for each joint.
+    # Use 0 if valid, otherwise use the closest limit.
+    # This is needed because some joints (e.g., Panda joint4) have limits
+    # that don't include 0.
+    ref_angles = []
     joint_limits_lower = []
     joint_limits_upper = []
 
     for link in link_list:
         joint = link.joint
 
-        # Use joint.default_coords for the static transform
-        # This is the transform at zero joint angle
-        if hasattr(joint, 'default_coords'):
-            link_translations.append(joint.default_coords.translation.copy())
-            link_rotations.append(joint.default_coords.rotation.copy())
-        else:
-            # Fallback to link's transform
-            if hasattr(link, '_translation'):
-                link_translations.append(link._translation.copy())
-            else:
-                link_translations.append(np.zeros(3))
-            if hasattr(link, '_rotation'):
-                link_rotations.append(link._rotation.copy())
-            else:
-                link_rotations.append(np.eye(3))
-
-        # Joint info
-        joint_axes.append(np.array(joint.axis))
-        joint_types.append(joint.joint_type)
-
-        # Handle joint limits, replacing None or inf with reasonable defaults
+        # Get joint limits
         min_angle = getattr(joint, 'min_angle', None)
         max_angle = getattr(joint, 'max_angle', None)
 
@@ -91,6 +73,22 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         joint_limits_lower.append(min_angle)
         joint_limits_upper.append(max_angle)
 
+        # Choose reference angle: 0 if valid, otherwise closest limit
+        if min_angle <= 0 <= max_angle:
+            ref_angle = 0.0
+        elif 0 < min_angle:
+            ref_angle = min_angle
+        else:  # max_angle < 0
+            ref_angle = max_angle
+
+        ref_angles.append(ref_angle)
+
+    ref_angles = np.array(ref_angles)
+
+    # Set all joints to their reference angles
+    for i, link in enumerate(link_list):
+        link.joint.joint_angle(ref_angles[i])
+
     # Get base link world transform (parent of first link in chain)
     first_link = link_list[0]
     if first_link.parent is not None:
@@ -100,23 +98,48 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         base_position = np.zeros(3)
         base_rotation = np.eye(3)
 
+    # Extract static transforms for each link using worldcoords()
+    # This properly handles fixed links between movable links in link_list.
+    # The transforms are computed at the reference configuration.
+    link_translations = []
+    link_rotations = []
+    joint_axes = []
+    joint_types = []
+
+    for i, link in enumerate(link_list):
+        joint = link.joint
+
+        if i == 0:
+            # First link: transform from base (parent of first link)
+            from_coords = first_link.parent.worldcoords() if first_link.parent else None
+        else:
+            # Subsequent links: transform from previous link in list
+            from_coords = link_list[i - 1].worldcoords()
+
+        # Compute relative transform at reference configuration.
+        link_coords = link.worldcoords()
+
+        if from_coords is not None:
+            # Relative transform: from_coords^-1 * link_coords
+            rel_coords = from_coords.inverse_transformation().transform(link_coords)
+            trans = rel_coords.worldpos().copy()
+            rot = rel_coords.worldrot().copy()
+        else:
+            # No parent, use link's world coordinates directly
+            trans = link_coords.worldpos().copy()
+            rot = link_coords.worldrot().copy()
+
+        link_translations.append(trans)
+        link_rotations.append(rot)
+
+        # Joint info
+        joint_axes.append(np.array(joint.axis))
+        joint_types.append(joint.joint_type)
+
     # Get end effector offset from last link
     last_link = link_list[-1]
 
-    # Save and reset joint angles to compute static EE offset
-    original_angles = [link.joint.joint_angle() for link in link_list]
-
-    # Set all joints to zero (or their limit if 0 is out of range)
-    for link in link_list:
-        joint = link.joint
-        if joint.min_angle is not None and joint.min_angle > 0:
-            link.joint.joint_angle(joint.min_angle)
-        elif joint.max_angle is not None and joint.max_angle < 0:
-            link.joint.joint_angle(joint.max_angle)
-        else:
-            link.joint.joint_angle(0.0)
-
-    # Compute relative transform from last link to move_target at zero config
+    # Compute relative transform from last link to move_target at ref config
     rel_coords = last_link.worldcoords().inverse_transformation().transform(
         move_target.worldcoords()
     )
@@ -135,6 +158,7 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         'joint_types': joint_types,
         'joint_limits_lower': np.array(joint_limits_lower),
         'joint_limits_upper': np.array(joint_limits_upper),
+        'ref_angles': ref_angles,
         'base_position': base_position,
         'base_rotation': base_rotation,
         'ee_offset_position': ee_offset_position,
@@ -184,6 +208,7 @@ def forward_kinematics(backend, joint_angles, fk_params):
     axes = backend.array(fk_params['joint_axes'])
     base_pos = backend.array(fk_params['base_position'])
     base_rot = backend.array(fk_params['base_rotation'])
+    ref_angles = backend.array(fk_params['ref_angles'])
 
     positions = []
     rotations = []
@@ -192,12 +217,15 @@ def forward_kinematics(backend, joint_angles, fk_params):
     current_rot = base_rot
 
     for i in range(n_joints):
-        # Apply link static transform
+        # Apply link static transform (computed at reference configuration)
         current_pos = current_pos + backend.matmul(current_rot, translations[i])
         current_rot = backend.matmul(current_rot, local_rotations[i])
 
-        # Apply joint rotation
-        joint_rot = _axis_angle_to_matrix(backend, axes[i], joint_angles[i])
+        # Apply joint rotation as delta from reference angle
+        # The static transforms include the reference rotation, so we apply
+        # only the difference (joint_angles[i] - ref_angles[i])
+        delta_angle = joint_angles[i] - ref_angles[i]
+        joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
         current_rot = backend.matmul(current_rot, joint_rot)
 
         positions.append(current_pos)
@@ -276,6 +304,7 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
     axes = backend.array(fk_params['joint_axes'])
     base_pos = backend.array(fk_params['base_position'])
     base_rot = backend.array(fk_params['base_rotation'])
+    ref_angles = backend.array(fk_params['ref_angles'])
 
     positions = []
     z_axes = []
@@ -292,8 +321,9 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
         positions.append(current_pos)
         z_axes.append(backend.matmul(current_rot, axes[i]))
 
-        # Apply joint rotation
-        joint_rot = _axis_angle_to_matrix(backend, axes[i], joint_angles[i])
+        # Apply joint rotation as delta from reference angle
+        delta_angle = joint_angles[i] - ref_angles[i]
+        joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
         current_rot = backend.matmul(current_rot, joint_rot)
 
     # Apply end-effector offset
@@ -347,6 +377,7 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
     axes = np.asarray(fk_params['joint_axes'])
     base_pos = np.asarray(fk_params['base_position'])
     base_rot = np.asarray(fk_params['base_rotation'])
+    ref_angles = np.asarray(fk_params['ref_angles'])
     ee_offset_pos = np.asarray(fk_params['ee_offset_position'])
     ee_offset_rot = np.asarray(fk_params['ee_offset_rotation'])
 
@@ -372,8 +403,8 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
         # z_axes[i] = current_rot @ axes[i]
         z_axes[i] = np.einsum('bij,j->bi', current_rot, axes[i])
 
-        # Apply joint rotation (axis-angle to rotation matrix, batched)
-        theta = joint_angles_batch[:, i]  # (batch_size,)
+        # Apply joint rotation as delta from reference angle (batched)
+        theta = joint_angles_batch[:, i] - ref_angles[i]  # (batch_size,)
         axis = axes[i]  # (3,)
 
         # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
@@ -977,6 +1008,7 @@ def create_jax_fk_function(fk_params):
     joint_axes = jnp.array(fk_params['joint_axes'])
     base_position = jnp.array(fk_params['base_position'])
     base_rotation = jnp.array(fk_params['base_rotation'])
+    ref_angles = jnp.array(fk_params['ref_angles'])
     ee_offset_position = jnp.array(fk_params['ee_offset_position'])
     ee_offset_rotation = jnp.array(fk_params['ee_offset_rotation'])
     n_joints = fk_params['n_joints']
@@ -1024,8 +1056,9 @@ def create_jax_fk_function(fk_params):
             current_pos = current_pos + current_rot @ link_trans
             current_rot = current_rot @ link_rot
 
-            # Joint rotation
-            joint_rot = rotation_matrix_axis_angle(joint_axes[i], angles[i])
+            # Joint rotation as delta from reference angle
+            delta_angle = angles[i] - ref_angles[i]
+            joint_rot = rotation_matrix_axis_angle(joint_axes[i], delta_angle)
             current_rot = current_rot @ joint_rot
 
         # Apply end effector offset
