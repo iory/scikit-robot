@@ -435,9 +435,10 @@ def main():
                 "Z Max", min=z_bounds[0], max=z_bounds[1],
                 initial_value=z_bounds[1], step=0.01
             )
+            sphere_size_initial = max(0.005, args.voxel_size * 0.4)
             sphere_size_slider = server.gui.add_slider(
                 "Sphere Size", min=0.005, max=0.1,
-                initial_value=args.voxel_size * 0.4, step=0.005
+                initial_value=sphere_size_initial, step=0.005
             )
             alpha_slider = server.gui.add_slider(
                 "Opacity", min=0.05, max=1.0,
