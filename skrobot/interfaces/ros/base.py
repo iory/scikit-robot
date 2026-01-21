@@ -13,6 +13,9 @@ import rospy
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
 
+from skrobot.interpolator import LinearInterpolator
+from skrobot.interpolator import MinjerkInterpolator
+from skrobot.interpolator import position_list_interpolation
 from skrobot.model import LinearJoint
 from skrobot.model import RotationalJoint
 
@@ -109,23 +112,50 @@ class ROSRobotInterfaceBase(object):
         self.joint_action_enable = True
         self.namespace = namespace
         self._joint_state_msg = None
+        self._received_joint_names = set()
         if self.namespace:
-            self.joint_states_sub = rospy.Subscriber('{}/{}'.format(
-                self.namespace, joint_states_topic),
-                JointState,
-                callback=self.joint_state_callback,
-                queue_size=joint_states_queue_size)
+            self.joint_states_topic = '{}/{}'.format(
+                self.namespace, joint_states_topic)
         else:
-            self.joint_states_sub = rospy.Subscriber(
-                joint_states_topic, JointState,
-                callback=self.joint_state_callback,
-                queue_size=joint_states_queue_size)
+            self.joint_states_topic = joint_states_topic
+        self.joint_states_sub = rospy.Subscriber(
+            self.joint_states_topic, JointState,
+            callback=self.joint_state_callback,
+            queue_size=joint_states_queue_size)
 
         self.controller_table = {}
         self.controller_param_table = {}
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
+        self._additional_joint_states_subs = []
+
+    def add_joint_states_topic(self, topic_name, queue_size=1):
+        """Subscribe to an additional joint_states topic.
+
+        This allows combining joint states from multiple topics
+        (e.g., when controlling multiple robots or robot parts).
+
+        Parameters
+        ----------
+        topic_name : str
+            The topic name to subscribe to.
+        queue_size : int
+            Queue size for the subscriber. Default is 1.
+
+        Returns
+        -------
+        subscriber : rospy.Subscriber
+            The created subscriber.
+        """
+        sub = rospy.Subscriber(
+            topic_name, JointState,
+            callback=self.joint_state_callback,
+            queue_size=queue_size)
+        self._additional_joint_states_subs.append(sub)
+        rospy.loginfo(
+            "Added additional joint_states topic: {}".format(topic_name))
+        return sub
 
     def _check_time(self, time, fastest_time, time_scale):
         """Check and Return send angle vector time
@@ -187,17 +217,69 @@ class ROSRobotInterfaceBase(object):
                 'time is invalid type. {}'.format(time))
         return time
 
-    def wait_until_update_all_joints(self, tgt_tm):
-        """TODO"""
+    def wait_until_update_all_joints(self, tgt_tm, timeout=3.0):
+        """Wait until all joints have been updated.
+
+        Only joints that have been received from joint_states topics are
+        checked. Joints that are not published in any topic are ignored.
+
+        Parameters
+        ----------
+        tgt_tm : rospy.Time or bool
+            Target time to compare against joint update timestamps.
+        timeout : float
+            Maximum time to wait in seconds. Default is 3.0.
+        """
+        self._not_updated_joints = []
+        self._timeout_reason = "wait_until_update_all_joints did not complete"
         if isinstance(tgt_tm, rospy.Time):
             initial_time = tgt_tm.to_nsec()
         else:
             initial_time = rospy.Time.now().to_nsec()
-        while True:
-            if 'stamp_list' in self.robot_state \
-               and all(map(lambda ts: ts.to_nsec() > initial_time,
-                           self.robot_state['stamp_list'])):
-                return
+        start_wait = rospy.get_time()
+        while not rospy.is_shutdown():
+            if 'stamp_list' in self.robot_state and self._received_joint_names:
+                model_names = self.robot_state['name']
+                stamps = self.robot_state['stamp_list']
+                # Only check joints that exist in subscribed topics
+                check_results = []
+                for i, name in enumerate(model_names):
+                    if name in self._received_joint_names:
+                        ts = stamps[i]
+                        check_results.append(
+                            ts is not None and ts.to_nsec() > initial_time)
+                if check_results and all(check_results):
+                    return True
+            if (rospy.get_time() - start_wait) > timeout:
+                self._set_timeout_reason(initial_time)
+                rospy.logwarn(
+                    "wait_until_update_all_joints timeout. "
+                    "{}".format(self._timeout_reason))
+                return False
+            rospy.sleep(0.01)
+        self._timeout_reason = "rospy is shutdown"
+        return False
+
+    def _set_timeout_reason(self, initial_time):
+        """Set the timeout reason based on robot_state."""
+        if 'stamp_list' not in self.robot_state \
+           or 'name' not in self.robot_state:
+            self._timeout_reason = \
+                "No joint_states message received. " \
+                "robot_state keys: {}".format(list(self.robot_state.keys()))
+        else:
+            stamp_list = self.robot_state['stamp_list']
+            joint_names = self.robot_state['name']
+            for name, ts in zip(joint_names, stamp_list):
+                if ts is None or ts.to_nsec() <= initial_time:
+                    self._not_updated_joints.append(name)
+            if self._not_updated_joints:
+                self._timeout_reason = \
+                    "Not updated joints: {}".format(self._not_updated_joints)
+            else:
+                self._timeout_reason = \
+                    "All joints received but timestamps not newer than " \
+                    "initial_time. Check /use_sim_time parameter."
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
@@ -237,8 +319,11 @@ class ROSRobotInterfaceBase(object):
         TODO
         """
         if wait_until_update:
-            self.wait_until_update_all_joints(wait_until_update)
+            if not self.wait_until_update_all_joints(wait_until_update):
+                return False
         if not self.robot_state:
+            self._timeout_reason = \
+                "robot_state is empty (no joint_states callback received)"
             return False
         joint_names = self.robot_state['name']
         positions = self.robot_state['position']
@@ -260,13 +345,16 @@ class ROSRobotInterfaceBase(object):
             joint.joint_angle(position)
             joint.joint_velocity = velocity
             joint.joint_torque = effort
+        return True
 
     def joint_state_callback(self, msg):
         self._joint_state_msg = msg
+        self._received_joint_names.update(msg.name)
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
-            robot_state_names = msg.name
+            # Initialize with all joint names from the robot model
+            robot_state_names = [j.name for j in self.robot.joint_list]
             self.robot_state['name'] = robot_state_names
             for key in ['position', 'velocity', 'effort']:
                 self.robot_state[key] = np.zeros(len(robot_state_names))
@@ -281,6 +369,10 @@ class ROSRobotInterfaceBase(object):
             if len(joint_names) == len(joint_data):
                 data = self.robot_state[key]
                 for jn in joint_names:
+                    # Skip joint names that are not in the robot model
+                    if jn not in robot_state_names:
+                        index += 1
+                        continue
                     joint_index = robot_state_names.index(jn)
                     data[joint_index] = joint_data[index]
                     index += 1
@@ -317,7 +409,8 @@ class ROSRobotInterfaceBase(object):
         if create_actions:
             for controller in self.default_controller():
                 controller_action = controller['controller_action']
-                if self.namespace is not None:
+                if self.namespace is not None \
+                   and not controller_action.startswith('/'):
                     controller_action = '{}/{}'.format(
                         self.namespace,
                         controller_action)
@@ -358,15 +451,19 @@ class ROSRobotInterfaceBase(object):
                 controller_state = param['controller_state']
                 trajectory_status = '{}/status'.format(
                     param['controller_action'])
-                if self.namespace is not None:
+                if self.namespace is not None \
+                   and not controller_state.startswith('/'):
                     controller_state_topic_name = '{}/{}'.format(
                         self.namespace,
                         controller_state)
+                else:
+                    controller_state_topic_name = controller_state
+                if self.namespace is not None \
+                   and not trajectory_status.startswith('/'):
                     trajectory_status_topic_name = '{}/{}'.format(
                         self.namespace,
                         trajectory_status)
                 else:
-                    controller_state_topic_name = controller_state
                     trajectory_status_topic_name = trajectory_status
                 rospy.Subscriber(
                     controller_state_topic_name,
@@ -430,7 +527,9 @@ class ROSRobotInterfaceBase(object):
                      controller_type=None,
                      start_time=0.0,
                      time_scale=5.0,
-                     velocities=None):
+                     velocities=None,
+                     interpolation=None,
+                     interpolation_dt=0.01):
         """Send joint angle to robot
 
         Send joint angle to robot. this method returns immediately, so use
@@ -453,6 +552,15 @@ class ROSRobotInterfaceBase(object):
             if time is not specified,
             it will use 1/time_scale of the fastest speed.
             time_scale must be >=1. (default: 5.0)
+        velocities : numpy.ndarray or None
+            velocities at goal position
+        interpolation : str or None
+            interpolation method. 'linear' or 'minjerk'.
+            If None, send single trajectory point (default behavior).
+            If specified, interpolate trajectory and send via
+            angle_vector_sequence.
+        interpolation_dt : float
+            time step for interpolation in [sec]. (default: 0.01)
 
         Returns
         -------
@@ -460,7 +568,12 @@ class ROSRobotInterfaceBase(object):
             angle-vector of real robots
         """
         if av is None:
-            self.update_robot_state(wait_until_update=True)
+            if not self.update_robot_state(wait_until_update=True):
+                reason = getattr(self, '_timeout_reason', 'Unknown reason')
+                raise RuntimeError(
+                    "Failed to get joint states from topic '{}': "
+                    "joint state update timed out. {}".format(
+                        self.joint_states_topic, reason))
             return self.robot.angle_vector()
         if controller_type is None:
             controller_type = self.controller_type
@@ -476,6 +589,12 @@ class ROSRobotInterfaceBase(object):
             controller_type,
             return_joint_names=True)
         time = self._check_time(time, fastest_time, time_scale=time_scale)
+
+        # Use interpolation if specified
+        if interpolation is not None:
+            return self._angle_vector_with_interpolation(
+                av, time, controller_type, start_time,
+                interpolation, interpolation_dt)
 
         self.robot.angle_vector(av)
         cacts = self.controller_table[controller_type]
@@ -494,6 +613,69 @@ class ROSRobotInterfaceBase(object):
                 start_time,
                 traj_points)
         return av
+
+    def _angle_vector_with_interpolation(
+            self, av, time, controller_type, start_time,
+            interpolation, interpolation_dt):
+        """Send angle vector using interpolation method.
+
+        Parameters
+        ----------
+        av : numpy.ndarray
+            target joint angle vector
+        time : float
+            time to goal in [sec]
+        controller_type : string
+            controller method name
+        start_time : float
+            time to start moving
+        interpolation : str
+            interpolation method. 'linear' or 'minjerk'.
+        interpolation_dt : float
+            time step for interpolation in [sec].
+
+        Returns
+        -------
+        av : np.ndarray
+            angle-vector
+        """
+        # Select interpolator
+        if interpolation == 'linear':
+            interpolator = LinearInterpolator()
+        elif interpolation == 'minjerk':
+            interpolator = MinjerkInterpolator()
+        else:
+            raise ValueError(
+                "Unknown interpolation method: {}. "
+                "Use 'linear' or 'minjerk'.".format(interpolation))
+
+        # Get current angle vector
+        current_av = self.robot.angle_vector()
+        position_list = [current_av, av]
+        time_list = [time]
+
+        # Generate interpolated trajectory
+        result = position_list_interpolation(
+            position_list, time_list, interpolation_dt,
+            interpolator=interpolator,
+            neglect_first=True)
+
+        positions = result['position']
+        times = result['time']
+
+        # Convert to avs and tms for angle_vector_sequence
+        avs = [np.array(pos) for pos in positions]
+
+        # Calculate time differences (tms is duration from previous to next)
+        tms = []
+        prev_time = 0.0
+        for t in times:
+            tms.append(t - prev_time)
+            prev_time = t
+
+        # Use angle_vector_sequence to send interpolated trajectory
+        return self.angle_vector_sequence(
+            avs, tms, controller_type, start_time, time_scale=1.0)
 
     def potentio_vector(self):
         """Returns current robot angle vector, This method uses caced data."""
