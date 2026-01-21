@@ -174,139 +174,140 @@ class ViserVisualizer:
         # Get robot display name
         robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
 
-        # Create transform control for each group
-        for group_name, (group_data, ec_info) in ik_groups.items():
-            link_names = group_data.get('links', [])
+        # Create transform control for each group inside IK Controls folder
+        with self._ik_controls_folder:
+            for group_name, (group_data, ec_info) in ik_groups.items():
+                link_names = group_data.get('links', [])
 
-            # Get link objects
-            link_list = []
-            for name in link_names:
-                for link in robot_model.link_list:
-                    if link.name == name:
-                        link_list.append(link)
-                        break
+                # Get link objects
+                link_list = []
+                for name in link_names:
+                    for link in robot_model.link_list:
+                        if link.name == name:
+                            link_list.append(link)
+                            break
 
-            if not link_list:
-                continue
+                if not link_list:
+                    continue
 
-            # Try to use existing end_coords from robot model
-            end_coords = self._find_existing_end_coords(robot_model, group_name)
+                # Try to use existing end_coords from robot model
+                end_coords = self._find_existing_end_coords(robot_model, group_name)
 
-            if end_coords is None:
-                # Create end_coords from detected info
-                parent_link_name = ec_info.get('parent_link', link_names[-1])
-                parent_link = None
-                for link in robot_model.link_list:
-                    if link.name == parent_link_name:
-                        parent_link = link
-                        break
-                if parent_link is None:
-                    parent_link = link_list[-1]
+                if end_coords is None:
+                    # Create end_coords from detected info
+                    parent_link_name = ec_info.get('parent_link', link_names[-1])
+                    parent_link = None
+                    for link in robot_model.link_list:
+                        if link.name == parent_link_name:
+                            parent_link = link
+                            break
+                    if parent_link is None:
+                        parent_link = link_list[-1]
 
-                pos = ec_info.get('pos', [0.0, 0.0, 0.0])
-                rot = ec_info.get('rot')
+                    pos = ec_info.get('pos', [0.0, 0.0, 0.0])
+                    rot = ec_info.get('rot')
 
-                end_coords = CascadedCoords(
-                    parent=parent_link,
-                    pos=pos,
-                    rot=rot,
-                    name=f"{group_name}_end_coords",
+                    end_coords = CascadedCoords(
+                        parent=parent_link,
+                        pos=pos,
+                        rot=rot,
+                        name=f"{group_name}_end_coords",
+                    )
+
+                # Add transform control at end-effector position
+                ee_pos = end_coords.worldpos()
+                ee_rot = end_coords.worldrot()
+
+                control = self._server.scene.add_transform_controls(
+                    f"ik_target/{robot_name}/{group_name}",
+                    scale=0.1,
+                    position=ee_pos,
+                    wxyz=matrix2quaternion(ee_rot),
                 )
 
-            # Add transform control at end-effector position
-            ee_pos = end_coords.worldpos()
-            ee_rot = end_coords.worldrot()
-
-            control = self._server.scene.add_transform_controls(
-                f"ik_target/{robot_name}/{group_name}",
-                scale=0.1,
-                position=ee_pos,
-                wxyz=matrix2quaternion(ee_rot),
-            )
-
-            # Add visibility checkbox for this target
-            visibility_checkbox = self._server.gui.add_checkbox(
-                f"Show {robot_name}/{group_name}", initial_value=True
-            )
-
-            def make_visibility_callback(ctrl, checkbox):
-                def callback(_):
-                    ctrl.visible = checkbox.value
-                return callback
-
-            visibility_checkbox.on_update(
-                make_visibility_callback(control, visibility_checkbox)
-            )
-
-            # Add numeric input fields for position and rotation
-            with self._server.gui.add_folder(
-                f"{robot_name}/{group_name} Target",
-                expand_by_default=False,
-            ):
-                # Position inputs (in meters)
-                pos_x = self._server.gui.add_number(
-                    "X [m]", initial_value=float(ee_pos[0]), step=0.01
-                )
-                pos_y = self._server.gui.add_number(
-                    "Y [m]", initial_value=float(ee_pos[1]), step=0.01
-                )
-                pos_z = self._server.gui.add_number(
-                    "Z [m]", initial_value=float(ee_pos[2]), step=0.01
+                # Add visibility checkbox for this target
+                visibility_checkbox = self._server.gui.add_checkbox(
+                    f"Show {robot_name}/{group_name}", initial_value=True
                 )
 
-                # Get initial RPY from rotation matrix
-                # matrix2rpy returns [roll, pitch, yaw]
-                roll_init, pitch_init, yaw_init = matrix2rpy(ee_rot)
+                def make_visibility_callback(ctrl, checkbox):
+                    def callback(_):
+                        ctrl.visible = checkbox.value
+                    return callback
 
-                # Rotation inputs (in degrees for user convenience)
-                roll_input = self._server.gui.add_number(
-                    "Roll [deg]",
-                    initial_value=float(np.rad2deg(roll_init)),
-                    step=1.0,
-                )
-                pitch_input = self._server.gui.add_number(
-                    "Pitch [deg]",
-                    initial_value=float(np.rad2deg(pitch_init)),
-                    step=1.0,
-                )
-                yaw_input = self._server.gui.add_number(
-                    "Yaw [deg]",
-                    initial_value=float(np.rad2deg(yaw_init)),
-                    step=1.0,
+                visibility_checkbox.on_update(
+                    make_visibility_callback(control, visibility_checkbox)
                 )
 
-            # Store target info
-            self._ik_targets[robot_id][group_name] = {
-                'link_list': link_list,
-                'end_coords': end_coords,
-                'control': control,
-                'visibility_checkbox': visibility_checkbox,
-                'pos_inputs': (pos_x, pos_y, pos_z),
-                'rot_inputs': (roll_input, pitch_input, yaw_input),
-                'robot_model': robot_model,
-            }
+                # Add numeric input fields for position and rotation
+                with self._server.gui.add_folder(
+                    f"{robot_name}/{group_name} Target",
+                    expand_by_default=False,
+                ):
+                    # Position inputs (in meters)
+                    pos_x = self._server.gui.add_number(
+                        "X [m]", initial_value=float(ee_pos[0]), step=0.01
+                    )
+                    pos_y = self._server.gui.add_number(
+                        "Y [m]", initial_value=float(ee_pos[1]), step=0.01
+                    )
+                    pos_z = self._server.gui.add_number(
+                        "Z [m]", initial_value=float(ee_pos[2]), step=0.01
+                    )
 
-            # Callback for when control is moved (updates numeric inputs)
-            def make_ik_callback(rid, gname):
-                def callback(_):
-                    self._solve_ik(rid, gname)
-                return callback
+                    # Get initial RPY from rotation matrix
+                    # matrix2rpy returns [roll, pitch, yaw]
+                    roll_init, pitch_init, yaw_init = matrix2rpy(ee_rot)
 
-            control.on_update(make_ik_callback(robot_id, group_name))
+                    # Rotation inputs (in degrees for user convenience)
+                    roll_input = self._server.gui.add_number(
+                        "Roll [deg]",
+                        initial_value=float(np.rad2deg(roll_init)),
+                        step=1.0,
+                    )
+                    pitch_input = self._server.gui.add_number(
+                        "Pitch [deg]",
+                        initial_value=float(np.rad2deg(pitch_init)),
+                        step=1.0,
+                    )
+                    yaw_input = self._server.gui.add_number(
+                        "Yaw [deg]",
+                        initial_value=float(np.rad2deg(yaw_init)),
+                        step=1.0,
+                    )
 
-            # Callback for numeric input changes
-            def make_numeric_ik_callback(rid, gname):
-                def callback(_):
-                    self._solve_ik_from_numeric(rid, gname)
-                return callback
+                # Store target info
+                self._ik_targets[robot_id][group_name] = {
+                    'link_list': link_list,
+                    'end_coords': end_coords,
+                    'control': control,
+                    'visibility_checkbox': visibility_checkbox,
+                    'pos_inputs': (pos_x, pos_y, pos_z),
+                    'rot_inputs': (roll_input, pitch_input, yaw_input),
+                    'robot_model': robot_model,
+                }
 
-            numeric_callback = make_numeric_ik_callback(robot_id, group_name)
-            pos_x.on_update(numeric_callback)
-            pos_y.on_update(numeric_callback)
-            pos_z.on_update(numeric_callback)
-            roll_input.on_update(numeric_callback)
-            pitch_input.on_update(numeric_callback)
-            yaw_input.on_update(numeric_callback)
+                # Callback for when control is moved (updates numeric inputs)
+                def make_ik_callback(rid, gname):
+                    def callback(_):
+                        self._solve_ik(rid, gname)
+                    return callback
+
+                control.on_update(make_ik_callback(robot_id, group_name))
+
+                # Callback for numeric input changes
+                def make_numeric_ik_callback(rid, gname):
+                    def callback(_):
+                        self._solve_ik_from_numeric(rid, gname)
+                    return callback
+
+                numeric_callback = make_numeric_ik_callback(robot_id, group_name)
+                pos_x.on_update(numeric_callback)
+                pos_y.on_update(numeric_callback)
+                pos_z.on_update(numeric_callback)
+                roll_input.on_update(numeric_callback)
+                pitch_input.on_update(numeric_callback)
+                yaw_input.on_update(numeric_callback)
 
     def _solve_ik(self, robot_id: int, group_name: str):
         """Solve IK for a group when its target is moved."""
@@ -709,49 +710,50 @@ class ViserVisualizer:
                 joint_groups[group_name] = []
             joint_groups[group_name].append((joint, short_name))
 
-        # Create folders for each group
-        for group_name, joints in joint_groups.items():
-            folder_name = f"{robot_name}/{group_name}"
-            with self._server.gui.add_folder(
-                folder_name,
-                expand_by_default=True,
-            ) as folder:
-                self._joint_folders[folder_name] = folder
+        # Create folders for each group inside Joint Angles folder
+        with self._joint_angles_folder:
+            for group_name, joints in joint_groups.items():
+                folder_name = f"{robot_name}/{group_name}"
+                with self._server.gui.add_folder(
+                    folder_name,
+                    expand_by_default=True,
+                ) as folder:
+                    self._joint_folders[folder_name] = folder
 
-                for joint, short_name in joints:
-                    min_angle = joint.min_angle
-                    max_angle = joint.max_angle
+                    for joint, short_name in joints:
+                        min_angle = joint.min_angle
+                        max_angle = joint.max_angle
 
-                    current_angle = joint.joint_angle()
+                        current_angle = joint.joint_angle()
 
-                    # Handle infinite limits (continuous joints)
-                    if np.isinf(min_angle) or np.isinf(max_angle):
-                        # For continuous joints, set range centered on current angle
-                        min_angle = current_angle - 2 * np.pi
-                        max_angle = current_angle + 2 * np.pi
-                    else:
-                        # Clamp current angle to valid range
-                        current_angle = np.clip(current_angle, min_angle, max_angle)
+                        # Handle infinite limits (continuous joints)
+                        if np.isinf(min_angle) or np.isinf(max_angle):
+                            # For continuous joints, set range centered on current angle
+                            min_angle = current_angle - 2 * np.pi
+                            max_angle = current_angle + 2 * np.pi
+                        else:
+                            # Clamp current angle to valid range
+                            current_angle = np.clip(current_angle, min_angle, max_angle)
 
-                    slider = self._server.gui.add_slider(
-                        short_name,
-                        min=float(min_angle),
-                        max=float(max_angle),
-                        step=0.01,
-                        initial_value=float(current_angle),
-                    )
+                        slider = self._server.gui.add_slider(
+                            short_name,
+                            min=float(min_angle),
+                            max=float(max_angle),
+                            step=0.01,
+                            initial_value=float(current_angle),
+                        )
 
-                    def make_callback(j, rid):
-                        def callback(_):
-                            if self._updating_from_ik:
-                                return
-                            j.joint_angle(self._joint_sliders[j.name].value)
-                            self.redraw()
-                            self._sync_ik_targets(rid)
-                        return callback
+                        def make_callback(j, rid):
+                            def callback(_):
+                                if self._updating_from_ik:
+                                    return
+                                j.joint_angle(self._joint_sliders[j.name].value)
+                                self.redraw()
+                                self._sync_ik_targets(rid)
+                            return callback
 
-                    slider.on_update(make_callback(joint, robot_id))
-                    self._joint_sliders[joint.name] = slider
+                        slider.on_update(make_callback(joint, robot_id))
+                        self._joint_sliders[joint.name] = slider
 
         # Add joint angle export feature
         self._add_joint_angle_export(robot_model)
@@ -763,21 +765,22 @@ class ViserVisualizer:
             return
         self._export_initialized = True
 
-        # Prefix input field
-        self._export_prefix = self._server.gui.add_text(
-            "Variable prefix",
-            initial_value="robot_model.",
-        )
+        with self._export_folder:
+            # Prefix input field
+            self._export_prefix = self._server.gui.add_text(
+                "Variable prefix",
+                initial_value="robot_model.",
+            )
 
-        # Generate code button
-        generate_button = self._server.gui.add_button("Generate Code")
+            # Generate code button
+            generate_button = self._server.gui.add_button("Generate Code")
 
-        # Text area for generated code (initially empty)
-        self._export_code_text = self._server.gui.add_text(
-            "Code",
-            initial_value="",
-            multiline=True,
-        )
+            # Text area for generated code (initially empty)
+            self._export_code_text = self._server.gui.add_text(
+                "Code",
+                initial_value="",
+                multiline=True,
+            )
 
         def generate_code_callback(_):
             prefix = self._export_prefix.value
@@ -872,29 +875,36 @@ class ViserVisualizer:
             self._linkid_to_handle[link_id] = handle
 
     def _ensure_gui_initialized(self):
-        """Initialize GUI sections in the correct order."""
+        """Initialize GUI section folders in the correct order."""
         if hasattr(self, '_gui_initialized'):
             return
         self._gui_initialized = True
 
-        # Add section headers in desired order
-        self._server.gui.add_markdown("## Joint Angles")
+        # Create section folders in desired order
+        self._joint_angles_folder = self._server.gui.add_folder(
+            "Joint Angles", expand_by_default=True
+        )
         if self._enable_ik:
-            self._server.gui.add_markdown("## IK Controls")
-            self._ik_constrain_rotation = self._server.gui.add_checkbox(
-                "Constrain Rotation", initial_value=True
+            self._ik_controls_folder = self._server.gui.add_folder(
+                "IK Controls", expand_by_default=True
             )
-            self._batch_ik_samples = self._server.gui.add_slider(
-                "Batch IK Samples",
-                min=10,
-                max=500,
-                step=10,
-                initial_value=100,
-            )
-            self._server.gui.add_markdown(
-                "*Batch IK runs when regular IK fails*"
-            )
-        self._server.gui.add_markdown("## Export Joint Angles")
+            with self._ik_controls_folder:
+                self._ik_constrain_rotation = self._server.gui.add_checkbox(
+                    "Constrain Rotation", initial_value=True
+                )
+                self._batch_ik_samples = self._server.gui.add_slider(
+                    "Batch IK Samples",
+                    min=10,
+                    max=500,
+                    step=10,
+                    initial_value=100,
+                )
+                self._server.gui.add_markdown(
+                    "*Batch IK runs when regular IK fails*"
+                )
+        self._export_folder = self._server.gui.add_folder(
+            "Export Joint Angles", expand_by_default=False
+        )
 
     def add(self, geometry: Union[Link, CascadedLink]):
         if isinstance(geometry, Link):
