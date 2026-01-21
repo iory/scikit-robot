@@ -171,26 +171,6 @@ class ViserVisualizer:
         if not ik_groups:
             return
 
-        # Add global IK GUI only once
-        if not hasattr(self, '_ik_gui_initialized'):
-            self._ik_gui_initialized = True
-            self._server.gui.add_markdown("## IK Controls")
-            self._ik_constrain_rotation = self._server.gui.add_checkbox(
-                "Constrain Rotation", initial_value=True
-            )
-
-            # Batch IK settings
-            self._batch_ik_samples = self._server.gui.add_slider(
-                "Batch IK Samples",
-                min=10,
-                max=500,
-                step=10,
-                initial_value=100,
-            )
-            self._server.gui.add_markdown(
-                "*Batch IK runs when regular IK fails*"
-            )
-
         # Get robot display name
         robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
 
@@ -691,11 +671,6 @@ class ViserVisualizer:
         robot_id = id(robot_model)
         robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
 
-        # Add markdown header only once
-        if not hasattr(self, '_joint_sliders_gui_initialized'):
-            self._joint_sliders_gui_initialized = True
-            self._server.gui.add_markdown("## Joint Angles")
-
         # Collect mimic joints (joints that follow other joints)
         mimic_joints = set()
         for joint in robot_model.joint_list:
@@ -783,7 +758,10 @@ class ViserVisualizer:
 
     def _add_joint_angle_export(self, robot_model: RobotModel):
         """Add GUI for exporting joint angles as Python code."""
-        self._server.gui.add_markdown("## Export Joint Angles")
+        # Only initialize export GUI once
+        if hasattr(self, '_export_initialized'):
+            return
+        self._export_initialized = True
 
         # Prefix input field
         self._export_prefix = self._server.gui.add_text(
@@ -804,24 +782,26 @@ class ViserVisualizer:
         def generate_code_callback(_):
             prefix = self._export_prefix.value
             lines = []
-            for joint in robot_model.joint_list:
-                if isinstance(joint, FixedJoint):
-                    continue
-                if joint.name not in self._joint_sliders:
-                    continue
-                angle = joint.joint_angle()
-                # Format angle nicely
-                angle_deg = np.rad2deg(angle)
-                # Use np.deg2rad for cleaner code if angle is a nice degree value
-                if abs(angle_deg - round(angle_deg)) < 0.01:
-                    angle_deg_int = int(round(angle_deg))
-                    if angle_deg_int == 0:
-                        angle_str = "0"
+            # Generate code for all robot models
+            for robot_model in self._robot_models.values():
+                for joint in robot_model.joint_list:
+                    if isinstance(joint, FixedJoint):
+                        continue
+                    if joint.name not in self._joint_sliders:
+                        continue
+                    angle = joint.joint_angle()
+                    # Format angle nicely
+                    angle_deg = np.rad2deg(angle)
+                    # Use np.deg2rad for cleaner code if angle is a nice degree value
+                    if abs(angle_deg - round(angle_deg)) < 0.01:
+                        angle_deg_int = int(round(angle_deg))
+                        if angle_deg_int == 0:
+                            angle_str = "0"
+                        else:
+                            angle_str = f"np.deg2rad({angle_deg_int})"
                     else:
-                        angle_str = f"np.deg2rad({angle_deg_int})"
-                else:
-                    angle_str = f"{angle:.6f}"
-                lines.append(f"{prefix}{joint.name}.joint_angle({angle_str})")
+                        angle_str = f"{angle:.6f}"
+                    lines.append(f"{prefix}{joint.name}.joint_angle({angle_str})")
             self._export_code_text.value = "\n".join(lines)
 
         generate_button.on_click(generate_code_callback)
@@ -891,6 +871,31 @@ class ViserVisualizer:
             self._linkid_to_link[link_id] = link
             self._linkid_to_handle[link_id] = handle
 
+    def _ensure_gui_initialized(self):
+        """Initialize GUI sections in the correct order."""
+        if hasattr(self, '_gui_initialized'):
+            return
+        self._gui_initialized = True
+
+        # Add section headers in desired order
+        self._server.gui.add_markdown("## Joint Angles")
+        if self._enable_ik:
+            self._server.gui.add_markdown("## IK Controls")
+            self._ik_constrain_rotation = self._server.gui.add_checkbox(
+                "Constrain Rotation", initial_value=True
+            )
+            self._batch_ik_samples = self._server.gui.add_slider(
+                "Batch IK Samples",
+                min=10,
+                max=500,
+                step=10,
+                initial_value=100,
+            )
+            self._server.gui.add_markdown(
+                "*Batch IK runs when regular IK fails*"
+            )
+        self._server.gui.add_markdown("## Export Joint Angles")
+
     def add(self, geometry: Union[Link, CascadedLink]):
         if isinstance(geometry, Link):
             self._add_link(geometry)
@@ -898,6 +903,7 @@ class ViserVisualizer:
             for link in geometry.link_list:
                 self._add_link(link)
             if isinstance(geometry, RobotModel):
+                self._ensure_gui_initialized()
                 self._add_joint_sliders(geometry)
                 if self._enable_ik:
                     self._setup_ik_controls(geometry)
