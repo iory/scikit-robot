@@ -51,12 +51,15 @@ class ViserVisualizer:
 
         # IK state
         self._enable_ik = enable_ik
-        self._ik_targets: Dict[str, dict] = {}
-        self._robot_model: Optional[RobotModel] = None
+        # robot_id -> {group_name -> target_info}
+        self._ik_targets: Dict[int, Dict[str, dict]] = {}
+        # robot_id -> RobotModel
+        self._robot_models: Dict[int, RobotModel] = {}
         self._updating_from_ik = False
 
         # Batch IK state
-        self._batch_ik_solvers: Dict[str, object] = {}
+        # robot_id -> {group_name -> solver}
+        self._batch_ik_solvers: Dict[int, Dict[str, object]] = {}
         self._batch_ik_samples = None
         self._jax_warning_shown = False
 
@@ -139,7 +142,10 @@ class ViserVisualizer:
         """Set up interactive IK controls for detected end-effectors."""
         from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
 
-        self._robot_model = robot_model
+        robot_id = id(robot_model)
+        self._robot_models[robot_id] = robot_model
+        self._ik_targets[robot_id] = {}
+        self._batch_ik_solvers[robot_id] = {}
 
         # Detect groups from geometry
         groups, end_effectors, end_coords_info, _ = generate_groups_from_geometry(
@@ -165,23 +171,28 @@ class ViserVisualizer:
         if not ik_groups:
             return
 
-        # Add GUI
-        self._server.gui.add_markdown("## IK Controls")
-        self._ik_constrain_rotation = self._server.gui.add_checkbox(
-            "Constrain Rotation", initial_value=True
-        )
+        # Add global IK GUI only once
+        if not hasattr(self, '_ik_gui_initialized'):
+            self._ik_gui_initialized = True
+            self._server.gui.add_markdown("## IK Controls")
+            self._ik_constrain_rotation = self._server.gui.add_checkbox(
+                "Constrain Rotation", initial_value=True
+            )
 
-        # Batch IK settings
-        self._batch_ik_samples = self._server.gui.add_slider(
-            "Batch IK Samples",
-            min=10,
-            max=500,
-            step=10,
-            initial_value=100,
-        )
-        self._server.gui.add_markdown(
-            "*Batch IK runs when regular IK fails*"
-        )
+            # Batch IK settings
+            self._batch_ik_samples = self._server.gui.add_slider(
+                "Batch IK Samples",
+                min=10,
+                max=500,
+                step=10,
+                initial_value=100,
+            )
+            self._server.gui.add_markdown(
+                "*Batch IK runs when regular IK fails*"
+            )
+
+        # Get robot display name
+        robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
 
         # Create transform control for each group
         for group_name, (group_data, ec_info) in ik_groups.items():
@@ -227,7 +238,7 @@ class ViserVisualizer:
             ee_rot = end_coords.worldrot()
 
             control = self._server.scene.add_transform_controls(
-                f"ik_target/{group_name}",
+                f"ik_target/{robot_name}/{group_name}",
                 scale=0.1,
                 position=ee_pos,
                 wxyz=matrix2quaternion(ee_rot),
@@ -235,7 +246,7 @@ class ViserVisualizer:
 
             # Add visibility checkbox for this target
             visibility_checkbox = self._server.gui.add_checkbox(
-                f"Show {group_name}", initial_value=True
+                f"Show {robot_name}/{group_name}", initial_value=True
             )
 
             def make_visibility_callback(ctrl, checkbox):
@@ -249,7 +260,7 @@ class ViserVisualizer:
 
             # Add numeric input fields for position and rotation
             with self._server.gui.add_folder(
-                f"{group_name} Target",
+                f"{robot_name}/{group_name} Target",
                 expand_by_default=False,
             ):
                 # Position inputs (in meters)
@@ -285,30 +296,31 @@ class ViserVisualizer:
                 )
 
             # Store target info
-            self._ik_targets[group_name] = {
+            self._ik_targets[robot_id][group_name] = {
                 'link_list': link_list,
                 'end_coords': end_coords,
                 'control': control,
                 'visibility_checkbox': visibility_checkbox,
                 'pos_inputs': (pos_x, pos_y, pos_z),
                 'rot_inputs': (roll_input, pitch_input, yaw_input),
+                'robot_model': robot_model,
             }
 
             # Callback for when control is moved (updates numeric inputs)
-            def make_ik_callback(gname):
+            def make_ik_callback(rid, gname):
                 def callback(_):
-                    self._solve_ik(gname)
+                    self._solve_ik(rid, gname)
                 return callback
 
-            control.on_update(make_ik_callback(group_name))
+            control.on_update(make_ik_callback(robot_id, group_name))
 
             # Callback for numeric input changes
-            def make_numeric_ik_callback(gname):
+            def make_numeric_ik_callback(rid, gname):
                 def callback(_):
-                    self._solve_ik_from_numeric(gname)
+                    self._solve_ik_from_numeric(rid, gname)
                 return callback
 
-            numeric_callback = make_numeric_ik_callback(group_name)
+            numeric_callback = make_numeric_ik_callback(robot_id, group_name)
             pos_x.on_update(numeric_callback)
             pos_y.on_update(numeric_callback)
             pos_z.on_update(numeric_callback)
@@ -316,15 +328,20 @@ class ViserVisualizer:
             pitch_input.on_update(numeric_callback)
             yaw_input.on_update(numeric_callback)
 
-    def _solve_ik(self, group_name: str):
+    def _solve_ik(self, robot_id: int, group_name: str):
         """Solve IK for a group when its target is moved."""
-        if self._robot_model is None or self._updating_from_ik:
+        if self._updating_from_ik:
             return
 
-        target = self._ik_targets.get(group_name)
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
+        target = robot_targets.get(group_name)
         if target is None:
             return
 
+        robot_model = target['robot_model']
         control = target['control']
         target_pos = np.array(control.position)
         target_rot = vtf.SO3(control.wxyz).as_matrix()
@@ -332,7 +349,7 @@ class ViserVisualizer:
 
         constrain_rot = self._ik_constrain_rotation.value
 
-        result = self._robot_model.inverse_kinematics(
+        result = robot_model.inverse_kinematics(
             target_coords,
             link_list=target['link_list'],
             move_target=target['end_coords'],
@@ -343,33 +360,39 @@ class ViserVisualizer:
 
         # If regular IK fails, try batch IK
         if result is False or result is None:
-            result = self._solve_ik_batch(group_name, target_pos, target_rot)
+            result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
             if result is not False and result is not None:
                 pass
 
         if result is not False and result is not None:
             self.redraw()
-            self._sync_joint_sliders()
+            self._sync_joint_sliders(robot_id)
             # Always exclude the current target to prevent it from moving
             # when IK doesn't reach the exact target position
-            self._sync_ik_targets(exclude=group_name)
+            self._sync_ik_targets(robot_id, exclude=group_name)
             # Sync numeric inputs with the target position
-            self._sync_numeric_inputs(group_name)
+            self._sync_numeric_inputs(robot_id, group_name)
         else:
             # IK failed: force update all link coordinates and redraw
             # This ensures cached worldcoords are recomputed after revert
-            for link in self._robot_model.link_list:
+            for link in robot_model.link_list:
                 link.update(force=True)
             self.redraw()
 
-    def _solve_ik_from_numeric(self, group_name: str):
+    def _solve_ik_from_numeric(self, robot_id: int, group_name: str):
         """Solve IK when numeric input fields are changed."""
-        if self._robot_model is None or self._updating_from_ik:
+        if self._updating_from_ik:
             return
 
-        target = self._ik_targets.get(group_name)
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
+        target = robot_targets.get(group_name)
         if target is None:
             return
+
+        robot_model = target['robot_model']
 
         # Get position from numeric inputs
         pos_inputs = target['pos_inputs']
@@ -391,7 +414,7 @@ class ViserVisualizer:
 
         constrain_rot = self._ik_constrain_rotation.value
 
-        result = self._robot_model.inverse_kinematics(
+        result = robot_model.inverse_kinematics(
             target_coords,
             link_list=target['link_list'],
             move_target=target['end_coords'],
@@ -402,11 +425,11 @@ class ViserVisualizer:
 
         # If regular IK fails, try batch IK
         if result is False or result is None:
-            result = self._solve_ik_batch(group_name, target_pos, target_rot)
+            result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
 
         if result is not False and result is not None:
             self.redraw()
-            self._sync_joint_sliders()
+            self._sync_joint_sliders(robot_id)
             # Update the transform control to match numeric inputs
             self._updating_from_ik = True
             try:
@@ -416,14 +439,18 @@ class ViserVisualizer:
             finally:
                 self._updating_from_ik = False
             # Sync other IK targets
-            self._sync_ik_targets(exclude=group_name)
+            self._sync_ik_targets(robot_id, exclude=group_name)
         else:
             # IK failed: revert numeric inputs and control to current pose
-            self._revert_ik_target(group_name)
+            self._revert_ik_target(robot_id, group_name)
 
-    def _revert_ik_target(self, group_name: str):
+    def _revert_ik_target(self, robot_id: int, group_name: str):
         """Revert IK target to current end-effector pose when IK fails."""
-        target = self._ik_targets.get(group_name)
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
+        target = robot_targets.get(group_name)
         if target is None:
             return
 
@@ -453,9 +480,13 @@ class ViserVisualizer:
         finally:
             self._updating_from_ik = False
 
-    def _sync_numeric_inputs(self, group_name: str):
+    def _sync_numeric_inputs(self, robot_id: int, group_name: str):
         """Sync numeric input fields with the transform control position."""
-        target = self._ik_targets.get(group_name)
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
+        target = robot_targets.get(group_name)
         if target is None:
             return
 
@@ -483,12 +514,14 @@ class ViserVisualizer:
         finally:
             self._updating_from_ik = False
 
-    def _solve_ik_batch(self, group_name: str, target_pos: np.ndarray,
-                        target_rot: np.ndarray):
+    def _solve_ik_batch(self, robot_id: int, group_name: str,
+                        target_pos: np.ndarray, target_rot: np.ndarray):
         """Solve IK using JAX batch solver with random initial configurations.
 
         Parameters
         ----------
+        robot_id : int
+            Robot model ID.
         group_name : str
             Name of the IK group.
         target_pos : np.ndarray
@@ -504,15 +537,21 @@ class ViserVisualizer:
         if self._batch_ik_samples is None:
             return False
 
-        target = self._ik_targets.get(group_name)
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return False
+
+        target = robot_targets.get(group_name)
         if target is None:
             return False
 
+        robot_model = target['robot_model']
         link_list = target['link_list']
         move_target = target['end_coords']
 
         # Get or create batch IK solver for this group
-        if group_name not in self._batch_ik_solvers:
+        robot_solvers = self._batch_ik_solvers.get(robot_id, {})
+        if group_name not in robot_solvers:
             try:
                 from skrobot.backend import list_backends
                 if 'jax' not in list_backends():
@@ -523,14 +562,14 @@ class ViserVisualizer:
                     return False
                 from skrobot.kinematics.differentiable import create_batch_ik_solver
                 solver = create_batch_ik_solver(
-                    self._robot_model, link_list, move_target,
+                    robot_model, link_list, move_target,
                     backend_name='jax'
                 )
-                self._batch_ik_solvers[group_name] = solver
+                self._batch_ik_solvers[robot_id][group_name] = solver
             except Exception:
                 return False
         else:
-            solver = self._batch_ik_solvers[group_name]
+            solver = robot_solvers[group_name]
 
         # Get batch size from slider
         batch_size = int(self._batch_ik_samples.value)
@@ -597,12 +636,16 @@ class ViserVisualizer:
 
         return False
 
-    def _sync_joint_sliders(self):
+    def _sync_joint_sliders(self, robot_id: int):
         """Sync joint sliders with current robot state."""
+        robot_model = self._robot_models.get(robot_id)
+        if robot_model is None:
+            return
+
         self._updating_from_ik = True
         try:
             for joint_name, slider in self._joint_sliders.items():
-                for joint in self._robot_model.joint_list:
+                for joint in robot_model.joint_list:
                     if joint.name == joint_name:
                         angle = joint.joint_angle()
                         slider.value = float(np.clip(angle, slider.min, slider.max))
@@ -610,11 +653,15 @@ class ViserVisualizer:
         finally:
             self._updating_from_ik = False
 
-    def _sync_ik_targets(self, exclude: Optional[str] = None):
+    def _sync_ik_targets(self, robot_id: int, exclude: Optional[str] = None):
         """Sync IK target positions with current end-effector poses."""
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
         self._updating_from_ik = True
         try:
-            for name, target in self._ik_targets.items():
+            for name, target in robot_targets.items():
                 if name == exclude:
                     continue
                 pos = target['end_coords'].worldpos()
@@ -641,7 +688,13 @@ class ViserVisualizer:
 
     def _add_joint_sliders(self, robot_model: RobotModel):
         """Add GUI sliders for each joint in the robot model."""
-        self._server.gui.add_markdown("## Joint Angles")
+        robot_id = id(robot_model)
+        robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
+
+        # Add markdown header only once
+        if not hasattr(self, '_joint_sliders_gui_initialized'):
+            self._joint_sliders_gui_initialized = True
+            self._server.gui.add_markdown("## Joint Angles")
 
         # Collect mimic joints (joints that follow other joints)
         mimic_joints = set()
@@ -682,13 +735,13 @@ class ViserVisualizer:
             joint_groups[group_name].append((joint, short_name))
 
         # Create folders for each group
-        self._joint_folders = {}
         for group_name, joints in joint_groups.items():
+            folder_name = f"{robot_name}/{group_name}"
             with self._server.gui.add_folder(
-                group_name,
+                folder_name,
                 expand_by_default=True,
             ) as folder:
-                self._joint_folders[group_name] = folder
+                self._joint_folders[folder_name] = folder
 
                 for joint, short_name in joints:
                     min_angle = joint.min_angle
@@ -713,16 +766,16 @@ class ViserVisualizer:
                         initial_value=float(current_angle),
                     )
 
-                    def make_callback(j):
+                    def make_callback(j, rid):
                         def callback(_):
                             if self._updating_from_ik:
                                 return
                             j.joint_angle(self._joint_sliders[j.name].value)
                             self.redraw()
-                            self._sync_ik_targets()
+                            self._sync_ik_targets(rid)
                         return callback
 
-                    slider.on_update(make_callback(joint))
+                    slider.on_update(make_callback(joint, robot_id))
                     self._joint_sliders[joint.name] = slider
 
         # Add joint angle export feature
