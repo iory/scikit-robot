@@ -1943,6 +1943,29 @@ class RobotModel(CascadedLink):
         """Arm end effector coordinates for single-arm robots."""
         return self._get_end_coords('rarm_end_coords')
 
+    @property
+    def leaf_links(self):
+        """Get all leaf links (links with no children).
+
+        Leaf links are potential end-effector candidates as they are
+        at the end of kinematic chains.
+
+        Returns
+        -------
+        list of Link
+            List of links that have no child links.
+
+        Examples
+        --------
+        >>> from skrobot.models import PR2
+        >>> robot = PR2()
+        >>> leaf_links = robot.leaf_links
+        >>> print([link.name for link in leaf_links])
+        """
+        child_links = {link.parent_link for link in self.link_list
+                       if link.parent_link is not None}
+        return [link for link in self.link_list if link not in child_links]
+
     def _meshes_from_urdf_visuals(self, visuals):
         meshes = []
         for visual in visuals:
@@ -3539,6 +3562,31 @@ class RobotModel(CascadedLink):
                     and l.joint.__class__.__name__ != 'FixedJoint']
         else:
             return [l.joint for l in link_list if hasattr(l, 'joint')]
+
+    @staticmethod
+    def filter_movable_links(link_list):
+        """Filter link list to include only links with movable joints.
+
+        Parameters
+        ----------
+        link_list : list of Link
+            List of links to filter.
+
+        Returns
+        -------
+        list of Link
+            Links that have movable (non-fixed) joints.
+
+        Examples
+        --------
+        >>> from skrobot.models import PR2
+        >>> robot = PR2()
+        >>> all_links = robot.link_lists(robot.r_gripper_tool_frame, robot.root_link)
+        >>> movable = RobotModel.filter_movable_links(all_links)
+        """
+        return [l for l in link_list if hasattr(l, 'joint')
+                and l.joint is not None
+                and l.joint.__class__.__name__ != 'FixedJoint']
 
     @staticmethod
     def joint_limits_from_joint_list(joint_list):

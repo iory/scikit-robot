@@ -8,6 +8,7 @@ Usage:
     python examples/reachability_map_demo.py
     python examples/reachability_map_demo.py --robot panda --samples 500000
     python examples/reachability_map_demo.py --color manipulability
+    python examples/reachability_map_demo.py --urdf /path/to/robot.urdf
 """
 
 import argparse
@@ -16,7 +17,187 @@ import time
 import numpy as np
 
 import skrobot
+from skrobot.coordinates import CascadedCoords
 from skrobot.kinematics import ReachabilityMap
+from skrobot.model.robot_model import RobotModel
+from skrobot.models.urdf import RobotModelFromURDF
+from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
+
+
+def _select_from_list(prompt, options, allow_multiple=False):
+    """Prompt user to select from a list of options.
+
+    Parameters
+    ----------
+    prompt : str
+        Prompt message.
+    options : list
+        List of options to choose from.
+    allow_multiple : bool
+        If True, allow multiple selections.
+
+    Returns
+    -------
+    str or list
+        Selected option(s).
+    """
+    print(f"\n{prompt}")
+    for i, option in enumerate(options):
+        print(f"  [{i}] {option}")
+
+    while True:
+        try:
+            if allow_multiple:
+                selection = input("Enter number(s) separated by comma: ").strip()
+                indices = [int(x.strip()) for x in selection.split(',')]
+                if all(0 <= idx < len(options) for idx in indices):
+                    return [options[idx] for idx in indices]
+            else:
+                selection = int(input("Enter number: ").strip())
+                if 0 <= selection < len(options):
+                    return options[selection]
+            print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+
+def _setup_robot_from_urdf(urdf_path, interactive=True):
+    """Load robot from URDF and detect/select kinematic chain.
+
+    Parameters
+    ----------
+    urdf_path : str
+        Path to URDF file.
+    interactive : bool
+        If True, prompt user for selection when auto-detection fails.
+
+    Returns
+    -------
+    tuple
+        (robot, link_list, end_coords)
+    """
+    # Load robot from URDF
+    print(f"Loading robot from URDF: {urdf_path}")
+    robot = RobotModelFromURDF(urdf_file=urdf_path)
+
+    # Try automatic detection using robot_class_generator
+    print("Attempting automatic kinematic chain detection...")
+    groups, end_effectors, end_coords_info, robot_name = generate_groups_from_geometry(robot)
+
+    # Find the best arm group
+    arm_group = None
+    arm_group_name = None
+
+    # Priority order for arm groups
+    priority_order = ['right_arm', 'left_arm', 'arm']
+    for group_name in priority_order:
+        if group_name in groups and groups[group_name] is not None:
+            arm_group = groups[group_name]
+            arm_group_name = group_name
+            break
+
+    if arm_group is not None:
+        # Setup end_coords first to get parent link
+        ec_info = end_coords_info.get(arm_group_name)
+        if ec_info is not None:
+            parent_link_name = ec_info['parent_link']
+            pos = ec_info.get('pos', [0.0, 0.0, 0.0])
+            rot = ec_info.get('rot')
+
+            # Convert to float to avoid np.float64 display issues
+            pos = [float(v) for v in pos]
+            if rot is not None:
+                rot = [float(v) for v in rot]
+
+            parent_link = None
+            for link in robot.link_list:
+                if link.name == parent_link_name:
+                    parent_link = link
+                    break
+
+            if parent_link is not None:
+                # Use robot.link_lists() to get correct kinematic chain
+                all_links = robot.link_lists(parent_link, robot.root_link)
+                link_list = RobotModel.filter_movable_links(all_links)
+
+                if link_list:
+                    print(f"  Detected {arm_group_name}: {len(link_list)} joints")
+                    print(f"  Links: {[l.name for l in link_list]}")
+
+                    has_offset = any(abs(v) > 1e-6 for v in pos)
+                    has_rot = rot is not None and any(abs(v) > 1e-6 for v in rot)
+
+                    if has_offset or has_rot:
+                        end_coords = CascadedCoords(
+                            parent=parent_link,
+                            pos=pos if has_offset else None,
+                            rot=rot if has_rot else None,
+                            name=f'{arm_group_name}_end_coords'
+                        )
+                    else:
+                        end_coords = CascadedCoords(
+                            parent=parent_link,
+                            name=f'{arm_group_name}_end_coords'
+                        )
+
+                    print(f"  End coords parent: {parent_link_name}")
+                    if has_offset:
+                        print(f"  End coords offset: [{pos[0]:.6f}, {pos[1]:.6f}, {pos[2]:.6f}]")
+                    if has_rot:
+                        print(f"  End coords rotation: [{rot[0]:.6f}, {rot[1]:.6f}, {rot[2]:.6f}]")
+
+                    # Set end_coords on robot for IK support in viewer
+                    robot.end_coords = end_coords
+
+                    return robot, link_list, end_coords
+
+    # Auto-detection failed, need user input
+    if not interactive:
+        raise RuntimeError(
+            "Could not automatically detect kinematic chain. "
+            "Run in interactive mode to manually select links."
+        )
+
+    print("\nAutomatic detection failed. Manual selection required.")
+
+    # Get root and leaf links for user selection
+    root_link_name = robot.root_link.name
+    leaf_link_names = [link.name for link in robot.leaf_links]
+
+    print(f"\nRoot link: {root_link_name}")
+    print(f"Leaf links ({len(leaf_link_names)}): {leaf_link_names[:10]}...")
+
+    # Let user select end link (end-effector)
+    end_link_name = _select_from_list(
+        "Select END link for kinematic chain (end-effector):",
+        leaf_link_names[:20]
+    )
+
+    # Find end link object
+    end_link_obj = getattr(robot, end_link_name.replace('-', '_'), None)
+    if end_link_obj is None:
+        raise RuntimeError(f"Could not find end link: {end_link_name}")
+
+    # Use robot.link_lists() to get kinematic chain from root to end
+    all_links = robot.link_lists(end_link_obj, robot.root_link)
+    link_list = RobotModel.filter_movable_links(all_links)
+
+    if not link_list:
+        raise RuntimeError(
+            f"Could not find movable joints from {root_link_name} to {end_link_name}"
+        )
+
+    print(f"\nKinematic chain: {[l.name for l in link_list]}")
+
+    end_coords = CascadedCoords(
+        parent=end_link_obj,
+        name='end_coords'
+    )
+
+    # Set end_coords on robot for IK support in viewer
+    robot.end_coords = end_coords
+
+    return robot, link_list, end_coords
 
 
 def main():
@@ -27,7 +208,11 @@ def main():
     parser.add_argument(
         '--robot', type=str, default='pr2',
         choices=['pr2', 'panda', 'fetch', 'r8', 'nextage'],
-        help='Robot model to use'
+        help='Robot model to use (ignored if --urdf is specified)'
+    )
+    parser.add_argument(
+        '--urdf', type=str, default=None,
+        help='Path to custom URDF file. When specified, --robot is ignored.'
     )
     parser.add_argument(
         '--backend', type=str, default=None,
@@ -100,21 +285,29 @@ def main():
         args.no_viz = True
 
     # Setup robot
-    print(f"Loading {args.robot} robot...")
-    if args.robot == 'pr2':
-        robot = skrobot.models.PR2()
-        robot.init_pose()
-    elif args.robot == 'panda':
-        robot = skrobot.models.Panda()
-    elif args.robot == 'fetch':
-        robot = skrobot.models.Fetch()
-    elif args.robot == 'r8':
-        robot = skrobot.models.R8_6()
-    elif args.robot == 'nextage':
-        robot = skrobot.models.Nextage()
+    if args.urdf is not None:
+        # Load from custom URDF
+        robot, link_list, end_coords = _setup_robot_from_urdf(
+            args.urdf,
+            interactive=not args.no_interactive
+        )
+    else:
+        # Use built-in robot model
+        print(f"Loading {args.robot} robot...")
+        if args.robot == 'pr2':
+            robot = skrobot.models.PR2()
+            robot.init_pose()
+        elif args.robot == 'panda':
+            robot = skrobot.models.Panda()
+        elif args.robot == 'fetch':
+            robot = skrobot.models.Fetch()
+        elif args.robot == 'r8':
+            robot = skrobot.models.R8_6()
+        elif args.robot == 'nextage':
+            robot = skrobot.models.Nextage()
 
-    link_list = robot.rarm.link_list
-    end_coords = robot.rarm.end_coords
+        link_list = robot.rarm.link_list
+        end_coords = robot.rarm.end_coords
 
     # Create reachability map
     rmap = ReachabilityMap(
@@ -148,7 +341,8 @@ def main():
     print("=" * 50)
     print("Reachability Map Summary")
     print("=" * 50)
-    print(f"Robot: {args.robot}")
+    robot_name = args.urdf if args.urdf else args.robot
+    print(f"Robot: {robot_name}")
     print(f"Voxel size: {args.voxel_size * 100:.0f} cm")
     print(f"Reachable voxels: {rmap.n_reachable_voxels:,}")
     print(f"Reachable volume: {rmap.reachable_volume:.3f} m³")
@@ -179,7 +373,7 @@ def main():
             print(f"  Z-slice [{z_min:.2f}, {z_max:.2f}]: {len(positions)} points")
 
         # Create viewer
-        viewer = skrobot.viewers.ViserVisualizer()
+        viewer = skrobot.viewers.ViserVisualizer(enable_ik=True)
 
         # Add robot
         viewer.add(robot)
