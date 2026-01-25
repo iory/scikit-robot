@@ -923,6 +923,9 @@ class ViserVisualizer:
     def show(self):
         host = self._server.get_host()
         port = self._server.get_port()
+        # 0.0.0.0 is not a valid browser URL
+        if host == "0.0.0.0":
+            host = "localhost"
         url = f"http://{host}:{port}"
         webbrowser.open(url)
 
