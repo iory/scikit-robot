@@ -11,6 +11,8 @@ from PIL import Image
 import pyglet
 from pyglet import compat_platform
 
+from skrobot.pycompat import is_wsl
+
 
 # WSL2 and Wayland specific fix for pyrender
 # Set PYOPENGL_PLATFORM to GLX for proper OpenGL context management
@@ -18,14 +20,8 @@ if platform.system() == 'Linux':
     needs_glx = False
 
     # Check for WSL2 environment
-    if os.path.exists('/proc/version'):
-        try:
-            with open('/proc/version', 'r') as f:
-                version_info = f.read().lower()
-            if 'microsoft' in version_info or 'wsl' in version_info:
-                needs_glx = True
-        except (OSError, IOError, PermissionError):
-            pass
+    if is_wsl():
+        needs_glx = True
 
     # Check for Wayland session (Ubuntu 24.04+ default)
     if os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland':
