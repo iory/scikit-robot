@@ -115,36 +115,6 @@ class R8_6(skrobot.model.RobotModel):
         self._larm_with_torso = None
         self._rarm_with_torso = None
 
-        # Define mimic joint relationships for batch IK
-        # Format: {mimic_joint: {'joint': parent_joint, 'multiplier': value, 'offset': value}}
-        self._setup_mimic_joints()
-
-    def _setup_mimic_joints(self):
-        """Setup mimic joint relationships for batch IK."""
-        # Left arm mimic joints
-        self.l_elbow_p1_joint_mimic.mimic = {
-            'joint': self.l_elbow_p1_joint,
-            'multiplier': -1.0,
-            'offset': 0.0
-        }
-        self.l_elbow_p2_joint_mimic.mimic = {
-            'joint': self.l_elbow_p2_joint,
-            'multiplier': -1.0,
-            'offset': 0.0
-        }
-
-        # Right arm mimic joints
-        self.r_elbow_p1_joint_mimic.mimic = {
-            'joint': self.r_elbow_p1_joint,
-            'multiplier': -1.0,
-            'offset': 0.0
-        }
-        self.r_elbow_p2_joint_mimic.mimic = {
-            'joint': self.r_elbow_p2_joint,
-            'multiplier': -1.0,
-            'offset': 0.0
-        }
-
     @property
     def larm(self):
         """Left arm model (without torso z-axis)"""
