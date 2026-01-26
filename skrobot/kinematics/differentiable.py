@@ -50,6 +50,31 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     # Save original joint angles
     original_angles = [link.joint.joint_angle() for link in link_list]
 
+    # Extract mimic joint information
+    # For each joint, store (parent_index, multiplier, offset) if it's a mimic joint
+    # parent_index is -1 if not a mimic joint
+    mimic_info = []
+    joint_name_to_index = {}
+
+    # First pass: build joint name to index mapping
+    for i, link in enumerate(link_list):
+        joint_name_to_index[link.joint.name] = i
+
+    # Second pass: identify mimic joints
+    for i, link in enumerate(link_list):
+        joint = link.joint
+        if hasattr(joint, 'mimic') and joint.mimic is not None:
+            parent_joint = joint.mimic.get('joint')
+            if parent_joint is not None and parent_joint.name in joint_name_to_index:
+                parent_idx = joint_name_to_index[parent_joint.name]
+                multiplier = joint.mimic.get('multiplier', 1.0)
+                offset = joint.mimic.get('offset', 0.0)
+                mimic_info.append((parent_idx, multiplier, offset))
+            else:
+                mimic_info.append((-1, 1.0, 0.0))
+        else:
+            mimic_info.append((-1, 1.0, 0.0))
+
     # Determine reference angles for each joint.
     # Use 0 if valid, otherwise use the closest limit.
     # This is needed because some joints (e.g., Panda joint4) have limits
@@ -58,7 +83,7 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     joint_limits_lower = []
     joint_limits_upper = []
 
-    for link in link_list:
+    for i, link in enumerate(link_list):
         joint = link.joint
 
         # Get joint limits
@@ -73,21 +98,31 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         joint_limits_lower.append(min_angle)
         joint_limits_upper.append(max_angle)
 
-        # Choose reference angle: 0 if valid, otherwise closest limit
-        if min_angle <= 0 <= max_angle:
-            ref_angle = 0.0
-        elif 0 < min_angle:
-            ref_angle = min_angle
-        else:  # max_angle < 0
-            ref_angle = max_angle
+        # For mimic joints, ref_angle is computed from parent's ref_angle
+        parent_idx, multiplier, offset = mimic_info[i]
+        if parent_idx >= 0:
+            # Mimic joint: ref_angle = parent_ref * multiplier + offset
+            parent_ref = ref_angles[parent_idx]
+            ref_angle = parent_ref * multiplier + offset
+        else:
+            # Regular joint: choose reference angle
+            if min_angle <= 0 <= max_angle:
+                ref_angle = 0.0
+            elif 0 < min_angle:
+                ref_angle = min_angle
+            else:  # max_angle < 0
+                ref_angle = max_angle
 
         ref_angles.append(ref_angle)
 
     ref_angles = np.array(ref_angles)
 
-    # Set all joints to their reference angles
+    # Set joints to their reference angles
+    # Skip mimic joints - they are set automatically when parent joint is set
     for i, link in enumerate(link_list):
-        link.joint.joint_angle(ref_angles[i])
+        parent_idx, _, _ = mimic_info[i]
+        if parent_idx < 0:  # Not a mimic joint
+            link.joint.joint_angle(ref_angles[i])
 
     # Get base link world transform (parent of first link in chain)
     first_link = link_list[0]
@@ -150,6 +185,11 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     for i, link in enumerate(link_list):
         link.joint.joint_angle(original_angles[i])
 
+    # Convert mimic_info to arrays for JAX compatibility
+    mimic_parent_indices = np.array([m[0] for m in mimic_info], dtype=np.int32)
+    mimic_multipliers = np.array([m[1] for m in mimic_info])
+    mimic_offsets = np.array([m[2] for m in mimic_info])
+
     return {
         'n_joints': n_joints,
         'link_translations': np.array(link_translations),
@@ -163,6 +203,9 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         'base_rotation': base_rotation,
         'ee_offset_position': ee_offset_position,
         'ee_offset_rotation': ee_offset_rotation,
+        'mimic_parent_indices': mimic_parent_indices,
+        'mimic_multipliers': mimic_multipliers,
+        'mimic_offsets': mimic_offsets,
     }
 
 
@@ -210,23 +253,54 @@ def forward_kinematics(backend, joint_angles, fk_params):
     base_rot = backend.array(fk_params['base_rotation'])
     ref_angles = backend.array(fk_params['ref_angles'])
 
+    # Handle mimic joints: compute effective joint angles
+    # For mimic joints, angle = parent_angle * multiplier + offset
+    mimic_parent_indices = fk_params.get('mimic_parent_indices')
+    if mimic_parent_indices is not None:
+        mimic_multipliers = backend.array(fk_params['mimic_multipliers'])
+        mimic_offsets = backend.array(fk_params['mimic_offsets'])
+
+        # Create effective joint angles array
+        # For non-mimic joints (parent_index == -1), use original angle
+        # For mimic joints, compute from parent
+        effective_angles = []
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                # Mimic joint: angle = parent_angle * multiplier + offset
+                parent_angle = joint_angles[parent_idx]
+                effective_angle = parent_angle * mimic_multipliers[i] + mimic_offsets[i]
+                effective_angles.append(effective_angle)
+            else:
+                # Regular joint
+                effective_angles.append(joint_angles[i])
+        joint_angles = backend.stack(effective_angles)
+
     positions = []
     rotations = []
 
     current_pos = base_pos
     current_rot = base_rot
 
+    joint_types = fk_params['joint_types']
+
     for i in range(n_joints):
         # Apply link static transform (computed at reference configuration)
         current_pos = current_pos + backend.matmul(current_rot, translations[i])
         current_rot = backend.matmul(current_rot, local_rotations[i])
 
-        # Apply joint rotation as delta from reference angle
-        # The static transforms include the reference rotation, so we apply
+        # Apply joint motion as delta from reference angle
+        # The static transforms include the reference configuration, so we apply
         # only the difference (joint_angles[i] - ref_angles[i])
         delta_angle = joint_angles[i] - ref_angles[i]
-        joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
-        current_rot = backend.matmul(current_rot, joint_rot)
+
+        if joint_types[i] == 'prismatic':
+            # Prismatic joint: translate along axis
+            current_pos = current_pos + backend.matmul(current_rot, axes[i] * delta_angle)
+        else:
+            # Revolute joint: rotate around axis
+            joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
+            current_rot = backend.matmul(current_rot, joint_rot)
 
         positions.append(current_pos)
         rotations.append(current_rot)
@@ -305,6 +379,7 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
     base_pos = backend.array(fk_params['base_position'])
     base_rot = backend.array(fk_params['base_rotation'])
     ref_angles = backend.array(fk_params['ref_angles'])
+    joint_types = fk_params['joint_types']
 
     positions = []
     z_axes = []
@@ -317,14 +392,19 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
         current_pos = current_pos + backend.matmul(current_rot, translations[i])
         current_rot = backend.matmul(current_rot, local_rotations[i])
 
-        # Store position and z-axis before joint rotation
+        # Store position and z-axis before joint motion
         positions.append(current_pos)
         z_axes.append(backend.matmul(current_rot, axes[i]))
 
-        # Apply joint rotation as delta from reference angle
+        # Apply joint motion as delta from reference angle
         delta_angle = joint_angles[i] - ref_angles[i]
-        joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
-        current_rot = backend.matmul(current_rot, joint_rot)
+        if joint_types[i] == 'prismatic':
+            # Prismatic joint: translate along axis
+            current_pos = current_pos + backend.matmul(current_rot, axes[i] * delta_angle)
+        else:
+            # Revolute joint: rotate around axis
+            joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
+            current_rot = backend.matmul(current_rot, joint_rot)
 
     # Apply end-effector offset
     ee_offset_pos = backend.array(fk_params['ee_offset_position'])
@@ -332,16 +412,26 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
     ee_pos = current_pos + backend.matmul(current_rot, ee_offset_pos)
     ee_rot = backend.matmul(current_rot, ee_offset_rot)
 
-    # Compute Jacobian: J[:, i] = z_i × (p_ee - p_i)
+    # Compute Jacobian
+    # For revolute joints: J[:, i] = z_i × (p_ee - p_i)
+    # For prismatic joints: J[:, i] = z_i (axis direction)
     J = backend.zeros((3, n_joints))
     for i in range(n_joints):
         z = z_axes[i]
-        r = ee_pos - positions[i]
-        cross_prod = backend.cross(z, r)
-        if backend.name == 'jax':
-            J = J.at[:, i].set(cross_prod)
+        if joint_types[i] == 'prismatic':
+            # Prismatic: Jacobian column is the axis direction
+            if backend.name == 'jax':
+                J = J.at[:, i].set(z)
+            else:
+                J[:, i] = z
         else:
-            J[:, i] = cross_prod
+            # Revolute: Jacobian column is z × r
+            r = ee_pos - positions[i]
+            cross_prod = backend.cross(z, r)
+            if backend.name == 'jax':
+                J = J.at[:, i].set(cross_prod)
+            else:
+                J[:, i] = cross_prod
 
     return J, ee_pos, ee_rot
 
@@ -380,6 +470,7 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
     ref_angles = np.asarray(fk_params['ref_angles'])
     ee_offset_pos = np.asarray(fk_params['ee_offset_position'])
     ee_offset_rot = np.asarray(fk_params['ee_offset_rotation'])
+    joint_types = fk_params['joint_types']
 
     # Initialize batch arrays
     # current_pos: (batch_size, 3)
@@ -398,49 +489,59 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
         # current_rot = current_rot @ local_rotations[i]
         current_rot = np.einsum('bij,jk->bik', current_rot, local_rotations[i])
 
-        # Store position and z-axis before joint rotation
+        # Store position and z-axis before joint motion
         positions[i] = current_pos
         # z_axes[i] = current_rot @ axes[i]
         z_axes[i] = np.einsum('bij,j->bi', current_rot, axes[i])
 
-        # Apply joint rotation as delta from reference angle (batched)
-        theta = joint_angles_batch[:, i] - ref_angles[i]  # (batch_size,)
+        # Apply joint motion as delta from reference angle (batched)
+        delta = joint_angles_batch[:, i] - ref_angles[i]  # (batch_size,)
         axis = axes[i]  # (3,)
 
-        # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
-        # where K is skew-symmetric matrix of axis
-        K = np.array([
-            [0, -axis[2], axis[1]],
-            [axis[2], 0, -axis[0]],
-            [-axis[1], axis[0], 0]
-        ])
-        K2 = K @ K
+        if joint_types[i] == 'prismatic':
+            # Prismatic joint: translate along axis
+            # current_pos += current_rot @ (axis * delta)
+            axis_scaled = axis[None, :] * delta[:, None]  # (batch_size, 3)
+            current_pos = current_pos + np.einsum('bij,bj->bi', current_rot, axis_scaled)
+        else:
+            # Revolute joint: rotate around axis
+            # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
+            # where K is skew-symmetric matrix of axis
+            K = np.array([
+                [0, -axis[2], axis[1]],
+                [axis[2], 0, -axis[0]],
+                [-axis[1], axis[0], 0]
+            ])
+            K2 = K @ K
 
-        sin_theta = np.sin(theta)[:, None, None]  # (batch_size, 1, 1)
-        cos_theta = np.cos(theta)[:, None, None]
-        I = np.eye(3)
+            sin_theta = np.sin(delta)[:, None, None]  # (batch_size, 1, 1)
+            cos_theta = np.cos(delta)[:, None, None]
+            I = np.eye(3)
 
-        # joint_rot: (batch_size, 3, 3)
-        joint_rot = I + sin_theta * K + (1 - cos_theta) * K2
+            # joint_rot: (batch_size, 3, 3)
+            joint_rot = I + sin_theta * K + (1 - cos_theta) * K2
 
-        # current_rot = current_rot @ joint_rot
-        current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rot)
+            # current_rot = current_rot @ joint_rot
+            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rot)
 
     # Apply end-effector offset
     ee_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
     ee_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
 
-    # Compute Jacobian: J[:, :, i] = z_i × (p_ee - p_i)
-    # z_axes: (n_joints, batch_size, 3)
-    # positions: (n_joints, batch_size, 3)
-    # ee_pos: (batch_size, 3)
+    # Compute Jacobian
+    # For revolute joints: J[:, :, i] = z_i × (p_ee - p_i)
+    # For prismatic joints: J[:, :, i] = z_i (axis direction)
     jacobians = np.zeros((batch_size, 3, n_joints))
     for i in range(n_joints):
-        r = ee_pos - positions[i]  # (batch_size, 3)
         z = z_axes[i]  # (batch_size, 3)
-        # cross product: (batch_size, 3)
-        cross = np.cross(z, r)
-        jacobians[:, :, i] = cross
+        if joint_types[i] == 'prismatic':
+            # Prismatic: Jacobian column is the axis direction
+            jacobians[:, :, i] = z
+        else:
+            # Revolute: Jacobian column is z × r
+            r = ee_pos - positions[i]  # (batch_size, 3)
+            cross = np.cross(z, r)
+            jacobians[:, :, i] = cross
 
     return jacobians, ee_pos, ee_rot
 
@@ -796,6 +897,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
     >>> solver = create_batch_ik_solver(robot, link_list, move_target)
     >>> solutions, success, errors = solver(target_positions, target_rotations)
     """
+    import numpy as np
+
     from skrobot.backend import get_backend
 
     backend = get_backend(backend_name)
@@ -803,51 +906,95 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
     # Extract FK parameters
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)
 
-    # Get joint limits
-    joint_limits_lower = backend.array(fk_params['joint_limits_lower'])
-    joint_limits_upper = backend.array(fk_params['joint_limits_upper'])
     n_joints = fk_params['n_joints']
+
+    # Identify non-mimic joints (these are the actual optimization variables)
+    mimic_parent_indices = fk_params.get('mimic_parent_indices', np.array([-1] * n_joints))
+    mimic_multipliers = fk_params.get('mimic_multipliers', np.ones(n_joints))
+    mimic_offsets = fk_params.get('mimic_offsets', np.zeros(n_joints))
+
+    # Build list of non-mimic joint indices
+    non_mimic_indices = [i for i in range(n_joints) if mimic_parent_indices[i] < 0]
+    len(non_mimic_indices)
+
+    # Get joint limits for non-mimic joints only
+    joint_limits_lower = backend.array(fk_params['joint_limits_lower'][non_mimic_indices])
+    joint_limits_upper = backend.array(fk_params['joint_limits_upper'][non_mimic_indices])
 
     # JIT cache for different iteration counts
     _jit_cache = {}
 
+    # Precompute arrays for expanding opt angles to full angles
+    _non_mimic_indices_arr = backend.array(np.array(non_mimic_indices, dtype=np.int32))
+    _mimic_parent_indices_arr = backend.array(mimic_parent_indices.astype(np.int32))
+    _mimic_multipliers_arr = backend.array(mimic_multipliers)
+    _mimic_offsets_arr = backend.array(mimic_offsets)
+
+    def _expand_to_full_angles(opt_angles):
+        """Expand optimization variables to full joint angles including mimic joints."""
+        # Create full angles array
+        full_angles = backend.zeros(n_joints)
+
+        # Fill in non-mimic joints
+        for i, opt_idx in enumerate(non_mimic_indices):
+            if backend.name == 'jax':
+                full_angles = full_angles.at[opt_idx].set(opt_angles[i])
+            else:
+                full_angles[opt_idx] = opt_angles[i]
+
+        # Fill in mimic joints based on their parent values
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                mimic_angle = full_angles[parent_idx] * mimic_multipliers[i] + mimic_offsets[i]
+                if backend.name == 'jax':
+                    full_angles = full_angles.at[i].set(mimic_angle)
+                else:
+                    full_angles[i] = mimic_angle
+
+        return full_angles
+
     def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold):
         """Create a JIT-compiled solver for given parameters."""
 
-        def loss_fn(angles, target_pos, target_rot):
+        def loss_fn(opt_angles, target_pos, target_rot):
             """Compute weighted pose error."""
-            pos, rot = forward_kinematics_ee(backend, angles, fk_params)
+            # Expand to full angles (including mimic joints)
+            full_angles = _expand_to_full_angles(opt_angles)
+            pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
             pos_err = backend.sum((pos - target_pos) ** 2)
             rot_err = backend.sum((rot - target_rot) ** 2)
             return pos_weight * pos_err + rot_weight * rot_err
 
         loss_and_grad = backend.value_and_grad(loss_fn)
 
-        def solve_single(init_angles, target_pos, target_rot):
+        def solve_single(init_opt_angles, target_pos, target_rot):
             """Solve IK for a single target using scan for efficient JIT."""
 
             def body_fn(carry, _):
                 """Single iteration step."""
-                angles = carry
-                loss, grad = loss_and_grad(angles, target_pos, target_rot)
-                new_angles = angles - learning_rate * grad
-                new_angles = backend.clip(new_angles, joint_limits_lower, joint_limits_upper)
-                return new_angles, loss
+                opt_angles = carry
+                loss, grad = loss_and_grad(opt_angles, target_pos, target_rot)
+                new_opt_angles = opt_angles - learning_rate * grad
+                new_opt_angles = backend.clip(new_opt_angles, joint_limits_lower, joint_limits_upper)
+                return new_opt_angles, loss
 
             # Use scan for efficient JIT compilation
-            final_angles, _ = backend.scan(body_fn, init_angles, None, length=max_iterations)
+            final_opt_angles, _ = backend.scan(body_fn, init_opt_angles, None, length=max_iterations)
 
-            final_pos, _ = forward_kinematics_ee(backend, final_angles, fk_params)
+            # Expand to full angles for final error check
+            final_full_angles = _expand_to_full_angles(final_opt_angles)
+            final_pos, _ = forward_kinematics_ee(backend, final_full_angles, fk_params)
             pos_err = backend.sqrt(backend.sum((final_pos - target_pos) ** 2))
             success = pos_err < pos_threshold
 
-            return final_angles, success, pos_err
+            return final_full_angles, success, pos_err
 
         # Vectorize over batch dimension (only batched args now)
         batched_solve = backend.vmap(solve_single)
 
-        def solve_batch(init_angles, target_positions, target_rotations):
-            return batched_solve(init_angles, target_positions, target_rotations)
+        def solve_batch(init_opt_angles, target_positions, target_rotations):
+            return batched_solve(init_opt_angles, target_positions, target_rotations)
 
         # JIT compile if supported
         return backend.compile(solve_batch)
@@ -890,13 +1037,15 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
         n_targets = target_positions.shape[0]
 
         if initial_angles is None:
-            # Use middle of joint limits as initial guess
+            # Use middle of joint limits as initial guess (for non-mimic joints only)
             init = (joint_limits_lower + joint_limits_upper) / 2
-            initial_angles = backend.stack([init] * n_targets)
+            initial_opt_angles = backend.stack([init] * n_targets)
         else:
             initial_angles = backend.array(initial_angles)
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
+            # Extract non-mimic joint angles
+            initial_opt_angles = initial_angles[:, non_mimic_indices]
 
         # Get or create JIT-compiled solver for these parameters
         cache_key = (max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold)
@@ -907,7 +1056,7 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
 
         solver_fn = _jit_cache[cache_key]
 
-        return solver_fn(initial_angles, target_positions, target_rotations)
+        return solver_fn(initial_opt_angles, target_positions, target_rotations)
 
     # Create FK function for external use
     def fk_fn(angles):
