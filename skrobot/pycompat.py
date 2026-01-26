@@ -10,6 +10,20 @@ else:
     lru_cache = repoze.lru.lru_cache
 
 
+# Ensure CPU backend on Mac before JAX imports
+if platform.system() == 'Darwin':
+    if 'JAX_PLATFORMS' not in os.environ:
+        os.environ['JAX_PLATFORMS'] = 'cpu'
+
+# Check if JAX is available and compatible with current NumPy version
+try:
+    import jax  # noqa: F401
+    HAS_JAX = True
+except (ImportError, AttributeError):
+    # JAX not installed or incompatible with current NumPy version
+    HAS_JAX = False
+
+
 def is_wsl():
     """Check if running in WSL environment."""
     if platform.system() != 'Linux':

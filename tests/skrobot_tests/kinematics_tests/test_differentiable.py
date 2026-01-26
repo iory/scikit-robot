@@ -1,22 +1,8 @@
-import os
-import platform
 import unittest
 
 import numpy as np
 
-
-# Ensure CPU backend on Mac before JAX imports
-if platform.system() == 'Darwin':
-    if 'JAX_PLATFORMS' not in os.environ:
-        os.environ['JAX_PLATFORMS'] = 'cpu'
-
-# Check if JAX is available and compatible with current NumPy version
-try:
-    import jax  # noqa: F401
-    HAS_JAX = True
-except (ImportError, AttributeError):
-    # JAX not installed or incompatible with current NumPy version
-    HAS_JAX = False
+from skrobot.pycompat import HAS_JAX
 
 
 def requires_jax(test_func):
