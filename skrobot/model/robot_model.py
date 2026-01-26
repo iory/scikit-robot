@@ -2473,6 +2473,12 @@ class RobotModel(CascadedLink):
             multiplier = j.mimic.multiplier
             offset = j.mimic.offset
             joint_a.register_mimic_joint(joint_b, multiplier, offset)
+            # Set mimic attribute on the mimic joint for batch IK support
+            joint_b.mimic = {
+                'joint': joint_a,
+                'multiplier': multiplier,
+                'offset': offset
+            }
 
         self._relevance_predicate_table = \
             self._compute_relevance_predicate_table()
