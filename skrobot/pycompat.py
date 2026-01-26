@@ -17,10 +17,19 @@ if platform.system() == 'Darwin':
 
 # Check if JAX is available and compatible with current NumPy version
 try:
-    import jax  # noqa: F401
+    import jax
+    from jax import lax
+    import jax.numpy as jnp
+    # Verify JAX actually works with current NumPy version
+    # JAX may import successfully but fail at runtime with older NumPy
+    # Test lax.scan which triggers np.asarray(..., copy=...) internally
+    def _test_fn(carry, _):
+        return carry + 1, None
+    _ = lax.scan(_test_fn, jnp.array(0.0), None, length=1)
     HAS_JAX = True
-except (ImportError, AttributeError):
-    # JAX not installed or incompatible with current NumPy version
+    del jax, jnp, lax, _test_fn
+except (ImportError, AttributeError, TypeError):
+    # JAX not installed or incompatible with current NumPy/SciPy version
     HAS_JAX = False
 
 
