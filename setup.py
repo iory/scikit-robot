@@ -63,6 +63,9 @@ if (sys.version_info.major > 2):
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         extra_all_requires.append('open3d')
     extra_all_requires.append('fast-simplification')
+    # JAX requires Python 3.10+
+    if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
+        extra_all_requires.extend(['jax', 'jaxlib'])
 
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds

@@ -84,10 +84,10 @@ class BackendRegistry:
             if not kwargs:
                 cls._instance_cache[cache_key] = instance
             return instance
-        except ImportError as e:
+        except (ImportError, AttributeError, TypeError) as e:
             raise ImportError(
                 f"Backend '{name}' is registered but its dependencies "
-                f"are not installed: {e}"
+                f"are not available: {e}"
             )
 
     @classmethod
@@ -129,7 +129,7 @@ class BackendRegistry:
             try:
                 cls.get(name)
                 available.append(name)
-            except ImportError:
+            except (ImportError, AttributeError, TypeError):
                 pass
         return available
 
@@ -138,7 +138,7 @@ class BackendRegistry:
         """Automatically select the best available backend.
 
         Priority order:
-        1. JAX (if available)
+        1. JAX (if available and compatible with NumPy version)
         2. NumPy (always available)
 
         Returns
@@ -146,17 +146,17 @@ class BackendRegistry:
         str
             Name of the selected backend.
         """
-        priority = ['jax', 'numpy']
+        # Check if JAX is truly usable (not just importable)
+        from skrobot.pycompat import HAS_JAX
 
-        for name in priority:
-            if name in cls._backends:
-                try:
-                    cls.get(name)
-                    return name
-                except ImportError:
-                    continue
+        if HAS_JAX and 'jax' in cls._backends:
+            try:
+                cls.get('jax')
+                return 'jax'
+            except (ImportError, AttributeError, TypeError):
+                pass
 
-        # This should never happen since numpy is always available
+        # Fallback to numpy
         return 'numpy'
 
     @classmethod
