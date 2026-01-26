@@ -472,6 +472,24 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
     ee_offset_rot = np.asarray(fk_params['ee_offset_rotation'])
     joint_types = fk_params['joint_types']
 
+    # Handle mimic joints: compute effective joint angles
+    mimic_parent_indices = fk_params.get('mimic_parent_indices')
+    if mimic_parent_indices is not None:
+        mimic_multipliers = np.asarray(fk_params['mimic_multipliers'])
+        mimic_offsets = np.asarray(fk_params['mimic_offsets'])
+
+        # Create effective joint angles array
+        effective_angles = joint_angles_batch.copy()
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                # Mimic joint: angle = parent_angle * multiplier + offset
+                effective_angles[:, i] = (
+                    joint_angles_batch[:, parent_idx] * mimic_multipliers[i]
+                    + mimic_offsets[i]
+                )
+        joint_angles_batch = effective_angles
+
     # Initialize batch arrays
     # current_pos: (batch_size, 3)
     # current_rot: (batch_size, 3, 3)
