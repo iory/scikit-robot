@@ -19,5 +19,6 @@ https://github.com/iory/scikit-robot/tree/main/examples
    signed_distance_functions
    swept_sphere
    batch_ik
+   reachability_map
    grasp_and_pull
    trajectory_interpolation
