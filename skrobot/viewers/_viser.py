@@ -969,6 +969,11 @@ class ViserVisualizer:
             handle.position = link.worldpos()
             handle.wxyz = matrix2quaternion(link.worldrot())
 
+        # Sync all IK targets if IK is enabled
+        if self._enable_ik:
+            for robot_id in self._ik_targets:
+                self._sync_ik_targets(robot_id)
+
     def delete(self, geometry: Union[Link, CascadedLink]):
         if isinstance(geometry, Link):
             links = [geometry]
