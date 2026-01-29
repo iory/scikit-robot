@@ -730,16 +730,6 @@ class ViserVisualizer:
                 continue
             if joint in mimic_joints:
                 continue
-            # Skip joints whose child link has no visual/collision mesh
-            child_link = joint.child_link
-            if child_link is None:
-                continue
-            visual = child_link.visual_mesh
-            collision = child_link.collision_mesh
-            has_visual = visual is not None and (not isinstance(visual, list) or len(visual) > 0)
-            has_collision = collision is not None and (not isinstance(collision, list) or len(collision) > 0)
-            if not has_visual and not has_collision:
-                continue
 
             # Extract group name (everything before last underscore + identifier)
             name_parts = joint.name.rsplit('_', 1)
