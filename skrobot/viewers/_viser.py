@@ -138,6 +138,45 @@ class ViserVisualizer:
 
         return None
 
+    def _find_existing_link_list(self, robot_model: RobotModel, group_name: str):
+        """Find existing link_list in robot model for a given group.
+
+        Parameters
+        ----------
+        robot_model : RobotModel
+            The robot model to search.
+        group_name : str
+            The group name (e.g., 'arm', 'right_arm', 'left_arm', 'head').
+
+        Returns
+        -------
+        list or None
+            The existing link_list if found, None otherwise.
+        """
+        # Map group names to possible limb attribute names
+        limb_attr_map = {
+            'arm': ['arm', 'rarm'],
+            'right_arm': ['rarm', 'right_arm'],
+            'left_arm': ['larm', 'left_arm'],
+            'right_leg': ['rleg', 'right_leg'],
+            'left_leg': ['lleg', 'left_leg'],
+            'head': ['head'],
+            'torso': ['torso'],
+        }
+        limb_attrs = limb_attr_map.get(group_name, [group_name])
+
+        for limb_attr in limb_attrs:
+            try:
+                if hasattr(robot_model, limb_attr):
+                    limb = getattr(robot_model, limb_attr)
+                    if hasattr(limb, 'link_list') and limb.link_list:
+                        return list(limb.link_list)
+            except NotImplementedError:
+                # Some robot models raise NotImplementedError for unimplemented limbs
+                continue
+
+        return None
+
     def _setup_ik_controls(self, robot_model: RobotModel):
         """Set up interactive IK controls for detected end-effectors."""
         from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
@@ -177,15 +216,18 @@ class ViserVisualizer:
         # Create transform control for each group inside IK Controls folder
         with self._ik_controls_folder:
             for group_name, (group_data, ec_info) in ik_groups.items():
-                link_names = group_data.get('links', [])
+                # Try to use existing link_list from robot model (e.g., rarm.link_list)
+                link_list = self._find_existing_link_list(robot_model, group_name)
 
-                # Get link objects
-                link_list = []
-                for name in link_names:
-                    for link in robot_model.link_list:
-                        if link.name == name:
-                            link_list.append(link)
-                            break
+                if link_list is None:
+                    # Fall back to generating from group data
+                    link_names = group_data.get('links', [])
+                    link_list = []
+                    for name in link_names:
+                        for link in robot_model.link_list:
+                            if link.name == name:
+                                link_list.append(link)
+                                break
 
                 if not link_list:
                     continue
@@ -195,7 +237,9 @@ class ViserVisualizer:
 
                 if end_coords is None:
                     # Create end_coords from detected info
-                    parent_link_name = ec_info.get('parent_link', link_names[-1])
+                    link_names = group_data.get('links', [])
+                    default_parent = link_names[-1] if link_names else link_list[-1].name
+                    parent_link_name = ec_info.get('parent_link', default_parent)
                     parent_link = None
                     for link in robot_model.link_list:
                         if link.name == parent_link_name:
@@ -685,16 +729,6 @@ class ViserVisualizer:
             if isinstance(joint, FixedJoint):
                 continue
             if joint in mimic_joints:
-                continue
-            # Skip joints whose child link has no visual/collision mesh
-            child_link = joint.child_link
-            if child_link is None:
-                continue
-            visual = child_link.visual_mesh
-            collision = child_link.collision_mesh
-            has_visual = visual is not None and (not isinstance(visual, list) or len(visual) > 0)
-            has_collision = collision is not None and (not isinstance(collision, list) or len(collision) > 0)
-            if not has_visual and not has_collision:
                 continue
 
             # Extract group name (everything before last underscore + identifier)
