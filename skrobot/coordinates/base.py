@@ -18,7 +18,7 @@ from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
-from skrobot.coordinates.math import rotation_angle
+from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
@@ -1888,7 +1888,7 @@ def wrt(coords, vec):
 def coordinates_distance(c1, c2, c=None):
     if c is None:
         c = c1.transformation(c2)
-    return np.linalg.norm(c.worldpos()), rotation_angle(c.worldrot())[0]
+    return np.linalg.norm(c.worldpos()), rotation_distance(c.worldrot(), np.eye(3), check=False)
 
 
 def slerp_coordinates(c1, c2, t):
