@@ -1742,37 +1742,66 @@ def rotation_angle(mat, return_angular_velocity=False):
     return theta, axis
 
 
-def rotation_distance(mat1, mat2):
-    """Return the distance of rotation matrixes.
+def rotation_distance(R1, R2, check=True):
+    """Return the geodesic distance between two rotations.
+
+    Computes the geodesic distance (shortest path on SO(3)) between
+    two rotation matrices. This is equivalent to the angle of the
+    relative rotation R1.T @ R2.
 
     Parameters
     ----------
-    mat1 : list or numpy.ndarray
-    mat2 : list or numpy.ndarray
-        3x3 matrix
+    R1 : list or numpy.ndarray
+        First rotation matrix (3x3) or axis-angle vector (3,).
+    R2 : list or numpy.ndarray
+        Second rotation matrix (3x3) or axis-angle vector (3,).
+    check : bool, optional
+        If True (default), validate that inputs are proper rotation matrices.
+        Set to False for better performance when inputs are known to be valid.
 
     Returns
     -------
-    diff_theta : float
-        distance of rotation matrixes in radian.
+    angle : float
+        Geodesic distance in radians (0 to pi).
 
     Examples
     --------
-    >>> import numpy
+    >>> import numpy as np
     >>> from skrobot.coordinates.math import rotation_distance
-    >>> rotation_distance(numpy.eye(3), numpy.eye(3))
+    >>> rotation_distance(np.eye(3), np.eye(3))
     0.0
     >>> rotation_distance(
-            numpy.eye(3),
-            numpy.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
+    ...     np.eye(3),
+    ...     np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))
     1.5707963267948966
+    >>> # Also accepts axis-angle vectors
+    >>> rotation_distance([0, 0, 0], [0, 0, np.pi/2])  # doctest: +ELLIPSIS
+    1.57079...
     """
-    mat1 = _check_valid_rotation(mat1)
-    mat2 = _check_valid_rotation(mat2)
-    q1 = matrix2quaternion(mat1)
-    q2 = matrix2quaternion(mat2)
-    diff_theta = quaternion_distance(q1, q2)
-    return diff_theta
+    R1 = np.asarray(R1)
+    R2 = np.asarray(R2)
+
+    # If inputs are axis-angle vectors (shape (3,)), convert to rotation matrix
+    if R1.shape == (3,):
+        R1 = axis_angle_vector_to_rotation_matrix(R1)
+    elif check:
+        R1 = _check_valid_rotation(R1)
+
+    if R2.shape == (3,):
+        R2 = axis_angle_vector_to_rotation_matrix(R2)
+    elif check:
+        R2 = _check_valid_rotation(R2)
+
+    # Relative rotation: R_rel = R1^T @ R2
+    R_rel = R1.T @ R2
+
+    # Geodesic distance = angle of relative rotation
+    # angle = arccos((trace(R) - 1) / 2)
+    trace = np.trace(R_rel)
+    # Clip to handle numerical errors
+    angle = np.arccos(np.clip((trace - 1) / 2, -1, 1))
+
+    return float(angle)
 
 
 def quaternion_multiply(quaternion1, quaternion0):
@@ -2438,8 +2467,97 @@ def invert_yaw_pitch_roll(yaw=0.0, pitch=0.0, roll=0.0):
     return a, b, c
 
 
+def look_at_rotation(camera_pos, target=None, up=None, return_matrix=True):
+    """Compute rotation for a camera looking at a target point.
+
+    This function computes the rotation that orients a camera (or any object)
+    to look at a target point. Uses OpenCV camera convention where:
+    - Camera looks along +Z axis
+    - X axis points right
+    - Y axis points down
+
+    Parameters
+    ----------
+    camera_pos : numpy.ndarray or list
+        Camera position in world frame (3,).
+    target : numpy.ndarray or list, optional
+        Target point to look at in world frame (3,).
+        Default is origin [0, 0, 0].
+    up : numpy.ndarray or list, optional
+        World up vector (3,). Default is [0, 0, 1] (Z-up world).
+    return_matrix : bool, optional
+        If True (default), return 3x3 rotation matrix.
+        If False, return axis-angle vector (3,).
+
+    Returns
+    -------
+    rotation : numpy.ndarray
+        Rotation matrix (3, 3) if return_matrix=True,
+        otherwise axis-angle vector (3,).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import look_at_rotation
+    >>> R = look_at_rotation([1, 0, 0], [0, 0, 0])  # Camera at X=1, looking at origin
+    >>> R.shape
+    (3, 3)
+    >>> aa = look_at_rotation([1, 0, 0], [0, 0, 0], return_matrix=False)
+    >>> aa.shape
+    (3,)
+    """
+    camera_pos = np.asarray(camera_pos, dtype=np.float64)
+    if target is None:
+        target = np.zeros(3)
+    else:
+        target = np.asarray(target, dtype=np.float64)
+
+    if up is None:
+        up = np.array([0.0, 0.0, 1.0])
+    else:
+        up = np.asarray(up, dtype=np.float64)
+
+    # Direction from camera to target (where camera should look)
+    look_dir = target - camera_pos
+    look_norm = np.linalg.norm(look_dir)
+    if look_norm < 1e-8:
+        # Camera and target at same position, return identity
+        if return_matrix:
+            return np.eye(3)
+        return np.zeros(3)
+    look_dir = look_dir / look_norm
+
+    # For OpenCV convention: camera looks along +Z, so R[2, :] = look_dir
+    cam_z = look_dir
+
+    # If look direction is parallel to up vector, use alternative up
+    if abs(np.dot(cam_z, up)) > 0.99:
+        up = np.array([0.0, 1.0, 0.0])
+
+    # Camera X axis (right) = look_dir × up (for right-hand system)
+    cam_x = np.cross(cam_z, up)
+    cam_x_norm = np.linalg.norm(cam_x)
+    if cam_x_norm < 1e-8:
+        # Fallback if cross product is zero
+        up = np.array([1.0, 0.0, 0.0])
+        cam_x = np.cross(cam_z, up)
+        cam_x_norm = np.linalg.norm(cam_x)
+    cam_x = cam_x / cam_x_norm
+
+    # Camera Y axis (down in OpenCV) = cam_z × cam_x
+    cam_y = np.cross(cam_z, cam_x)
+
+    # R's rows are camera axes in world coordinates
+    R = np.vstack([cam_x, cam_y, cam_z])
+
+    if return_matrix:
+        return R
+    return rotation_matrix_to_axis_angle_vector(R)
+
+
 inverse_rodrigues = rotation_angle
 quat_from_rotation_matrix = matrix2quaternion
+rotation_geodesic_distance = rotation_distance
 quat_from_rpy = rpy2quaternion
 rotation_matrix_from_quat = quaternion2matrix
 rpy_from_quat = quaternion2rpy

@@ -29,7 +29,7 @@ from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_inverse
 from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import rodrigues
-from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
+from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_target_joint_dimension
@@ -3307,9 +3307,8 @@ class RobotModel(CascadedLink):
                 current_rot_matrix = quaternion2matrix(current_poses[i, 3:])
 
                 # Calculate error with original target
-                original_error_matrix = np.matmul(current_rot_matrix.T, target_rot_matrix)
-                original_error = rotation_matrix_to_axis_angle_vector(original_error_matrix)
-                original_error_norm = np.linalg.norm(original_error)
+                original_error_norm = rotation_distance(
+                    current_rot_matrix, target_rot_matrix, check=False)
 
                 # Calculate error with mirrored target (180° rotation around axis)
                 if axis_char == 'x':
@@ -3320,9 +3319,8 @@ class RobotModel(CascadedLink):
                     mirror_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
 
                 mirrored_target_rot = np.matmul(target_rot_matrix, mirror_matrix)
-                mirrored_error_matrix = np.matmul(current_rot_matrix.T, mirrored_target_rot)
-                mirrored_error = rotation_matrix_to_axis_angle_vector(mirrored_error_matrix)
-                mirrored_error_norm = np.linalg.norm(mirrored_error)
+                mirrored_error_norm = rotation_distance(
+                    current_rot_matrix, mirrored_target_rot, check=False)
 
                 # Use the target orientation that gives smaller error
                 if mirrored_error_norm < original_error_norm:
