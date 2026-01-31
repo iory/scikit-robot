@@ -204,8 +204,8 @@ Get Point Cloud for Visualization
         max_points=50000
     )
 
-Using with ViserVisualizer
---------------------------
+Using with ViserViewer
+----------------------
 
 .. code-block:: python
 
@@ -216,7 +216,7 @@ Using with ViserVisualizer
     positions, colors = rmap.get_point_cloud(color_by='reachability_index')
 
     # Create viewer
-    viewer = skrobot.viewers.ViserVisualizer()
+    viewer = skrobot.viewers.ViserViewer()
     viewer.add(robot)
 
     # Create sphere mesh for visualization

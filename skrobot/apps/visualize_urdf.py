@@ -37,7 +37,7 @@ def main():
     elif args.viewer == 'pyrender':
         viewer = skrobot.viewers.PyrenderViewer(update_interval=0.1)
     elif args.viewer == 'viser':
-        viewer = skrobot.viewers.ViserVisualizer(enable_ik=True)
+        viewer = skrobot.viewers.ViserViewer(enable_ik=True)
 
     # Load robot model from ROS parameter or file
     if args.ros is not None:
