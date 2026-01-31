@@ -215,21 +215,21 @@ class CascadedLink(CascadedCoords):
             elif mask_sum == 3:
                 rotation_axis = True
             elif mask_sum == 2:
-                # Two axes constrained
+                # Two axes constrained -> use 2-char legacy format
                 if np.array_equal(mask_vec, [0, 1, 1]):
-                    rotation_axis = 'x'
-                elif np.array_equal(mask_vec, [1, 0, 1]):
-                    rotation_axis = 'y'
-                elif np.array_equal(mask_vec, [1, 1, 0]):
-                    rotation_axis = 'z'
-            elif mask_sum == 1:
-                # One axis constrained
-                if np.array_equal(mask_vec, [1, 0, 0]):
                     rotation_axis = 'yz'
-                elif np.array_equal(mask_vec, [0, 1, 0]):
+                elif np.array_equal(mask_vec, [1, 0, 1]):
                     rotation_axis = 'zx'
-                elif np.array_equal(mask_vec, [0, 0, 1]):
+                elif np.array_equal(mask_vec, [1, 1, 0]):
                     rotation_axis = 'xy'
+            elif mask_sum == 1:
+                # One axis constrained -> use 1-char legacy format
+                if np.array_equal(mask_vec, [1, 0, 0]):
+                    rotation_axis = 'x'
+                elif np.array_equal(mask_vec, [0, 1, 0]):
+                    rotation_axis = 'y'
+                elif np.array_equal(mask_vec, [0, 0, 1]):
+                    rotation_axis = 'z'
 
         return translation_axis, rotation_axis
 

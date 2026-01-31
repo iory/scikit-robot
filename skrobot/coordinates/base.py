@@ -1025,28 +1025,28 @@ class Coordinates(object):
                     effective_rotation_axis = True
                     use_legacy = True
                 elif mask_sum == 2:
-                    # Two axes constrained -> legacy single axis notation
-                    # mask [0,1,1] -> constrain y,z -> legacy 'x'
-                    # mask [1,0,1] -> constrain x,z -> legacy 'y'
-                    # mask [1,1,0] -> constrain x,y -> legacy 'z'
+                    # Two axes constrained -> legacy two-axis notation
+                    # mask [0,1,1] -> constrain y,z -> legacy 'yz'
+                    # mask [1,0,1] -> constrain x,z -> legacy 'zx'
+                    # mask [1,1,0] -> constrain x,y -> legacy 'xy'
                     if np.array_equal(mask_vec, [0, 1, 1]):
-                        effective_rotation_axis = 'x'
+                        effective_rotation_axis = 'yz'
                     elif np.array_equal(mask_vec, [1, 0, 1]):
-                        effective_rotation_axis = 'y'
+                        effective_rotation_axis = 'zx'
                     elif np.array_equal(mask_vec, [1, 1, 0]):
-                        effective_rotation_axis = 'z'
+                        effective_rotation_axis = 'xy'
                     use_legacy = True
                 elif mask_sum == 1:
-                    # One axis constrained -> legacy two-axis notation
-                    # mask [1,0,0] -> constrain x -> legacy 'yz'
-                    # mask [0,1,0] -> constrain y -> legacy 'xz' or 'zx'
-                    # mask [0,0,1] -> constrain z -> legacy 'xy'
+                    # One axis constrained -> legacy single-axis notation
+                    # mask [1,0,0] -> constrain x -> legacy 'x'
+                    # mask [0,1,0] -> constrain y -> legacy 'y'
+                    # mask [0,0,1] -> constrain z -> legacy 'z'
                     if np.array_equal(mask_vec, [1, 0, 0]):
-                        effective_rotation_axis = 'yz'
+                        effective_rotation_axis = 'x'
                     elif np.array_equal(mask_vec, [0, 1, 0]):
-                        effective_rotation_axis = 'zx'
+                        effective_rotation_axis = 'y'
                     elif np.array_equal(mask_vec, [0, 0, 1]):
-                        effective_rotation_axis = 'xy'
+                        effective_rotation_axis = 'z'
                     use_legacy = True
         else:
             # Default: constrain all axes
