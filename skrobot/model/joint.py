@@ -461,16 +461,16 @@ class FixedJoint(Joint):
 
 def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords,
-                             move_target, transform_coords, rotation_axis,
-                             translation_axis):
+                             move_target, transform_coords, rotation_mask,
+                             position_mask):
     j_rot = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, transform_coords)
     p_diff = np.matmul(transform_coords.worldrot().T,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = cross_product(j_rot, p_diff)
-    j_translation = calc_dif_with_axis(j_translation, translation_axis)
+    j_translation = calc_dif_with_axis(j_translation, position_mask)
     jacobian[row:row + len(j_translation), column] = j_translation
-    j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
+    j_rotation = calc_dif_with_axis(j_rot, rotation_mask)
     jacobian[row + len(j_translation):
              row + len(j_translation) + len(j_rotation),
              column] = j_rotation
@@ -481,13 +481,13 @@ def calc_jacobian_linear(jacobian, row, column,
                          joint, paxis, child_link,
                          world_default_coords,
                          move_target, transform_coords,
-                         rotation_axis, translation_axis):
+                         rotation_mask, position_mask):
     j_trans = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, transform_coords)
     j_rot = np.array([0, 0, 0])
-    j_trans = calc_dif_with_axis(j_trans, translation_axis)
+    j_trans = calc_dif_with_axis(j_trans, position_mask)
     jacobian[row:row + len(j_trans), column] = j_trans
-    j_rot = calc_dif_with_axis(j_rot, rotation_axis)
+    j_rot = calc_dif_with_axis(j_rot, rotation_mask)
     jacobian[row + len(j_trans):
              row + len(j_trans) + len(j_rot),
              column] = j_rot
@@ -661,22 +661,22 @@ class OmniWheelJoint(Joint):
                       joint, paxis, child_link,
                       world_default_coords,
                       move_target, transform_coords,
-                      rotation_axis, translation_axis):
+                      rotation_mask, position_mask):
         calc_jacobian_linear(jacobian, row, column + 0,
                              joint, [1, 0, 0], child_link,
                              world_default_coords,
                              move_target, transform_coords,
-                             rotation_axis, translation_axis)
+                             rotation_mask, position_mask)
         calc_jacobian_linear(jacobian, row, column + 1,
                              joint, [0, 1, 0], child_link,
                              world_default_coords,
                              move_target, transform_coords,
-                             rotation_axis, translation_axis)
+                             rotation_mask, position_mask)
         calc_jacobian_rotational(jacobian, row, column + 2,
                                  joint, [0, 0, 1], child_link,
                                  world_default_coords,
                                  move_target, transform_coords,
-                                 rotation_axis, translation_axis)
+                                 rotation_mask, position_mask)
         return jacobian
 
 

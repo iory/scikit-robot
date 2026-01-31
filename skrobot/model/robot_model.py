@@ -148,10 +148,12 @@ class CascadedLink(CascadedCoords):
 
         Returns
         -------
-        translation_axis : str, bool, or None
-            Effective translation_axis for internal use.
-        rotation_axis : str, bool, or None
-            Effective rotation_axis for internal use.
+        effective_translation_axis : str, bool, or None
+            Effective translation_axis value for internal use
+            (converted from position_mask if provided).
+        effective_rotation_axis : str, bool, or None
+            Effective rotation_axis value for internal use
+            (converted from rotation_mask if provided).
         """
         # Position
         if position_mask is not None and translation_axis is not None:

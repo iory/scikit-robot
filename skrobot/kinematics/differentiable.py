@@ -1291,8 +1291,8 @@ def solve_ik_scipy(
     target_coords,
     link_list,
     move_target,
-    rotation_axis=True,
-    translation_axis=True,
+    rotation_mask=True,
+    position_mask=True,
     max_iterations=100,
     pos_threshold=0.001,
     rot_threshold=0.017,
@@ -1312,9 +1312,9 @@ def solve_ik_scipy(
         List of links in the kinematic chain.
     move_target : CascadedCoords
         End effector coordinates.
-    rotation_axis : bool
+    rotation_mask : bool
         Whether to constrain rotation.
-    translation_axis : bool
+    position_mask : bool
         Whether to constrain translation.
     max_iterations : int
         Maximum iterations.
@@ -1367,7 +1367,7 @@ def solve_ik_scipy(
         pos_err = np.sum((current_pos - target_pos) ** 2)
 
         # Rotation error
-        if rotation_axis:
+        if rotation_mask:
             rot_err = np.sum((current_rot - target_rot) ** 2)
         else:
             rot_err = 0.0
