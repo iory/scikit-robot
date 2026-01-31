@@ -101,7 +101,7 @@ Set target_coords.
 
 For detailed information about inverse kinematics including:
 
-- Axis constraints (``rotation_axis`` and ``translation_axis`` parameters)
+- Axis constraints (``position_mask`` and ``rotation_mask`` parameters)
 - Batch inverse kinematics for multiple poses
 - Visual examples of different constraint types
 - Advanced features and performance optimization
