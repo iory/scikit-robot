@@ -24,8 +24,8 @@ from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
 
 
-class ViserVisualizer:
-    """Viser-based 3D visualizer for scikit-robot.
+class ViserViewer:
+    """Viser-based 3D viewer for scikit-robot.
 
     Parameters
     ----------

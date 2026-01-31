@@ -215,11 +215,11 @@ Collision/Visual mesh toggle example:
         transparent_background=True  # Render with transparent background
     )
 
-ViserVisualizer
----------------
+ViserViewer
+-----------
 
 **Description:**
-  The ``ViserVisualizer`` is a web-based 3D viewer built on the `Viser <https://viser.studio/>`_ library. It provides an interactive browser interface with GUI controls for manipulating robot joint angles and real-time inverse kinematics (IK).
+  The ``ViserViewer`` is a web-based 3D viewer built on the `Viser <https://viser.studio/>`_ library. It provides an interactive browser interface with GUI controls for manipulating robot joint angles and real-time inverse kinematics (IK).
 
 **Key Functionalities:**
 
@@ -253,11 +253,11 @@ The following video demonstrates the interactive IK feature, where dragging the 
 
 .. code-block:: python
 
-    from skrobot.viewers import ViserVisualizer
+    from skrobot.viewers import ViserViewer
     from skrobot.models import Panda
 
     # Create viewer with interactive IK enabled
-    viewer = ViserVisualizer(enable_ik=True)
+    viewer = ViserViewer(enable_ik=True)
 
     # Load and add robot model
     robot = Panda()

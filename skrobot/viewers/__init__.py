@@ -68,7 +68,10 @@ except ImportError:
         pass
 
 try:
-    from ._viser import ViserVisualizer
+    from ._viser import ViserViewer
 except ImportError:
-    class ViserVisualizer(DummyViewer):
+    class ViserViewer(DummyViewer):
         pass
+
+# Backwards compatibility alias
+ViserVisualizer = ViserViewer

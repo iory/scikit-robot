@@ -12,7 +12,7 @@ Scikit-robot supports multiple visualization backends:
 - **TrimeshSceneViewer**: Lightweight, fast rendering
 - **PyrenderViewer**: OpenGL-based, smoother rendering
 - **JupyterNotebookViewer**: Browser-based, works in Jupyter and Google Colab
-- **ViserVisualizer**: Web-based viewer with interactive joint sliders
+- **ViserViewer**: Web-based viewer with interactive joint sliders
 
 Basic usage:
 
@@ -26,19 +26,19 @@ Basic usage:
    viewer.add(robot)
    viewer.show()
 
-ViserVisualizer
----------------
+ViserViewer
+-----------
 
-ViserVisualizer provides a web-based 3D visualization that opens in your browser.
+ViserViewer provides a web-based 3D visualization that opens in your browser.
 It automatically generates GUI sliders for each joint, allowing real-time manipulation of joint angles.
 
 .. code-block:: python
 
    from skrobot.models import PR2
-   from skrobot.viewers import ViserVisualizer
+   from skrobot.viewers import ViserViewer
 
    robot = PR2()
-   viewer = ViserVisualizer()
+   viewer = ViserViewer()
    viewer.add(robot)
    viewer.show()  # Opens browser automatically
 
@@ -51,7 +51,7 @@ It automatically generates GUI sliders for each joint, allowing real-time manipu
 .. image:: ../../image/viser-viewer.jpg
    :width: 600px
    :align: center
-   :alt: ViserVisualizer with joint angle sliders
+   :alt: ViserViewer with joint angle sliders
 
 Features:
 
