@@ -1239,3 +1239,291 @@ class TestRobotModel(unittest.TestCase):
         self.assertIsNone(pr2.left_leg)
         self.assertIsNone(fetch.right_leg)
         self.assertIsNone(fetch.left_leg)
+
+    # Mask-based IK API tests (position_mask, rotation_mask, rotation_mirror)
+
+    def test_normalize_mask(self):
+        """Test normalize_mask function."""
+        from skrobot.coordinates.math import normalize_mask
+        testing.assert_array_equal(normalize_mask(True), [1, 1, 1])
+        testing.assert_array_equal(normalize_mask(False), [0, 0, 0])
+        testing.assert_array_equal(normalize_mask(None), [0, 0, 0])
+        testing.assert_array_equal(normalize_mask('x'), [1, 0, 0])
+        testing.assert_array_equal(normalize_mask('y'), [0, 1, 0])
+        testing.assert_array_equal(normalize_mask('z'), [0, 0, 1])
+        testing.assert_array_equal(normalize_mask('xy'), [1, 1, 0])
+        testing.assert_array_equal(normalize_mask('yz'), [0, 1, 1])
+        testing.assert_array_equal(normalize_mask('xz'), [1, 0, 1])
+        testing.assert_array_equal(normalize_mask('xyz'), [1, 1, 1])
+        testing.assert_array_equal(normalize_mask([1, 0, 1]), [1, 0, 1])
+
+        with self.assertRaises(ValueError):
+            normalize_mask('invalid')
+
+    def test_convert_legacy_axis_to_mask(self):
+        """Test convert_legacy_axis_to_mask function."""
+        from skrobot.coordinates.math import convert_legacy_axis_to_mask
+
+        # Test basic conversions
+        mask, mirror = convert_legacy_axis_to_mask(True)
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask(False)
+        testing.assert_array_equal(mask, [0, 0, 0])
+        self.assertIsNone(mirror)
+
+        # Legacy 'x' means ignore x -> constrain y,z
+        mask, mirror = convert_legacy_axis_to_mask('x')
+        testing.assert_array_equal(mask, [0, 1, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask('y')
+        testing.assert_array_equal(mask, [1, 0, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask('z')
+        testing.assert_array_equal(mask, [1, 1, 0])
+        self.assertIsNone(mirror)
+
+        # Legacy 'xy' means ignore x,y -> constrain z only
+        mask, mirror = convert_legacy_axis_to_mask('xy')
+        testing.assert_array_equal(mask, [0, 0, 1])
+        self.assertIsNone(mirror)
+
+        # Legacy mirror modes
+        mask, mirror = convert_legacy_axis_to_mask('xm')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'x')
+
+        mask, mirror = convert_legacy_axis_to_mask('ym')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'y')
+
+        mask, mirror = convert_legacy_axis_to_mask('zm')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'z')
+
+    def test_calc_dif_with_mask(self):
+        """Test calc_dif_with_mask function."""
+        from skrobot.model.joint import calc_dif_with_mask
+        dif = np.array([1, 2, 3])
+
+        # Constrain all axes
+        testing.assert_array_equal(
+            calc_dif_with_mask(dif, np.array([1, 1, 1])), [1, 2, 3])
+        # Constrain none
+        testing.assert_array_equal(
+            calc_dif_with_mask(dif, np.array([0, 0, 0])), [])
+        # Constrain x only
+        testing.assert_array_equal(
+            calc_dif_with_mask(dif, np.array([1, 0, 0])), [1])
+        # Constrain y,z
+        testing.assert_array_equal(
+            calc_dif_with_mask(dif, np.array([0, 1, 1])), [2, 3])
+        # Constrain x,z
+        testing.assert_array_equal(
+            calc_dif_with_mask(dif, np.array([1, 0, 1])), [1, 3])
+
+        # Mirror mode returns full vector
+        result = calc_dif_with_mask(dif, np.array([1, 1, 1]), mirror_axis='x')
+        testing.assert_array_equal(result, [1, 2, 3])
+
+    def test_difference_position_with_position_mask(self):
+        """Test difference_position with position_mask parameter."""
+        from skrobot.coordinates import Coordinates
+
+        c1 = Coordinates().translate([0.0, 0.0, 0.0])
+        c2 = Coordinates().translate([1.0, 2.0, 3.0])
+
+        # Default (all constrained)
+        dif = c1.difference_position(c2)
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 3.0])
+
+        # Constrain all
+        dif = c1.difference_position(c2, position_mask=True)
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 3.0])
+
+        # Constrain none
+        dif = c1.difference_position(c2, position_mask=False)
+        testing.assert_array_almost_equal(dif, [0.0, 0.0, 0.0])
+
+        # Constrain z only
+        dif = c1.difference_position(c2, position_mask='z')
+        testing.assert_array_almost_equal(dif, [0.0, 0.0, 3.0])
+
+        # Constrain x,y only
+        dif = c1.difference_position(c2, position_mask='xy')
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 0.0])
+
+        # Constrain using array
+        dif = c1.difference_position(c2, position_mask=[1, 0, 1])
+        testing.assert_array_almost_equal(dif, [1.0, 0.0, 3.0])
+
+    def test_difference_position_deprecation_warning(self):
+        """Test that translation_axis emits DeprecationWarning."""
+        import warnings
+
+        from skrobot.coordinates import Coordinates
+
+        c1 = Coordinates()
+        c2 = Coordinates().translate([1.0, 2.0, 3.0])
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            c1.difference_position(c2, translation_axis=True)
+            self.assertTrue(
+                any(issubclass(x.category, DeprecationWarning) for x in w))
+
+    def test_difference_position_conflict_error(self):
+        """Test that specifying both APIs raises ValueError."""
+        from skrobot.coordinates import Coordinates
+
+        c1 = Coordinates()
+        c2 = Coordinates().translate([1.0, 2.0, 3.0])
+
+        with self.assertRaises(ValueError):
+            c1.difference_position(c2, position_mask=True, translation_axis=True)
+
+    def test_difference_rotation_with_rotation_mask(self):
+        """Test difference_rotation with rotation_mask parameter."""
+        from skrobot.coordinates import Coordinates
+        from skrobot.coordinates.math import rpy_matrix
+
+        c1 = Coordinates()
+        c2 = Coordinates(rot=rpy_matrix(np.pi / 4, np.pi / 6, np.pi / 8))
+
+        # Default (all constrained)
+        dif_default = c1.difference_rotation(c2)
+        self.assertEqual(dif_default.shape, (3,))
+
+        # Constrain all
+        dif_all = c1.difference_rotation(c2, rotation_mask=True)
+        testing.assert_array_almost_equal(dif_default, dif_all)
+
+        # Constrain none
+        dif_none = c1.difference_rotation(c2, rotation_mask=False)
+        testing.assert_array_almost_equal(dif_none, [0, 0, 0])
+
+    def test_difference_rotation_deprecation_warning(self):
+        """Test that rotation_axis emits DeprecationWarning."""
+        import warnings
+
+        from skrobot.coordinates import Coordinates
+        from skrobot.coordinates.math import rpy_matrix
+
+        c1 = Coordinates()
+        c2 = Coordinates(rot=rpy_matrix(np.pi / 4, 0, 0))
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            c1.difference_rotation(c2, rotation_axis=True)
+            self.assertTrue(
+                any(issubclass(x.category, DeprecationWarning) for x in w))
+
+    def test_difference_rotation_conflict_error(self):
+        """Test that specifying both APIs raises ValueError."""
+        from skrobot.coordinates import Coordinates
+
+        c1 = Coordinates()
+        c2 = Coordinates()
+
+        with self.assertRaises(ValueError):
+            c1.difference_rotation(c2, rotation_mask=True, rotation_axis=True)
+
+    def test_inverse_kinematics_with_mask(self):
+        """Test inverse_kinematics with position_mask and rotation_mask."""
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
+            [0.05, 0.0, 0.0], 'local')
+
+        kuka.reset_manip_pose()
+        result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=kuka.rarm.end_coords,
+            link_list=kuka.rarm.link_list,
+            position_mask=True,
+            rotation_mask=True,
+            stop=50)
+        self.assertIsNot(result, False)
+
+        # Constrain only x,y position
+        kuka.reset_manip_pose()
+        result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=kuka.rarm.end_coords,
+            link_list=kuka.rarm.link_list,
+            position_mask='xy',
+            rotation_mask=False,
+            stop=50)
+        self.assertIsNot(result, False)
+
+    def test_inverse_kinematics_legacy_compatibility(self):
+        """Test that legacy API still works with deprecation warning."""
+        import warnings
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
+            [0.02, 0.0, 0.0], 'local')
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            kuka.reset_manip_pose()
+            result = kuka.inverse_kinematics(
+                target_coords,
+                move_target=kuka.rarm.end_coords,
+                link_list=kuka.rarm.link_list,
+                translation_axis=True,
+                rotation_axis=True,
+                stop=50)
+            self.assertTrue(
+                any(issubclass(x.category, DeprecationWarning) for x in w))
+            self.assertIsNot(result, False)
+
+    def test_inverse_kinematics_conflict_error(self):
+        """Test that specifying both APIs raises ValueError."""
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+
+        target_coords = kuka.rarm.end_coords.copy_worldcoords()
+
+        with self.assertRaises(ValueError):
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=kuka.rarm.end_coords,
+                link_list=kuka.rarm.link_list,
+                position_mask=True,
+                translation_axis=True,
+                stop=10)
+
+        with self.assertRaises(ValueError):
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=kuka.rarm.end_coords,
+                link_list=kuka.rarm.link_list,
+                rotation_mask=True,
+                rotation_axis=True,
+                stop=10)
+
+    def test_batch_inverse_kinematics_with_mask(self):
+        """Test batch_inverse_kinematics with position_mask and rotation_mask."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [
+            skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])
+        ]
+
+        solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            position_mask=True,
+            rotation_mask='xy',  # constrain x,y rotation only
+            stop=30,
+            attempts_per_pose=1
+        )
+        self.assertEqual(len(solutions), 1)
+        self.assertEqual(len(success_flags), 1)
