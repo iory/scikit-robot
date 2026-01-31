@@ -3039,12 +3039,13 @@ class RobotModel(CascadedLink):
                     # For mirror constraints (xm, ym, zm), don't zero out any translation errors
                     # since we want to converge on the mirrored solution
                     if trans_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in trans_axis.lower():
+                        # Standard axis constraints - axis string specifies what to IGNORE
+                        # So we zero out the errors for axes IN the string (they're ignored)
+                        if 'x' in trans_axis.lower():
                             constrained_pose_error[0] = 0
-                        if 'y' not in trans_axis.lower():
+                        if 'y' in trans_axis.lower():
                             constrained_pose_error[1] = 0
-                        if 'z' not in trans_axis.lower():
+                        if 'z' in trans_axis.lower():
                             constrained_pose_error[2] = 0
 
                 # Handle rotation constraints (indices 3-5)
@@ -3080,11 +3081,12 @@ class RobotModel(CascadedLink):
                             constrained_pose_error[3:] = dif_rot
                         else:
                             # Multi-axis constraints (xy, xz, yz, xyz)
-                            if 'x' not in rot_axis.lower():
+                            # axis string specifies what to IGNORE, so zero out those
+                            if 'x' in rot_axis.lower():
                                 constrained_pose_error[3] = 0
-                            if 'y' not in rot_axis.lower():
+                            if 'y' in rot_axis.lower():
                                 constrained_pose_error[4] = 0
-                            if 'z' not in rot_axis.lower():
+                            if 'z' in rot_axis.lower():
                                 constrained_pose_error[5] = 0
 
                 # Apply translation tolerance in target's local frame
@@ -3447,32 +3449,38 @@ class RobotModel(CascadedLink):
                         active_rows.extend([0, 1, 2])  # All rotation DOF
                     else:
                         # Multi-axis constraints like 'xy', 'xyz', etc.
-                        if 'x' in rot_axis.lower():
+                        # Note: rotation_axis specifies which axes to IGNORE (legacy semantics)
+                        # So we add the axes NOT in the string
+                        if 'x' not in rot_axis.lower():
                             active_rows.append(0)
-                        if 'y' in rot_axis.lower():
+                        if 'y' not in rot_axis.lower():
                             active_rows.append(1)
-                        if 'z' in rot_axis.lower():
+                        if 'z' not in rot_axis.lower():
                             active_rows.append(2)
             # If rot_axis is False, no rotation rows are added
 
             # Handle translation constraints
+            # Note: translation_axis specifies which axes to IGNORE (legacy semantics)
+            # e.g., translation_axis='yz' means ignore y,z and constrain x only
             trans_axis = translation_axis_list[i]
             if trans_axis is True:
                 active_rows.extend([3, 4, 5])  # All translation DOF
+            elif trans_axis is False:
+                pass  # No translation rows added
             elif isinstance(trans_axis, str):
                 # Handle mirror constraints (xm, ym, zm) for translation
                 if trans_axis.lower() in ['xm', 'ym', 'zm']:
                     # For translation mirror constraints, allow all translation DOF
                     active_rows.extend([3, 4, 5])
                 else:
-                    # Standard axis constraints
-                    if 'x' in trans_axis.lower():
+                    # Standard axis constraints - axis string specifies what to IGNORE
+                    # So we add the axes NOT in the string
+                    if 'x' not in trans_axis.lower():
                         active_rows.append(3)
-                    if 'y' in trans_axis.lower():
+                    if 'y' not in trans_axis.lower():
                         active_rows.append(4)
-                    if 'z' in trans_axis.lower():
+                    if 'z' not in trans_axis.lower():
                         active_rows.append(5)
-            # If trans_axis is False, no translation rows are added
 
             # Extract only the active rows (exclude unwanted constraints)
             if len(active_rows) > 0:
