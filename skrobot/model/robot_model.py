@@ -3314,13 +3314,33 @@ class RobotModel(CascadedLink):
                     # For mirror constraints (xm, ym, zm), don't zero out any rotation errors
                     # since we want to converge on the mirrored solution
                     if rot_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in rot_axis.lower():
-                            constrained_pose_error[3] = 0
-                        if 'y' not in rot_axis.lower():
-                            constrained_pose_error[4] = 0
-                        if 'z' not in rot_axis.lower():
-                            constrained_pose_error[5] = 0
+                        # For single axis constraints (e.g., 'x'), use difference_rotation
+                        # to correctly calculate the axis direction error
+                        if rot_axis.lower() in ['x', 'y', 'z']:
+                            # Create coordinate objects for accurate error calculation
+                            current_coord = Coordinates()
+                            current_coord.newcoords(
+                                quaternion2matrix(current_poses_updated[i, 3:]),
+                                current_poses_updated[i, :3])
+                            target_coord = Coordinates()
+                            target_coord.newcoords(
+                                quaternion2matrix(target_poses_unsolved[i, 3:]),
+                                target_poses_unsolved[i, :3])
+                            # Calculate rotation error using same method as regular IK
+                            with warnings.catch_warnings():
+                                warnings.simplefilter('ignore', DeprecationWarning)
+                                dif_rot = current_coord.difference_rotation(
+                                    target_coord, rotation_axis=rot_axis.lower())
+                            # Use the magnitude of dif_rot as the rotation error
+                            constrained_pose_error[3:] = dif_rot
+                        else:
+                            # Multi-axis constraints (xy, xz, yz, xyz)
+                            if 'x' not in rot_axis.lower():
+                                constrained_pose_error[3] = 0
+                            if 'y' not in rot_axis.lower():
+                                constrained_pose_error[4] = 0
+                            if 'z' not in rot_axis.lower():
+                                constrained_pose_error[5] = 0
 
                 # Apply translation tolerance in target's local frame
                 # Note: tol > 0 check ensures 0.0 means "no special tolerance"
@@ -3675,14 +3695,11 @@ class RobotModel(CascadedLink):
                     # For mirror constraints, allow all rotation DOF but we'll handle mirroring in error calculation
                     active_rows.extend([0, 1, 2])
                 else:
-                    # For single axis constraints, only use the relevant rotation DOF
-                    # This matches the behavior of regular IK
-                    if rot_axis.lower() == 'x':
-                        active_rows.append(0)  # Only x rotation DOF
-                    elif rot_axis.lower() == 'y':
-                        active_rows.append(1)  # Only y rotation DOF
-                    elif rot_axis.lower() == 'z':
-                        active_rows.append(2)  # Only z rotation DOF
+                    # For single axis direction constraints (e.g., rotation_axis='x'):
+                    # The adjusted_target is computed to match only the x-axis direction
+                    # Use all 3 DOFs since the error is computed in RPY which has cross-terms
+                    if rot_axis.lower() in ['x', 'y', 'z']:
+                        active_rows.extend([0, 1, 2])  # All rotation DOF
                     else:
                         # Multi-axis constraints like 'xy', 'xyz', etc.
                         if 'x' in rot_axis.lower():
