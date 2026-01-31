@@ -8,10 +8,12 @@ from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import _check_valid_translation
 from skrobot.coordinates.math import angle_between_vectors
+from skrobot.coordinates.math import convert_legacy_axis_to_mask
 from skrobot.coordinates.math import convert_to_axis_vector
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion_multiply
@@ -866,22 +868,32 @@ class Coordinates(object):
         return self.rotate_vector(ax)
 
     def difference_position(self, coords,
-                            translation_axis=True):
+                            translation_axis=None,
+                            position_mask=None):
         """Return differences in position of given coords.
 
         Parameters
         ----------
         coords : skrobot.coordinates.Coordinates
             given coordinates
-        translation_axis : str or bool or None (optional)
+        translation_axis : str or bool or None (optional, deprecated)
+            Legacy API: specifies which axes to IGNORE.
             we can take 'x', 'y', 'z', 'xy', 'yz', 'zx', 'xx', 'yy', 'zz',
             True or False(None).
+            Note: semantics are inverted compared to position_mask.
+        position_mask : str, bool, list, or numpy.ndarray (optional)
+            Specifies which axes to CONSTRAIN.
+            - True: constrain all axes (default)
+            - False/None: no constraint
+            - 'z': constrain z-axis only
+            - 'xy': constrain x,y axes
+            - [1, 1, 0]: direct specification (constrain x,y)
 
         Returns
         -------
         dif_pos : numpy.ndarray
             difference position of self coordinates and coords
-            considering translation_axis.
+            considering position_mask or translation_axis.
 
         Examples
         --------
@@ -899,29 +911,64 @@ class Coordinates(object):
         ...          pi / 3.0, 'x')
         >>> c1.difference_position(c2)
         array([ 0.2, -0.5, -0.2])
+        >>> # position_mask='z' constrains z only
+        >>> c1.difference_position(c2, position_mask='z')
+        array([ 0. ,  0. , -0.2])
         """
+        # Check for conflicting parameters
+        if position_mask is not None and translation_axis is not None:
+            raise ValueError(
+                "Cannot specify both position_mask and translation_axis")
+
+        # Handle legacy API with deprecation warning
+        if translation_axis is not None:
+            warnings.warn(
+                "translation_axis is deprecated. Use position_mask instead. "
+                "Note: semantics are inverted - position_mask='z' means "
+                "constrain z only, while translation_axis='z' meant ignore z.",
+                DeprecationWarning, stacklevel=2)
+            mask_vec, _ = convert_legacy_axis_to_mask(translation_axis)
+        elif position_mask is not None:
+            mask_vec = normalize_mask(position_mask)
+        else:
+            # Default: constrain all axes
+            mask_vec = np.array([1, 1, 1])
+
         dif_pos = self.inverse_transform_vector(coords.worldpos())
-        translation_axis = convert_to_axis_vector(translation_axis)
-        dif_pos[translation_axis == 1] = 0.0
+        dif_pos[mask_vec == 0] = 0.0  # Zero out unconstrained axes
         return dif_pos
 
     def difference_rotation(self, coords,
-                            rotation_axis=True):
+                            rotation_axis=None,
+                            rotation_mask=None,
+                            rotation_mirror=None):
         """Return differences in rotation of given coords.
 
         Parameters
         ----------
         coords : skrobot.coordinates.Coordinates
             given coordinates
-        rotation_axis : str or bool or None (optional)
-            we can take 'x', 'y', 'z', 'xx', 'yy', 'zz', 'xm', 'ym', 'zm',
-            'xy', 'yx', 'yz', 'zy', 'zx', 'xz', True or False(None).
+        rotation_axis : str or bool or None (optional, deprecated)
+            Legacy API: we can take 'x', 'y', 'z', 'xx', 'yy', 'zz',
+            'xm', 'ym', 'zm', 'xy', 'yx', 'yz', 'zy', 'zx', 'xz',
+            True or False(None).
+            Note: semantics are inverted compared to rotation_mask.
+        rotation_mask : str, bool, list, or numpy.ndarray (optional)
+            Specifies which rotation axes to CONSTRAIN.
+            - True: constrain all axes (default)
+            - False/None: no constraint
+            - 'z': constrain z-axis only
+            - 'xy': constrain x,y axes
+            - [1, 1, 0]: direct specification (constrain x,y)
+        rotation_mirror : str or None (optional)
+            Mirror axis ('x', 'y', 'z') for allowing
+            180-degree rotations around the specified axis.
 
         Returns
         -------
         dif_rot : numpy.ndarray
             difference rotation of self coordinates and coords
-            considering rotation_axis.
+            considering rotation_mask or rotation_axis.
 
         Examples
         --------
@@ -932,26 +979,20 @@ class Coordinates(object):
         >>> coord2 = Coordinates(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
         >>> coord1.difference_rotation(coord2)
         array([-0.32855112,  1.17434985,  1.05738936])
-        >>> coord1.difference_rotation(coord2, rotation_axis=False)
+        >>> coord1.difference_rotation(coord2, rotation_mask=False)
         array([0, 0, 0])
-        >>> coord1.difference_rotation(coord2, rotation_axis='x')
+        >>> # rotation_mask='yz' constrains y,z only
+        >>> # (equivalent to legacy rotation_axis='x')
+        >>> coord1.difference_rotation(coord2, rotation_mask='yz')
         array([0.        , 1.36034952, 0.78539816])
-        >>> coord1.difference_rotation(coord2, rotation_axis='y')
-        array([0.35398131, 0.        , 0.97442695])
-        >>> coord1.difference_rotation(coord2, rotation_axis='z')
-        array([-0.88435715,  0.74192175,  0.        ])
 
-        Using mirror option ['xm', 'ym', 'zm'], you can
-        allow differences of mirror direction.
+        Using mirror option:
 
         >>> coord1 = Coordinates()
         >>> coord2 = Coordinates().rotate(pi, 'x')
-        >>> coord1.difference_rotation(coord2, 'xm')
+        >>> coord1.difference_rotation(coord2, rotation_mask=True,
+        ...                            rotation_mirror='x')
         array([-2.99951957e-32,  0.00000000e+00,  0.00000000e+00])
-        >>> coord1 = Coordinates()
-        >>> coord2 = Coordinates().rotate(pi / 2.0, 'x')
-        >>> coord1.difference_rotation(coord2, 'xm')
-        array([-1.57079633,  0.        ,  0.        ])
         """
         def need_mirror_for_nearest_axis(coords0, coords1, ax):
             a0 = coords0.axis(ax)
@@ -962,6 +1003,77 @@ class Coordinates(object):
             dr1m = angle_between_vectors(a0, a1_mirror, normalize=False) \
                 * normalize_vector(cross_product(a0, a1_mirror))
             return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
+
+        # Check for conflicting parameters
+        if rotation_mask is not None and rotation_axis is not None:
+            raise ValueError(
+                "Cannot specify both rotation_mask and rotation_axis")
+
+        # Handle legacy API with deprecation warning
+        use_legacy = False
+        effective_rotation_axis = None
+        mirror_axis = rotation_mirror
+
+        if rotation_axis is not None:
+            warnings.warn(
+                "rotation_axis is deprecated. Use rotation_mask and "
+                "rotation_mirror instead. "
+                "Note: semantics are inverted - rotation_mask='yz' means "
+                "constrain y,z only, while rotation_axis='x' meant ignore x.",
+                DeprecationWarning, stacklevel=2)
+            use_legacy = True
+            effective_rotation_axis = rotation_axis
+        elif rotation_mask is not None or rotation_mirror is not None:
+            if rotation_mask is None:
+                rotation_mask = True  # Default to constrain all
+            mask_vec = normalize_mask(rotation_mask)
+
+            # Convert to legacy format for internal processing
+            if mirror_axis is not None:
+                # Mirror mode
+                effective_rotation_axis = mirror_axis + 'm'
+                use_legacy = True
+            else:
+                # Check mask pattern and convert to legacy axis
+                mask_sum = np.sum(mask_vec)
+                if mask_sum == 0:
+                    effective_rotation_axis = False
+                    use_legacy = True
+                elif mask_sum == 3:
+                    effective_rotation_axis = True
+                    use_legacy = True
+                elif mask_sum == 2:
+                    # Two axes constrained -> legacy single axis notation
+                    # mask [0,1,1] -> constrain y,z -> legacy 'x'
+                    # mask [1,0,1] -> constrain x,z -> legacy 'y'
+                    # mask [1,1,0] -> constrain x,y -> legacy 'z'
+                    if np.array_equal(mask_vec, [0, 1, 1]):
+                        effective_rotation_axis = 'x'
+                    elif np.array_equal(mask_vec, [1, 0, 1]):
+                        effective_rotation_axis = 'y'
+                    elif np.array_equal(mask_vec, [1, 1, 0]):
+                        effective_rotation_axis = 'z'
+                    use_legacy = True
+                elif mask_sum == 1:
+                    # One axis constrained -> legacy two-axis notation
+                    # mask [1,0,0] -> constrain x -> legacy 'yz'
+                    # mask [0,1,0] -> constrain y -> legacy 'xz' or 'zx'
+                    # mask [0,0,1] -> constrain z -> legacy 'xy'
+                    if np.array_equal(mask_vec, [1, 0, 0]):
+                        effective_rotation_axis = 'yz'
+                    elif np.array_equal(mask_vec, [0, 1, 0]):
+                        effective_rotation_axis = 'zx'
+                    elif np.array_equal(mask_vec, [0, 0, 1]):
+                        effective_rotation_axis = 'xy'
+                    use_legacy = True
+        else:
+            # Default: constrain all axes
+            effective_rotation_axis = True
+            use_legacy = True
+
+        # Use existing legacy implementation
+        if use_legacy:
+            rotation_axis = effective_rotation_axis
 
         if rotation_axis in ['x', 'y', 'z']:
             a0 = self.axis(rotation_axis)
@@ -1015,7 +1127,8 @@ class Coordinates(object):
             ax = rotation_axis[0]
             if not need_mirror_for_nearest_axis(self, coords, ax):
                 rot = rotate_matrix(rot, np.pi, ax)
-            dif_rot = rotation_matrix_to_axis_angle_vector(np.matmul(self.worldrot().T, rot))
+            dif_rot = rotation_matrix_to_axis_angle_vector(
+                np.matmul(self.worldrot().T, rot))
         elif rotation_axis is False or rotation_axis is None:
             dif_rot = np.array([0, 0, 0])
         elif rotation_axis is True:
@@ -1023,7 +1136,7 @@ class Coordinates(object):
                                       coords.worldrot())
             dif_rot = rotation_matrix_to_axis_angle_vector(dif_rotmatrix)
         else:
-            raise ValueError
+            raise ValueError("Invalid rotation_axis: {}".format(rotation_axis))
         return dif_rot
 
     def rotate_with_matrix(self, mat, wrt='local'):

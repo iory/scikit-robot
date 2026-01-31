@@ -13,10 +13,12 @@ from skrobot.coordinates.geo import orient_coords_to_axis
 from skrobot.coordinates.geo import rotate_points
 
 from skrobot.coordinates.math import axis_angle_vector_to_rotation_matrix
+from skrobot.coordinates.math import convert_legacy_axis_to_mask
 from skrobot.coordinates.math import look_at_rotation
 from skrobot.coordinates.math import make_matrix
 from skrobot.coordinates.math import manipulability
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import rotation_geodesic_distance
