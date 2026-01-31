@@ -89,7 +89,7 @@ Example usage:
 
    robot.rarm.inverse_kinematics(
        target_coords,
-       rotation_axis=True  # Full 6-DOF constraint
+       rotation_mask=True  # Full 6-DOF constraint
    )
 
 3. URDF Toolchain
