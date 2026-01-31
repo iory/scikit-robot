@@ -3675,10 +3675,14 @@ class RobotModel(CascadedLink):
                     # For mirror constraints, allow all rotation DOF but we'll handle mirroring in error calculation
                     active_rows.extend([0, 1, 2])
                 else:
-                    # For single axis constraints, use all rotation DOF
-                    # The constraint is applied in the error calculation phase
-                    if rot_axis.lower() in ['x', 'y', 'z']:
-                        active_rows.extend([0, 1, 2])  # All rotation DOF for single axis constraints
+                    # For single axis constraints, only use the relevant rotation DOF
+                    # This matches the behavior of regular IK
+                    if rot_axis.lower() == 'x':
+                        active_rows.append(0)  # Only x rotation DOF
+                    elif rot_axis.lower() == 'y':
+                        active_rows.append(1)  # Only y rotation DOF
+                    elif rot_axis.lower() == 'z':
+                        active_rows.append(2)  # Only z rotation DOF
                     else:
                         # Multi-axis constraints like 'xy', 'xyz', etc.
                         if 'x' in rot_axis.lower():
