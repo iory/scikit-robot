@@ -24,6 +24,7 @@ from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_inverse
@@ -32,6 +33,7 @@ from skrobot.coordinates.math import rodrigues
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.model.joint import calc_dif_with_axis
+from skrobot.model.joint import calc_dif_with_mask
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import FixedJoint
@@ -126,6 +128,108 @@ class CascadedLink(CascadedCoords):
         if key in self._relevance_predicate_table:
             return self._relevance_predicate_table[key]
         return False
+
+    def _resolve_mask_params(self, position_mask, rotation_mask, rotation_mirror,
+                             translation_axis, rotation_axis):
+        """Resolve new/legacy axis parameters with compatibility.
+
+        Parameters
+        ----------
+        position_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which position axes to constrain.
+        rotation_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which rotation axes to constrain.
+        rotation_mirror : str or None
+            Mirror axis for rotation.
+        translation_axis : str, bool, or None
+            Legacy API: specifies which axes to ignore.
+        rotation_axis : str, bool, or None
+            Legacy API: specifies which axes to ignore.
+
+        Returns
+        -------
+        translation_axis : str, bool, or None
+            Effective translation_axis for internal use.
+        rotation_axis : str, bool, or None
+            Effective rotation_axis for internal use.
+        """
+        # Position
+        if position_mask is not None and translation_axis is not None:
+            raise ValueError(
+                "Cannot specify both position_mask and translation_axis")
+        if translation_axis is not None:
+            warnings.warn(
+                "translation_axis is deprecated. Use position_mask instead. "
+                "Note: semantics are inverted - position_mask='z' means "
+                "constrain z only, while translation_axis='z' meant ignore z.",
+                DeprecationWarning, stacklevel=3)
+            # Use legacy value as-is
+        elif position_mask is not None:
+            # Convert new mask to legacy axis format
+            mask_vec = normalize_mask(position_mask)
+            mask_sum = int(np.sum(mask_vec))
+            if mask_sum == 0:
+                translation_axis = False
+            elif mask_sum == 3:
+                translation_axis = True
+            elif mask_sum == 2:
+                # Two axes constrained
+                if np.array_equal(mask_vec, [0, 1, 1]):
+                    translation_axis = 'x'  # ignore x
+                elif np.array_equal(mask_vec, [1, 0, 1]):
+                    translation_axis = 'y'  # ignore y
+                elif np.array_equal(mask_vec, [1, 1, 0]):
+                    translation_axis = 'z'  # ignore z
+            elif mask_sum == 1:
+                # One axis constrained
+                if np.array_equal(mask_vec, [1, 0, 0]):
+                    translation_axis = 'yz'  # ignore y,z
+                elif np.array_equal(mask_vec, [0, 1, 0]):
+                    translation_axis = 'xz'  # ignore x,z
+                elif np.array_equal(mask_vec, [0, 0, 1]):
+                    translation_axis = 'xy'  # ignore x,y
+
+        # Rotation
+        if rotation_mask is not None and rotation_axis is not None:
+            raise ValueError(
+                "Cannot specify both rotation_mask and rotation_axis")
+        if rotation_axis is not None:
+            warnings.warn(
+                "rotation_axis is deprecated. Use rotation_mask and "
+                "rotation_mirror instead.",
+                DeprecationWarning, stacklevel=3)
+            # Use legacy value as-is
+        elif rotation_mask is not None or rotation_mirror is not None:
+            if rotation_mask is None:
+                rotation_mask = True  # Default to constrain all when mirror is set
+            mask_vec = normalize_mask(rotation_mask)
+            mask_sum = int(np.sum(mask_vec))
+
+            if rotation_mirror is not None:
+                # Mirror mode
+                rotation_axis = rotation_mirror + 'm'
+            elif mask_sum == 0:
+                rotation_axis = False
+            elif mask_sum == 3:
+                rotation_axis = True
+            elif mask_sum == 2:
+                # Two axes constrained
+                if np.array_equal(mask_vec, [0, 1, 1]):
+                    rotation_axis = 'x'
+                elif np.array_equal(mask_vec, [1, 0, 1]):
+                    rotation_axis = 'y'
+                elif np.array_equal(mask_vec, [1, 1, 0]):
+                    rotation_axis = 'z'
+            elif mask_sum == 1:
+                # One axis constrained
+                if np.array_equal(mask_vec, [1, 0, 0]):
+                    rotation_axis = 'yz'
+                elif np.array_equal(mask_vec, [0, 1, 0]):
+                    rotation_axis = 'zx'
+                elif np.array_equal(mask_vec, [0, 0, 1]):
+                    rotation_axis = 'xy'
+
+        return translation_axis, rotation_axis
 
     def angle_vector(self, av=None, return_av=None):
         """Get or set joint angle vector.
@@ -489,21 +593,41 @@ class CascadedLink(CascadedCoords):
                          j_sharp=j_sharp,
                          *args, **kwargs)
 
-    def calc_vel_from_pos(self, dif_pos, translation_axis,
-                          p_limit=100.0):
+    def calc_vel_from_pos(self, dif_pos, translation_axis=None,
+                          p_limit=100.0, position_mask=None):
         """Calculate velocity from difference position
 
         Parameters
         ----------
         dif_pos : np.ndarray
             [m] order
-        translation_axis : str
-            see calc_dif_with_axis
+        translation_axis : str (deprecated)
+            Legacy API: see calc_dif_with_axis
+        p_limit : float
+            Position limit
+        position_mask : str, bool, list, or numpy.ndarray
+            Specifies which position axes to CONSTRAIN
 
         Returns
         -------
         vel_p : np.ndarray
         """
+        # Handle mask parameters
+        if position_mask is not None:
+            if translation_axis is not None:
+                raise ValueError(
+                    "Cannot specify both position_mask and translation_axis")
+            warnings.warn(
+                "position_mask in calc_vel_from_pos is not directly supported. "
+                "Use the mask-based API in inverse_kinematics instead.",
+                DeprecationWarning, stacklevel=2)
+            mask_vec = normalize_mask(position_mask)
+            if LA.norm(dif_pos) > p_limit:
+                dif_pos = p_limit * normalize_vector(dif_pos)
+            return calc_dif_with_mask(dif_pos, mask_vec)
+
+        if translation_axis is None:
+            translation_axis = True
         if LA.norm(dif_pos) > p_limit:
             dif_pos = p_limit * normalize_vector(dif_pos)
         vel_p = calc_dif_with_axis(dif_pos, translation_axis)
@@ -511,8 +635,45 @@ class CascadedLink(CascadedCoords):
 
     def calc_vel_from_rot(self,
                           dif_rot,
-                          rotation_axis,
-                          r_limit=0.5):
+                          rotation_axis=None,
+                          r_limit=0.5,
+                          rotation_mask=None,
+                          rotation_mirror=None):
+        """Calculate velocity from difference rotation
+
+        Parameters
+        ----------
+        dif_rot : np.ndarray
+            Rotation difference
+        rotation_axis : str (deprecated)
+            Legacy API: see calc_dif_with_axis
+        r_limit : float
+            Rotation limit
+        rotation_mask : str, bool, list, or numpy.ndarray
+            Specifies which rotation axes to CONSTRAIN
+        rotation_mirror : str or None
+            Mirror axis
+
+        Returns
+        -------
+        vel_r : np.ndarray
+        """
+        # Handle mask parameters
+        if rotation_mask is not None:
+            if rotation_axis is not None:
+                raise ValueError(
+                    "Cannot specify both rotation_mask and rotation_axis")
+            warnings.warn(
+                "rotation_mask in calc_vel_from_rot is not directly supported. "
+                "Use the mask-based API in inverse_kinematics instead.",
+                DeprecationWarning, stacklevel=2)
+            mask_vec = normalize_mask(rotation_mask)
+            if LA.norm(dif_rot) > r_limit:
+                dif_rot = r_limit * normalize_vector(dif_rot)
+            return calc_dif_with_mask(dif_rot, mask_vec, rotation_mirror)
+
+        if rotation_axis is None:
+            rotation_axis = True
         if LA.norm(dif_rot) > r_limit:
             dif_rot = r_limit * normalize_vector(dif_rot)
         vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
@@ -679,8 +840,11 @@ class CascadedLink(CascadedCoords):
             loop=0,
             link_list=None,
             move_target=None,
-            rotation_axis=True,
-            translation_axis=True,
+            position_mask=None,
+            rotation_mask=None,
+            rotation_mirror=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             thre=None,
             rthre=None,
             dif_pos_ratio=1.0,
@@ -718,6 +882,12 @@ class CascadedLink(CascadedCoords):
         move_target = listify(move_target)
 
         n = len(move_target)
+
+        # Resolve new/legacy mask parameters
+        translation_axis, rotation_axis = self._resolve_mask_params(
+            position_mask, rotation_mask, rotation_mirror,
+            translation_axis, rotation_axis)
+
         if rotation_axis is None:
             rotation_axis = listify(True, n)
         if translation_axis is None:
@@ -810,14 +980,17 @@ class CascadedLink(CascadedCoords):
                 translation_axis,
                 rotation_axis)
         if jacobi is None:
-            jacobi = self.calc_jacobian_from_link_list(
-                move_target=move_target,
-                link_list=link_list,
-                translation_axis=translation_axis,
-                rotation_axis=rotation_axis,
-                additional_jacobi_dimension=additional_jacobi_dimension,
-                # method_args
-            )
+            # Suppress internal deprecation warning
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', DeprecationWarning)
+                jacobi = self.calc_jacobian_from_link_list(
+                    move_target=move_target,
+                    link_list=link_list,
+                    translation_axis=translation_axis,
+                    rotation_axis=rotation_axis,
+                    additional_jacobi_dimension=additional_jacobi_dimension,
+                    # method_args
+                )
 
         # convergence check
         if min_loop is not None:
@@ -965,8 +1138,11 @@ class CascadedLink(CascadedCoords):
             link_list=None,
             move_target=None,
             revert_if_fail=True,
-            rotation_axis=True,
-            translation_axis=True,
+            position_mask=None,
+            rotation_mask=None,
+            rotation_mirror=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             joint_args=None,
             thre=None,
             rthre=None,
@@ -997,11 +1173,25 @@ class CascadedLink(CascadedCoords):
             End-effector coordinate frame(s).
         revert_if_fail : bool
             If True, revert to initial joint angles on failure.
-        rotation_axis : bool, str, or list
-            Which rotation axes to constrain. True=all, False=none,
-            'x'/'y'/'z'=single axis, 'xy'/'yz'/'zx'=two axes.
-        translation_axis : bool, str, or list
-            Which translation axes to constrain. Same format as rotation_axis.
+        position_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which position axes to CONSTRAIN.
+            - True: constrain all axes (default)
+            - False/None: no constraint
+            - 'z': constrain z-axis only
+            - 'xy': constrain x,y axes
+            - [1, 1, 0]: direct specification (constrain x,y)
+        rotation_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which rotation axes to CONSTRAIN.
+            Same format as position_mask.
+        rotation_mirror : str or None
+            Mirror axis ('x', 'y', 'z') for allowing
+            180-degree rotations around the specified axis.
+        rotation_axis : bool, str, or list (deprecated)
+            Legacy API: Which rotation axes to ignore. True=none, False=all,
+            'x'/'y'/'z'=ignore single axis, 'xy'/'yz'/'zx'=ignore two axes.
+        translation_axis : bool, str, or list (deprecated)
+            Legacy API: Which translation axes to ignore.
+            Same format as rotation_axis.
         translation_tolerance : list or None
             Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
             in meters. If error on an axis is within tolerance, it's treated
@@ -1018,6 +1208,17 @@ class CascadedLink(CascadedCoords):
         numpy.ndarray or False
             Joint angle vector if successful, False otherwise.
         """
+        # Resolve new/legacy mask parameters
+        translation_axis, rotation_axis = self._resolve_mask_params(
+            position_mask, rotation_mask, rotation_mirror,
+            translation_axis, rotation_axis)
+
+        # Set defaults if not specified
+        if translation_axis is None:
+            translation_axis = True
+        if rotation_axis is None:
+            rotation_axis = True
+
         additional_jacobi = additional_jacobi or []
         additional_vel = additional_vel or []
         target_coords = listify(target_coords)
@@ -1113,16 +1314,19 @@ class CascadedLink(CascadedCoords):
             target_coords = list(map(
                 lambda x: x() if callable(x) else x,
                 target_coords))
-            dif_pos = list(map(lambda mv, tc, trans_axis:
-                               mv.difference_position(
-                                   tc, translation_axis=trans_axis),
-                               move_target, target_coords,
-                               translation_axis))
-            dif_rot = list(map(lambda mv, tc, rot_axis:
-                               mv.difference_rotation(
-                                   tc, rotation_axis=rot_axis),
-                               move_target, target_coords,
-                               rotation_axis))
+            # Suppress internal deprecation warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', DeprecationWarning)
+                dif_pos = list(map(lambda mv, tc, trans_axis:
+                                   mv.difference_position(
+                                       tc, translation_axis=trans_axis),
+                                   move_target, target_coords,
+                                   translation_axis))
+                dif_rot = list(map(lambda mv, tc, rot_axis:
+                                   mv.difference_rotation(
+                                       tc, rotation_axis=rot_axis),
+                                   move_target, target_coords,
+                                   rotation_axis))
 
             # Apply translation tolerance in target_coords' local frame
             # Note: tol > 0 check ensures 0.0 means "no special tolerance"
@@ -1179,13 +1383,16 @@ class CascadedLink(CascadedCoords):
 
         target_coords = list(map(lambda x: x() if callable(x) else x,
                                  target_coords))
-        dif_pos = list(map(lambda mv, tc, trans_axis:
-                           mv.difference_position(
-                               tc, translation_axis=trans_axis),
-                           move_target, target_coords, translation_axis))
-        dif_rot = list(map(lambda mv, tc, rot_axis:
-                           mv.difference_rotation(tc, rotation_axis=rot_axis),
-                           move_target, target_coords, rotation_axis))
+        # Suppress internal deprecation warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            dif_pos = list(map(lambda mv, tc, trans_axis:
+                               mv.difference_position(
+                                   tc, translation_axis=trans_axis),
+                               move_target, target_coords, translation_axis))
+            dif_rot = list(map(lambda mv, tc, rot_axis:
+                               mv.difference_rotation(tc, rotation_axis=rot_axis),
+                               move_target, target_coords, rotation_axis))
 
         # success
         success = self.ik_convergence_check(
@@ -1401,6 +1608,11 @@ class CascadedLink(CascadedCoords):
                                      move_target,
                                      link_list=None,
                                      transform_coords=None,
+
+                                     position_mask=None,
+                                     rotation_mask=None,
+                                     rotation_mirror=None,
+                                     # Legacy API (deprecated)
                                      rotation_axis=None,
                                      translation_axis=None,
                                      col_offset=0,
@@ -1411,6 +1623,11 @@ class CascadedLink(CascadedCoords):
                                      *args, **kwargs):
         assert self._relevance_predicate_table is not None, \
             "relevant table must be set beforehand"
+
+        # Resolve new/legacy mask parameters
+        translation_axis, rotation_axis = self._resolve_mask_params(
+            position_mask, rotation_mask, rotation_mirror,
+            translation_axis, rotation_axis)
 
         if link_list is None:
             link_list = self.link_list
@@ -2364,8 +2581,13 @@ class RobotModel(CascadedLink):
             target_coords,
             move_target=None,
             link_list=None,
-            rotation_axis=True,
-            translation_axis=True,
+
+            position_mask=None,
+            rotation_mask=None,
+            rotation_mirror=None,
+            # Legacy API (deprecated)
+            rotation_axis=None,
+            translation_axis=None,
             stop=100,
             thre=0.001,
             rthre=np.deg2rad(1.0),
@@ -2391,11 +2613,24 @@ class RobotModel(CascadedLink):
             Target link or end-effector. If None, uses self.end_coords
         link_list : Optional[List]
             List of links from root to target. If None, automatically computed from move_target
-        rotation_axis : Union[bool, str, List]
-            Rotation constraints. If True, use all axes. If False, no rotation.
+        position_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which position axes to CONSTRAIN.
+            - True: constrain all axes (default)
+            - False/None: no constraint
+            - 'z': constrain z-axis only
+            - 'xy': constrain x,y axes
+            - [1, 1, 0]: direct specification (constrain x,y)
+        rotation_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which rotation axes to CONSTRAIN.
+            Same format as position_mask.
+        rotation_mirror : str or None
+            Mirror axis ('x', 'y', 'z') for allowing
+            180-degree rotations around the specified axis.
+        rotation_axis : Union[bool, str, List] (deprecated)
+            Legacy API: Rotation constraints. If True, use all axes. If False, no rotation.
             If string, specify axes (e.g., 'xy', 'z'). Can be list for multiple targets
-        translation_axis : Union[bool, str, List]
-            Translation constraints. If True, use all axes. If False, no translation.
+        translation_axis : Union[bool, str, List] (deprecated)
+            Legacy API: Translation constraints. If True, use all axes. If False, no translation.
             If string, specify axes (e.g., 'xy', 'z'). Can be list for multiple targets
         stop : int
             Maximum number of iterations
@@ -2452,6 +2687,17 @@ class RobotModel(CascadedLink):
         ...         robot.angle_vector(solution)
         ...         break
         """
+        # Resolve new/legacy mask parameters
+        translation_axis, rotation_axis = self._resolve_mask_params(
+            position_mask, rotation_mask, rotation_mirror,
+            translation_axis, rotation_axis)
+
+        # Set defaults if not specified
+        if translation_axis is None:
+            translation_axis = True
+        if rotation_axis is None:
+            rotation_axis = True
+
         return self._batch_inverse_kinematics_impl(
             target_coords, move_target, link_list,
             rotation_axis, translation_axis, stop, thre, rthre,
@@ -3108,7 +3354,10 @@ class RobotModel(CascadedLink):
                 target_coord.newcoords(quaternion2matrix(target_poses[i, 3:]), target_poses[i, :3])
 
                 # Calculate rotation difference using the same method as regular IK
-                dif_rot = current_coord.difference_rotation(target_coord, rotation_axis=rot_axis.lower())
+                # Suppress internal deprecation warning
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', DeprecationWarning)
+                    dif_rot = current_coord.difference_rotation(target_coord, rotation_axis=rot_axis.lower())
 
                 # Apply the calculated rotation to current pose to get the adjusted target
                 if np.linalg.norm(dif_rot) > 1e-6:
@@ -3247,10 +3496,13 @@ class RobotModel(CascadedLink):
                     map(lambda mt: self.link_lists(mt.parent),
                         move_target))
 
-        return super(RobotModel, self).inverse_kinematics_loop(
-            dif_pos, dif_rot,
-            link_list=link_list, move_target=move_target,
-            target_coords=target_coords, **kwargs)
+        # Suppress internal deprecation warning
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            return super(RobotModel, self).inverse_kinematics_loop(
+                dif_pos, dif_rot,
+                link_list=link_list, move_target=move_target,
+                target_coords=target_coords, **kwargs)
 
     def inverse_kinematics_loop_for_look_at(
             self, move_target, look_at,

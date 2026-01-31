@@ -126,6 +126,29 @@ def calc_dif_with_axis(dif, axis):
     return ret
 
 
+def calc_dif_with_mask(dif, mask, mirror_axis=None):
+    """Return diff filtered by mask.
+
+    Parameters
+    ----------
+    dif : numpy.ndarray
+        3-element difference vector
+    mask : numpy.ndarray
+        3-element mask, 1=constrained, 0=free
+    mirror_axis : str or None
+        Mirror axis ('x', 'y', 'z') or None
+
+    Returns
+    -------
+    ret : numpy.ndarray
+        Filtered difference (only constrained dimensions)
+    """
+    if mirror_axis is not None:
+        # Mirror mode: return full vector (special handling in IK)
+        return dif.copy()
+    return dif[mask == 1]
+
+
 class _MimicJointHook(object):
 
     def __init__(self, this, other, multiplier, offset):
