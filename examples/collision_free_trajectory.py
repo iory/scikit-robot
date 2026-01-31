@@ -100,7 +100,7 @@ right_arm_end_coords = skrobot.coordinates.CascadedCoords(
 robot_model.inverse_kinematics(
     target_coords=target_coords,
     link_list=link_list,
-    move_target=right_arm_end_coords, rotation_axis=True)
+    move_target=right_arm_end_coords, rotation_mask=True)
 av_goal = get_robot_config(robot_model, joint_list, with_base=with_base)
 
 # collision checker setup

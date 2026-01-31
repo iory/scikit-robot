@@ -130,8 +130,8 @@ class R8_6(skrobot.model.RobotModel):
             self._larm.inverse_kinematics_defaults = {
                 'link_list': self.larm_links,
                 'move_target': self._larm.end_coords,
-                'rotation_axis': True,
-                'translation_axis': True,
+                'rotation_mask': True,
+                'position_mask': True,
             }
         return self._larm
 
@@ -150,8 +150,8 @@ class R8_6(skrobot.model.RobotModel):
             self._rarm.inverse_kinematics_defaults = {
                 'link_list': self.rarm_links,
                 'move_target': self._rarm.end_coords,
-                'rotation_axis': True,
-                'translation_axis': True,
+                'rotation_mask': True,
+                'position_mask': True,
             }
         return self._rarm
 
@@ -171,8 +171,8 @@ class R8_6(skrobot.model.RobotModel):
             self._larm_with_torso.inverse_kinematics_defaults = {
                 'link_list': self.larm_with_torso_links,
                 'move_target': self._larm_with_torso.end_coords,
-                'rotation_axis': True,
-                'translation_axis': True,
+                'rotation_mask': True,
+                'position_mask': True,
             }
         return self._larm_with_torso
 
@@ -192,8 +192,8 @@ class R8_6(skrobot.model.RobotModel):
             self._rarm_with_torso.inverse_kinematics_defaults = {
                 'link_list': self.rarm_with_torso_links,
                 'move_target': self._rarm_with_torso.end_coords,
-                'rotation_axis': True,
-                'translation_axis': True,
+                'rotation_mask': True,
+                'position_mask': True,
             }
         return self._rarm_with_torso
 
