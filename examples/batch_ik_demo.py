@@ -14,15 +14,15 @@ from skrobot.models import PR2
 from skrobot.models import R8_6
 
 
-def parse_axis_constraint(axis_str):
-    """Parse axis constraint string to appropriate format."""
-    if axis_str.lower() == 'true':
+def parse_mask_constraint(mask_str):
+    """Parse mask constraint string to appropriate format."""
+    if mask_str.lower() == 'true':
         return True
-    elif axis_str.lower() == 'false':
+    elif mask_str.lower() == 'false':
         return False
     else:
         # String like 'xy', 'xyz', 'z', etc.
-        return axis_str.lower()
+        return mask_str.lower()
 
 
 def main():
@@ -30,12 +30,12 @@ def main():
     parser.add_argument('--robot', type=str, default='pr2',
                         choices=['fetch', 'pr2', 'panda', 'r8_6', 'nextage'],
                         help='Robot model to use. Default: fetch')
-    parser.add_argument('--rotation-axis', '--rotation_axis', '-r',
+    parser.add_argument('--rotation-mask', '--rotation_mask', '-r',
                         default='True',
-                        help='Rotation axis constraints (True/False/xyz/xy/z/etc). Default: True')
-    parser.add_argument('--translation-axis', '--translation_axis', '-t',
+                        help='Rotation mask constraints (True/False/xyz/xy/z/etc). Default: True')
+    parser.add_argument('--position-mask', '--position_mask', '-p',
                         default='True',
-                        help='Translation axis constraints (True/False/xyz/xy/z/etc). Default: True')
+                        help='Position mask constraints (True/False/xyz/xy/z/etc). Default: True')
     parser.add_argument('--attempts-per-pose', '--attempts_per_pose', '-a',
                         type=int, default=50,
                         help='Number of attempts per pose with different random initial poses. Default: 50')
@@ -61,9 +61,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse axis constraints
-    rotation_axis = parse_axis_constraint(args.rotation_axis)
-    translation_axis = parse_axis_constraint(args.translation_axis)
+    # Parse mask constraints
+    rotation_mask = parse_mask_constraint(args.rotation_mask)
+    position_mask = parse_mask_constraint(args.position_mask)
 
     # Process tolerance arguments
     translation_tolerance = args.translation_tolerance
@@ -77,8 +77,8 @@ def main():
     print(f"   Robot: {args.robot.upper()}")
     if args.with_torso and args.robot in ['pr2', 'fetch']:
         print("   With torso: Yes")
-    print(f"   Rotation axis: {rotation_axis}")
-    print(f"   Translation axis: {translation_axis}")
+    print(f"   Rotation mask: {rotation_mask}")
+    print(f"   Position mask: {position_mask}")
     print(f"   Attempts per pose: {args.attempts_per_pose}")
     print(f"   Max iterations: {args.stop}")
     print(f"   Position threshold: {args.thre}m")
@@ -161,8 +161,8 @@ def main():
     # Use inverse_kinematics_defaults if available, otherwise specify explicitly
     ik_kwargs = {
         'move_target': arm.end_coords,
-        'rotation_axis': rotation_axis,
-        'translation_axis': translation_axis,
+        'rotation_mask': rotation_mask,
+        'position_mask': position_mask,
         'stop': args.stop,
         'thre': args.thre,
         'rthre': np.deg2rad(args.rthre),
@@ -219,20 +219,17 @@ def main():
                 pos_error = achieved_pos - target_pos
                 constrained_pos_error = pos_error.copy()
 
-                # Apply translation constraints to error calculation
-                if translation_axis is False:
+                # Apply position mask to error calculation
+                if position_mask is False:
                     constrained_pos_error = np.array([0, 0, 0])
-                elif isinstance(translation_axis, str):
-                    # For mirror constraints (xm, ym, zm), don't zero out any translation errors
-                    # since we want to see the full error after mirroring is applied
-                    if translation_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in translation_axis.lower():
-                            constrained_pos_error[0] = 0
-                        if 'y' not in translation_axis.lower():
-                            constrained_pos_error[1] = 0
-                        if 'z' not in translation_axis.lower():
-                            constrained_pos_error[2] = 0
+                elif isinstance(position_mask, str):
+                    # Zero out errors for unconstrained axes
+                    if 'x' not in position_mask.lower():
+                        constrained_pos_error[0] = 0
+                    if 'y' not in position_mask.lower():
+                        constrained_pos_error[1] = 0
+                    if 'z' not in position_mask.lower():
+                        constrained_pos_error[2] = 0
 
                 pos_error_norm = np.linalg.norm(constrained_pos_error)
 
@@ -240,9 +237,9 @@ def main():
                 rot_error = 0.0
                 rot_error_details = ""
 
-                if rotation_axis is not False:
+                if rotation_mask is not False:
                     # Calculate rotation error using difference_rotation method
-                    dif_rot = achieved_coords.difference_rotation(target_poses[i], rotation_axis=rotation_axis)
+                    dif_rot = achieved_coords.difference_rotation(target_poses[i], rotation_mask=rotation_mask)
                     rot_error = np.linalg.norm(dif_rot)
 
                     # Calculate individual axis errors for detailed analysis
@@ -330,7 +327,7 @@ def main():
                 print("Solved poses: Normal colored axes (RGB = XYZ)")
                 print("Unsolved poses: Red axes")
                 print("End-effector: RGB colored axis (shows actual robot pose)")
-                print("Note: Axes shown regardless of rotation_axis setting for visual comparison")
+                print("Note: Axes shown regardless of rotation_mask setting for visual comparison")
                 print(f"Robot cycles through {len(successful_solutions)} successful solutions only")
                 print("Each solution displays for 0.5 seconds")
                 print("Current target axis will be highlighted, others will be dimmed")

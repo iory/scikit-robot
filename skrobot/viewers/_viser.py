@@ -378,7 +378,7 @@ class ViserViewer:
             target_coords,
             link_list=target['link_list'],
             move_target=target['end_coords'],
-            rotation_axis=constrain_rot,
+            rotation_mask=constrain_rot,
             stop=30,
             revert_if_fail=True,
         )
@@ -443,7 +443,7 @@ class ViserViewer:
             target_coords,
             link_list=target['link_list'],
             move_target=target['end_coords'],
-            rotation_axis=constrain_rot,
+            rotation_mask=constrain_rot,
             stop=30,
             revert_if_fail=True,
         )

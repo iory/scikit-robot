@@ -186,7 +186,7 @@ def _forward_kinematics(robot_model,
             [move_target],
             link_list,
             transform_coords=world_coordinate,
-            rotation_axis=with_rot)
+            rotation_mask=with_rot)
 
         if with_rot:
             kine_mat = quaternion_kinematic_matrix(ef_quat_wrt_world)
