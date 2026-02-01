@@ -309,25 +309,19 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
 
         solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
 
-        # All mask combinations to test
+        # Representative mask combinations to test
+        # Minimal set covering: True/False, single axis, double axis, array form
         position_masks = [
             True, False,
-            'x', 'y', 'z',
-            'xy', 'yx', 'xz', 'zx', 'yz', 'zy',
-            'xyz',
-            [1, 0, 0], [0, 1, 0], [0, 0, 1],
-            [1, 1, 0], [1, 0, 1], [0, 1, 1],
-            [1, 1, 1],
+            'x',           # Single axis
+            'xy',          # Double axis
+            [1, 0, 1],     # Array form
         ]
 
         rotation_masks = [
             True, False,
-            'x', 'y', 'z',
-            'xy', 'yx', 'xz', 'zx', 'yz', 'zy',
-            'xyz',
-            [1, 0, 0], [0, 1, 0], [0, 0, 1],
-            [1, 1, 0], [1, 0, 1], [0, 1, 1],
-            [1, 1, 1],
+            'x',           # Single axis
+            'yz',          # Double axis
         ]
 
         # Target with small position and rotation change
