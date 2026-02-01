@@ -1557,8 +1557,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             (solutions, success_flags, combined_errors)
             combined_errors is the sum of position and rotation errors.
         """
-        target_positions = backend.array(target_positions)
-        target_rotations = backend.array(target_rotations)
+        target_positions = backend.array(np.asarray(target_positions, dtype=np.float64))
+        target_rotations = backend.array(np.asarray(target_rotations, dtype=np.float64))
         n_targets = target_positions.shape[0]
         n_opt_joints = len(non_mimic_indices)
 
@@ -1568,7 +1568,7 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             init = (joint_limits_lower + joint_limits_upper) / 2
             base_initial_opt_angles = backend.stack([init] * n_targets)
         else:
-            initial_angles = backend.array(initial_angles)
+            initial_angles = backend.array(np.asarray(initial_angles, dtype=np.float64))
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
             # Extract non-mimic joint angles
@@ -1589,31 +1589,39 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
                 target_rotations_np, attempts_per_pose, axis=0
             )
 
-            # Generate initial angles for all attempts
-            all_initial_opt_angles = []
-
+            # Generate initial angles for all attempts (vectorized)
             # Convert joint limits to numpy for random generation
             lower_np = backend.to_numpy(joint_limits_lower)
             upper_np = backend.to_numpy(joint_limits_upper)
             base_initial_opt_angles_np = backend.to_numpy(base_initial_opt_angles)
 
-            for target_idx in range(n_targets):
-                for attempt_idx in range(attempts_per_pose):
-                    if attempt_idx == 0 and use_current_angles:
-                        # First attempt: use provided initial angles
-                        all_initial_opt_angles.append(
-                            base_initial_opt_angles_np[target_idx]
-                        )
-                    else:
-                        # Subsequent attempts: random within joint limits
-                        random_init = np.random.uniform(
-                            lower_np, upper_np, size=(n_opt_joints,)
-                        )
-                        all_initial_opt_angles.append(random_init)
+            n_expanded = n_targets * attempts_per_pose
 
-            initial_opt_angles = backend.array(np.array(all_initial_opt_angles))
-            target_positions_for_solve = backend.array(expanded_target_positions_np)
-            target_rotations_for_solve = backend.array(expanded_target_rotations_np)
+            if use_current_angles:
+                # First attempt uses provided angles, rest are random
+                # Shape: (n_targets, attempts_per_pose, n_opt_joints)
+                all_initial_opt_angles = np.random.uniform(
+                    lower_np, upper_np,
+                    size=(n_targets, attempts_per_pose, n_opt_joints)
+                )
+                # Set first attempt to provided initial angles
+                all_initial_opt_angles[:, 0, :] = base_initial_opt_angles_np
+                # Reshape to (n_expanded, n_opt_joints)
+                all_initial_opt_angles = all_initial_opt_angles.reshape(
+                    n_expanded, n_opt_joints
+                )
+            else:
+                # All attempts are random
+                all_initial_opt_angles = np.random.uniform(
+                    lower_np, upper_np, size=(n_expanded, n_opt_joints)
+                )
+
+            initial_opt_angles = backend.array(
+                all_initial_opt_angles.astype(np.float64))
+            target_positions_for_solve = backend.array(
+                expanded_target_positions_np.astype(np.float64))
+            target_rotations_for_solve = backend.array(
+                expanded_target_rotations_np.astype(np.float64))
         else:
             initial_opt_angles = base_initial_opt_angles
             target_positions_for_solve = target_positions
@@ -1656,21 +1664,14 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             all_success_np = all_success_np.reshape(n_targets, attempts_per_pose)
             all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
 
-            # Select best attempt for each target (lowest error)
+            # Select best attempt for each target (lowest error) - vectorized
             best_indices = np.argmin(all_errors_np, axis=1)
 
-            solutions = np.array([
-                all_solutions_np[i, best_indices[i]]
-                for i in range(n_targets)
-            ])
-            success_flags = np.array([
-                all_success_np[i, best_indices[i]]
-                for i in range(n_targets)
-            ])
-            errors = np.array([
-                all_errors_np[i, best_indices[i]]
-                for i in range(n_targets)
-            ])
+            # Use advanced indexing instead of Python loop
+            target_indices = np.arange(n_targets)
+            solutions = all_solutions_np[target_indices, best_indices]
+            success_flags = all_success_np[target_indices, best_indices]
+            errors = all_errors_np[target_indices, best_indices]
 
             return backend.array(solutions), backend.array(success_flags), backend.array(errors)
         else:

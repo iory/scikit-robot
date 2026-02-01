@@ -2590,6 +2590,7 @@ class RobotModel(CascadedLink):
             random_initial_range=0.7,
             translation_tolerance=None,
             rotation_tolerance=None,
+            backend='numpy',
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -2651,6 +2652,10 @@ class RobotModel(CascadedLink):
             Per-axis rotation tolerance from target as
             [roll_tol, pitch_tol, yaw_tol] in radians. If error on an axis
             is within tolerance, it's treated as reached.
+        backend : str
+            Backend to use for computation ('numpy' or 'jax').
+            JAX backend provides faster computation through JIT compilation.
+            Default is 'numpy'.
         **kwargs : dict
             Additional keyword arguments
 
@@ -2695,13 +2700,13 @@ class RobotModel(CascadedLink):
             target_coords, move_target, link_list,
             rotation_axis, translation_axis, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, **kwargs)
+            translation_tolerance, rotation_tolerance, backend=backend, **kwargs)
 
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
             rotation_axis, translation_axis, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, **kwargs):
+            translation_tolerance, rotation_tolerance, backend='numpy', **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
 
@@ -2809,7 +2814,7 @@ class RobotModel(CascadedLink):
             translation_axis, rotation_axis)
 
         # Create backend solver
-        solver = create_batch_ik_solver(self, single_link_list, move_target, backend_name='numpy')
+        solver = create_batch_ik_solver(self, single_link_list, move_target, backend_name=backend)
 
         solutions_array, success_array, errors_array = solver(
             target_positions,
