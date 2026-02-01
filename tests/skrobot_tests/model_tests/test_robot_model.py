@@ -976,7 +976,6 @@ class TestRobotModel(unittest.TestCase):
         solutions, success_flags, _ = r8_6.batch_inverse_kinematics(
             target_coords,
             move_target=r8_6.rarm.end_coords,
-            stop=100,
             attempts_per_pose=10
         )
 
