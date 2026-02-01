@@ -10,7 +10,6 @@ if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
     _SUBMODULES = [
         "coordinates",
         "data",
-        "interpolator",
         "planner",
         "interfaces",
         "model",
@@ -75,7 +74,6 @@ else:
 
     from skrobot import coordinates
     from skrobot import data
-    from skrobot import interpolator
     from skrobot import planner
     from skrobot import interfaces
     from skrobot import model
