@@ -1120,26 +1120,49 @@ def _create_numpy_optimized_solver(fk_params):
 
         # Optimization loop
         opt_angles = init_opt_angles.copy()
+        eps = 1e-7
+
+        # Precompute perturbation pattern for all parameters at once
+        # Shape: (2 * n_opt, n_opt) - first n_opt are +eps, next n_opt are -eps
+        perturbation_pattern = np.zeros((2 * n_opt, n_opt))
+        for j in range(n_opt):
+            perturbation_pattern[j, j] = eps          # +eps for parameter j
+            perturbation_pattern[n_opt + j, j] = -eps  # -eps for parameter j
 
         for iteration in range(max_iterations):
-            # Compute gradients using vectorized finite differences
-            full_angles = _expand_to_full_angles_batch(opt_angles)
-
-            # Create perturbed inputs for gradient computation
-            eps = 1e-7
             batch_size = opt_angles.shape[0]
 
-            # Compute gradient for each parameter
-            grad = np.zeros_like(opt_angles)
-            for j in range(n_opt):
-                opt_plus = opt_angles.copy()
-                opt_plus[:, j] += eps
-                opt_minus = opt_angles.copy()
-                opt_minus[:, j] -= eps
+            # Create all perturbed angles at once: (batch_size * 2 * n_opt, n_opt)
+            # For each sample, we have 2*n_opt perturbations
+            opt_angles_expanded = np.tile(opt_angles, (2 * n_opt, 1))  # (batch * 2*n_opt, n_opt)
+            perturbations = np.tile(perturbation_pattern, (batch_size, 1))  # (batch * 2*n_opt, n_opt)
+            opt_angles_perturbed = opt_angles_expanded + perturbations
 
-                loss_plus = loss_fn_batch(opt_plus, target_positions_expanded, target_rotations_expanded)
-                loss_minus = loss_fn_batch(opt_minus, target_positions_expanded, target_rotations_expanded)
-                grad[:, j] = (loss_plus - loss_minus) / (2 * eps)
+            # Reorder so that perturbations for same sample are contiguous
+            # Current: [s0_p0+, s1_p0+, ..., s0_p0-, s1_p0-, ...]
+            # Want: [s0_p0+, s0_p1+, ..., s0_p0-, s0_p1-, ..., s1_p0+, ...]
+            opt_angles_perturbed = opt_angles_perturbed.reshape(2 * n_opt, batch_size, n_opt)
+            opt_angles_perturbed = opt_angles_perturbed.transpose(1, 0, 2)  # (batch, 2*n_opt, n_opt)
+            opt_angles_perturbed = opt_angles_perturbed.reshape(-1, n_opt)  # (batch * 2*n_opt, n_opt)
+
+            # Expand targets similarly
+            target_pos_exp = np.repeat(target_positions_expanded, 2 * n_opt, axis=0)
+            target_rot_exp = np.repeat(target_rotations_expanded, 2 * n_opt, axis=0)
+
+            # Single FK call for all perturbations
+            full_angles_perturbed = _expand_to_full_angles_batch(opt_angles_perturbed)
+            pos_err_all, rot_err_all = compute_errors_batch(
+                full_angles_perturbed, target_pos_exp, target_rot_exp
+            )
+            loss_all = pos_weight * pos_err_all ** 2 + rot_weight * rot_err_all ** 2
+
+            # Reshape: (batch, 2*n_opt) -> split into plus and minus
+            loss_all = loss_all.reshape(batch_size, 2 * n_opt)
+            loss_plus = loss_all[:, :n_opt]      # (batch, n_opt)
+            loss_minus = loss_all[:, n_opt:]     # (batch, n_opt)
+
+            # Compute gradients
+            grad = (loss_plus - loss_minus) / (2 * eps)  # (batch, n_opt)
 
             # Update
             opt_angles = opt_angles - learning_rate * grad
