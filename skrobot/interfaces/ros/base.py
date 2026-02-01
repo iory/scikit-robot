@@ -13,9 +13,6 @@ import rospy
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
 
-from skrobot.interpolator import LinearInterpolator
-from skrobot.interpolator import MinjerkInterpolator
-from skrobot.interpolator import position_list_interpolation
 from skrobot.model import LinearJoint
 from skrobot.model import RotationalJoint
 
@@ -639,41 +636,34 @@ class ROSRobotInterfaceBase(object):
         av : np.ndarray
             angle-vector
         """
-        # Select interpolator
-        if interpolation == 'linear':
-            interpolator = LinearInterpolator()
-        elif interpolation == 'minjerk':
-            interpolator = MinjerkInterpolator()
-        else:
+        if interpolation not in ('linear', 'minjerk'):
             raise ValueError(
                 "Unknown interpolation method: {}. "
                 "Use 'linear' or 'minjerk'.".format(interpolation))
 
-        # Get current angle vector
         current_av = self.robot.angle_vector()
-        position_list = [current_av, av]
-        time_list = [time]
 
-        # Generate interpolated trajectory
-        result = position_list_interpolation(
-            position_list, time_list, interpolation_dt,
-            interpolator=interpolator,
-            neglect_first=True)
+        # Generate time samples (excluding t=0)
+        n_steps = max(1, int(time / interpolation_dt))
+        t_samples = np.linspace(interpolation_dt, time, n_steps)
 
-        positions = result['position']
-        times = result['time']
+        if interpolation == 'linear':
+            # Linear interpolation
+            alpha = t_samples / time
+            positions = (1 - alpha[:, np.newaxis]) * current_av \
+                + alpha[:, np.newaxis] * av
+        else:
+            # Minimum jerk interpolation (5th order polynomial)
+            # With zero velocity and acceleration at boundaries
+            tau = t_samples / time
+            # s(tau) = 10*tau^3 - 15*tau^4 + 6*tau^5
+            s = 10 * tau**3 - 15 * tau**4 + 6 * tau**5
+            positions = (1 - s[:, np.newaxis]) * current_av \
+                + s[:, np.newaxis] * av
 
-        # Convert to avs and tms for angle_vector_sequence
-        avs = [np.array(pos) for pos in positions]
+        avs = [positions[i] for i in range(len(positions))]
+        tms = [interpolation_dt] * len(avs)
 
-        # Calculate time differences (tms is duration from previous to next)
-        tms = []
-        prev_time = 0.0
-        for t in times:
-            tms.append(t - prev_time)
-            prev_time = t
-
-        # Use angle_vector_sequence to send interpolated trajectory
         return self.angle_vector_sequence(
             avs, tms, controller_type, start_time, time_scale=1.0)
 

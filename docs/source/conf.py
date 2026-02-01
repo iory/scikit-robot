@@ -86,10 +86,6 @@ language = 'en'
 exclude_patterns = []
 
 # Suppress warnings for ambiguous cross-references.
-# This is needed because 'axis' exists in multiple classes:
-# - Coordinates.axis (method)
-# - Quaternion.axis (property)
-# - DualQuaternion.axis (property)
 suppress_warnings = ['ref.python']
 
 # The name of the Pygments (syntax highlighting) style to use.

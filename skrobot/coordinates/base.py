@@ -4,7 +4,6 @@ import warnings
 
 import numpy as np
 
-from skrobot.coordinates.dual_quaternion import DualQuaternion
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import _check_valid_translation
 from skrobot.coordinates.math import angle_between_vectors
@@ -14,7 +13,6 @@ from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
-from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
@@ -714,22 +712,6 @@ class Coordinates(object):
         array([0.1545085 , 0.47552826, 0.26761657, 0.8236391 ])
         """
         return wxyz2xyzw(matrix2quaternion(self._rotation))
-
-    @property
-    def dual_quaternion(self):
-        """Property of DualQuaternion
-
-        Return DualQuaternion representation of this coordinate.
-
-        Returns
-        -------
-        DualQuaternion : skrobot.coordinates.dual_quaternion.DualQuaternion
-            DualQuaternion representation of this coordinate
-        """
-        qr = normalize_vector(self.quaternion)
-        x, y, z = self._translation
-        qd = quaternion_multiply(np.array([0, x, y, z]), qr) * 0.5
-        return DualQuaternion(qr, qd)
 
     def parent_orientation(self, v, wrt):
         if wrt == 'local' or wrt == self:
