@@ -840,9 +840,8 @@ class CascadedLink(CascadedCoords):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            # Legacy API (deprecated)
-            rotation_axis=None,
-            translation_axis=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             thre=None,
             rthre=None,
             dif_pos_ratio=1.0,
@@ -1140,9 +1139,8 @@ class CascadedLink(CascadedCoords):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            # Legacy API (deprecated)
-            rotation_axis=None,
-            translation_axis=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             joint_args=None,
             thre=None,
             rthre=None,
@@ -1632,9 +1630,8 @@ class CascadedLink(CascadedCoords):
                           position_mask=None,
                           rotation_mask=None,
                           rotation_mirror=None,
-                          # Legacy API (deprecated)
-                          translation_axis=None,
-                          rotation_axis=None,
+                          translation_axis=None,  # Legacy API (deprecated)
+                          rotation_axis=None,  # Legacy API (deprecated)
                           dof_limit_gain=0.5):
         # Resolve new/legacy mask parameters
         translation_axis, rotation_axis = self._resolve_mask_params(
@@ -1867,9 +1864,8 @@ class CascadedLink(CascadedCoords):
                                      position_mask=None,
                                      rotation_mask=None,
                                      rotation_mirror=None,
-                                     # Legacy API (deprecated)
-                                     rotation_axis=None,
-                                     translation_axis=None,
+                                     rotation_axis=None,  # Legacy API (deprecated)
+                                     translation_axis=None,  # Legacy API (deprecated)
                                      col_offset=0,
                                      dim=None,
                                      jacobian=None,
@@ -2837,9 +2833,8 @@ class RobotModel(CascadedLink):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            # Legacy API (deprecated)
-            rotation_axis=None,
-            translation_axis=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             stop=500,
             thre=0.001,
             rthre=np.deg2rad(1.0),

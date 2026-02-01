@@ -67,6 +67,17 @@ class ViserViewer:
     def is_active(self) -> bool:
         return self._is_active
 
+    @property
+    def server(self):
+        """Return the underlying viser server for advanced usage.
+
+        Returns
+        -------
+        viser.ViserServer
+            The viser server instance.
+        """
+        return self._server
+
     def close(self):
         self._is_active = False
         self._server.stop()
@@ -596,66 +607,42 @@ class ViserViewer:
         else:
             solver = robot_solvers[group_name]
 
-        # Get batch size from slider
-        batch_size = int(self._batch_ik_samples.value)
+        # Get number of attempts from slider
+        attempts = int(self._batch_ik_samples.value)
 
-        # Generate random initial configurations
-        lower = np.array(solver.joint_limits_lower)
-        upper = np.array(solver.joint_limits_upper)
-        n_joints = solver.n_joints
-
-        # Use current joint angles as one of the initial guesses
-        current_angles = np.array([link.joint.joint_angle() for link in link_list])
-        random_init = np.random.uniform(lower, upper, size=(batch_size - 1, n_joints))
-        initial_angles = np.vstack([current_angles.reshape(1, -1), random_init])
-
-        # Prepare target arrays (same target for all batch)
-        target_positions = np.tile(target_pos, (batch_size, 1))
-        target_rotations = np.tile(target_rot, (batch_size, 1, 1))
-
-        # Rotation weight based on constraint setting
+        # Rotation constraint based on UI setting
         constrain_rot = self._ik_constrain_rotation.value
-        rot_weight = 0.1 if constrain_rot else 0.0
+        rotation_mask = True if constrain_rot else False
 
-        # Solve batch IK
+        # Get current angles for the first attempt
+        current_angles = np.array([link.joint.joint_angle() for link in link_list])
+
+        # Solve IK with multiple attempts
+        # The solver handles: random init, best solution selection
         try:
             solutions, success_flags, errors = solver(
-                target_positions,
-                target_rotations,
-                initial_angles=initial_angles,
+                target_pos.reshape(1, 3),
+                target_rot.reshape(1, 3, 3),
+                initial_angles=current_angles.reshape(1, -1),
                 max_iterations=100,
                 learning_rate=0.1,
-                pos_weight=1.0,
-                rot_weight=rot_weight,
+                rotation_mask=rotation_mask,
                 pos_threshold=0.01,
+                attempts_per_pose=attempts,
+                use_current_angles=True,
             )
 
-            # Convert JAX arrays to numpy if needed
-            success_flags = np.asarray(success_flags)
-            errors = np.asarray(errors)
-            solutions = np.asarray(solutions)
+            # Convert JAX arrays to numpy
+            best_solution = np.asarray(solutions)[0]
+            success = bool(np.asarray(success_flags)[0])
+            error = float(np.asarray(errors)[0])
 
-            min_error = np.min(errors)
-            best_idx = np.argmin(errors)
-
-            # Find the best successful solution
-            if np.any(success_flags):
-                successful_indices = np.where(success_flags)[0]
-                best_idx = successful_indices[np.argmin(errors[successful_indices])]
-                best_solution = solutions[best_idx]
-
-                # Apply the solution to the robot
+            # Apply if successful or error is reasonable
+            if success or error < 0.02:
                 for i, link in enumerate(link_list):
                     link.joint.joint_angle(float(best_solution[i]))
-
                 return best_solution
-            else:
-                # Even if no "success", use the best solution if error is reasonable
-                if min_error < 0.02:  # 2cm threshold for fallback
-                    best_solution = solutions[best_idx]
-                    for i, link in enumerate(link_list):
-                        link.joint.joint_angle(float(best_solution[i]))
-                    return best_solution
+
         except Exception as e:
             print(f"[Batch IK] Exception: {e}")
 
