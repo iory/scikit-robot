@@ -478,6 +478,130 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
 
         self.assertLess(pos_error, 0.01, f"Position error too large: {pos_error}")
 
+    @requires_jax
+    def test_batch_ik_position_mask_and_rotation_mask(self):
+        """Test batch IK with various position_mask and rotation_mask combinations."""
+        from skrobot.kinematics.differentiable import create_batch_ik_solver
+        from skrobot.coordinates.math import rotation_matrix_from_rpy
+
+        panda = self.panda
+        panda.reset_manip_pose()
+
+        link_list = panda.rarm.link_list
+        move_target = panda.rarm.end_coords
+
+        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
+
+        # All mask combinations to test
+        position_masks = [
+            True, False,
+            'x', 'y', 'z',
+            'xy', 'yx', 'xz', 'zx', 'yz', 'zy',
+            'xyz',
+            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+            [1, 1, 0], [1, 0, 1], [0, 1, 1],
+            [1, 1, 1],
+        ]
+
+        rotation_masks = [
+            True, False,
+            'x', 'y', 'z',
+            'xy', 'yx', 'xz', 'zx', 'yz', 'zy',
+            'xyz',
+            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+            [1, 1, 0], [1, 0, 1], [0, 1, 1],
+            [1, 1, 1],
+        ]
+
+        # Target with small position and rotation change
+        current_pos = move_target.worldpos()
+        current_rot = move_target.worldrot()
+        target_pos = current_pos + np.array([0.02, 0.01, 0.01])
+        target_rot = rotation_matrix_from_rpy([0.1, 0.05, 0.1]) @ current_rot
+
+        target_positions = np.array([target_pos])
+        target_rotations = np.array([target_rot])
+
+        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
+
+        # Helper to convert mask to array
+        def mask_to_array(mask):
+            if mask is None or mask is False:
+                return np.array([0, 0, 0])
+            if mask is True:
+                return np.array([1, 1, 1])
+            if isinstance(mask, str):
+                arr = np.array([0, 0, 0])
+                if 'x' in mask:
+                    arr[0] = 1
+                if 'y' in mask:
+                    arr[1] = 1
+                if 'z' in mask:
+                    arr[2] = 1
+                return arr
+            return np.array(mask)
+
+        for pos_mask in position_masks:
+            for rot_mask in rotation_masks:
+                panda.reset_manip_pose()
+
+                # Skip if both masks are False (nothing to constrain)
+                pos_arr = mask_to_array(pos_mask)
+                rot_arr = mask_to_array(rot_mask)
+                if np.sum(pos_arr) == 0 and np.sum(rot_arr) == 0:
+                    continue
+
+                try:
+                    solutions, success_flags, errors = solver(
+                        target_positions,
+                        target_rotations,
+                        initial_angles=initial_angles,
+                        max_iterations=150,
+                        learning_rate=0.15,
+                        rot_weight=0.5,
+                        position_mask=pos_mask,
+                        rotation_mask=rot_mask,
+                    )
+
+                    # Apply solution
+                    for i, link in enumerate(link_list):
+                        link.joint.joint_angle(solutions[0, i])
+
+                    achieved_pos = move_target.worldpos()
+                    achieved_rot = move_target.worldrot()
+
+                    # Check position constraints (relaxed threshold for combined constraints)
+                    # When both position and rotation are constrained, convergence is harder
+                    pos_threshold = 0.05 if np.sum(rot_arr) > 0 else 0.02
+                    if np.sum(pos_arr) > 0:
+                        for axis_idx in range(3):
+                            if pos_arr[axis_idx] == 1:
+                                axis_error = abs(achieved_pos[axis_idx] - target_pos[axis_idx])
+                                self.assertLess(
+                                    axis_error, pos_threshold,
+                                    f"pos_mask={pos_mask}, rot_mask={rot_mask}, "
+                                    f"axis {axis_idx} error: {axis_error}"
+                                )
+
+                    # Check rotation constraints (for single/double axis, check direction)
+                    if np.sum(rot_arr) > 0 and np.sum(rot_arr) <= 2:
+                        for axis_idx in range(3):
+                            if rot_arr[axis_idx] == 1:
+                                target_axis = target_rot[:, axis_idx]
+                                achieved_axis = achieved_rot[:, axis_idx]
+                                dot_product = abs(np.dot(target_axis, achieved_axis))
+                                axis_error = 1 - dot_product
+                                self.assertLess(
+                                    axis_error, 0.15,
+                                    f"pos_mask={pos_mask}, rot_mask={rot_mask}, "
+                                    f"rotation axis {axis_idx} direction error: {axis_error}"
+                                )
+
+                except Exception as e:
+                    self.fail(
+                        f"Failed for pos_mask={pos_mask}, rot_mask={rot_mask}: {e}"
+                    )
+
 
 if __name__ == '__main__':
     unittest.main()
