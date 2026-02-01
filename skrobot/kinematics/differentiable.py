@@ -904,6 +904,48 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
+def _normalize_mask_to_array(mask):
+    """Normalize mask specification to a 3-element numpy array.
+
+    Parameters
+    ----------
+    mask : bool, str, list, or numpy.ndarray
+        - True: constrain all axes -> [1, 1, 1]
+        - False/None: no constraint -> [0, 0, 0]
+        - 'x': constrain x-axis only -> [1, 0, 0]
+        - 'xy': constrain x,y axes -> [1, 1, 0]
+        - [1, 1, 0]: direct specification
+
+    Returns
+    -------
+    mask_array : numpy.ndarray
+        3-element array, 1=constrained, 0=free
+    """
+    if mask is None or mask is False:
+        return np.array([0.0, 0.0, 0.0])
+    if mask is True:
+        return np.array([1.0, 1.0, 1.0])
+    if isinstance(mask, str):
+        mask_dict = {
+            'x': np.array([1.0, 0.0, 0.0]),
+            'y': np.array([0.0, 1.0, 0.0]),
+            'z': np.array([0.0, 0.0, 1.0]),
+            'xy': np.array([1.0, 1.0, 0.0]),
+            'yx': np.array([1.0, 1.0, 0.0]),
+            'xz': np.array([1.0, 0.0, 1.0]),
+            'zx': np.array([1.0, 0.0, 1.0]),
+            'yz': np.array([0.0, 1.0, 1.0]),
+            'zy': np.array([0.0, 1.0, 1.0]),
+            'xyz': np.array([1.0, 1.0, 1.0]),
+        }
+        if mask in mask_dict:
+            return mask_dict[mask]
+        raise ValueError(f"Unknown mask string: {mask}")
+    if isinstance(mask, (list, np.ndarray)):
+        return np.array(mask, dtype=np.float64)
+    raise ValueError(f"Invalid mask type: {type(mask)}")
+
+
 def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='jax'):
     """Create a high-performance batch IK solver.
 
@@ -928,12 +970,19 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
     callable
         Batch IK solver function with signature:
         solve(target_positions, target_rotations, initial_angles=None,
-              max_iterations=100, learning_rate=0.1) -> (solutions, success, errors)
+              max_iterations=100, learning_rate=0.1,
+              position_mask=True, rotation_mask=True) -> (solutions, success, errors)
 
     Examples
     --------
     >>> solver = create_batch_ik_solver(robot, link_list, move_target)
     >>> solutions, success, errors = solver(target_positions, target_rotations)
+    >>> # With axis constraints
+    >>> solutions, success, errors = solver(
+    ...     target_positions, target_rotations,
+    ...     position_mask='xy',  # constrain x, y position only
+    ...     rotation_mask='x',   # constrain x-axis direction only
+    ... )
     """
     import numpy as np
 
@@ -992,16 +1041,46 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
 
         return full_angles
 
-    def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold):
+    def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight,
+                          pos_threshold, pos_mask_arr, rot_mask_arr):
         """Create a JIT-compiled solver for given parameters."""
 
+        # Convert masks to backend arrays
+        pos_mask = backend.array(pos_mask_arr)
+        rot_mask = backend.array(rot_mask_arr)
+
+        # Check if we have single-axis rotation constraint (for special handling)
+        rot_mask_sum = np.sum(rot_mask_arr)
+        is_single_axis_rot = rot_mask_sum == 1
+
         def loss_fn(opt_angles, target_pos, target_rot):
-            """Compute weighted pose error."""
+            """Compute weighted pose error with mask constraints."""
             # Expand to full angles (including mimic joints)
             full_angles = _expand_to_full_angles(opt_angles)
             pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
-            pos_err = backend.sum((pos - target_pos) ** 2)
-            rot_err = backend.sum((rot - target_rot) ** 2)
+
+            # Position error with mask
+            # pos_mask[i] = 1 means constrain axis i, 0 means ignore
+            pos_diff = pos - target_pos
+            pos_err = backend.sum((pos_diff * pos_mask) ** 2)
+
+            # Rotation error with mask
+            if is_single_axis_rot:
+                # For single-axis constraint, compare axis directions
+                # rot_mask tells us which column (axis) to compare
+                # e.g., rot_mask=[1,0,0] means compare x-axis direction
+                achieved_axis = backend.matmul(rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                # Error = 1 - |dot product| (0 when aligned, 1 when perpendicular)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                rot_err = 1.0 - dot_product ** 2
+            else:
+                # For multi-axis or full constraint, use matrix difference
+                # Apply mask by zeroing out unconstrained columns
+                rot_masked = rot * rot_mask  # broadcast mask to columns
+                target_rot_masked = target_rot * rot_mask
+                rot_err = backend.sum((rot_masked - target_rot_masked) ** 2)
+
             return pos_weight * pos_err + rot_weight * rot_err
 
         loss_and_grad = backend.value_and_grad(loss_fn)
@@ -1022,8 +1101,23 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
 
             # Expand to full angles for final error check
             final_full_angles = _expand_to_full_angles(final_opt_angles)
-            final_pos, _ = forward_kinematics_ee(backend, final_full_angles, fk_params)
-            pos_err = backend.sqrt(backend.sum((final_pos - target_pos) ** 2))
+            final_pos, final_rot = forward_kinematics_ee(backend, final_full_angles, fk_params)
+
+            # Compute error considering masks
+            pos_diff = final_pos - target_pos
+            pos_err = backend.sqrt(backend.sum((pos_diff * pos_mask) ** 2))
+
+            # Check success based on masked error
+            if is_single_axis_rot:
+                achieved_axis = backend.matmul(final_rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                rot_err = 1.0 - backend.abs(dot_product)
+            else:
+                rot_diff = final_rot - target_rot
+                rot_err = backend.sqrt(backend.sum((rot_diff * rot_mask) ** 2))
+
+            # For success check, use position error (rotation check would need threshold)
             success = pos_err < pos_threshold
 
             return final_full_angles, success, pos_err
@@ -1043,7 +1137,9 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
               learning_rate=0.1,
               pos_weight=1.0,
               rot_weight=0.1,
-              pos_threshold=0.001):
+              pos_threshold=0.001,
+              position_mask=True,
+              rotation_mask=True):
         """Solve batch IK.
 
         Parameters
@@ -1064,6 +1160,20 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             Rotation error weight.
         pos_threshold : float
             Position error threshold for success.
+        position_mask : bool, str, list, or numpy.ndarray
+            Position constraint mask. Specifies which position axes to constrain.
+            - True: constrain all axes (default)
+            - False: no position constraint
+            - 'x', 'y', 'z': constrain single axis
+            - 'xy', 'xz', 'yz': constrain two axes
+            - [1, 1, 0]: array form (1=constrain, 0=free)
+        rotation_mask : bool, str, list, or numpy.ndarray
+            Rotation constraint mask. Specifies which rotation axes to constrain.
+            - True: constrain all rotation axes (default)
+            - False: no rotation constraint
+            - 'x', 'y', 'z': constrain single axis direction
+            - 'xy', 'xz', 'yz': constrain two axis directions
+            - [1, 1, 0]: array form (1=constrain, 0=free)
 
         Returns
         -------
@@ -1085,11 +1195,18 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             # Extract non-mimic joint angles
             initial_opt_angles = initial_angles[:, non_mimic_indices]
 
+        # Normalize masks to arrays
+        pos_mask_arr = _normalize_mask_to_array(position_mask)
+        rot_mask_arr = _normalize_mask_to_array(rotation_mask)
+
         # Get or create JIT-compiled solver for these parameters
-        cache_key = (max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold)
+        # Include masks in cache key (convert to tuple for hashability)
+        cache_key = (max_iterations, learning_rate, pos_weight, rot_weight,
+                     pos_threshold, tuple(pos_mask_arr), tuple(rot_mask_arr))
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_solver_fn(
-                max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold
+                max_iterations, learning_rate, pos_weight, rot_weight,
+                pos_threshold, pos_mask_arr, rot_mask_arr
             )
 
         solver_fn = _jit_cache[cache_key]
