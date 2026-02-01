@@ -1042,16 +1042,66 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
         return full_angles
 
     def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight,
-                          pos_threshold, pos_mask_arr, rot_mask_arr):
+                          pos_threshold, rot_threshold, pos_mask_arr, rot_mask_arr,
+                          rotation_mirror):
         """Create a JIT-compiled solver for given parameters."""
 
         # Convert masks to backend arrays
         pos_mask = backend.array(pos_mask_arr)
         rot_mask = backend.array(rot_mask_arr)
 
-        # Check if we have single-axis rotation constraint (for special handling)
+        # Check mask sums for determining constraint types
+        pos_mask_sum = np.sum(pos_mask_arr)
         rot_mask_sum = np.sum(rot_mask_arr)
         is_single_axis_rot = rot_mask_sum == 1
+        has_pos_constraint = pos_mask_sum > 0
+        has_rot_constraint = rot_mask_sum > 0
+
+        # Create 180° rotation matrix for mirror axis
+        # Rx(180°) = diag(1, -1, -1), Ry(180°) = diag(-1, 1, -1), Rz(180°) = diag(-1, -1, 1)
+        mirror_rot = None
+        if rotation_mirror is not None:
+            if rotation_mirror == 'x':
+                mirror_rot = backend.array(np.array([
+                    [1.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0],
+                    [0.0, 0.0, -1.0]
+                ]))
+            elif rotation_mirror == 'y':
+                mirror_rot = backend.array(np.array([
+                    [-1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, -1.0]
+                ]))
+            elif rotation_mirror == 'z':
+                mirror_rot = backend.array(np.array([
+                    [-1.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0],
+                    [0.0, 0.0, 1.0]
+                ]))
+
+        def compute_rot_error_single(rot, target_rot):
+            """Compute rotation error for a single target rotation."""
+            if is_single_axis_rot:
+                achieved_axis = backend.matmul(rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                return 1.0 - dot_product ** 2
+            else:
+                rot_masked = rot * rot_mask
+                target_rot_masked = target_rot * rot_mask
+                return backend.sum((rot_masked - target_rot_masked) ** 2)
+
+        def compute_rot_error_single_for_check(rot, target_rot):
+            """Compute rotation error for convergence check."""
+            if is_single_axis_rot:
+                achieved_axis = backend.matmul(rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                return 1.0 - backend.abs(dot_product)
+            else:
+                rot_diff = rot - target_rot
+                return backend.sqrt(backend.sum((rot_diff * rot_mask) ** 2))
 
         def loss_fn(opt_angles, target_pos, target_rot):
             """Compute weighted pose error with mask constraints."""
@@ -1060,67 +1110,102 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
 
             # Position error with mask
-            # pos_mask[i] = 1 means constrain axis i, 0 means ignore
             pos_diff = pos - target_pos
             pos_err = backend.sum((pos_diff * pos_mask) ** 2)
 
-            # Rotation error with mask
-            if is_single_axis_rot:
-                # For single-axis constraint, compare axis directions
-                # rot_mask tells us which column (axis) to compare
-                # e.g., rot_mask=[1,0,0] means compare x-axis direction
-                achieved_axis = backend.matmul(rot, rot_mask)
-                target_axis = backend.matmul(target_rot, rot_mask)
-                # Error = 1 - |dot product| (0 when aligned, 1 when perpendicular)
-                dot_product = backend.sum(achieved_axis * target_axis)
-                rot_err = 1.0 - dot_product ** 2
+            # Rotation error with mask (and optional mirror)
+            if mirror_rot is not None:
+                # Compute error for both normal and mirrored target
+                rot_err_normal = compute_rot_error_single(rot, target_rot)
+                target_rot_mirrored = backend.matmul(target_rot, mirror_rot)
+                rot_err_mirror = compute_rot_error_single(rot, target_rot_mirrored)
+                # Take minimum
+                rot_err = backend.minimum(rot_err_normal, rot_err_mirror)
             else:
-                # For multi-axis or full constraint, use matrix difference
-                # Apply mask by zeroing out unconstrained columns
-                rot_masked = rot * rot_mask  # broadcast mask to columns
-                target_rot_masked = target_rot * rot_mask
-                rot_err = backend.sum((rot_masked - target_rot_masked) ** 2)
+                rot_err = compute_rot_error_single(rot, target_rot)
 
             return pos_weight * pos_err + rot_weight * rot_err
 
         loss_and_grad = backend.value_and_grad(loss_fn)
 
-        def solve_single(init_opt_angles, target_pos, target_rot):
-            """Solve IK for a single target using scan for efficient JIT."""
+        def compute_errors(opt_angles, target_pos, target_rot):
+            """Compute position and rotation errors."""
+            full_angles = _expand_to_full_angles(opt_angles)
+            pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
 
-            def body_fn(carry, _):
-                """Single iteration step."""
-                opt_angles = carry
-                loss, grad = loss_and_grad(opt_angles, target_pos, target_rot)
-                new_opt_angles = opt_angles - learning_rate * grad
-                new_opt_angles = backend.clip(new_opt_angles, joint_limits_lower, joint_limits_upper)
-                return new_opt_angles, loss
-
-            # Use scan for efficient JIT compilation
-            final_opt_angles, _ = backend.scan(body_fn, init_opt_angles, None, length=max_iterations)
-
-            # Expand to full angles for final error check
-            final_full_angles = _expand_to_full_angles(final_opt_angles)
-            final_pos, final_rot = forward_kinematics_ee(backend, final_full_angles, fk_params)
-
-            # Compute error considering masks
-            pos_diff = final_pos - target_pos
+            # Position error
+            pos_diff = pos - target_pos
             pos_err = backend.sqrt(backend.sum((pos_diff * pos_mask) ** 2))
 
-            # Check success based on masked error
-            if is_single_axis_rot:
-                achieved_axis = backend.matmul(final_rot, rot_mask)
-                target_axis = backend.matmul(target_rot, rot_mask)
-                dot_product = backend.sum(achieved_axis * target_axis)
-                rot_err = 1.0 - backend.abs(dot_product)
+            # Rotation error (with optional mirror)
+            if mirror_rot is not None:
+                rot_err_normal = compute_rot_error_single_for_check(rot, target_rot)
+                target_rot_mirrored = backend.matmul(target_rot, mirror_rot)
+                rot_err_mirror = compute_rot_error_single_for_check(rot, target_rot_mirrored)
+                rot_err = backend.minimum(rot_err_normal, rot_err_mirror)
             else:
-                rot_diff = final_rot - target_rot
-                rot_err = backend.sqrt(backend.sum((rot_diff * rot_mask) ** 2))
+                rot_err = compute_rot_error_single_for_check(rot, target_rot)
 
-            # For success check, use position error (rotation check would need threshold)
-            success = pos_err < pos_threshold
+            return pos_err, rot_err
 
-            return final_full_angles, success, pos_err
+        def check_converged(pos_err, rot_err):
+            """Check if converged based on mask constraints."""
+            if has_pos_constraint and has_rot_constraint:
+                return (pos_err < pos_threshold) & (rot_err < rot_threshold)
+            elif has_pos_constraint:
+                return pos_err < pos_threshold
+            elif has_rot_constraint:
+                return rot_err < rot_threshold
+            else:
+                return backend.array(True)
+
+        def solve_single(init_opt_angles, target_pos, target_rot):
+            """Solve IK for a single target with early stopping."""
+
+            def cond_fn(state):
+                """Continue if not converged and not at max iterations."""
+                opt_angles, iteration, pos_err, rot_err = state
+                not_converged = ~check_converged(pos_err, rot_err)
+                not_max_iter = iteration < max_iterations
+                return not_converged & not_max_iter
+
+            def body_fn(state):
+                """Single iteration step."""
+                opt_angles, iteration, _, _ = state
+
+                # Compute gradient and update
+                loss, grad = loss_and_grad(opt_angles, target_pos, target_rot)
+                new_opt_angles = opt_angles - learning_rate * grad
+                new_opt_angles = backend.clip(
+                    new_opt_angles, joint_limits_lower, joint_limits_upper
+                )
+
+                # Compute errors for convergence check
+                pos_err, rot_err = compute_errors(new_opt_angles, target_pos, target_rot)
+
+                return (new_opt_angles, iteration + 1, pos_err, rot_err)
+
+            # Initial state: (angles, iteration=0, pos_err=inf, rot_err=inf)
+            init_pos_err, init_rot_err = compute_errors(
+                init_opt_angles, target_pos, target_rot
+            )
+            init_state = (init_opt_angles, 0, init_pos_err, init_rot_err)
+
+            # Run optimization with early stopping
+            final_opt_angles, final_iter, final_pos_err, final_rot_err = backend.while_loop(
+                cond_fn, body_fn, init_state
+            )
+
+            # Expand to full angles
+            final_full_angles = _expand_to_full_angles(final_opt_angles)
+
+            # Check success
+            success = check_converged(final_pos_err, final_rot_err)
+
+            # Combined error for best solution selection
+            combined_err = final_pos_err + final_rot_err
+
+            return final_full_angles, success, combined_err
 
         # Vectorize over batch dimension (only batched args now)
         batched_solve = backend.vmap(solve_single)
@@ -1138,8 +1223,12 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
               pos_weight=1.0,
               rot_weight=0.1,
               pos_threshold=0.001,
+              rot_threshold=0.1,
               position_mask=True,
-              rotation_mask=True):
+              rotation_mask=True,
+              rotation_mirror=None,
+              attempts_per_pose=1,
+              use_current_angles=True):
         """Solve batch IK.
 
         Parameters
@@ -1150,6 +1239,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             Target rotation matrices (N, 3, 3).
         initial_angles : array-like, optional
             Initial joint angles (N, n_joints) or (n_joints,).
+            If attempts_per_pose > 1 and use_current_angles=True, this is used
+            as the first attempt for each target.
         max_iterations : int
             Maximum gradient descent iterations.
         learning_rate : float
@@ -1159,7 +1250,12 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
         rot_weight : float
             Rotation error weight.
         pos_threshold : float
-            Position error threshold for success.
+            Position error threshold for success (in meters).
+        rot_threshold : float
+            Rotation error threshold for success.
+            For single-axis constraint: 0 = aligned, 1 = perpendicular.
+            For multi-axis constraint: Frobenius norm of rotation matrix diff.
+            Default is 0.1.
         position_mask : bool, str, list, or numpy.ndarray
             Position constraint mask. Specifies which position axes to constrain.
             - True: constrain all axes (default)
@@ -1174,44 +1270,146 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             - 'x', 'y', 'z': constrain single axis direction
             - 'xy', 'xz', 'yz': constrain two axis directions
             - [1, 1, 0]: array form (1=constrain, 0=free)
+        rotation_mirror : str or None
+            Allow 180° rotated orientation around specified axis.
+            - None: no mirror (default)
+            - 'x': allow 180° rotation around x-axis
+            - 'y': allow 180° rotation around y-axis
+            - 'z': allow 180° rotation around z-axis
+            Useful when gripper orientation can be flipped (e.g., up or down).
+        attempts_per_pose : int
+            Number of IK attempts per target pose. Each attempt uses a different
+            initial configuration. The best solution (lowest error) is returned.
+            Default is 1 (single attempt).
+        use_current_angles : bool
+            If True and attempts_per_pose > 1, use initial_angles as the first
+            attempt (like viser's strategy). Remaining attempts use random
+            initial values. Default is True.
 
         Returns
         -------
         tuple
-            (solutions, success_flags, position_errors)
+            (solutions, success_flags, combined_errors)
+            combined_errors is the sum of position and rotation errors.
         """
         target_positions = backend.array(target_positions)
         target_rotations = backend.array(target_rotations)
         n_targets = target_positions.shape[0]
+        n_opt_joints = len(non_mimic_indices)
 
+        # Handle initial angles
         if initial_angles is None:
             # Use middle of joint limits as initial guess (for non-mimic joints only)
             init = (joint_limits_lower + joint_limits_upper) / 2
-            initial_opt_angles = backend.stack([init] * n_targets)
+            base_initial_opt_angles = backend.stack([init] * n_targets)
         else:
             initial_angles = backend.array(initial_angles)
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
             # Extract non-mimic joint angles
-            initial_opt_angles = initial_angles[:, non_mimic_indices]
+            base_initial_opt_angles = initial_angles[:, non_mimic_indices]
+
+        # Generate multiple initial values if attempts_per_pose > 1
+        if attempts_per_pose > 1:
+            # Convert to numpy for expansion
+            target_positions_np = backend.to_numpy(target_positions)
+            target_rotations_np = backend.to_numpy(target_rotations)
+
+            # Expand targets to (n_targets * attempts_per_pose)
+            # Each target is repeated attempts_per_pose times
+            expanded_target_positions_np = np.repeat(
+                target_positions_np, attempts_per_pose, axis=0
+            )
+            expanded_target_rotations_np = np.repeat(
+                target_rotations_np, attempts_per_pose, axis=0
+            )
+
+            # Generate initial angles for all attempts
+            all_initial_opt_angles = []
+
+            # Convert joint limits to numpy for random generation
+            lower_np = backend.to_numpy(joint_limits_lower)
+            upper_np = backend.to_numpy(joint_limits_upper)
+            base_initial_opt_angles_np = backend.to_numpy(base_initial_opt_angles)
+
+            for target_idx in range(n_targets):
+                for attempt_idx in range(attempts_per_pose):
+                    if attempt_idx == 0 and use_current_angles:
+                        # First attempt: use provided initial angles
+                        all_initial_opt_angles.append(
+                            base_initial_opt_angles_np[target_idx]
+                        )
+                    else:
+                        # Subsequent attempts: random within joint limits
+                        random_init = np.random.uniform(
+                            lower_np, upper_np, size=(n_opt_joints,)
+                        )
+                        all_initial_opt_angles.append(random_init)
+
+            initial_opt_angles = backend.array(np.array(all_initial_opt_angles))
+            target_positions_for_solve = backend.array(expanded_target_positions_np)
+            target_rotations_for_solve = backend.array(expanded_target_rotations_np)
+        else:
+            initial_opt_angles = base_initial_opt_angles
+            target_positions_for_solve = target_positions
+            target_rotations_for_solve = target_rotations
 
         # Normalize masks to arrays
         pos_mask_arr = _normalize_mask_to_array(position_mask)
         rot_mask_arr = _normalize_mask_to_array(rotation_mask)
 
         # Get or create JIT-compiled solver for these parameters
-        # Include masks in cache key (convert to tuple for hashability)
+        # Include masks, thresholds, and mirror in cache key
         cache_key = (max_iterations, learning_rate, pos_weight, rot_weight,
-                     pos_threshold, tuple(pos_mask_arr), tuple(rot_mask_arr))
+                     pos_threshold, rot_threshold,
+                     tuple(pos_mask_arr), tuple(rot_mask_arr), rotation_mirror)
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_solver_fn(
                 max_iterations, learning_rate, pos_weight, rot_weight,
-                pos_threshold, pos_mask_arr, rot_mask_arr
+                pos_threshold, rot_threshold, pos_mask_arr, rot_mask_arr,
+                rotation_mirror
             )
 
         solver_fn = _jit_cache[cache_key]
 
-        return solver_fn(initial_opt_angles, target_positions, target_rotations)
+        # Solve all (targets × attempts)
+        all_solutions, all_success, all_errors = solver_fn(
+            initial_opt_angles, target_positions_for_solve, target_rotations_for_solve
+        )
+
+        # If multiple attempts, select best solution for each target
+        if attempts_per_pose > 1:
+            # Convert to numpy for selection
+            all_solutions_np = backend.to_numpy(all_solutions)
+            all_success_np = backend.to_numpy(all_success)
+            all_errors_np = backend.to_numpy(all_errors)
+
+            # Reshape to (n_targets, attempts_per_pose, ...)
+            all_solutions_np = all_solutions_np.reshape(
+                n_targets, attempts_per_pose, n_joints
+            )
+            all_success_np = all_success_np.reshape(n_targets, attempts_per_pose)
+            all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
+
+            # Select best attempt for each target (lowest error)
+            best_indices = np.argmin(all_errors_np, axis=1)
+
+            solutions = np.array([
+                all_solutions_np[i, best_indices[i]]
+                for i in range(n_targets)
+            ])
+            success_flags = np.array([
+                all_success_np[i, best_indices[i]]
+                for i in range(n_targets)
+            ])
+            errors = np.array([
+                all_errors_np[i, best_indices[i]]
+                for i in range(n_targets)
+            ])
+
+            return backend.array(solutions), backend.array(success_flags), backend.array(errors)
+        else:
+            return all_solutions, all_success, all_errors
 
     # Create FK function for external use
     def fk_fn(angles):
