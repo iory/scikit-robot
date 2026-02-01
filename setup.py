@@ -36,12 +36,6 @@ with open('requirements_docs.txt') as f:
         req = line.split('#')[0].strip()
         docs_install_requires.append(req)
 
-opt_install_requires = []
-with open('requirements_opt.txt') as f:
-    for line in f:
-        req = line.split('#')[0].strip()
-        opt_install_requires.append(req)
-
 
 def remove_from_requirements(install_requires, remove_req):
     # If remove_req is "pyglet", requirement name with or without
@@ -71,15 +65,14 @@ if (sys.version_info.major > 2):
 # version lock those packages here so install succeeds
 if (sys.version_info.major, sys.version_info.minor) <= (3, 7):
     # packages that no longer support old Python
-    lock = [('pyglet', '1.4.10', install_requires),
-            ('cvxopt', '1.2.7', opt_install_requires)]
+    lock = [('pyglet', '1.4.10', install_requires)]
     for name, version, requires in lock:
         remove_from_requirements(requires, name)
 
         # add working version locked requirements
         requires.append('{}=={}'.format(name, version))
 
-extra_all_requires += docs_install_requires + opt_install_requires
+extra_all_requires += docs_install_requires
 
 
 console_scripts = ["skr=skrobot.apps.cli:main",
@@ -127,7 +120,6 @@ setup(
         "console_scripts": console_scripts,
     },
     extras_require={
-        'opt': opt_install_requires,
         'docs': docs_install_requires,
         'all': extra_all_requires,
     },
