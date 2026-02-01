@@ -946,6 +946,249 @@ def _normalize_mask_to_array(mask):
     raise ValueError(f"Invalid mask type: {type(mask)}")
 
 
+def _create_numpy_optimized_solver(fk_params):
+    """Create an optimized batch IK solver using pure NumPy with vectorized operations.
+
+    This uses batched FK and gradient computation for better performance than
+    the generic vmap-based approach.
+    """
+    n_joints = fk_params['n_joints']
+
+    # Identify non-mimic joints
+    mimic_parent_indices = fk_params.get('mimic_parent_indices', np.array([-1] * n_joints))
+    mimic_multipliers = fk_params.get('mimic_multipliers', np.ones(n_joints))
+    mimic_offsets = fk_params.get('mimic_offsets', np.zeros(n_joints))
+
+    non_mimic_indices = np.array([i for i in range(n_joints) if mimic_parent_indices[i] < 0])
+    n_opt = len(non_mimic_indices)
+
+    joint_limits_lower = fk_params['joint_limits_lower'][non_mimic_indices]
+    joint_limits_upper = fk_params['joint_limits_upper'][non_mimic_indices]
+
+    def _expand_to_full_angles_batch(opt_angles_batch):
+        """Expand optimization variables to full joint angles (batched)."""
+        batch_size = opt_angles_batch.shape[0]
+        full_angles = np.zeros((batch_size, n_joints))
+
+        # Fill non-mimic joints
+        full_angles[:, non_mimic_indices] = opt_angles_batch
+
+        # Fill mimic joints
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                full_angles[:, i] = (
+                    full_angles[:, parent_idx] * mimic_multipliers[i] + mimic_offsets[i]
+                )
+
+        return full_angles
+
+    def solve(target_positions, target_rotations,
+              initial_angles=None,
+              max_iterations=100,
+              learning_rate=0.1,
+              pos_weight=1.0,
+              rot_weight=0.1,
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_mask=True,
+              rotation_mask=True,
+              rotation_mirror=None,
+              attempts_per_pose=1,
+              use_current_angles=True):
+        """Solve batch IK using optimized NumPy operations."""
+        target_positions = np.asarray(target_positions)
+        target_rotations = np.asarray(target_rotations)
+
+        if target_positions.ndim == 1:
+            target_positions = target_positions.reshape(1, 3)
+            target_rotations = target_rotations.reshape(1, 3, 3)
+
+        n_targets = target_positions.shape[0]
+
+        # Parse masks
+        pos_mask_arr = _normalize_mask_to_array(position_mask)
+        rot_mask_arr = _normalize_mask_to_array(rotation_mask)
+
+        pos_mask_sum = np.sum(pos_mask_arr)
+        rot_mask_sum = np.sum(rot_mask_arr)
+        has_pos_constraint = pos_mask_sum > 0
+        has_rot_constraint = rot_mask_sum > 0
+        is_single_axis_rot = rot_mask_sum == 1
+
+        # Create mirror rotation if specified
+        mirror_rot = None
+        if rotation_mirror is not None:
+            if rotation_mirror == 'x':
+                mirror_rot = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype=np.float64)
+            elif rotation_mirror == 'y':
+                mirror_rot = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float64)
+            elif rotation_mirror == 'z':
+                mirror_rot = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=np.float64)
+
+        # Handle attempts_per_pose
+        if attempts_per_pose > 1:
+            # Repeat targets
+            target_positions_expanded = np.repeat(target_positions, attempts_per_pose, axis=0)
+            target_rotations_expanded = np.repeat(target_rotations, attempts_per_pose, axis=0)
+
+            # Generate initial angles
+            n_expanded = n_targets * attempts_per_pose
+            if initial_angles is not None and use_current_angles:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                # First attempt uses provided angles, rest are random
+                init_opt_angles = np.zeros((n_expanded, n_opt))
+                for t in range(n_targets):
+                    init_opt_angles[t * attempts_per_pose] = init_angles[t, non_mimic_indices]
+                    for a in range(1, attempts_per_pose):
+                        idx = t * attempts_per_pose + a
+                        init_opt_angles[idx] = np.random.uniform(
+                            joint_limits_lower, joint_limits_upper
+                        )
+            else:
+                init_opt_angles = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt)
+                )
+        else:
+            target_positions_expanded = target_positions
+            target_rotations_expanded = target_rotations
+            n_expanded = n_targets
+
+            if initial_angles is not None:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                init_opt_angles = init_angles[:, non_mimic_indices]
+            else:
+                init_opt_angles = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt)
+                )
+
+        def compute_errors_batch(full_angles_batch, target_pos, target_rot):
+            """Compute position and rotation errors for a batch."""
+            pos, rot = forward_kinematics_ee_batched_numpy(full_angles_batch, fk_params)
+
+            # Position error
+            if has_pos_constraint:
+                pos_diff = pos - target_pos
+                pos_diff_masked = pos_diff * pos_mask_arr
+                pos_err = np.sqrt(np.sum(pos_diff_masked ** 2, axis=1))
+            else:
+                pos_err = np.zeros(full_angles_batch.shape[0])
+
+            # Rotation error
+            if has_rot_constraint:
+                if mirror_rot is not None:
+                    # Try both original and mirrored target
+                    target_rot_mirrored = target_rot @ mirror_rot
+
+                if is_single_axis_rot:
+                    # Single axis: use dot product
+                    axis_idx = np.argmax(rot_mask_arr)
+                    target_axis = target_rot[:, :, axis_idx]  # (batch, 3)
+                    current_axis = rot[:, :, axis_idx]  # (batch, 3)
+
+                    dots = np.sum(target_axis * current_axis, axis=1)
+                    rot_err = 1.0 - np.abs(dots)
+
+                    if mirror_rot is not None:
+                        target_axis_m = target_rot_mirrored[:, :, axis_idx]
+                        dots_m = np.sum(target_axis_m * current_axis, axis=1)
+                        rot_err_m = 1.0 - np.abs(dots_m)
+                        rot_err = np.minimum(rot_err, rot_err_m)
+                else:
+                    # Full rotation: Frobenius norm
+                    rot_diff = rot - target_rot
+                    rot_err = np.sqrt(np.sum(rot_diff ** 2, axis=(1, 2)))
+
+                    if mirror_rot is not None:
+                        rot_diff_m = rot - target_rot_mirrored
+                        rot_err_m = np.sqrt(np.sum(rot_diff_m ** 2, axis=(1, 2)))
+                        rot_err = np.minimum(rot_err, rot_err_m)
+            else:
+                rot_err = np.zeros(full_angles_batch.shape[0])
+
+            return pos_err, rot_err
+
+        def loss_fn_batch(opt_angles_batch, target_pos, target_rot):
+            """Batched loss function."""
+            full_angles = _expand_to_full_angles_batch(opt_angles_batch)
+            pos_err, rot_err = compute_errors_batch(full_angles, target_pos, target_rot)
+            return pos_weight * pos_err ** 2 + rot_weight * rot_err ** 2
+
+        # Optimization loop
+        opt_angles = init_opt_angles.copy()
+
+        for iteration in range(max_iterations):
+            # Compute gradients using vectorized finite differences
+            full_angles = _expand_to_full_angles_batch(opt_angles)
+
+            # Create perturbed inputs for gradient computation
+            eps = 1e-7
+            batch_size = opt_angles.shape[0]
+
+            # Compute gradient for each parameter
+            grad = np.zeros_like(opt_angles)
+            for j in range(n_opt):
+                opt_plus = opt_angles.copy()
+                opt_plus[:, j] += eps
+                opt_minus = opt_angles.copy()
+                opt_minus[:, j] -= eps
+
+                loss_plus = loss_fn_batch(opt_plus, target_positions_expanded, target_rotations_expanded)
+                loss_minus = loss_fn_batch(opt_minus, target_positions_expanded, target_rotations_expanded)
+                grad[:, j] = (loss_plus - loss_minus) / (2 * eps)
+
+            # Update
+            opt_angles = opt_angles - learning_rate * grad
+            opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
+
+            # Early stopping check
+            full_angles = _expand_to_full_angles_batch(opt_angles)
+            pos_err, rot_err = compute_errors_batch(
+                full_angles, target_positions_expanded, target_rotations_expanded
+            )
+            converged = (pos_err < pos_threshold) & (rot_err < rot_threshold)
+            if np.all(converged):
+                break
+
+        # Final results
+        full_angles = _expand_to_full_angles_batch(opt_angles)
+        pos_err, rot_err = compute_errors_batch(
+            full_angles, target_positions_expanded, target_rotations_expanded
+        )
+        combined_err = pos_err + rot_err
+        success = (pos_err < pos_threshold) & (rot_err < rot_threshold)
+
+        # Select best attempt for each target
+        if attempts_per_pose > 1:
+            full_angles = full_angles.reshape(n_targets, attempts_per_pose, n_joints)
+            success = success.reshape(n_targets, attempts_per_pose)
+            combined_err = combined_err.reshape(n_targets, attempts_per_pose)
+
+            best_indices = np.argmin(combined_err, axis=1)
+            solutions = np.array([full_angles[i, best_indices[i]] for i in range(n_targets)])
+            success_out = np.array([success[i, best_indices[i]] for i in range(n_targets)])
+            errors_out = np.array([combined_err[i, best_indices[i]] for i in range(n_targets)])
+        else:
+            solutions = full_angles
+            success_out = success
+            errors_out = combined_err
+
+        return solutions, success_out, errors_out
+
+    # Attach metadata
+    solve.n_joints = n_joints
+    solve.joint_limits_lower = fk_params['joint_limits_lower']
+    solve.joint_limits_upper = fk_params['joint_limits_upper']
+    solve.fk_params = fk_params
+    solve.backend_name = 'numpy'
+
+    return solve
+
+
 def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='jax'):
     """Create a high-performance batch IK solver.
 
@@ -988,10 +1231,14 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
 
     from skrobot.backend import get_backend
 
-    backend = get_backend(backend_name)
-
     # Extract FK parameters
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)
+
+    # Use optimized NumPy solver for numpy backend
+    if backend_name == 'numpy':
+        return _create_numpy_optimized_solver(fk_params)
+
+    backend = get_backend(backend_name)
 
     n_joints = fk_params['n_joints']
 
@@ -1462,6 +1709,173 @@ def _axis_angle_to_matrix(backend, axis, angle):
     s = backend.sin(angle)
 
     return I + s * K + (1 - c) * backend.matmul(K, K)
+
+
+def _axis_angle_to_matrix_batched(axis, angles):
+    """Convert axis-angle to rotation matrices for a batch of angles.
+
+    Uses Rodrigues' formula with NumPy broadcasting for efficiency.
+
+    Parameters
+    ----------
+    axis : numpy.ndarray
+        Rotation axis (3,).
+    angles : numpy.ndarray
+        Rotation angles (batch,).
+
+    Returns
+    -------
+    rotations : numpy.ndarray
+        Rotation matrices (batch, 3, 3).
+    """
+    # Normalize axis
+    axis = axis / (np.linalg.norm(axis) + 1e-10)
+
+    # Skew-symmetric matrix K
+    K = np.array([
+        [0, -axis[2], axis[1]],
+        [axis[2], 0, -axis[0]],
+        [-axis[1], axis[0], 0]
+    ])
+
+    # K @ K precomputed
+    K2 = K @ K
+
+    # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
+    # angles: (batch,)
+    c = np.cos(angles)[:, None, None]  # (batch, 1, 1)
+    s = np.sin(angles)[:, None, None]  # (batch, 1, 1)
+
+    I = np.eye(3)
+    return I + s * K + (1 - c) * K2  # (batch, 3, 3)
+
+
+def forward_kinematics_ee_batched_numpy(joint_angles_batch, fk_params):
+    """Compute end-effector pose for a batch of joint angles using NumPy.
+
+    Optimized version that processes all batch elements simultaneously.
+
+    Parameters
+    ----------
+    joint_angles_batch : numpy.ndarray
+        Joint angles (batch, n_joints).
+    fk_params : dict
+        FK parameters from extract_fk_parameters().
+
+    Returns
+    -------
+    positions : numpy.ndarray
+        End-effector positions (batch, 3).
+    rotations : numpy.ndarray
+        End-effector rotations (batch, 3, 3).
+    """
+    batch_size = joint_angles_batch.shape[0]
+    n_joints = fk_params['n_joints']
+
+    translations = fk_params['link_translations']  # (n_joints, 3)
+    local_rotations = fk_params['link_rotations']  # (n_joints, 3, 3)
+    axes = fk_params['joint_axes']  # (n_joints, 3)
+    base_pos = fk_params['base_position']  # (3,)
+    base_rot = fk_params['base_rotation']  # (3, 3)
+    ref_angles = fk_params['ref_angles']  # (n_joints,)
+    joint_types = fk_params['joint_types']
+    ee_offset_pos = fk_params['ee_offset_position']  # (3,)
+    ee_offset_rot = fk_params['ee_offset_rotation']  # (3, 3)
+
+    # Handle mimic joints
+    mimic_parent_indices = fk_params.get('mimic_parent_indices')
+    if mimic_parent_indices is not None:
+        mimic_multipliers = fk_params['mimic_multipliers']
+        mimic_offsets = fk_params['mimic_offsets']
+
+        effective_angles = joint_angles_batch.copy()
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                effective_angles[:, i] = (
+                    joint_angles_batch[:, parent_idx] * mimic_multipliers[i]
+                    + mimic_offsets[i]
+                )
+        joint_angles_batch = effective_angles
+
+    # Initialize batch transforms
+    current_pos = np.tile(base_pos, (batch_size, 1))  # (batch, 3)
+    current_rot = np.tile(base_rot, (batch_size, 1, 1))  # (batch, 3, 3)
+
+    for i in range(n_joints):
+        # Apply link static transform
+        # pos = pos + rot @ translation
+        current_pos = current_pos + np.einsum(
+            'bij,j->bi', current_rot, translations[i]
+        )
+        # rot = rot @ local_rotation
+        current_rot = np.einsum(
+            'bij,jk->bik', current_rot, local_rotations[i]
+        )
+
+        # Apply joint motion
+        delta_angles = joint_angles_batch[:, i] - ref_angles[i]  # (batch,)
+
+        if joint_types[i] == 'prismatic':
+            # Translate along axis
+            current_pos = current_pos + np.einsum(
+                'bij,j,b->bi', current_rot, axes[i], delta_angles
+            )
+        else:
+            # Revolute: rotate around axis
+            joint_rots = _axis_angle_to_matrix_batched(
+                axes[i], delta_angles
+            )  # (batch, 3, 3)
+            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+
+    # Apply end-effector offset
+    current_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
+    current_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+
+    return current_pos, current_rot
+
+
+def _compute_gradient_batched_numpy(loss_fn_batched, angles_batch, eps=1e-7):
+    """Compute gradients for a batch of angles using vectorized finite differences.
+
+    Parameters
+    ----------
+    loss_fn_batched : callable
+        Loss function that takes (batch, n_joints) and returns (batch,).
+    angles_batch : numpy.ndarray
+        Joint angles (batch, n_joints).
+    eps : float
+        Finite difference step size.
+
+    Returns
+    -------
+    gradients : numpy.ndarray
+        Gradients (batch, n_joints).
+    """
+    batch_size, n_joints = angles_batch.shape
+
+    # Create perturbed angles for all parameters at once
+    # Shape: (batch, n_joints, 2) - plus and minus perturbations
+    angles_plus = np.tile(angles_batch[:, :, None], (1, 1, n_joints))  # (batch, n_joints, n_joints)
+    angles_minus = angles_plus.copy()
+
+    # Add perturbations along diagonal (perturbing each joint independently)
+    for j in range(n_joints):
+        angles_plus[:, j, j] += eps
+        angles_minus[:, j, j] -= eps
+
+    # Reshape for batch evaluation: (batch * n_joints, n_joints)
+    angles_plus_flat = angles_plus.reshape(-1, n_joints)
+    angles_minus_flat = angles_minus.reshape(-1, n_joints)
+
+    # Evaluate loss for all perturbed inputs
+    loss_plus = loss_fn_batched(angles_plus_flat).reshape(batch_size, n_joints)
+    loss_minus = loss_fn_batched(angles_minus_flat).reshape(batch_size, n_joints)
+
+    # Central difference
+    gradients = (loss_plus - loss_minus) / (2 * eps)
+
+    return gradients
 
 
 def create_jax_fk_function(fk_params):
