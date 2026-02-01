@@ -387,7 +387,7 @@ def main():
 
         # Add reachability visualization using batched meshes
         import trimesh as tm
-        server = viewer._server
+        server = viewer.server
 
         # Create unit icosphere mesh
         unit_sphere = tm.creation.icosphere(subdivisions=1, radius=1.0)
