@@ -1134,18 +1134,13 @@ def _create_numpy_optimized_solver(fk_params):
 
             # Create all perturbed angles at once: (batch_size * 2 * n_opt, n_opt)
             # For each sample, we have 2*n_opt perturbations
-            opt_angles_expanded = np.tile(opt_angles, (2 * n_opt, 1))  # (batch * 2*n_opt, n_opt)
+            # Use np.repeat so each sample's angles are repeated 2*n_opt times consecutively
+            opt_angles_expanded = np.repeat(opt_angles, 2 * n_opt, axis=0)  # (batch * 2*n_opt, n_opt)
             perturbations = np.tile(perturbation_pattern, (batch_size, 1))  # (batch * 2*n_opt, n_opt)
             opt_angles_perturbed = opt_angles_expanded + perturbations
+            # Now ordering is: [s0+p0, s0+p1, ..., s0-pn, s1+p0, s1+p1, ...]
 
-            # Reorder so that perturbations for same sample are contiguous
-            # Current: [s0_p0+, s1_p0+, ..., s0_p0-, s1_p0-, ...]
-            # Want: [s0_p0+, s0_p1+, ..., s0_p0-, s0_p1-, ..., s1_p0+, ...]
-            opt_angles_perturbed = opt_angles_perturbed.reshape(2 * n_opt, batch_size, n_opt)
-            opt_angles_perturbed = opt_angles_perturbed.transpose(1, 0, 2)  # (batch, 2*n_opt, n_opt)
-            opt_angles_perturbed = opt_angles_perturbed.reshape(-1, n_opt)  # (batch * 2*n_opt, n_opt)
-
-            # Expand targets similarly
+            # Expand targets similarly (each target repeated 2*n_opt times)
             target_pos_exp = np.repeat(target_positions_expanded, 2 * n_opt, axis=0)
             target_rot_exp = np.repeat(target_rotations_expanded, 2 * n_opt, axis=0)
 
