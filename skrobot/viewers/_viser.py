@@ -718,6 +718,7 @@ class ViserViewer:
                 pos_threshold=0.01,
                 attempts_per_pose=attempts,
                 use_current_angles=True,
+                select_closest_to_initial=True,
             )
             t1 = time.time()
             solve_ms = (t1 - t0) * 1000
