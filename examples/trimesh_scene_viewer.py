@@ -53,7 +53,7 @@ def main():
 >>> robot.reset_manip_pose()
 >>> viewer.redraw()
 >>> robot.init_pose()
->>> robot.inverse_kinematics(box, rotation_axis='y')
+>>> robot.inverse_kinematics(box, rotation_mask='xz')
 ''')
 
         import IPython
@@ -83,7 +83,7 @@ def main():
 
         print('==> IK to box')
         robot.reset_manip_pose()
-        robot.inverse_kinematics(box, rotation_axis='y')
+        robot.inverse_kinematics(box, rotation_mask='xz')
         print(robot.angle_vector())
         time.sleep(1)
         viewer.redraw()
