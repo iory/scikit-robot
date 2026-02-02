@@ -48,26 +48,26 @@ The basic inverse kinematics solver finds joint angles to reach a target pose:
     # Initialize robot and set up target
     robot = PR2()
     robot.reset_pose()
-    
+
     # Define target pose
     target_coords = Coordinates(
         pos=[0.8, -0.3, 0.8],
         rot=[0.0, np.deg2rad(30), np.deg2rad(-30)]
     )
-    
+
     # Solve inverse kinematics
     link_list = robot.rarm.link_list
     result = robot.inverse_kinematics(
         target_coords,
         link_list=link_list,
         move_target=robot.rarm.end_coords,
-        rotation_axis=True,
-        translation_axis=True,
+        rotation_mask=True,
+        position_mask=True,
         stop=100,              # Maximum iterations
         thre=0.001,           # Position threshold (meters)
         rthre=np.deg2rad(1.0) # Rotation threshold (radians)
     )
-    
+
     if result is not False:
         print("IK solved successfully!")
         print("Joint angles:", robot.angle_vector())
@@ -86,28 +86,28 @@ For multiple target poses, batch IK provides significant performance improvement
 
     robot = Fetch()
     robot.reset_pose()
-    
+
     # Define multiple target poses
     target_poses = [
         Coordinates(pos=[0.7, -0.2, 0.9]).rotate(np.deg2rad(30), 'y'),
         Coordinates(pos=[0.6, -0.3, 1.0]).rotate(np.deg2rad(-25), 'z'),
         Coordinates(pos=[0.8, -0.1, 0.8]).rotate(np.deg2rad(45), 'x'),
     ]
-    
+
     # Solve batch inverse kinematics
     link_list = robot.rarm.link_list
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         target_poses,
         link_list=link_list,
         move_target=robot.rarm.end_coords,
-        rotation_axis=True,
-        translation_axis=True,
+        rotation_mask=True,
+        position_mask=True,
         stop=100,
         thre=0.001,
         rthre=np.deg2rad(1.0),
         attempts_per_pose=50  # Multiple attempts with random initial poses
     )
-    
+
     # Check results
     for i, (solution, success, attempts) in enumerate(zip(solutions, success_flags, attempt_counts)):
         if success:
@@ -119,59 +119,121 @@ For multiple target poses, batch IK provides significant performance improvement
 Axis Constraints
 ~~~~~~~~~~~~~~~~
 
-The ``rotation_axis`` and ``translation_axis`` parameters provide fine-grained control over which degrees of freedom are constrained during IK solving.
+The ``position_mask`` and ``rotation_mask`` parameters provide fine-grained control over which degrees of freedom are constrained during IK solving. The mask specifies which axes to **constrain** (1=constrained, 0=free).
 
-Translation Axis Constraints
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Controls which translational degrees of freedom are used:
-
-.. code-block:: python
-
-    # Full 3D translation (default)
-    robot.inverse_kinematics(target, translation_axis=True)
-    
-    # No translation constraints - ignore position
-    robot.inverse_kinematics(target, translation_axis=False)
-    
-    # Constrain only specific axes
-    robot.inverse_kinematics(target, translation_axis='xy')  # Only X and Y
-    robot.inverse_kinematics(target, translation_axis='z')   # Only Z
-    robot.inverse_kinematics(target, translation_axis='xz')  # X and Z only
-
-**Supported translation axis values:**
-
-- ``True``: Use all translation axes (X, Y, Z)
-- ``False`` or ``None``: Ignore translation completely
-- ``'x'``, ``'y'``, ``'z'``: Constrain only the specified axis
-- ``'xy'``, ``'yz'``, ``'xz'``: Constrain two specified axes
-- ``'xm'``, ``'ym'``, ``'zm'``: Mirror notation - finds nearest axis orientation by allowing sign flip (e.g., ``'xm'`` allows X-axis to point in opposite direction if closer)
-
-Rotation Axis Constraints
+Position Mask Constraints
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Controls which rotational degrees of freedom are used:
+Controls which positional degrees of freedom are constrained:
 
 .. code-block:: python
 
-    # Full 3D rotation (default)
-    robot.inverse_kinematics(target, rotation_axis=True)
-    
+    # Full 3D position constraint (default)
+    robot.inverse_kinematics(target, position_mask=True)
+
+    # No position constraints - ignore position
+    robot.inverse_kinematics(target, position_mask=False)
+
+    # Constrain only specific axes
+    robot.inverse_kinematics(target, position_mask='z')    # Only Z (height)
+    robot.inverse_kinematics(target, position_mask='xy')   # Only X and Y (planar)
+    robot.inverse_kinematics(target, position_mask='xz')   # X and Z only
+
+**Supported position mask values:**
+
+- ``True``: Constrain all position axes (X, Y, Z)
+- ``False`` or ``None``: No position constraint
+- ``'x'``, ``'y'``, ``'z'``: Constrain only the specified axis
+- ``'xy'``, ``'yz'``, ``'xz'``: Constrain the two specified axes
+- ``[1, 0, 1]``: Direct mask specification (constrain X and Z)
+
+Rotation Mask Constraints
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Controls which rotational degrees of freedom are constrained. The two-axis masks are most useful as they preserve one axis direction while allowing rotation around it.
+
+.. code-block:: python
+
+    # Full 3D rotation constraint (default)
+    robot.inverse_kinematics(target, rotation_mask=True)
+
     # No rotation constraints - ignore orientation
-    robot.inverse_kinematics(target, rotation_axis=False)
-    
-    # Constrain only specific rotation axes
-    robot.inverse_kinematics(target, rotation_axis='z')     # Only yaw
-    robot.inverse_kinematics(target, rotation_axis='xy')    # Roll and pitch only
-    robot.inverse_kinematics(target, rotation_axis=True)   # All rotations
+    robot.inverse_kinematics(target, rotation_mask=False)
 
-**Supported rotation axis values:**
+    # Two-axis constraints (recommended for partial rotation control)
+    robot.inverse_kinematics(target, rotation_mask='yz')   # X-axis direction preserved
+    robot.inverse_kinematics(target, rotation_mask='xz')   # Y-axis direction preserved
+    robot.inverse_kinematics(target, rotation_mask='xy')   # Z-axis direction preserved
 
-- ``True``: Use all rotation axes (roll, pitch, yaw)
-- ``False`` or ``None``: Ignore rotation completely  
-- ``'x'``, ``'y'``, ``'z'``: Constrain only the specified rotation axis
-- ``'xy'``, ``'yz'``, ``'xz'``: Constrain two specified rotation axes
-- ``'xm'``, ``'ym'``, ``'zm'``: Mirror notation - finds nearest orientation by allowing axis sign flip (e.g., ``'xm'`` optimizes rotation considering both +X and -X directions)
+**Supported rotation mask values:**
+
+- ``True``: Constrain all rotation axes (full orientation match)
+- ``False`` or ``None``: No rotation constraint (orientation free)
+- ``'xy'``, ``'yz'``, ``'xz'``: Constrain two rotation axes, preserving the third axis direction
+- ``[1, 1, 0]``: Direct mask specification (same as ``'xy'``)
+
+Mirror Mode (rotation_mirror)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``rotation_mirror`` parameter allows the solver to consider both positive and negative directions of a specific axis, choosing the orientation that results in the shortest rotation path:
+
+.. code-block:: python
+
+    # Allow X-axis to flip direction if closer
+    robot.inverse_kinematics(target, rotation_mask=True, rotation_mirror='x')
+
+    # Allow Y-axis to flip direction if closer
+    robot.inverse_kinematics(target, rotation_mask=True, rotation_mirror='y')
+
+    # Allow Z-axis to flip direction if closer
+    robot.inverse_kinematics(target, rotation_mask=True, rotation_mirror='z')
+
+Backwards Compatibility (Legacy API)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The legacy ``rotation_axis`` and ``translation_axis`` parameters are still supported for backwards compatibility. They are automatically converted to the new mask format internally.
+
+**Important semantic difference:**
+
+- Legacy API specifies axes to **ignore** (free axes)
+- New API specifies axes to **constrain** (fixed axes)
+
+**Conversion table (rotation):**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Legacy (rotation_axis)
+     - New (rotation_mask)
+     - Effect
+   * - ``True``
+     - ``True``
+     - Full rotation constraint
+   * - ``False``
+     - ``False``
+     - No rotation constraint
+   * - ``'x'`` (ignore X)
+     - ``'yz'``
+     - X-axis direction preserved
+   * - ``'y'`` (ignore Y)
+     - ``'xz'``
+     - Y-axis direction preserved
+   * - ``'z'`` (ignore Z)
+     - ``'xy'``
+     - Z-axis direction preserved
+
+**Example:**
+
+.. code-block:: python
+
+    # These are equivalent - Y-axis direction preserved:
+    robot.inverse_kinematics(target, rotation_axis='y')    # Legacy: ignore Y
+    robot.inverse_kinematics(target, rotation_mask='xz')   # New: constrain X,Z
+
+    # These are equivalent - Z-axis direction preserved:
+    robot.inverse_kinematics(target, rotation_axis='z')    # Legacy: ignore Z
+    robot.inverse_kinematics(target, rotation_mask='xy')   # New: constrain X,Y
 
 Visual Examples of Axis Constraints
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -183,78 +245,60 @@ The following images demonstrate how different axis constraints affect the robot
 .. figure:: ../_static/ik_basic_full_6dof.png
    :width: 60%
    :align: center
-   
+
    **Full 6-DOF Control**
-   
-   ``rotation_axis=True, translation_axis=True``
+
+   ``rotation_mask=True, position_mask=True``
 
 .. figure:: ../_static/ik_basic_position_only.png
    :width: 60%
    :align: center
-   
+
    **Position Only (No Orientation)**
-   
-   ``rotation_axis=False, translation_axis=True``
+
+   ``rotation_mask=False, position_mask=True``
 
 .. figure:: ../_static/ik_basic_orientation_only.png
    :width: 60%
    :align: center
-   
-   **Orientation Only (No Position)**
-   
-   ``rotation_axis=True, translation_axis=False``
 
-**Single Axis Rotation with Full Translation**
+   **Orientation Only (No Position)**
+
+   ``rotation_mask=True, position_mask=False``
+
+**Partial Rotation Constraints**
+
+These examples show IK with one axis direction preserved by constraining two rotation components.
 
 .. figure:: ../_static/ik_single_rot_rot_x_trans_full.png
    :width: 60%
    :align: center
-   
-   **Roll Only (X-axis Rotation)**
-   
-   ``rotation_axis='x', translation_axis=True``
+
+   **X-axis Direction Preserved**
+
+   New: ``rotation_mask='yz'`` / Legacy: ``rotation_axis='x'``
+
+   X-axis direction matches target, rotation around X is free.
 
 .. figure:: ../_static/ik_single_rot_rot_y_trans_full.png
    :width: 60%
    :align: center
-   
-   **Pitch Only (Y-axis Rotation)**
-   
-   ``rotation_axis='y', translation_axis=True``
+
+   **Y-axis Direction Preserved**
+
+   New: ``rotation_mask='xz'`` / Legacy: ``rotation_axis='y'``
+
+   Y-axis direction matches target, rotation around Y is free.
 
 .. figure:: ../_static/ik_single_rot_rot_z_trans_full.png
    :width: 60%
    :align: center
-   
-   **Yaw Only (Z-axis Rotation)**
-   
-   ``rotation_axis='z', translation_axis=True``
 
-**Double Axis Rotation with Full Translation**
+   **Z-axis Direction Preserved**
 
-.. figure:: ../_static/ik_double_rot_rot_xy_trans_full.png
-   :width: 60%
-   :align: center
-   
-   **Roll + Pitch (XY-axes Rotation)**
-   
-   ``rotation_axis='xy', translation_axis=True``
+   New: ``rotation_mask='xy'`` / Legacy: ``rotation_axis='z'``
 
-.. figure:: ../_static/ik_double_rot_rot_yz_trans_full.png
-   :width: 60%
-   :align: center
-   
-   **Pitch + Yaw (YZ-axes Rotation)**
-   
-   ``rotation_axis='yz', translation_axis=True``
-
-.. figure:: ../_static/ik_double_rot_rot_zx_trans_full.png
-   :width: 60%
-   :align: center
-   
-   **Yaw + Roll (ZX-axes Rotation)**
-   
-   ``rotation_axis='zx', translation_axis=True``
+   Z-axis direction matches target, rotation around Z is free.
 
 **Mirror Notation (Axis Flip Optimization)**
 
@@ -263,66 +307,32 @@ The mirror notation allows the solver to consider both positive and negative dir
 .. figure:: ../_static/ik_minus_rot_rot_xm_trans_full.png
    :width: 60%
    :align: center
-   
+
    **X-mirror (Optimized X-axis Orientation)**
-   
-   ``rotation_axis='xm', translation_axis=True``
-   
+
+   ``rotation_mask=True, rotation_mirror='x', position_mask=True``
+
    Considers both +X and -X directions, chooses nearest
 
 .. figure:: ../_static/ik_minus_rot_rot_ym_trans_full.png
    :width: 60%
    :align: center
-   
+
    **Y-mirror (Optimized Y-axis Orientation)**
-   
-   ``rotation_axis='ym', translation_axis=True``
-   
+
+   ``rotation_mask=True, rotation_mirror='y', position_mask=True``
+
    Considers both +Y and -Y directions, chooses nearest
 
 .. figure:: ../_static/ik_minus_rot_rot_zm_trans_full.png
    :width: 60%
    :align: center
-   
+
    **Z-mirror (Optimized Z-axis Orientation)**
-   
-   ``rotation_axis='zm', translation_axis=True``
-   
+
+   ``rotation_mask=True, rotation_mirror='z', position_mask=True``
+
    Considers both +Z and -Z directions, chooses nearest
-
-**Mixed Constraints**
-
-Common combinations of translation and rotation constraints for specific applications:
-
-.. figure:: ../_static/ik_mixed_planar_yaw.png
-   :width: 60%
-   :align: center
-   
-   **Planar Motion + Yaw Control**
-   
-   ``rotation_axis='z', translation_axis='xy'``
-   
-   Useful for mobile robots on flat surfaces
-
-.. figure:: ../_static/ik_mixed_vertical_tilt.png
-   :width: 60%
-   :align: center
-   
-   **Vertical Motion + Tilt Control**
-   
-   ``rotation_axis='xy', translation_axis='z'``
-   
-   Useful for lifting with orientation adjustment
-
-.. figure:: ../_static/ik_mixed_frontal_plane.png
-   :width: 60%
-   :align: center
-   
-   **Frontal Plane Motion**
-   
-   ``rotation_axis='x', translation_axis='yz'``
-   
-   Constrains motion to YZ plane with roll control
 
 Practical Examples with Constraints
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -331,55 +341,55 @@ Practical Examples with Constraints
 
     from skrobot.coordinates import Coordinates
     from skrobot.models import Fetch
-    
+
     # Initialize robot
     robot = Fetch()
     robot.reset_pose()
-    
+
     # Define target pose
     target = Coordinates(pos=[0.7, 0.0, 1.0])
-    
+
     # Setup link list and move target for all examples
     link_list = robot.rarm.link_list
     move_target = robot.rarm.end_coords
-    
+
     # Position-only IK (ignore orientation)
     robot.inverse_kinematics(
         target,
         link_list=link_list,
         move_target=move_target,
-        translation_axis=True,
-        rotation_axis=False
+        position_mask=True,
+        rotation_mask=False
     )
-    
+
     # Orientation-only IK (ignore position)
     robot.reset_pose()
     robot.inverse_kinematics(
         target,
         link_list=link_list,
         move_target=move_target,
-        translation_axis=False,
-        rotation_axis=True
+        position_mask=False,
+        rotation_mask=True
     )
-    
-    # Planar motion (XY plane, limited rotation)
+
+    # Planar motion (XY plane) with roll/pitch control
     robot.reset_pose()
     robot.inverse_kinematics(
         target,
         link_list=link_list,
         move_target=move_target,
-        translation_axis='xy',
-        rotation_axis='xy'
+        position_mask='xy',
+        rotation_mask='xy'
     )
-    
+
     # Vertical motion with yaw control
     robot.reset_pose()
     robot.inverse_kinematics(
         target,
         link_list=link_list,
         move_target=move_target,
-        translation_axis='z',
-        rotation_axis='z'
+        position_mask='z',
+        rotation_mask='z'
     )
 
 Advanced Features
@@ -395,22 +405,22 @@ When using batch IK, you can specify multiple attempts per pose to improve succe
     from skrobot.coordinates import Coordinates
     from skrobot.models import Fetch
     import numpy as np
-    
+
     # Initialize robot
     robot = Fetch()
     robot.reset_pose()
-    
+
     # Define multiple target poses
     target_poses = [
         Coordinates(pos=[0.7, 0.0, 1.0]),
         Coordinates(pos=[0.6, 0.2, 0.9]),
         Coordinates(pos=[0.8, -0.1, 1.1]),
     ]
-    
+
     # Setup parameters
     link_list = robot.rarm.link_list
     move_target = robot.rarm.end_coords
-    
+
     # Batch IK with multiple attempts
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         target_poses,
@@ -429,18 +439,18 @@ Adjust precision requirements based on your application:
     from skrobot.coordinates import Coordinates
     from skrobot.models import Fetch
     import numpy as np
-    
+
     # Initialize robot
     robot = Fetch()
     robot.reset_pose()
-    
+
     # Define target pose
     target = Coordinates(pos=[0.7, 0.0, 1.0])
-    
+
     # Setup parameters
     link_list = robot.rarm.link_list
     move_target = robot.rarm.end_coords
-    
+
     # High precision for precise manipulation
     robot.inverse_kinematics(
         target,
@@ -449,7 +459,7 @@ Adjust precision requirements based on your application:
         thre=0.0001,           # 0.1mm position tolerance
         rthre=np.deg2rad(0.1)  # 0.1 degree rotation tolerance
     )
-    
+
     # Lower precision for faster solving
     robot.reset_pose()
     robot.inverse_kinematics(
@@ -479,42 +489,42 @@ Common Patterns
     from skrobot.coordinates import Coordinates
     from skrobot.models import Fetch
     import numpy as np
-    
+
     # Initialize robot
     robot = Fetch()
     robot.reset_pose()
-    
+
     # Setup parameters
     link_list = robot.rarm.link_list
     move_target = robot.rarm.end_coords
-    
-    # Pick and place operations - position-only approach
+
+    # Pick and place operations - position with yaw control
     pick_poses = [
         Coordinates(pos=[0.5, 0.2, 0.8]),
         Coordinates(pos=[0.6, 0.1, 0.7]),
     ]
-    
+
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         pick_poses,
         link_list=link_list,
         move_target=move_target,
-        translation_axis=True,
-        rotation_axis='z',  # Only control yaw for grasping
+        position_mask=True,
+        rotation_mask='z',  # Only control yaw for grasping
         attempts_per_pose=20
     )
-    
+
     # Painting/welding - orientation-critical operations
     paint_poses = [
         Coordinates(pos=[0.5, 0.0, 0.8], rot=[0, np.pi/2, 0]),
         Coordinates(pos=[0.6, 0.0, 0.8], rot=[0, np.pi/2, 0]),
     ]
-    
+
     solutions, success_flags, attempt_counts = robot.batch_inverse_kinematics(
         paint_poses,
         link_list=link_list,
         move_target=move_target,
-        translation_axis=True,
-        rotation_axis=True,  # Full orientation control
+        position_mask=True,
+        rotation_mask=True,  # Full orientation control
         thre=0.001,          # High precision
         rthre=np.deg2rad(1.0),
         attempts_per_pose=20

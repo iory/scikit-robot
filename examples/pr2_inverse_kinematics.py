@@ -59,7 +59,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
         unreachable_coords,
         link_list=link_list,
         move_target=robot_model.right_arm_end_coords,
-        rotation_axis=True,
+        rotation_mask=True,
         revert_if_fail=True  # Default behavior
     )
 
@@ -74,7 +74,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
         target_coords,  # The original successful target
         link_list=link_list,
         move_target=robot_model.right_arm_end_coords,
-        rotation_axis=True
+        rotation_mask=True
     )
 
     viewer.redraw()
@@ -87,7 +87,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
                 unreachable_coords,
                 link_list=link_list,
                 move_target=robot_model.right_arm_end_coords,
-                rotation_axis=True,
+                rotation_mask=True,
                 revert_if_fail=False  # Keep partial progress
             )
     else:
@@ -95,7 +95,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
             unreachable_coords,
             link_list=link_list,
             move_target=robot_model.right_arm_end_coords,
-            rotation_axis=True,
+            rotation_mask=True,
             revert_if_fail=False  # Keep partial progress
         )
 

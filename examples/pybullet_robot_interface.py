@@ -53,7 +53,7 @@ def main():
         target_coords,
         link_list=robot.arm.link_list,
         move_target=robot.arm_end_coords,
-        rotation_axis=True,
+        rotation_mask=True,
         stop=1000,
     )
     interface.angle_vector(robot.angle_vector(), realtime_simulation=True)
