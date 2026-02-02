@@ -267,6 +267,12 @@ class ROSRobotInterfaceBase(object):
         else:
             stamp_list = self.robot_state['stamp_list']
             joint_names = self.robot_state['name']
+            if len(joint_names) == 0 or len(stamp_list) == 0:
+                self._timeout_reason = \
+                    "joint_names or stamp_list is empty. " \
+                    "len(joint_names): {}, len(stamp_list): {}".format(
+                        len(joint_names), len(stamp_list))
+                return
             for name, ts in zip(joint_names, stamp_list):
                 if ts is None or ts.to_nsec() <= initial_time:
                     self._not_updated_joints.append(name)
