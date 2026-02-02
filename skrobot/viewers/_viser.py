@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import Dict
 from typing import Optional
 from typing import Union
@@ -62,6 +64,23 @@ class ViserViewer:
         self._batch_ik_solvers: Dict[int, Dict[str, object]] = {}
         self._batch_ik_samples = None
         self._jax_warning_shown = False
+
+        # JAX availability check (done once at init)
+        self._jax_available = False
+        try:
+            from skrobot.backend import list_backends
+            self._jax_available = 'jax' in list_backends()
+        except Exception:
+            pass
+
+        # Throttling for IK callbacks
+        self._last_ik_time: Dict[tuple, float] = {}  # (robot_id, group_name) -> timestamp
+        self._ik_throttle_interval = 0.05  # 50ms throttle
+
+        # Thread safety for IK solving
+        self._ik_lock = threading.Lock()
+        self._solver_creation_lock = threading.Lock()
+        self._solver_creating: Dict[tuple, bool] = {}  # (robot_id, group_name) -> creating
 
     @property
     def is_active(self) -> bool:
@@ -369,6 +388,14 @@ class ViserViewer:
         if self._updating_from_ik:
             return
 
+        # Throttle IK calls
+        now = time.time()
+        key = (robot_id, group_name)
+        last_time = self._last_ik_time.get(key, 0)
+        if now - last_time < self._ik_throttle_interval:
+            return
+        self._last_ik_time[key] = now
+
         robot_targets = self._ik_targets.get(robot_id)
         if robot_targets is None:
             return
@@ -381,24 +408,22 @@ class ViserViewer:
         control = target['control']
         target_pos = np.array(control.position)
         target_rot = vtf.SO3(control.wxyz).as_matrix()
-        target_coords = Coordinates(pos=target_pos, rot=target_rot)
 
-        constrain_rot = self._ik_constrain_rotation.value
-
-        result = robot_model.inverse_kinematics(
-            target_coords,
-            link_list=target['link_list'],
-            move_target=target['end_coords'],
-            rotation_mask=constrain_rot,
-            stop=30,
-            revert_if_fail=True,
-        )
-
-        # If regular IK fails, try batch IK
-        if result is False or result is None:
+        # Use JAX batch IK if available (faster for interactive use)
+        if self._jax_available:
             result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
-            if result is not False and result is not None:
-                pass
+        else:
+            # Fall back to regular IK
+            target_coords = Coordinates(pos=target_pos, rot=target_rot)
+            constrain_rot = self._ik_constrain_rotation.value
+            result = robot_model.inverse_kinematics(
+                target_coords,
+                link_list=target['link_list'],
+                move_target=target['end_coords'],
+                rotation_mask=constrain_rot,
+                stop=10,  # Reduced iterations for interactive use
+                revert_if_fail=True,
+            )
 
         if result is not False and result is not None:
             self.redraw()
@@ -419,6 +444,14 @@ class ViserViewer:
         """Solve IK when numeric input fields are changed."""
         if self._updating_from_ik:
             return
+
+        # Throttle IK calls
+        now = time.time()
+        key = (robot_id, group_name)
+        last_time = self._last_ik_time.get(key, 0)
+        if now - last_time < self._ik_throttle_interval:
+            return
+        self._last_ik_time[key] = now
 
         robot_targets = self._ik_targets.get(robot_id)
         if robot_targets is None:
@@ -446,22 +479,22 @@ class ViserViewer:
 
         # Convert RPY to rotation matrix
         target_rot = rotation_matrix_from_rpy([yaw, pitch, roll])
-        target_coords = Coordinates(pos=target_pos, rot=target_rot)
 
-        constrain_rot = self._ik_constrain_rotation.value
-
-        result = robot_model.inverse_kinematics(
-            target_coords,
-            link_list=target['link_list'],
-            move_target=target['end_coords'],
-            rotation_mask=constrain_rot,
-            stop=30,
-            revert_if_fail=True,
-        )
-
-        # If regular IK fails, try batch IK
-        if result is False or result is None:
+        # Use JAX batch IK if available (faster for interactive use)
+        if self._jax_available:
             result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
+        else:
+            # Fall back to regular IK
+            target_coords = Coordinates(pos=target_pos, rot=target_rot)
+            constrain_rot = self._ik_constrain_rotation.value
+            result = robot_model.inverse_kinematics(
+                target_coords,
+                link_list=target['link_list'],
+                move_target=target['end_coords'],
+                rotation_mask=constrain_rot,
+                stop=10,  # Reduced iterations for interactive use
+                revert_if_fail=True,
+            )
 
         if result is not False and result is not None:
             self.redraw()
@@ -585,27 +618,85 @@ class ViserViewer:
         link_list = target['link_list']
         move_target = target['end_coords']
 
-        # Get or create batch IK solver for this group
+        # Get current angles for the first attempt
+        current_angles = np.array([link.joint.joint_angle() for link in link_list])
+
+        # Get or create batch IK solver for this group (with locking)
+        solver_key = (robot_id, group_name)
+        solver = None
+
+        # Check if solver exists (fast path without lock)
         robot_solvers = self._batch_ik_solvers.get(robot_id, {})
-        if group_name not in robot_solvers:
-            try:
-                from skrobot.backend import list_backends
-                if 'jax' not in list_backends():
-                    if not self._jax_warning_shown:
-                        print("[Batch IK] JAX not available. "
-                              "Install with: pip install jax jaxlib")
-                        self._jax_warning_shown = True
-                    return False
-                from skrobot.kinematics.differentiable import create_batch_ik_solver
-                solver = create_batch_ik_solver(
-                    robot_model, link_list, move_target,
-                    backend_name='jax'
-                )
-                self._batch_ik_solvers[robot_id][group_name] = solver
-            except Exception:
-                return False
-        else:
+        if group_name in robot_solvers:
             solver = robot_solvers[group_name]
+
+        # Need to create solver
+        if solver is None:
+            with self._solver_creation_lock:
+                # Double-check after acquiring lock
+                robot_solvers = self._batch_ik_solvers.get(robot_id, {})
+                if group_name in robot_solvers:
+                    solver = robot_solvers[group_name]
+                elif solver_key in self._solver_creating:
+                    # Another thread is creating, skip this call
+                    return False
+                else:
+                    # Mark as creating
+                    self._solver_creating[solver_key] = True
+
+            if solver is None and solver_key in self._solver_creating:
+                try:
+                    from skrobot.backend import list_backends
+                    if 'jax' not in list_backends():
+                        if not self._jax_warning_shown:
+                            print("[Batch IK] JAX not available. "
+                                  "Install with: pip install jax jaxlib")
+                            self._jax_warning_shown = True
+                        return False
+                    from skrobot.kinematics.differentiable import create_batch_ik_solver
+                    print(f"[Batch IK] Creating JAX solver for {group_name}...")
+                    t0 = time.time()
+                    solver = create_batch_ik_solver(
+                        robot_model, link_list, move_target,
+                        backend_name='jax'
+                    )
+                    t1 = time.time()
+                    print(f"[Batch IK] Solver created ({(t1 - t0) * 1000:.0f}ms), warming up JIT...")
+                    # Warmup JIT compilation (use same params as actual solve)
+                    dummy_pos = target_pos.reshape(1, 3)
+                    dummy_rot = target_rot.reshape(1, 3, 3)
+                    dummy_angles = current_angles.reshape(1, -1)
+                    # Warmup with default attempts for both rotation_mask values
+                    default_attempts = 1000
+                    t2 = time.time()
+                    solver(dummy_pos, dummy_rot, initial_angles=dummy_angles,
+                           max_iterations=20, learning_rate=0.5,
+                           pos_threshold=0.01, rotation_mask=True,
+                           attempts_per_pose=default_attempts)
+                    t3 = time.time()
+                    print(f"[Batch IK] JIT warmup 1/2 ({(t3 - t2) * 1000:.0f}ms)")
+                    solver(dummy_pos, dummy_rot, initial_angles=dummy_angles,
+                           max_iterations=20, learning_rate=0.5,
+                           pos_threshold=0.01, rotation_mask=False,
+                           attempts_per_pose=default_attempts)
+                    t4 = time.time()
+                    print(f"[Batch IK] JIT warmup 2/2 ({(t4 - t3) * 1000:.0f}ms)")
+                    print(f"[Batch IK] Solver ready for {group_name} (total: {(t4 - t0) * 1000:.0f}ms)")
+
+                    # Store solver
+                    with self._solver_creation_lock:
+                        if robot_id not in self._batch_ik_solvers:
+                            self._batch_ik_solvers[robot_id] = {}
+                        self._batch_ik_solvers[robot_id][group_name] = solver
+                        self._solver_creating.pop(solver_key, None)
+                except Exception as e:
+                    print(f"[Batch IK] Failed to create solver: {e}")
+                    with self._solver_creation_lock:
+                        self._solver_creating.pop(solver_key, None)
+                    return False
+
+        if solver is None:
+            return False
 
         # Get number of attempts from slider
         attempts = int(self._batch_ik_samples.value)
@@ -614,23 +705,25 @@ class ViserViewer:
         constrain_rot = self._ik_constrain_rotation.value
         rotation_mask = True if constrain_rot else False
 
-        # Get current angles for the first attempt
-        current_angles = np.array([link.joint.joint_angle() for link in link_list])
-
-        # Solve IK with multiple attempts
-        # The solver handles: random init, best solution selection
+        # Solve IK with multiple attempts (fixed params for JIT cache)
         try:
+            t0 = time.time()
             solutions, success_flags, errors = solver(
                 target_pos.reshape(1, 3),
                 target_rot.reshape(1, 3, 3),
                 initial_angles=current_angles.reshape(1, -1),
-                max_iterations=100,
-                learning_rate=0.1,
+                max_iterations=20,
+                learning_rate=0.5,
                 rotation_mask=rotation_mask,
                 pos_threshold=0.01,
                 attempts_per_pose=attempts,
                 use_current_angles=True,
             )
+            t1 = time.time()
+            solve_ms = (t1 - t0) * 1000
+            if solve_ms > 5:
+                print(f"[Batch IK] Solve: {solve_ms:.1f}ms, attempts={attempts}, "
+                      f"rot_mask={rotation_mask}, err={float(np.asarray(errors)[0]):.4f}")
 
             # Convert JAX arrays to numpy
             best_solution = np.asarray(solutions)[0]
@@ -638,7 +731,7 @@ class ViserViewer:
             error = float(np.asarray(errors)[0])
 
             # Apply if successful or error is reasonable
-            if success or error < 0.02:
+            if success or error < 0.05:
                 for i, link in enumerate(link_list):
                     link.joint.joint_angle(float(best_solution[i]))
                 return best_solution
@@ -914,14 +1007,14 @@ class ViserViewer:
                     "Constrain Rotation", initial_value=True
                 )
                 self._batch_ik_samples = self._server.gui.add_slider(
-                    "Batch IK Samples",
-                    min=10,
-                    max=500,
+                    "Batch IK Attempts",
+                    min=1,
+                    max=2000,
                     step=10,
-                    initial_value=100,
+                    initial_value=1000,
                 )
                 self._server.gui.add_markdown(
-                    "*Batch IK runs when regular IK fails*"
+                    "*JAX batch IK: faster interactive solving*"
                 )
         self._export_folder = self._server.gui.add_folder(
             "Export Joint Angles", expand_by_default=False
