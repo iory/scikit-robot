@@ -5,6 +5,9 @@ import numpy as np
 from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import cross_product
+from skrobot.coordinates.math import is_mask_array
+from skrobot.coordinates.math import select_by_axis
+from skrobot.coordinates.math import select_by_mask
 
 
 logger = getLogger(__name__)
@@ -85,68 +88,6 @@ def calc_target_joint_dimension_from_link_list(link_list):
         if hasattr(link, 'joint'):
             n += link.joint.joint_dof
     return n
-
-
-def calc_dif_with_axis(dif, axis):
-    """Return diff with respect to axis.
-
-    Parameters
-    ----------
-    dif : list[float] or numpy.ndarray
-        difference vector
-    axis : str or bool or None
-        if axis is False or None, return numpy.array([]).
-        if axis is True, return dif.
-
-    Returns
-    -------
-    ret : numpy.ndarray
-        difference with respect to axis.
-    """
-    if axis in ['x', 'xx']:
-        ret = np.array([dif[1], dif[2]])
-    elif axis in ['y', 'yy']:
-        ret = np.array([dif[0], dif[2]])
-    elif axis in ['z', 'zz']:
-        ret = np.array([dif[0], dif[1]])
-    elif axis in ['xy', 'yx']:
-        ret = np.array([dif[2]])
-    elif axis in ['yz', 'zy']:
-        ret = np.array([dif[0]])
-    elif axis in ['zx', 'xz']:
-        ret = np.array([dif[1]])
-    elif axis is None or axis is False:
-        ret = np.array([])
-    elif axis in ['xm', 'ym', 'zm']:
-        ret = dif
-    elif axis is True:
-        ret = dif
-    else:
-        raise ValueError('axis {} is not supported'.format(axis))
-    return ret
-
-
-def calc_dif_with_mask(dif, mask, mirror_axis=None):
-    """Return diff filtered by mask.
-
-    Parameters
-    ----------
-    dif : numpy.ndarray
-        3-element difference vector
-    mask : numpy.ndarray
-        3-element mask, 1=constrained, 0=free
-    mirror_axis : str or None
-        Mirror axis ('x', 'y', 'z') or None
-
-    Returns
-    -------
-    ret : numpy.ndarray
-        Filtered difference (only constrained dimensions)
-    """
-    if mirror_axis is not None:
-        # Mirror mode: return full vector (special handling in IK)
-        return dif.copy()
-    return dif[mask == 1]
 
 
 class _MimicJointHook(object):
@@ -459,11 +400,6 @@ class FixedJoint(Joint):
         return calc_jacobian_rotational(*args, **kwargs)
 
 
-def _is_mask_array(val):
-    """Check if val is a mask array (numpy array with shape (3,))."""
-    return isinstance(val, np.ndarray) and val.shape == (3,)
-
-
 def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords,
                              move_target, transform_coords, rotation_axis,
@@ -474,15 +410,15 @@ def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = cross_product(j_rot, p_diff)
     # Handle both mask format and legacy axis format
-    if _is_mask_array(translation_axis):
-        j_translation = calc_dif_with_mask(j_translation, translation_axis)
+    if is_mask_array(translation_axis):
+        j_translation = select_by_mask(j_translation, translation_axis)
     else:
-        j_translation = calc_dif_with_axis(j_translation, translation_axis)
+        j_translation = select_by_axis(j_translation, translation_axis)
     jacobian[row:row + len(j_translation), column] = j_translation
-    if _is_mask_array(rotation_axis):
-        j_rotation = calc_dif_with_mask(j_rot, rotation_axis)
+    if is_mask_array(rotation_axis):
+        j_rotation = select_by_mask(j_rot, rotation_axis)
     else:
-        j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
+        j_rotation = select_by_axis(j_rot, rotation_axis)
     jacobian[row + len(j_translation):
              row + len(j_translation) + len(j_rotation),
              column] = j_rotation
@@ -498,15 +434,15 @@ def calc_jacobian_linear(jacobian, row, column,
         paxis, world_default_coords, transform_coords)
     j_rot = np.array([0, 0, 0])
     # Handle both mask format and legacy axis format
-    if _is_mask_array(translation_axis):
-        j_trans = calc_dif_with_mask(j_trans, translation_axis)
+    if is_mask_array(translation_axis):
+        j_trans = select_by_mask(j_trans, translation_axis)
     else:
-        j_trans = calc_dif_with_axis(j_trans, translation_axis)
+        j_trans = select_by_axis(j_trans, translation_axis)
     jacobian[row:row + len(j_trans), column] = j_trans
-    if _is_mask_array(rotation_axis):
-        j_rot = calc_dif_with_mask(j_rot, rotation_axis)
+    if is_mask_array(rotation_axis):
+        j_rot = select_by_mask(j_rot, rotation_axis)
     else:
-        j_rot = calc_dif_with_axis(j_rot, rotation_axis)
+        j_rot = select_by_axis(j_rot, rotation_axis)
     jacobian[row + len(j_trans):
              row + len(j_trans) + len(j_rot),
              column] = j_rot

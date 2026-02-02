@@ -10,7 +10,7 @@ import trimesh
 import skrobot
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_coords
-from skrobot.model import calc_dif_with_axis
+from skrobot.coordinates.math import select_by_axis
 from skrobot.model import joint_angle_limit_weight
 from skrobot.model import LinearJoint
 from skrobot.model import Link
@@ -33,25 +33,25 @@ class TestRobotModel(unittest.TestCase):
         fetch = self.fetch
         fetch.angle_vector()
 
-    def test_calc_dif_with_axis(self):
+    def test_select_by_axis(self):
         dif = np.array([1, 2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'x'), [2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xx'), [2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'y'), [1, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yy'), [1, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'z'), [1, 2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zz'), [1, 2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xy'), [3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yx'), [3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yz'), [1])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zy'), [1])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xz'), [2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zx'), [2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, True), [1, 2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, False), [])
-        testing.assert_array_equal(calc_dif_with_axis(dif, None), [])
+        testing.assert_array_equal(select_by_axis(dif, 'x'), [2, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'xx'), [2, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'y'), [1, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'yy'), [1, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'z'), [1, 2])
+        testing.assert_array_equal(select_by_axis(dif, 'zz'), [1, 2])
+        testing.assert_array_equal(select_by_axis(dif, 'xy'), [3])
+        testing.assert_array_equal(select_by_axis(dif, 'yx'), [3])
+        testing.assert_array_equal(select_by_axis(dif, 'yz'), [1])
+        testing.assert_array_equal(select_by_axis(dif, 'zy'), [1])
+        testing.assert_array_equal(select_by_axis(dif, 'xz'), [2])
+        testing.assert_array_equal(select_by_axis(dif, 'zx'), [2])
+        testing.assert_array_equal(select_by_axis(dif, True), [1, 2, 3])
+        testing.assert_array_equal(select_by_axis(dif, False), [])
+        testing.assert_array_equal(select_by_axis(dif, None), [])
         with self.assertRaises(ValueError):
-            testing.assert_array_equal(calc_dif_with_axis(dif, [1, 2, 3]))
+            testing.assert_array_equal(select_by_axis(dif, [1, 2, 3]))
 
     def test_visual_mesh(self):
         fetch = self.fetch
@@ -1304,29 +1304,29 @@ class TestRobotModel(unittest.TestCase):
         testing.assert_array_equal(mask, [1, 1, 1])
         self.assertEqual(mirror, 'z')
 
-    def test_calc_dif_with_mask(self):
-        """Test calc_dif_with_mask function."""
-        from skrobot.model.joint import calc_dif_with_mask
+    def test_select_by_mask(self):
+        """Test select_by_mask function."""
+        from skrobot.coordinates.math import select_by_mask
         dif = np.array([1, 2, 3])
 
         # Constrain all axes
         testing.assert_array_equal(
-            calc_dif_with_mask(dif, np.array([1, 1, 1])), [1, 2, 3])
+            select_by_mask(dif, np.array([1, 1, 1])), [1, 2, 3])
         # Constrain none
         testing.assert_array_equal(
-            calc_dif_with_mask(dif, np.array([0, 0, 0])), [])
+            select_by_mask(dif, np.array([0, 0, 0])), [])
         # Constrain x only
         testing.assert_array_equal(
-            calc_dif_with_mask(dif, np.array([1, 0, 0])), [1])
+            select_by_mask(dif, np.array([1, 0, 0])), [1])
         # Constrain y,z
         testing.assert_array_equal(
-            calc_dif_with_mask(dif, np.array([0, 1, 1])), [2, 3])
+            select_by_mask(dif, np.array([0, 1, 1])), [2, 3])
         # Constrain x,z
         testing.assert_array_equal(
-            calc_dif_with_mask(dif, np.array([1, 0, 1])), [1, 3])
+            select_by_mask(dif, np.array([1, 0, 1])), [1, 3])
 
         # Mirror mode returns full vector
-        result = calc_dif_with_mask(dif, np.array([1, 1, 1]), mirror_axis='x')
+        result = select_by_mask(dif, np.array([1, 1, 1]), mirror_axis='x')
         testing.assert_array_equal(result, [1, 2, 3])
 
     def test_difference_position_with_position_mask(self):

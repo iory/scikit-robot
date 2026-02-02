@@ -177,6 +177,97 @@ def warn_rotation_axis_deprecated(stacklevel=2):
         DeprecationWarning, stacklevel=stacklevel + 1)
 
 
+def is_mask_array(val):
+    """Check if val is a mask array (3-element array or list).
+
+    Parameters
+    ----------
+    val : any
+        Value to check
+
+    Returns
+    -------
+    bool
+        True if val is a 3-element numpy array or list of numbers
+    """
+    if isinstance(val, np.ndarray):
+        return val.ndim == 1 and len(val) == 3
+    if isinstance(val, list) and len(val) == 3:
+        return all(isinstance(x, (int, float, np.integer, np.floating))
+                   for x in val)
+    return False
+
+
+def select_by_mask(vector, mask, mirror_axis=None):
+    """Select elements from vector based on mask.
+
+    Parameters
+    ----------
+    vector : numpy.ndarray
+        3-element vector
+    mask : numpy.ndarray
+        3-element mask array, 1=select, 0=ignore
+    mirror_axis : str or None
+        If specified ('x', 'y', 'z'), return full vector for mirror mode
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected elements (only where mask == 1)
+    """
+    if mirror_axis is not None:
+        return vector.copy()
+    return vector[mask == 1]
+
+
+def select_by_axis(vector, axis):
+    """Select elements from vector based on legacy axis specification.
+
+    This is for backward compatibility with legacy axis format.
+
+    Parameters
+    ----------
+    vector : numpy.ndarray
+        3-element vector [x, y, z]
+    axis : str or bool or None
+        Legacy axis specification:
+        - False/None: return empty array
+        - True: return full vector
+        - 'x'/'xx': return [y, z] (ignore x)
+        - 'y'/'yy': return [x, z] (ignore y)
+        - 'z'/'zz': return [x, y] (ignore z)
+        - 'xy'/'yx': return [z] (ignore x,y)
+        - 'yz'/'zy': return [x] (ignore y,z)
+        - 'zx'/'xz': return [y] (ignore z,x)
+        - 'xm'/'ym'/'zm': return full vector (mirror mode)
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected elements based on axis
+    """
+    if axis in ['x', 'xx']:
+        return np.array([vector[1], vector[2]])
+    elif axis in ['y', 'yy']:
+        return np.array([vector[0], vector[2]])
+    elif axis in ['z', 'zz']:
+        return np.array([vector[0], vector[1]])
+    elif axis in ['xy', 'yx']:
+        return np.array([vector[2]])
+    elif axis in ['yz', 'zy']:
+        return np.array([vector[0]])
+    elif axis in ['zx', 'xz']:
+        return np.array([vector[1]])
+    elif axis is None or axis is False:
+        return np.array([])
+    elif axis in ['xm', 'ym', 'zm']:
+        return vector
+    elif axis is True:
+        return vector
+    else:
+        raise ValueError('axis {} is not supported'.format(axis))
+
+
 def convert_to_axis_vector(axis):
     """Convert axis to float vector.
 

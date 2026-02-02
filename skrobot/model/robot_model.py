@@ -22,6 +22,7 @@ from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates.math import convert_legacy_axis_to_mask
+from skrobot.coordinates.math import is_mask_array
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
@@ -33,10 +34,10 @@ from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import rodrigues
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rpy2quaternion
+from skrobot.coordinates.math import select_by_axis
+from skrobot.coordinates.math import select_by_mask
 from skrobot.coordinates.math import warn_rotation_axis_deprecated
 from skrobot.coordinates.math import warn_translation_axis_deprecated
-from skrobot.model.joint import calc_dif_with_axis
-from skrobot.model.joint import calc_dif_with_mask
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import FixedJoint
@@ -577,7 +578,7 @@ class CascadedLink(CascadedCoords):
         dif_pos : np.ndarray
             [m] order
         translation_axis : str (deprecated)
-            Legacy API: see calc_dif_with_axis
+            Legacy API: see select_by_axis
         p_limit : float
             Position limit
         position_mask : str, bool, list, or numpy.ndarray
@@ -596,12 +597,12 @@ class CascadedLink(CascadedCoords):
                 raise ValueError(
                     "Cannot specify both position_mask and translation_axis")
             mask_vec = normalize_mask(position_mask)
-            return calc_dif_with_mask(dif_pos, mask_vec)
+            return select_by_mask(dif_pos, mask_vec)
 
         # Legacy API
         if translation_axis is None:
             translation_axis = True
-        vel_p = calc_dif_with_axis(dif_pos, translation_axis)
+        vel_p = select_by_axis(dif_pos, translation_axis)
         return vel_p
 
     def calc_vel_from_rot(self,
@@ -617,7 +618,7 @@ class CascadedLink(CascadedCoords):
         dif_rot : np.ndarray
             Rotation difference
         rotation_axis : str (deprecated)
-            Legacy API: see calc_dif_with_axis
+            Legacy API: see select_by_axis
         r_limit : float
             Rotation limit
         rotation_mask : str, bool, list, or numpy.ndarray
@@ -638,12 +639,12 @@ class CascadedLink(CascadedCoords):
                 raise ValueError(
                     "Cannot specify both rotation_mask and rotation_axis")
             mask_vec = normalize_mask(rotation_mask)
-            return calc_dif_with_mask(dif_rot, mask_vec, rotation_mirror)
+            return select_by_mask(dif_rot, mask_vec, rotation_mirror)
 
         # Legacy API
         if rotation_axis is None:
             rotation_axis = True
-        vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
+        vel_r = select_by_axis(dif_rot, rotation_axis)
         return vel_r
 
     def calc_nspace_from_joint_limit(self,
@@ -1475,16 +1476,8 @@ class CascadedLink(CascadedCoords):
         dim : int
             Total dimension of constrained axes.
         """
-        def _is_mask_array(val):
-            if isinstance(val, np.ndarray):
-                return val.ndim == 1 and len(val) == 3
-            if isinstance(val, list) and len(val) == 3:
-                return all(isinstance(x, (int, float, np.integer, np.floating))
-                           for x in val)
-            return False
-
         def _count_dim(mask_or_axis):
-            if _is_mask_array(mask_or_axis):
+            if is_mask_array(mask_or_axis):
                 return int(np.sum(np.asarray(mask_or_axis)))
             elif mask_or_axis in ['x', 'y', 'z', 'xx', 'yy', 'zz']:
                 return 2  # 3 - 1 (ignore one axis)
@@ -1498,9 +1491,9 @@ class CascadedLink(CascadedCoords):
                 return 3  # Default to all
 
         # Convert to lists for uniform handling
-        if not isinstance(position_mask, list) or _is_mask_array(position_mask):
+        if not isinstance(position_mask, list) or is_mask_array(position_mask):
             position_mask = [position_mask]
-        if not isinstance(rotation_mask, list) or _is_mask_array(rotation_mask):
+        if not isinstance(rotation_mask, list) or is_mask_array(rotation_mask):
             rotation_mask = [rotation_mask]
 
         if len(rotation_mask) != len(position_mask):

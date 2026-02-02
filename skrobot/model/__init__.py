@@ -22,7 +22,6 @@ from skrobot.model.joint import RotationalJoint
 
 from skrobot.model.joint import calc_angle_speed_gain_scalar
 from skrobot.model.joint import calc_angle_speed_gain_vector
-from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_jacobian_default_rotate_vector
 from skrobot.model.joint import calc_jacobian_linear
 from skrobot.model.joint import calc_jacobian_rotational
