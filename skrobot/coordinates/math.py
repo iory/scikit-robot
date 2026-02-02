@@ -18,6 +18,7 @@ _AXIS_VECTORS = {
     'x': np.array([1, 0, 0]),
     'y': np.array([0, 1, 0]),
     'z': np.array([0, 0, 1]),
+    'xyz': np.array([1, 1, 1]),
     '-x': np.array([-1, 0, 0]),
     '-y': np.array([0, -1, 0]),
     '-z': np.array([0, 0, -1]),
@@ -28,6 +29,243 @@ _AXIS_VECTORS = {
     'zx': np.array([1, 0, 1]),
     'xz': np.array([1, 0, 1]),
 }
+
+# Mask vectors: 1 = constrained, 0 = free (opposite of _AXIS_VECTORS usage)
+_MASK_VECTORS = {
+    'x': np.array([1, 0, 0]),
+    'y': np.array([0, 1, 0]),
+    'z': np.array([0, 0, 1]),
+    'xy': np.array([1, 1, 0]),
+    'yx': np.array([1, 1, 0]),
+    'yz': np.array([0, 1, 1]),
+    'zy': np.array([0, 1, 1]),
+    'zx': np.array([1, 0, 1]),
+    'xz': np.array([1, 0, 1]),
+    'xyz': np.array([1, 1, 1]),
+}
+
+
+def normalize_mask(mask):
+    """Normalize mask specification to a 3-element array.
+
+    Mask values indicate which axes to CONSTRAIN.
+
+    Parameters
+    ----------
+    mask : bool, str, list, or numpy.ndarray
+        - True: constrain all axes -> [1, 1, 1]
+        - False/None: no constraint -> [0, 0, 0]
+        - 'z': constrain z-axis only -> [0, 0, 1]
+        - 'xy': constrain x,y axes -> [1, 1, 0]
+        - [1, 1, 0]: direct specification
+
+    Returns
+    -------
+    mask_vector : numpy.ndarray
+        3-element array, 1=constrained, 0=free
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import normalize_mask
+    >>> normalize_mask(True)
+    array([1, 1, 1])
+    >>> normalize_mask(False)
+    array([0, 0, 0])
+    >>> normalize_mask('z')
+    array([0, 0, 1])
+    >>> normalize_mask('xy')
+    array([1, 1, 0])
+    >>> normalize_mask([1, 0, 1])
+    array([1, 0, 1])
+    """
+    if mask is None or mask is False:
+        return np.array([0, 0, 0])
+    if mask is True:
+        return np.array([1, 1, 1])
+    if isinstance(mask, str):
+        if mask in ['xx', 'yy', 'zz']:
+            # Double-letter means single axis with emphasis
+            axis = mask[0]
+            return _MASK_VECTORS[axis].copy()
+        if mask in _MASK_VECTORS:
+            return _MASK_VECTORS[mask].copy()
+        raise ValueError("Unknown mask string: {}".format(mask))
+    if isinstance(mask, (list, np.ndarray)):
+        arr = np.asarray(mask)
+        if arr.shape != (3,):
+            raise ValueError("Mask must have 3 elements")
+        return arr
+    raise ValueError("Invalid mask type: {}".format(type(mask)))
+
+
+def convert_legacy_axis_to_mask(axis):
+    """Convert legacy axis specification to new mask format.
+
+    Legacy: axis='x' means IGNORE x-axis (constrain y,z)
+    New: mask='x' means CONSTRAIN x-axis only
+
+    Parameters
+    ----------
+    axis : bool, str, list, or numpy.ndarray
+        Legacy axis specification
+
+    Returns
+    -------
+    mask_vector : numpy.ndarray
+        3-element array, 1=constrained, 0=free
+    mirror_axis : str or None
+        'x', 'y', 'z' if mirror mode was specified, None otherwise
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import convert_legacy_axis_to_mask
+    >>> convert_legacy_axis_to_mask(True)
+    (array([1, 1, 1]), None)
+    >>> convert_legacy_axis_to_mask(False)
+    (array([0, 0, 0]), None)
+    >>> convert_legacy_axis_to_mask('x')  # ignore x -> constrain y,z
+    (array([0, 1, 1]), None)
+    >>> convert_legacy_axis_to_mask('xm')  # mirror x
+    (array([1, 1, 1]), 'x')
+    >>> convert_legacy_axis_to_mask('xx')  # ignore x
+    (array([0, 1, 1]), None)
+    """
+    if axis is None or axis is False:
+        return np.array([0, 0, 0]), None
+    if axis is True:
+        return np.array([1, 1, 1]), None
+    if isinstance(axis, str):
+        if axis in ['xm', 'ym', 'zm']:
+            # Legacy mirror: xm means constrain all with x-mirror
+            return np.array([1, 1, 1]), axis[0]  # 'x', 'y', or 'z'
+        if axis in ['xx', 'yy', 'zz']:
+            # Legacy: 'xx' means ignore x (constrain y,z)
+            ignore_idx = {'xx': 0, 'yy': 1, 'zz': 2}[axis]
+            mask = np.array([1, 1, 1])
+            mask[ignore_idx] = 0
+            return mask, None
+        if axis == 'xyz':
+            # 'xyz' means constrain all axes (like True)
+            return np.array([1, 1, 1]), None
+        if axis in _AXIS_VECTORS:
+            # Legacy: axis indicates which to IGNORE
+            # Invert: 1->0, 0->1
+            legacy_vec = _AXIS_VECTORS[axis]
+            return (1 - legacy_vec).astype(int), None
+        raise ValueError("Unknown axis string: {}".format(axis))
+    if isinstance(axis, (list, np.ndarray)):
+        return np.asarray(axis), None
+    raise ValueError("Invalid axis type: {}".format(type(axis)))
+
+
+def warn_translation_axis_deprecated(stacklevel=2):
+    """Emit deprecation warning for translation_axis parameter."""
+    warnings.warn(
+        "translation_axis is deprecated. Use position_mask instead. "
+        "Note: semantics are inverted - position_mask='z' means "
+        "constrain z only, while translation_axis='z' meant ignore z.",
+        DeprecationWarning, stacklevel=stacklevel + 1)
+
+
+def warn_rotation_axis_deprecated(stacklevel=2):
+    """Emit deprecation warning for rotation_axis parameter."""
+    warnings.warn(
+        "rotation_axis is deprecated. Use rotation_mask and "
+        "rotation_mirror instead. "
+        "Note: semantics are inverted - rotation_mask='yz' means "
+        "constrain y,z only, while rotation_axis='x' meant ignore x.",
+        DeprecationWarning, stacklevel=stacklevel + 1)
+
+
+def is_mask_array(val):
+    """Check if val is a mask array (3-element array or list).
+
+    Parameters
+    ----------
+    val : any
+        Value to check
+
+    Returns
+    -------
+    bool
+        True if val is a 3-element numpy array or list of numbers
+    """
+    if isinstance(val, np.ndarray):
+        return val.ndim == 1 and len(val) == 3
+    if isinstance(val, list) and len(val) == 3:
+        return all(isinstance(x, (int, float, np.integer, np.floating))
+                   for x in val)
+    return False
+
+
+def select_by_mask(vector, mask, mirror_axis=None):
+    """Select elements from vector based on mask.
+
+    Parameters
+    ----------
+    vector : numpy.ndarray
+        3-element vector
+    mask : numpy.ndarray
+        3-element mask array, 1=select, 0=ignore
+    mirror_axis : str or None
+        If specified ('x', 'y', 'z'), return full vector for mirror mode
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected elements (only where mask == 1)
+    """
+    if mirror_axis is not None:
+        return vector.copy()
+    return vector[mask == 1]
+
+
+def select_by_axis(vector, axis):
+    """Select elements from vector based on legacy axis specification.
+
+    This is for backward compatibility with legacy axis format.
+
+    Parameters
+    ----------
+    vector : numpy.ndarray
+        3-element vector [x, y, z]
+    axis : str or bool or None
+        Legacy axis specification:
+        - False/None: return empty array
+        - True: return full vector
+        - 'x'/'xx': return [y, z] (ignore x)
+        - 'y'/'yy': return [x, z] (ignore y)
+        - 'z'/'zz': return [x, y] (ignore z)
+        - 'xy'/'yx': return [z] (ignore x,y)
+        - 'yz'/'zy': return [x] (ignore y,z)
+        - 'zx'/'xz': return [y] (ignore z,x)
+        - 'xm'/'ym'/'zm': return full vector (mirror mode)
+
+    Returns
+    -------
+    numpy.ndarray
+        Selected elements based on axis
+    """
+    if axis in ['x', 'xx']:
+        return np.array([vector[1], vector[2]])
+    elif axis in ['y', 'yy']:
+        return np.array([vector[0], vector[2]])
+    elif axis in ['z', 'zz']:
+        return np.array([vector[0], vector[1]])
+    elif axis in ['xy', 'yx']:
+        return np.array([vector[2]])
+    elif axis in ['yz', 'zy']:
+        return np.array([vector[0]])
+    elif axis in ['zx', 'xz']:
+        return np.array([vector[1]])
+    elif axis is None or axis is False:
+        return np.array([])
+    elif axis in ['xm', 'ym', 'zm']:
+        return vector
+    elif axis is True:
+        return vector
+    else:
+        raise ValueError('axis {} is not supported'.format(axis))
 
 
 def convert_to_axis_vector(axis):

@@ -10,7 +10,7 @@ import trimesh
 import skrobot
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_coords
-from skrobot.model import calc_dif_with_axis
+from skrobot.coordinates.math import select_by_axis
 from skrobot.model import joint_angle_limit_weight
 from skrobot.model import LinearJoint
 from skrobot.model import Link
@@ -33,25 +33,25 @@ class TestRobotModel(unittest.TestCase):
         fetch = self.fetch
         fetch.angle_vector()
 
-    def test_calc_dif_with_axis(self):
+    def test_select_by_axis(self):
         dif = np.array([1, 2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'x'), [2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xx'), [2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'y'), [1, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yy'), [1, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'z'), [1, 2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zz'), [1, 2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xy'), [3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yx'), [3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'yz'), [1])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zy'), [1])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'xz'), [2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, 'zx'), [2])
-        testing.assert_array_equal(calc_dif_with_axis(dif, True), [1, 2, 3])
-        testing.assert_array_equal(calc_dif_with_axis(dif, False), [])
-        testing.assert_array_equal(calc_dif_with_axis(dif, None), [])
+        testing.assert_array_equal(select_by_axis(dif, 'x'), [2, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'xx'), [2, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'y'), [1, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'yy'), [1, 3])
+        testing.assert_array_equal(select_by_axis(dif, 'z'), [1, 2])
+        testing.assert_array_equal(select_by_axis(dif, 'zz'), [1, 2])
+        testing.assert_array_equal(select_by_axis(dif, 'xy'), [3])
+        testing.assert_array_equal(select_by_axis(dif, 'yx'), [3])
+        testing.assert_array_equal(select_by_axis(dif, 'yz'), [1])
+        testing.assert_array_equal(select_by_axis(dif, 'zy'), [1])
+        testing.assert_array_equal(select_by_axis(dif, 'xz'), [2])
+        testing.assert_array_equal(select_by_axis(dif, 'zx'), [2])
+        testing.assert_array_equal(select_by_axis(dif, True), [1, 2, 3])
+        testing.assert_array_equal(select_by_axis(dif, False), [])
+        testing.assert_array_equal(select_by_axis(dif, None), [])
         with self.assertRaises(ValueError):
-            testing.assert_array_equal(calc_dif_with_axis(dif, [1, 2, 3]))
+            testing.assert_array_equal(select_by_axis(dif, [1, 2, 3]))
 
     def test_visual_mesh(self):
         fetch = self.fetch
@@ -163,7 +163,7 @@ class TestRobotModel(unittest.TestCase):
             base_link = fetch.link_list[0]
             jac_analytic = fetch.calc_jacobian_from_link_list(
                 move_target, link_list,
-                rotation_axis=None, transform_coords=base_link)
+                rotation_mask=False, transform_coords=base_link)
             testing.assert_almost_equal(jac_numerical, jac_analytic, decimal=5)
         for move_target in [fetch.rarm_end_coords] + link_list:
             compare(move_target)
@@ -239,10 +239,11 @@ class TestRobotModel(unittest.TestCase):
     def test_inverse_kinematics_args(self):
         kuka = self.kuka
         kuka.inverse_kinematics_args()
+        # Use normalized mask arrays for multi-target IK
         d = kuka.inverse_kinematics_args(
             union_link_list=kuka.rarm.link_list,
-            rotation_axis=[True],
-            translation_axis=[True])
+            rotation_mask=[[1, 1, 1]],
+            position_mask=[[1, 1, 1]])
         self.assertEqual(d['dim'], 6)
         self.assertEqual(d['n_joint_dimension'], 7)
 
@@ -258,8 +259,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True)
+            position_mask=True,
+            rotation_mask=True)
         dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
         dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
@@ -268,21 +269,37 @@ class TestRobotModel(unittest.TestCase):
         target_coords = kuka.rarm.end_coords.copy_worldcoords().\
             rotate(- np.pi / 6.0, 'y', 'local')
 
-        for rotation_axis in [True,
+        for rotation_mask in [True,
                               'x', 'y', 'z',
-                              'xx', 'yy', 'zz',
-                              'xm', 'ym', 'zm']:
+                              'xx', 'yy', 'zz']:
             kuka.reset_manip_pose()
             kuka.inverse_kinematics(
                 target_coords,
                 move_target=move_target,
                 link_list=link_list,
-                translation_axis=True,
-                rotation_axis=rotation_axis)
+                position_mask=True,
+                rotation_mask=rotation_mask)
             dif_pos = kuka.rarm.end_coords.difference_position(
                 target_coords, True)
             dif_rot = kuka.rarm.end_coords.difference_rotation(
-                target_coords, rotation_axis)
+                target_coords, rotation_mask=rotation_mask)
+            self.assertLess(np.linalg.norm(dif_pos), 0.001)
+            self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+        # Test rotation with mirroring using explicit rotation_mirror parameter
+        for axis in ['x', 'y', 'z']:
+            kuka.reset_manip_pose()
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=move_target,
+                link_list=link_list,
+                position_mask=True,
+                rotation_mask=axis,
+                rotation_mirror=axis)
+            dif_pos = kuka.rarm.end_coords.difference_position(
+                target_coords, True)
+            dif_rot = kuka.rarm.end_coords.difference_rotation(
+                target_coords, rotation_mask=axis, rotation_mirror=axis)
             self.assertLess(np.linalg.norm(dif_pos), 0.001)
             self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
@@ -294,8 +311,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True)
+            position_mask=True,
+            rotation_mask=True)
         self.assertEqual(ik_result, False)
         testing.assert_array_equal(
             av, kuka.angle_vector())
@@ -357,13 +374,14 @@ class TestRobotModel(unittest.TestCase):
         dimension = fetch.calc_target_axis_dimension(
             False, False)
         self.assertEqual(dimension, 0)
+        # For multi-target IK, pass list of normalized masks
         dimension = fetch.calc_target_axis_dimension(
-            [True, True], [True, True])
+            [[1, 1, 1], [1, 1, 1]], [[1, 1, 1], [1, 1, 1]])
         self.assertEqual(dimension, 12)
 
         with self.assertRaises(ValueError):
             dimension = fetch.calc_target_axis_dimension(
-                [True, False], True)
+                [[1, 1, 1], [0, 0, 0]], [1, 1, 1])
 
     def test_calc_jacobian_for_interlocking_joints(self):
         r = self.fetch
@@ -762,30 +780,30 @@ class TestRobotModel(unittest.TestCase):
         self.assertLessEqual(attempt_counts[0], 5)
 
     def test_batch_inverse_kinematics_axis_constraints(self):
-        """Test batch IK with different axis constraints."""
+        """Test batch IK with different mask constraints."""
         fetch = self.fetch
         fetch.reset_pose()
 
         target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
 
-        # Test different rotation axis constraints
-        for rotation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+        # Test different rotation mask constraints
+        for rotation_mask in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
             solutions, success_flags, _ = fetch.batch_inverse_kinematics(
                 target_coords,
                 move_target=fetch.rarm.end_coords,
-                rotation_axis=rotation_axis,
+                rotation_mask=rotation_mask,
                 stop=20,
                 attempts_per_pose=1
             )
             self.assertEqual(len(solutions), 1)
             self.assertEqual(len(success_flags), 1)
 
-        # Test different translation axis constraints
-        for translation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+        # Test different position mask constraints
+        for position_mask in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
             solutions, success_flags, _ = fetch.batch_inverse_kinematics(
                 target_coords,
                 move_target=fetch.rarm.end_coords,
-                translation_axis=translation_axis,
+                position_mask=position_mask,
                 stop=20,
                 attempts_per_pose=1
             )
@@ -1067,7 +1085,7 @@ class TestRobotModel(unittest.TestCase):
         solutions, success_flags, _ = pr2.batch_inverse_kinematics(
             target_coords,
             move_target=offset_end_coords,
-            rotation_axis=False,  # Only position
+            rotation_mask=False,  # Only position
             stop=200,
             attempts_per_pose=10,
             thre=0.001
@@ -1108,8 +1126,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             stop=100)
         dif_pos_no_tol = kuka.rarm.end_coords.difference_position(
             target_coords, True)
@@ -1122,8 +1140,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             translation_tolerance=[0.1, 0.1, 0.1],
             stop=100)
         # Parameter should be accepted without error
@@ -1149,8 +1167,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             rotation_tolerance=[np.deg2rad(10), None, None],
             stop=100)
 
@@ -1174,8 +1192,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             translation_tolerance=[0.01, 0.01, 0.01],
             rotation_tolerance=[np.deg2rad(5), np.deg2rad(5), np.deg2rad(5)],
             stop=50)
@@ -1239,3 +1257,192 @@ class TestRobotModel(unittest.TestCase):
         self.assertIsNone(pr2.left_leg)
         self.assertIsNone(fetch.right_leg)
         self.assertIsNone(fetch.left_leg)
+
+    # Mask-based IK API tests (position_mask, rotation_mask, rotation_mirror)
+
+    def test_normalize_mask(self):
+        """Test normalize_mask function."""
+        from skrobot.coordinates.math import normalize_mask
+        testing.assert_array_equal(normalize_mask(True), [1, 1, 1])
+        testing.assert_array_equal(normalize_mask(False), [0, 0, 0])
+        testing.assert_array_equal(normalize_mask(None), [0, 0, 0])
+        testing.assert_array_equal(normalize_mask('x'), [1, 0, 0])
+        testing.assert_array_equal(normalize_mask('y'), [0, 1, 0])
+        testing.assert_array_equal(normalize_mask('z'), [0, 0, 1])
+        testing.assert_array_equal(normalize_mask('xy'), [1, 1, 0])
+        testing.assert_array_equal(normalize_mask('yz'), [0, 1, 1])
+        testing.assert_array_equal(normalize_mask('xz'), [1, 0, 1])
+        testing.assert_array_equal(normalize_mask('xyz'), [1, 1, 1])
+        testing.assert_array_equal(normalize_mask([1, 0, 1]), [1, 0, 1])
+
+        with self.assertRaises(ValueError):
+            normalize_mask('invalid')
+
+    def test_convert_legacy_axis_to_mask(self):
+        """Test convert_legacy_axis_to_mask function."""
+        from skrobot.coordinates.math import convert_legacy_axis_to_mask
+
+        # Test basic conversions
+        mask, mirror = convert_legacy_axis_to_mask(True)
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask(False)
+        testing.assert_array_equal(mask, [0, 0, 0])
+        self.assertIsNone(mirror)
+
+        # Legacy 'x' means ignore x -> constrain y,z
+        mask, mirror = convert_legacy_axis_to_mask('x')
+        testing.assert_array_equal(mask, [0, 1, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask('y')
+        testing.assert_array_equal(mask, [1, 0, 1])
+        self.assertIsNone(mirror)
+
+        mask, mirror = convert_legacy_axis_to_mask('z')
+        testing.assert_array_equal(mask, [1, 1, 0])
+        self.assertIsNone(mirror)
+
+        # Legacy 'xy' means ignore x,y -> constrain z only
+        mask, mirror = convert_legacy_axis_to_mask('xy')
+        testing.assert_array_equal(mask, [0, 0, 1])
+        self.assertIsNone(mirror)
+
+        # Legacy mirror modes
+        mask, mirror = convert_legacy_axis_to_mask('xm')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'x')
+
+        mask, mirror = convert_legacy_axis_to_mask('ym')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'y')
+
+        mask, mirror = convert_legacy_axis_to_mask('zm')
+        testing.assert_array_equal(mask, [1, 1, 1])
+        self.assertEqual(mirror, 'z')
+
+    def test_select_by_mask(self):
+        """Test select_by_mask function."""
+        from skrobot.coordinates.math import select_by_mask
+        dif = np.array([1, 2, 3])
+
+        # Constrain all axes
+        testing.assert_array_equal(
+            select_by_mask(dif, np.array([1, 1, 1])), [1, 2, 3])
+        # Constrain none
+        testing.assert_array_equal(
+            select_by_mask(dif, np.array([0, 0, 0])), [])
+        # Constrain x only
+        testing.assert_array_equal(
+            select_by_mask(dif, np.array([1, 0, 0])), [1])
+        # Constrain y,z
+        testing.assert_array_equal(
+            select_by_mask(dif, np.array([0, 1, 1])), [2, 3])
+        # Constrain x,z
+        testing.assert_array_equal(
+            select_by_mask(dif, np.array([1, 0, 1])), [1, 3])
+
+        # Mirror mode returns full vector
+        result = select_by_mask(dif, np.array([1, 1, 1]), mirror_axis='x')
+        testing.assert_array_equal(result, [1, 2, 3])
+
+    def test_difference_position_with_position_mask(self):
+        """Test difference_position with position_mask parameter."""
+        from skrobot.coordinates import Coordinates
+
+        c1 = Coordinates().translate([0.0, 0.0, 0.0])
+        c2 = Coordinates().translate([1.0, 2.0, 3.0])
+
+        # Default (all constrained)
+        dif = c1.difference_position(c2)
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 3.0])
+
+        # Constrain all
+        dif = c1.difference_position(c2, position_mask=True)
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 3.0])
+
+        # Constrain none
+        dif = c1.difference_position(c2, position_mask=False)
+        testing.assert_array_almost_equal(dif, [0.0, 0.0, 0.0])
+
+        # Constrain z only
+        dif = c1.difference_position(c2, position_mask='z')
+        testing.assert_array_almost_equal(dif, [0.0, 0.0, 3.0])
+
+        # Constrain x,y only
+        dif = c1.difference_position(c2, position_mask='xy')
+        testing.assert_array_almost_equal(dif, [1.0, 2.0, 0.0])
+
+        # Constrain using array
+        dif = c1.difference_position(c2, position_mask=[1, 0, 1])
+        testing.assert_array_almost_equal(dif, [1.0, 0.0, 3.0])
+
+    def test_difference_rotation_with_rotation_mask(self):
+        """Test difference_rotation with rotation_mask parameter."""
+        from skrobot.coordinates import Coordinates
+        from skrobot.coordinates.math import rpy_matrix
+
+        c1 = Coordinates()
+        c2 = Coordinates(rot=rpy_matrix(np.pi / 4, np.pi / 6, np.pi / 8))
+
+        # Default (all constrained)
+        dif_default = c1.difference_rotation(c2)
+        self.assertEqual(dif_default.shape, (3,))
+
+        # Constrain all
+        dif_all = c1.difference_rotation(c2, rotation_mask=True)
+        testing.assert_array_almost_equal(dif_default, dif_all)
+
+        # Constrain none
+        dif_none = c1.difference_rotation(c2, rotation_mask=False)
+        testing.assert_array_almost_equal(dif_none, [0, 0, 0])
+
+    def test_inverse_kinematics_with_mask(self):
+        """Test inverse_kinematics with position_mask and rotation_mask."""
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
+            [0.05, 0.0, 0.0], 'local')
+
+        kuka.reset_manip_pose()
+        result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=kuka.rarm.end_coords,
+            link_list=kuka.rarm.link_list,
+            position_mask=True,
+            rotation_mask=True,
+            stop=50)
+        self.assertIsNot(result, False)
+
+        # Constrain only x,y position
+        kuka.reset_manip_pose()
+        result = kuka.inverse_kinematics(
+            target_coords,
+            move_target=kuka.rarm.end_coords,
+            link_list=kuka.rarm.link_list,
+            position_mask='xy',
+            rotation_mask=False,
+            stop=50)
+        self.assertIsNot(result, False)
+
+    def test_batch_inverse_kinematics_with_mask(self):
+        """Test batch_inverse_kinematics with position_mask and rotation_mask."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        target_coords = [
+            skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])
+        ]
+
+        solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            position_mask=True,
+            rotation_mask='xy',  # constrain x,y rotation only
+            stop=30,
+            attempts_per_pose=1
+        )
+        self.assertEqual(len(solutions), 1)
+        self.assertEqual(len(success_flags), 1)

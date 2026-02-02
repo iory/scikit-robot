@@ -5,6 +5,7 @@ import numpy as np
 from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import cross_product
+from skrobot.coordinates.math import select_by_mask
 
 
 logger = getLogger(__name__)
@@ -85,45 +86,6 @@ def calc_target_joint_dimension_from_link_list(link_list):
         if hasattr(link, 'joint'):
             n += link.joint.joint_dof
     return n
-
-
-def calc_dif_with_axis(dif, axis):
-    """Return diff with respect to axis.
-
-    Parameters
-    ----------
-    dif : list[float] or numpy.ndarray
-        difference vector
-    axis : str or bool or None
-        if axis is False or None, return numpy.array([]).
-        if axis is True, return dif.
-
-    Returns
-    -------
-    ret : numpy.ndarray
-        difference with respect to axis.
-    """
-    if axis in ['x', 'xx']:
-        ret = np.array([dif[1], dif[2]])
-    elif axis in ['y', 'yy']:
-        ret = np.array([dif[0], dif[2]])
-    elif axis in ['z', 'zz']:
-        ret = np.array([dif[0], dif[1]])
-    elif axis in ['xy', 'yx']:
-        ret = np.array([dif[2]])
-    elif axis in ['yz', 'zy']:
-        ret = np.array([dif[0]])
-    elif axis in ['zx', 'xz']:
-        ret = np.array([dif[1]])
-    elif axis is None or axis is False:
-        ret = np.array([])
-    elif axis in ['xm', 'ym', 'zm']:
-        ret = dif
-    elif axis is True:
-        ret = dif
-    else:
-        raise ValueError('axis {} is not supported'.format(axis))
-    return ret
 
 
 class _MimicJointHook(object):
@@ -438,16 +400,16 @@ class FixedJoint(Joint):
 
 def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords,
-                             move_target, transform_coords, rotation_axis,
-                             translation_axis):
+                             move_target, transform_coords, rotation_mask,
+                             position_mask):
     j_rot = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, transform_coords)
     p_diff = np.matmul(transform_coords.worldrot().T,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = cross_product(j_rot, p_diff)
-    j_translation = calc_dif_with_axis(j_translation, translation_axis)
+    j_translation = select_by_mask(j_translation, position_mask)
     jacobian[row:row + len(j_translation), column] = j_translation
-    j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
+    j_rotation = select_by_mask(j_rot, rotation_mask)
     jacobian[row + len(j_translation):
              row + len(j_translation) + len(j_rotation),
              column] = j_rotation
@@ -458,13 +420,13 @@ def calc_jacobian_linear(jacobian, row, column,
                          joint, paxis, child_link,
                          world_default_coords,
                          move_target, transform_coords,
-                         rotation_axis, translation_axis):
+                         rotation_mask, position_mask):
     j_trans = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, transform_coords)
     j_rot = np.array([0, 0, 0])
-    j_trans = calc_dif_with_axis(j_trans, translation_axis)
+    j_trans = select_by_mask(j_trans, position_mask)
     jacobian[row:row + len(j_trans), column] = j_trans
-    j_rot = calc_dif_with_axis(j_rot, rotation_axis)
+    j_rot = select_by_mask(j_rot, rotation_mask)
     jacobian[row + len(j_trans):
              row + len(j_trans) + len(j_rot),
              column] = j_rot
