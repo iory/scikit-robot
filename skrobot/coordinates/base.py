@@ -27,6 +27,10 @@ from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 
 
+# Sentinel value to distinguish between "not passed" and "passed as None"
+_UNSET = object()
+
+
 def transform_coords(c1, c2, out=None):
     """Return Coordinates by applying c1 to c2 from the left
 
@@ -850,7 +854,7 @@ class Coordinates(object):
         return self.rotate_vector(ax)
 
     def difference_position(self, coords,
-                            translation_axis=None,
+                            translation_axis=_UNSET,
                             position_mask=None):
         """Return differences in position of given coords.
 
@@ -898,12 +902,12 @@ class Coordinates(object):
         array([ 0. ,  0. , -0.2])
         """
         # Check for conflicting parameters
-        if position_mask is not None and translation_axis is not None:
+        if position_mask is not None and translation_axis is not _UNSET:
             raise ValueError(
                 "Cannot specify both position_mask and translation_axis")
 
         # Handle legacy API with deprecation warning
-        if translation_axis is not None:
+        if translation_axis is not _UNSET:
             warnings.warn(
                 "translation_axis is deprecated. Use position_mask instead. "
                 "Note: semantics are inverted - position_mask='z' means "
@@ -921,7 +925,7 @@ class Coordinates(object):
         return dif_pos
 
     def difference_rotation(self, coords,
-                            rotation_axis=None,
+                            rotation_axis=_UNSET,
                             rotation_mask=None,
                             rotation_mirror=None):
         """Return differences in rotation of given coords.
@@ -986,12 +990,12 @@ class Coordinates(object):
             return np.linalg.norm(dr1) < np.linalg.norm(dr1m)
 
         # Check for conflicting parameters
-        if rotation_mask is not None and rotation_axis is not None:
+        if rotation_mask is not None and rotation_axis is not _UNSET:
             raise ValueError(
                 "Cannot specify both rotation_mask and rotation_axis")
 
         # Legacy API: use old implementation for backward compatibility
-        if rotation_axis is not None:
+        if rotation_axis is not _UNSET:
             warnings.warn(
                 "rotation_axis is deprecated. Use rotation_mask and "
                 "rotation_mirror instead. "
