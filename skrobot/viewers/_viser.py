@@ -408,22 +408,23 @@ class ViserViewer:
         control = target['control']
         target_pos = np.array(control.position)
         target_rot = vtf.SO3(control.wxyz).as_matrix()
+        target_coords = Coordinates(pos=target_pos, rot=target_rot)
 
-        # Use JAX batch IK if available (faster for interactive use)
-        if self._jax_available:
+        constrain_rot = self._ik_constrain_rotation.value
+
+        # Try regular IK first (fast, high accuracy)
+        result = robot_model.inverse_kinematics(
+            target_coords,
+            link_list=target['link_list'],
+            move_target=target['end_coords'],
+            rotation_mask=constrain_rot,
+            stop=30,
+            revert_if_fail=True,
+        )
+
+        # If regular IK fails, try batch IK with many random starts
+        if (result is False or result is None) and self._jax_available:
             result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
-        else:
-            # Fall back to regular IK
-            target_coords = Coordinates(pos=target_pos, rot=target_rot)
-            constrain_rot = self._ik_constrain_rotation.value
-            result = robot_model.inverse_kinematics(
-                target_coords,
-                link_list=target['link_list'],
-                move_target=target['end_coords'],
-                rotation_mask=constrain_rot,
-                stop=10,  # Reduced iterations for interactive use
-                revert_if_fail=True,
-            )
 
         if result is not False and result is not None:
             self.redraw()
@@ -479,22 +480,23 @@ class ViserViewer:
 
         # Convert RPY to rotation matrix
         target_rot = rotation_matrix_from_rpy([yaw, pitch, roll])
+        target_coords = Coordinates(pos=target_pos, rot=target_rot)
 
-        # Use JAX batch IK if available (faster for interactive use)
-        if self._jax_available:
+        constrain_rot = self._ik_constrain_rotation.value
+
+        # Try regular IK first (fast, high accuracy)
+        result = robot_model.inverse_kinematics(
+            target_coords,
+            link_list=target['link_list'],
+            move_target=target['end_coords'],
+            rotation_mask=constrain_rot,
+            stop=30,
+            revert_if_fail=True,
+        )
+
+        # If regular IK fails, try batch IK with many random starts
+        if (result is False or result is None) and self._jax_available:
             result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
-        else:
-            # Fall back to regular IK
-            target_coords = Coordinates(pos=target_pos, rot=target_rot)
-            constrain_rot = self._ik_constrain_rotation.value
-            result = robot_model.inverse_kinematics(
-                target_coords,
-                link_list=target['link_list'],
-                move_target=target['end_coords'],
-                rotation_mask=constrain_rot,
-                stop=10,  # Reduced iterations for interactive use
-                revert_if_fail=True,
-            )
 
         if result is not False and result is not None:
             self.redraw()
