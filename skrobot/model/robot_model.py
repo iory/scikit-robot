@@ -1785,7 +1785,8 @@ class RobotModel(CascadedLink):
 
     def load_urdf_from_robot_description(
             self, param_name='/robot_description',
-            include_mimic_joints=True):
+            include_mimic_joints=True, timeout_seconds=10):
+
         """Load URDF from ROS parameter server and initialize the model.
 
         Waits until the specified ROS parameter is available, reads the URDF
@@ -1800,6 +1801,8 @@ class RobotModel(CascadedLink):
         include_mimic_joints : bool, optional
             If True, mimic joints are included in the `self.joint_list`.
             Passed directly to `load_urdf_file`.
+        timeout_seconds : int, optional
+            Timeout to load urdf from robot_description. (ROS1 only)
         """
         ros_version = os.environ.get('ROS_VERSION', '1')
 
@@ -1811,7 +1814,7 @@ class RobotModel(CascadedLink):
                 logger.warning("rclpy not available for ROS2, falling back to ROS1 method")
 
         try:
-            self._load_urdf_from_ros1(param_name, include_mimic_joints)
+            self._load_urdf_from_ros1(param_name, include_mimic_joints, timeout_seconds)
         except ImportError:
             raise RuntimeError("Neither rclpy (ROS2) nor rospy (ROS1) is available. "
                                "Please ensure ROS is properly installed and sourced.")
@@ -1934,7 +1937,7 @@ class RobotModel(CascadedLink):
             except OSError as e:
                 logger.warning("Failed to remove temporary file %s: %s", tmp_path, e)
 
-    def _load_urdf_from_ros1(self, param_name, include_mimic_joints):
+    def _load_urdf_from_ros1(self, param_name, include_mimic_joints, timeout_seconds):
         """Load URDF from ROS1 parameter server with security and timeout handling."""
         import rospy
 
@@ -1943,7 +1946,7 @@ class RobotModel(CascadedLink):
             rospy.init_node('urdf_loader_node_for_skrobot', anonymous=True)
             logger.info("Initialized temporary ROS1 node")
 
-        urdf = self._fetch_urdf_with_timeout_ros1(param_name)
+        urdf = self._fetch_urdf_with_timeout_ros1(param_name, timeout_seconds)
         self._load_urdf_from_string_secure(urdf, include_mimic_joints)
 
     def _fetch_urdf_with_timeout_ros1(self, param_name, timeout_seconds=10):
