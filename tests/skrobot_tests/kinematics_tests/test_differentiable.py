@@ -48,26 +48,19 @@ class TestDifferentiableKinematics(unittest.TestCase):
         link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
 
-        # Extract FK parameters
         fk_params = extract_fk_parameters(panda, link_list, move_target)
-
-        # Get current joint angles
         joint_angles = np.array([link.joint.joint_angle() for link in link_list])
 
-        # Compute FK with JAX backend
         pos_jax, rot_jax = forward_kinematics_ee(
             backend, backend.array(joint_angles), fk_params
         )
 
-        # Get expected position from robot model
         expected_pos = move_target.worldpos()
         expected_rot = move_target.worldrot()
 
-        # Compare positions (should be very close)
         pos_error = np.linalg.norm(backend.to_numpy(pos_jax) - expected_pos)
         self.assertLess(pos_error, 1e-6, f"Position error too large: {pos_error}")
 
-        # Compare rotations
         rot_error = np.linalg.norm(backend.to_numpy(rot_jax) - expected_rot)
         self.assertLess(rot_error, 1e-6, f"Rotation error too large: {rot_error}")
 
@@ -83,36 +76,57 @@ class TestDifferentiableKinematics(unittest.TestCase):
         link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
 
-        # Test at different poses
         test_poses = [
-            np.zeros(7),  # Zero pose
-            np.array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7]),  # Random pose
+            np.zeros(7),
+            np.array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7]),
         ]
 
         for angles in test_poses:
-            # Set robot to this pose
             for i, link in enumerate(link_list):
-                # Clip to joint limits
                 min_angle = link.joint.min_angle
                 max_angle = link.joint.max_angle
                 clipped_angle = np.clip(angles[i], min_angle, max_angle)
                 link.joint.joint_angle(clipped_angle)
 
-            # Extract FK params (need to re-extract after changing pose)
             fk_params = extract_fk_parameters(panda, link_list, move_target)
-
-            # Get actual joint angles after clipping
             actual_angles = np.array([link.joint.joint_angle() for link in link_list])
 
-            # Compute FK
             pos_jax, rot_jax = forward_kinematics_ee(
                 backend, backend.array(actual_angles), fk_params
             )
 
-            # Compare with robot model
             expected_pos = move_target.worldpos()
             pos_error = np.linalg.norm(backend.to_numpy(pos_jax) - expected_pos)
             self.assertLess(pos_error, 1e-6)
+
+    @requires_jax
+    def test_forward_kinematics_r8_6(self):
+        """Test forward kinematics with R8_6 robot (mimic joints)."""
+        from skrobot.backend import get_backend
+        from skrobot.kinematics.differentiable import extract_fk_parameters
+        from skrobot.kinematics.differentiable import forward_kinematics_ee
+
+        r8_6 = self.r8_6
+        r8_6.reset_pose()
+
+        backend = get_backend('jax')
+        link_list = r8_6.rarm.link_list
+        move_target = r8_6.rarm.end_coords
+
+        fk_params = extract_fk_parameters(r8_6, link_list, move_target)
+        joint_angles = np.array([link.joint.joint_angle() for link in link_list])
+
+        pos_jax, rot_jax = forward_kinematics_ee(
+            backend, backend.array(joint_angles), fk_params
+        )
+
+        expected_pos = move_target.worldpos()
+        pos_error = np.linalg.norm(backend.to_numpy(pos_jax) - expected_pos)
+        self.assertLess(
+            pos_error, 0.01,
+            f"Position error too large for R8_6: {pos_error}m. "
+            f"JAX pos: {backend.to_numpy(pos_jax)}, Expected: {expected_pos}"
+        )
 
     @requires_jax
     def test_jacobian_computation(self):
@@ -131,14 +145,10 @@ class TestDifferentiableKinematics(unittest.TestCase):
         fk_params = extract_fk_parameters(panda, link_list, move_target)
         joint_angles = np.array([link.joint.joint_angle() for link in link_list])
 
-        # Compute Jacobian
         jacobian = compute_jacobian(backend, backend.array(joint_angles), fk_params)
         jacobian_np = backend.to_numpy(jacobian)
 
-        # Check shape
         self.assertEqual(jacobian_np.shape, (3, 7))
-
-        # Jacobian should not be all zeros
         self.assertGreater(np.linalg.norm(jacobian_np), 0.1)
 
     @requires_jax
@@ -152,140 +162,14 @@ class TestDifferentiableKinematics(unittest.TestCase):
         link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
 
-        # Create solver
         solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
 
-        # Check solver attributes
         self.assertEqual(solver.n_joints, 7)
         self.assertIsNotNone(solver.fk_params)
 
-    @requires_jax
-    def test_batch_ik_simple_target(self):
-        """Test batch IK with a simple target near current position."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
 
-        panda = self.panda
-        panda.reset_manip_pose()
-
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Create target at current position (should converge easily)
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        # Get current joint angles as initial guess
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Solve
-        solutions, success_flags, errors = solver(
-            target_positions,
-            target_rotations,
-            initial_angles=initial_angles,
-            max_iterations=50
-        )
-
-        # Should converge since we're already at the target
-        self.assertTrue(success_flags[0], f"IK failed with error {errors[0]}")
-        self.assertLess(errors[0], 0.01)
-
-
-class TestDifferentiableKinematicsR8_6(unittest.TestCase):
-    """Test differentiable kinematics with R8_6 robot (has mimic joints)."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_JAX:
-            return
-
-        from skrobot.models import R8_6
-        cls.r8_6 = R8_6()
-
-    @requires_jax
-    def test_forward_kinematics_r8_6(self):
-        """Test forward kinematics with R8_6 robot (mimic joints).
-
-        R8_6 has mimic joints in its elbow mechanism. This test verifies
-        that the differentiable FK correctly handles mimic joints.
-        """
-        from skrobot.backend import get_backend
-        from skrobot.kinematics.differentiable import extract_fk_parameters
-        from skrobot.kinematics.differentiable import forward_kinematics_ee
-
-        r8_6 = self.r8_6
-        r8_6.reset_pose()
-
-        backend = get_backend('jax')
-        link_list = r8_6.rarm.link_list
-        move_target = r8_6.rarm.end_coords
-
-        # Extract FK parameters
-        fk_params = extract_fk_parameters(r8_6, link_list, move_target)
-
-        # Get current joint angles
-        joint_angles = np.array([link.joint.joint_angle() for link in link_list])
-
-        # Compute FK with JAX backend
-        pos_jax, rot_jax = forward_kinematics_ee(
-            backend, backend.array(joint_angles), fk_params
-        )
-
-        # Get expected position from robot model
-        expected_pos = move_target.worldpos()
-
-        # Compare positions
-        pos_error = np.linalg.norm(backend.to_numpy(pos_jax) - expected_pos)
-        self.assertLess(
-            pos_error, 0.01,
-            f"Position error too large for R8_6: {pos_error}m. "
-            f"JAX pos: {backend.to_numpy(pos_jax)}, Expected: {expected_pos}"
-        )
-
-    @requires_jax
-    def test_batch_ik_r8_6(self):
-        """Test batch IK with R8_6 robot."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
-        r8_6 = self.r8_6
-        r8_6.reset_pose()
-
-        link_list = r8_6.rarm.link_list
-        move_target = r8_6.rarm.end_coords
-
-        solver = create_batch_ik_solver(r8_6, link_list, move_target, backend_name='jax')
-
-        # Create target at current position
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        # Get current joint angles as initial guess
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Solve
-        solutions, success_flags, errors = solver(
-            target_positions,
-            target_rotations,
-            initial_angles=initial_angles,
-            max_iterations=100
-        )
-
-        # Check if converged (may fail if mimic joints not properly handled)
-        self.assertLess(
-            errors[0], 0.05,
-            f"R8_6 IK error too large: {errors[0]}m"
-        )
-
-
-class TestDifferentiableAxisConstraints(unittest.TestCase):
-    """Test axis constraints in differentiable batch IK solver."""
+class TestDifferentiableBatchIK(unittest.TestCase):
+    """Test batch IK solving functionality with various configurations."""
 
     @classmethod
     def setUpClass(cls):
@@ -293,13 +177,76 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
             return
 
         from skrobot.models import Panda
+        from skrobot.models import R8_6
+
         cls.panda = Panda()
+        cls.r8_6 = R8_6()
+
+    def _get_solver_and_target(self, robot, offset=None):
+        """Helper to create solver and target at current or offset position."""
+        from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        link_list = robot.rarm.link_list
+        move_target = robot.rarm.end_coords
+
+        solver = create_batch_ik_solver(robot, link_list, move_target, backend_name='jax')
+
+        current_pos = move_target.worldpos()
+        current_rot = move_target.worldrot()
+
+        if offset is not None:
+            target_pos = current_pos + np.array(offset)
+        else:
+            target_pos = current_pos
+
+        target_positions = np.array([target_pos])
+        target_rotations = np.array([current_rot])
+
+        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
+
+        return solver, target_positions, target_rotations, initial_angles
 
     @requires_jax
-    def test_batch_ik_position_mask_and_rotation_mask(self):
+    def test_batch_ik_simple_target(self):
+        """Test batch IK with a simple target near current position."""
+        panda = self.panda
+        panda.reset_manip_pose()
+
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
+
+        solutions, success_flags, errors = solver(
+            target_positions,
+            target_rotations,
+            initial_angles=initial_angles,
+            max_iterations=50
+        )
+
+        self.assertTrue(success_flags[0], f"IK failed with error {errors[0]}")
+        self.assertLess(errors[0], 0.01)
+
+    @requires_jax
+    def test_batch_ik_r8_6(self):
+        """Test batch IK with R8_6 robot (mimic joints)."""
+        r8_6 = self.r8_6
+        r8_6.reset_pose()
+
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(r8_6)
+
+        solutions, success_flags, errors = solver(
+            target_positions,
+            target_rotations,
+            initial_angles=initial_angles,
+            max_iterations=100
+        )
+
+        self.assertLess(errors[0], 0.05, f"R8_6 IK error too large: {errors[0]}m")
+
+    @requires_jax
+    def test_position_mask_and_rotation_mask(self):
         """Test batch IK with various position_mask and rotation_mask combinations."""
         from skrobot.coordinates.math import rotation_matrix_from_rpy
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
 
         panda = self.panda
         panda.reset_manip_pose()
@@ -307,24 +254,11 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
         link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
+        solver, _, _, initial_angles = self._get_solver_and_target(panda)
 
-        # Representative mask combinations to test
-        # Minimal set covering: True/False, single axis, double axis, array form
-        position_masks = [
-            True, False,
-            'x',           # Single axis
-            'xy',          # Double axis
-            [1, 0, 1],     # Array form
-        ]
+        position_masks = [True, False, 'x', 'xy', [1, 0, 1]]
+        rotation_masks = [True, False, 'x', 'yz']
 
-        rotation_masks = [
-            True, False,
-            'x',           # Single axis
-            'yz',          # Double axis
-        ]
-
-        # Target with small position and rotation change
         current_pos = move_target.worldpos()
         current_rot = move_target.worldrot()
         target_pos = current_pos + np.array([0.02, 0.01, 0.01])
@@ -333,9 +267,6 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
         target_positions = np.array([target_pos])
         target_rotations = np.array([target_rot])
 
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Helper to convert mask to array
         def mask_to_array(mask):
             if mask is None or mask is False:
                 return np.array([0, 0, 0])
@@ -356,7 +287,6 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
             for rot_mask in rotation_masks:
                 panda.reset_manip_pose()
 
-                # Skip if both masks are False (nothing to constrain)
                 pos_arr = mask_to_array(pos_mask)
                 rot_arr = mask_to_array(rot_mask)
                 if np.sum(pos_arr) == 0 and np.sum(rot_arr) == 0:
@@ -374,15 +304,12 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
                         rotation_mask=rot_mask,
                     )
 
-                    # Apply solution
                     for i, link in enumerate(link_list):
                         link.joint.joint_angle(solutions[0, i])
 
                     achieved_pos = move_target.worldpos()
                     achieved_rot = move_target.worldrot()
 
-                    # Check position constraints (relaxed threshold for combined constraints)
-                    # When both position and rotation are constrained, convergence is harder
                     pos_threshold = 0.05 if np.sum(rot_arr) > 0 else 0.02
                     if np.sum(pos_arr) > 0:
                         for axis_idx in range(3):
@@ -394,7 +321,6 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
                                     f"axis {axis_idx} error: {axis_error}"
                                 )
 
-                    # Check rotation constraints (for single/double axis, check direction)
                     if np.sum(rot_arr) > 0 and np.sum(rot_arr) <= 2:
                         for axis_idx in range(3):
                             if rot_arr[axis_idx] == 1:
@@ -409,45 +335,17 @@ class TestDifferentiableAxisConstraints(unittest.TestCase):
                                 )
 
                 except Exception as e:
-                    self.fail(
-                        f"Failed for pos_mask={pos_mask}, rot_mask={rot_mask}: {e}"
-                    )
-
-
-class TestDifferentiableConvergenceCheck(unittest.TestCase):
-    """Test convergence check with position and rotation thresholds."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_JAX:
-            return
-
-        from skrobot.models import Panda
-        cls.panda = Panda()
+                    self.fail(f"Failed for pos_mask={pos_mask}, rot_mask={rot_mask}: {e}")
 
     @requires_jax
     def test_convergence_with_pos_and_rot_threshold(self):
         """Test that success flag considers both position and rotation errors."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Target at current position (should succeed easily)
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Test with tight thresholds - should succeed at current pose
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -459,33 +357,17 @@ class TestDifferentiableConvergenceCheck(unittest.TestCase):
             rotation_mask=True,
         )
 
-        self.assertTrue(
-            success_flags[0],
-            f"Should succeed at current pose. Error: {errors[0]}"
-        )
+        self.assertTrue(success_flags[0], f"Should succeed at current pose. Error: {errors[0]}")
 
     @requires_jax
     def test_convergence_position_only(self):
         """Test convergence with position constraint only."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Position only - rotation error should not affect success
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -494,36 +376,20 @@ class TestDifferentiableConvergenceCheck(unittest.TestCase):
             pos_threshold=0.001,
             rot_threshold=0.01,
             position_mask=True,
-            rotation_mask=False,  # No rotation constraint
+            rotation_mask=False,
         )
 
-        self.assertTrue(
-            success_flags[0],
-            f"Should succeed with position only. Error: {errors[0]}"
-        )
+        self.assertTrue(success_flags[0], f"Should succeed with position only. Error: {errors[0]}")
 
     @requires_jax
     def test_convergence_rotation_only(self):
         """Test convergence with rotation constraint only."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Rotation only - position error should not affect success
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -531,37 +397,21 @@ class TestDifferentiableConvergenceCheck(unittest.TestCase):
             max_iterations=50,
             pos_threshold=0.001,
             rot_threshold=0.1,
-            position_mask=False,  # No position constraint
+            position_mask=False,
             rotation_mask=True,
         )
 
-        self.assertTrue(
-            success_flags[0],
-            f"Should succeed with rotation only. Error: {errors[0]}"
-        )
+        self.assertTrue(success_flags[0], f"Should succeed with rotation only. Error: {errors[0]}")
 
     @requires_jax
     def test_convergence_single_axis_rotation(self):
         """Test convergence with single-axis rotation constraint."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Single-axis rotation constraint (z-axis direction only)
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -570,7 +420,7 @@ class TestDifferentiableConvergenceCheck(unittest.TestCase):
             pos_threshold=0.001,
             rot_threshold=0.1,
             position_mask=True,
-            rotation_mask='z',  # Only z-axis direction
+            rotation_mask='z',
         )
 
         self.assertTrue(
@@ -578,40 +428,15 @@ class TestDifferentiableConvergenceCheck(unittest.TestCase):
             f"Should succeed with single-axis rotation. Error: {errors[0]}"
         )
 
-
-class TestDifferentiableRotationMirror(unittest.TestCase):
-    """Test rotation_mirror feature in differentiable batch IK solver."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_JAX:
-            return
-
-        from skrobot.models import Panda
-        cls.panda = Panda()
-
     @requires_jax
     def test_rotation_mirror_basic(self):
         """Test that rotation_mirror parameter works."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Test with each mirror axis
         for mirror_axis in ['x', 'y', 'z']:
             solutions, success_flags, errors = solver(
                 target_positions,
@@ -621,28 +446,20 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
                 rotation_mirror=mirror_axis,
             )
 
-            self.assertTrue(
-                success_flags[0],
-                f"Should succeed with rotation_mirror='{mirror_axis}'"
-            )
+            self.assertTrue(success_flags[0], f"Should succeed with rotation_mirror='{mirror_axis}'")
 
     @requires_jax
     def test_rotation_mirror_flipped_target(self):
         """Test that rotation_mirror allows flipped orientation."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
+        solver, _, _, initial_angles = self._get_solver_and_target(panda)
 
         current_pos = move_target.worldpos()
         current_rot = move_target.worldrot()
 
-        # Create 180° rotated target around x-axis
         Rx_180 = np.array([
             [1.0, 0.0, 0.0],
             [0.0, -1.0, 0.0],
@@ -653,9 +470,6 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
         target_positions = np.array([current_pos])
         target_rotations = np.array([flipped_rot])
 
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Without mirror: should have high rotation error
         solutions_no_mirror, _, errors_no_mirror = solver(
             target_positions,
             target_rotations,
@@ -664,7 +478,6 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
             rotation_mirror=None,
         )
 
-        # With x-axis mirror: should succeed (current pose matches flipped target)
         solutions_with_mirror, success_with_mirror, errors_with_mirror = solver(
             target_positions,
             target_rotations,
@@ -673,8 +486,6 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
             rotation_mirror='x',
         )
 
-        # With mirror, the current pose should match the flipped target
-        # So error should be much lower
         self.assertLess(
             float(errors_with_mirror[0]),
             float(errors_no_mirror[0]),
@@ -685,20 +496,15 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
     @requires_jax
     def test_rotation_mirror_convergence(self):
         """Test that rotation_mirror helps convergence to mirrored pose."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
+        solver, _, _, initial_angles = self._get_solver_and_target(panda)
 
         current_pos = move_target.worldpos()
         current_rot = move_target.worldrot()
 
-        # Create 180° rotated target around z-axis
         Rz_180 = np.array([
             [-1.0, 0.0, 0.0],
             [0.0, -1.0, 0.0],
@@ -709,9 +515,6 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
         target_positions = np.array([current_pos])
         target_rotations = np.array([flipped_rot])
 
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # With z-axis mirror: should succeed
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -722,48 +525,18 @@ class TestDifferentiableRotationMirror(unittest.TestCase):
             rot_threshold=0.1,
         )
 
-        # Current pose is the mirrored version of the target, so should succeed
-        self.assertTrue(
-            success_flags[0],
-            f"Should succeed with z-axis mirror. Error: {errors[0]}"
-        )
-
-
-class TestDifferentiableEarlyStopping(unittest.TestCase):
-    """Test early stopping functionality."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_JAX:
-            return
-
-        from skrobot.models import Panda
-        cls.panda = Panda()
+        self.assertTrue(success_flags[0], f"Should succeed with z-axis mirror. Error: {errors[0]}")
 
     @requires_jax
     def test_early_stopping_at_solution(self):
         """Test that solver stops early when starting at solution."""
         import time
 
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Target at current position
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        # Current joint angles (already at solution)
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
         # Warm up JIT
         _ = solver(
@@ -775,62 +548,30 @@ class TestDifferentiableEarlyStopping(unittest.TestCase):
             rot_threshold=0.1,
         )
 
-        # Time with many max_iterations (should stop early)
         start = time.time()
         solutions, success, errors = solver(
             target_positions,
             target_rotations,
             initial_angles=initial_angles,
-            max_iterations=1000,  # Many iterations
+            max_iterations=1000,
             pos_threshold=0.001,
             rot_threshold=0.1,
         )
         elapsed = time.time() - start
 
-        # Should succeed (already at solution)
         self.assertTrue(success[0])
         self.assertLess(errors[0], 0.01)
-
-        # Should be fast because of early stopping
-        # (not a strict check, just a sanity check)
         self.assertLess(elapsed, 5.0, "Should be fast due to early stopping")
-
-
-class TestDifferentiableAttemptsPerPose(unittest.TestCase):
-    """Test attempts_per_pose feature in differentiable batch IK solver."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAS_JAX:
-            return
-
-        from skrobot.models import Panda
-        cls.panda = Panda()
 
     @requires_jax
     def test_attempts_per_pose_basic(self):
         """Test that attempts_per_pose parameter works correctly."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Create target at current position
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        # Get current joint angles as initial guess
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # Solve with multiple attempts
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -840,82 +581,64 @@ class TestDifferentiableAttemptsPerPose(unittest.TestCase):
             use_current_angles=True,
         )
 
-        # Should still return one solution per target
         self.assertEqual(solutions.shape[0], 1)
         self.assertEqual(len(success_flags), 1)
         self.assertEqual(len(errors), 1)
-
-        # Should converge since we're already at the target
         self.assertLess(errors[0], 0.01)
 
     @requires_jax
     def test_attempts_per_pose_improves_success(self):
         """Test that multiple attempts improve success rate for difficult targets."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
+        solver, _, _, _ = self._get_solver_and_target(panda, offset=[0.1, 0.0, 0.0])
+
         move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Create a challenging target (moved significantly from current position)
         current_pos = move_target.worldpos()
         current_rot = move_target.worldrot()
 
-        # Move target by 10cm in x direction
         target_pos = current_pos + np.array([0.1, 0.0, 0.0])
         target_positions = np.array([target_pos])
         target_rotations = np.array([current_rot])
 
-        # Solve without attempts (single attempt from joint limit midpoint)
-        np.random.seed(42)  # For reproducibility
+        np.random.seed(42)
         solutions_single, _, errors_single = solver(
             target_positions,
             target_rotations,
-            initial_angles=None,  # Will use midpoint of joint limits
+            initial_angles=None,
             max_iterations=100,
             attempts_per_pose=1,
         )
 
-        # Solve with multiple attempts
-        np.random.seed(42)  # Same seed for fair comparison
+        np.random.seed(42)
         solutions_multi, _, errors_multi = solver(
             target_positions,
             target_rotations,
             initial_angles=None,
             max_iterations=100,
             attempts_per_pose=10,
-            use_current_angles=False,  # All random to test selection
+            use_current_angles=False,
         )
 
-        # Multiple attempts should give same or better result
-        # (since it selects the best among all attempts)
         self.assertLessEqual(
             float(errors_multi[0]),
-            float(errors_single[0]) + 0.001,  # Small tolerance for numerical issues
+            float(errors_single[0]) + 0.001,
             f"Multi-attempt error {errors_multi[0]} should be <= single-attempt {errors_single[0]}"
         )
 
     @requires_jax
     def test_attempts_per_pose_with_batch(self):
         """Test attempts_per_pose with multiple targets."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
         move_target = panda.rarm.end_coords
-
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
+        solver, _, _, initial_angles = self._get_solver_and_target(panda)
 
         current_pos = move_target.worldpos()
         current_rot = move_target.worldrot()
 
-        # Create 3 targets with small offsets
         target_positions = np.array([
             current_pos + np.array([0.02, 0.0, 0.0]),
             current_pos + np.array([0.0, 0.02, 0.0]),
@@ -923,10 +646,8 @@ class TestDifferentiableAttemptsPerPose(unittest.TestCase):
         ])
         target_rotations = np.array([current_rot, current_rot, current_rot])
 
-        initial_angles = np.array([[link.joint.joint_angle() for link in link_list]])
         initial_angles = np.tile(initial_angles, (3, 1))
 
-        # Solve with multiple attempts per target
         solutions, success_flags, errors = solver(
             target_positions,
             target_rotations,
@@ -936,53 +657,31 @@ class TestDifferentiableAttemptsPerPose(unittest.TestCase):
             use_current_angles=True,
         )
 
-        # Should return 3 solutions (one per target)
         self.assertEqual(solutions.shape[0], 3)
         self.assertEqual(len(success_flags), 3)
         self.assertEqual(len(errors), 3)
 
-        # All should have reasonable errors
         for i, err in enumerate(errors):
-            self.assertLess(
-                err, 0.05,
-                f"Target {i} error {err} too large"
-            )
+            self.assertLess(err, 0.05, f"Target {i} error {err} too large")
 
     @requires_jax
     def test_use_current_angles_flag(self):
         """Test that use_current_angles=True uses provided initial angles first."""
-        from skrobot.kinematics.differentiable import create_batch_ik_solver
-
         panda = self.panda
         panda.reset_manip_pose()
 
-        link_list = panda.rarm.link_list
-        move_target = panda.rarm.end_coords
+        solver, target_positions, target_rotations, initial_angles = \
+            self._get_solver_and_target(panda)
 
-        solver = create_batch_ik_solver(panda, link_list, move_target, backend_name='jax')
-
-        # Target at current position - should converge immediately with current angles
-        current_pos = move_target.worldpos()
-        current_rot = move_target.worldrot()
-
-        target_positions = np.array([current_pos])
-        target_rotations = np.array([current_rot])
-
-        # Current joint angles as initial guess
-        current_angles = np.array([[link.joint.joint_angle() for link in link_list]])
-
-        # With use_current_angles=True, first attempt uses current angles
-        # which should give perfect solution immediately
         solutions, _, errors = solver(
             target_positions,
             target_rotations,
-            initial_angles=current_angles,
-            max_iterations=10,  # Few iterations since we start at solution
+            initial_angles=initial_angles,
+            max_iterations=10,
             attempts_per_pose=5,
             use_current_angles=True,
         )
 
-        # Should have near-zero error since first attempt starts at solution
         self.assertLess(
             errors[0], 0.001,
             f"Error {errors[0]} too large when starting from solution"

@@ -6,6 +6,8 @@ with any differentiable backend (NumPy, JAX, PyTorch).
 
 import numpy as np
 
+from skrobot.coordinates.math import normalize_axis_mask
+
 
 def extract_fk_parameters(robot_model, link_list, move_target):
     """Extract FK parameters from a robot model for differentiable computation.
@@ -904,46 +906,6 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
-def _normalize_mask_to_array(mask):
-    """Normalize mask specification to a 3-element numpy array.
-
-    Parameters
-    ----------
-    mask : bool, str, list, or numpy.ndarray
-        - True: constrain all axes -> [1, 1, 1]
-        - False/None: no constraint -> [0, 0, 0]
-        - 'x': constrain x-axis only -> [1, 0, 0]
-        - 'xy': constrain x,y axes -> [1, 1, 0]
-        - [1, 1, 0]: direct specification
-
-    Returns
-    -------
-    mask_array : numpy.ndarray
-        3-element array, 1=constrained, 0=free
-    """
-    if mask is None or mask is False:
-        return np.array([0.0, 0.0, 0.0])
-    if mask is True:
-        return np.array([1.0, 1.0, 1.0])
-    if isinstance(mask, str):
-        mask_dict = {
-            'x': np.array([1.0, 0.0, 0.0]),
-            'y': np.array([0.0, 1.0, 0.0]),
-            'z': np.array([0.0, 0.0, 1.0]),
-            'xy': np.array([1.0, 1.0, 0.0]),
-            'yx': np.array([1.0, 1.0, 0.0]),
-            'xz': np.array([1.0, 0.0, 1.0]),
-            'zx': np.array([1.0, 0.0, 1.0]),
-            'yz': np.array([0.0, 1.0, 1.0]),
-            'zy': np.array([0.0, 1.0, 1.0]),
-            'xyz': np.array([1.0, 1.0, 1.0]),
-        }
-        if mask in mask_dict:
-            return mask_dict[mask]
-        raise ValueError(f"Unknown mask string: {mask}")
-    if isinstance(mask, (list, np.ndarray)):
-        return np.array(mask, dtype=np.float64)
-    raise ValueError(f"Invalid mask type: {type(mask)}")
 
 
 def _create_numpy_optimized_solver(fk_params):
@@ -1008,8 +970,8 @@ def _create_numpy_optimized_solver(fk_params):
         n_targets = target_positions.shape[0]
 
         # Parse masks
-        pos_mask_arr = _normalize_mask_to_array(position_mask)
-        rot_mask_arr = _normalize_mask_to_array(rotation_mask)
+        pos_mask_arr = normalize_axis_mask(position_mask)
+        rot_mask_arr = normalize_axis_mask(rotation_mask)
 
         pos_mask_sum = np.sum(pos_mask_arr)
         rot_mask_sum = np.sum(rot_mask_arr)
@@ -1662,8 +1624,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             target_rotations_for_solve = target_rotations
 
         # Normalize masks to arrays
-        pos_mask_arr = _normalize_mask_to_array(position_mask)
-        rot_mask_arr = _normalize_mask_to_array(rotation_mask)
+        pos_mask_arr = normalize_axis_mask(position_mask)
+        rot_mask_arr = normalize_axis_mask(rotation_mask)
 
         # Get or create JIT-compiled solver for these parameters
         # Include masks, thresholds, and mirror in cache key

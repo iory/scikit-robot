@@ -2690,3 +2690,65 @@ rvec_to_quaternion = rotation_vector_to_quaternion
 # clockwise angle
 ccw_angle_between_vectors = counter_clockwise_angle_between_vectors
 cw_angle_between_vectors = clockwise_angle_between_vectors
+
+
+def normalize_axis_mask(mask):
+    """Normalize axis mask specification to a 3-element numpy array.
+
+    This function converts various mask specifications to a consistent
+    3-element numpy array format for axis constraints.
+
+    Parameters
+    ----------
+    mask : bool, str, list, or numpy.ndarray
+        Mask specification:
+        - True: constrain all axes -> [1, 1, 1]
+        - False/None: no constraint -> [0, 0, 0]
+        - 'x': constrain x-axis only -> [1, 0, 0]
+        - 'y': constrain y-axis only -> [0, 1, 0]
+        - 'z': constrain z-axis only -> [0, 0, 1]
+        - 'xy', 'yx': constrain x,y axes -> [1, 1, 0]
+        - 'xz', 'zx': constrain x,z axes -> [1, 0, 1]
+        - 'yz', 'zy': constrain y,z axes -> [0, 1, 1]
+        - 'xyz': constrain all axes -> [1, 1, 1]
+        - [1, 1, 0]: direct array specification
+
+    Returns
+    -------
+    mask_array : numpy.ndarray
+        3-element float array where 1.0 means constrained and 0.0 means free.
+
+    Examples
+    --------
+    >>> normalize_axis_mask(True)
+    array([1., 1., 1.])
+    >>> normalize_axis_mask(False)
+    array([0., 0., 0.])
+    >>> normalize_axis_mask('xy')
+    array([1., 1., 0.])
+    >>> normalize_axis_mask([1, 0, 1])
+    array([1., 0., 1.])
+    """
+    if mask is None or mask is False:
+        return np.array([0.0, 0.0, 0.0])
+    if mask is True:
+        return np.array([1.0, 1.0, 1.0])
+    if isinstance(mask, str):
+        mask_dict = {
+            'x': np.array([1.0, 0.0, 0.0]),
+            'y': np.array([0.0, 1.0, 0.0]),
+            'z': np.array([0.0, 0.0, 1.0]),
+            'xy': np.array([1.0, 1.0, 0.0]),
+            'yx': np.array([1.0, 1.0, 0.0]),
+            'xz': np.array([1.0, 0.0, 1.0]),
+            'zx': np.array([1.0, 0.0, 1.0]),
+            'yz': np.array([0.0, 1.0, 1.0]),
+            'zy': np.array([0.0, 1.0, 1.0]),
+            'xyz': np.array([1.0, 1.0, 1.0]),
+        }
+        if mask in mask_dict:
+            return mask_dict[mask]
+        raise ValueError(f"Unknown mask string: {mask}")
+    if isinstance(mask, (list, np.ndarray)):
+        return np.array(mask, dtype=np.float64)
+    raise ValueError(f"Invalid mask type: {type(mask)}")
