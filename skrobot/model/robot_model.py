@@ -33,6 +33,8 @@ from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import rodrigues
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rpy2quaternion
+from skrobot.coordinates.math import warn_rotation_axis_deprecated
+from skrobot.coordinates.math import warn_translation_axis_deprecated
 from skrobot.model.joint import calc_dif_with_axis
 from skrobot.model.joint import calc_dif_with_mask
 from skrobot.model.joint import calc_target_joint_dimension
@@ -181,11 +183,7 @@ class CascadedLink(CascadedCoords):
             raise ValueError(
                 "Cannot specify both position_mask and translation_axis")
         if translation_axis_used:
-            warnings.warn(
-                "translation_axis is deprecated. Use position_mask instead. "
-                "Note: semantics are inverted - position_mask='z' means "
-                "constrain z only, while translation_axis='z' meant ignore z.",
-                DeprecationWarning, stacklevel=3)
+            warn_translation_axis_deprecated(stacklevel=2)
             position_mask, _ = convert_legacy_axis_to_mask(translation_axis)
         elif position_mask is not None:
             position_mask = normalize_mask(position_mask)
@@ -197,10 +195,7 @@ class CascadedLink(CascadedCoords):
             raise ValueError(
                 "Cannot specify both rotation_mask and rotation_axis")
         if rotation_axis_used:
-            warnings.warn(
-                "rotation_axis is deprecated. Use rotation_mask and "
-                "rotation_mirror instead.",
-                DeprecationWarning, stacklevel=3)
+            warn_rotation_axis_deprecated(stacklevel=2)
             rotation_mask, legacy_mirror = convert_legacy_axis_to_mask(rotation_axis)
             if legacy_mirror is not None:
                 rotation_mirror = legacy_mirror
@@ -1076,11 +1071,7 @@ class CascadedLink(CascadedCoords):
 
         # Handle legacy API: convert single values to lists if needed
         if translation_axis is not None and position_mask is None:
-            warnings.warn(
-                "translation_axis is deprecated. Use position_mask instead. "
-                "Note: semantics are inverted - position_mask='z' means "
-                "constrain z only, while translation_axis='z' meant ignore z.",
-                DeprecationWarning, stacklevel=2)
+            warn_translation_axis_deprecated()
             if not isinstance(translation_axis, list):
                 translation_axis = [translation_axis]
             position_mask = []
@@ -1089,10 +1080,7 @@ class CascadedLink(CascadedCoords):
                 position_mask.append(pmask)
 
         if rotation_axis is not None and rotation_mask is None:
-            warnings.warn(
-                "rotation_axis is deprecated. Use rotation_mask and "
-                "rotation_mirror instead.",
-                DeprecationWarning, stacklevel=2)
+            warn_rotation_axis_deprecated()
             if not isinstance(rotation_axis, list):
                 rotation_axis = [rotation_axis]
             rotation_mask = []

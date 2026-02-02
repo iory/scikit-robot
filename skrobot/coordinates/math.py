@@ -158,6 +158,25 @@ def convert_legacy_axis_to_mask(axis):
     raise ValueError("Invalid axis type: {}".format(type(axis)))
 
 
+def warn_translation_axis_deprecated(stacklevel=2):
+    """Emit deprecation warning for translation_axis parameter."""
+    warnings.warn(
+        "translation_axis is deprecated. Use position_mask instead. "
+        "Note: semantics are inverted - position_mask='z' means "
+        "constrain z only, while translation_axis='z' meant ignore z.",
+        DeprecationWarning, stacklevel=stacklevel + 1)
+
+
+def warn_rotation_axis_deprecated(stacklevel=2):
+    """Emit deprecation warning for rotation_axis parameter."""
+    warnings.warn(
+        "rotation_axis is deprecated. Use rotation_mask and "
+        "rotation_mirror instead. "
+        "Note: semantics are inverted - rotation_mask='yz' means "
+        "constrain y,z only, while rotation_axis='x' meant ignore x.",
+        DeprecationWarning, stacklevel=stacklevel + 1)
+
+
 def convert_to_axis_vector(axis):
     """Convert axis to float vector.
 

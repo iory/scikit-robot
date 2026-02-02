@@ -23,6 +23,8 @@ from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
+from skrobot.coordinates.math import warn_rotation_axis_deprecated
+from skrobot.coordinates.math import warn_translation_axis_deprecated
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 
@@ -908,11 +910,7 @@ class Coordinates(object):
 
         # Handle legacy API with deprecation warning
         if translation_axis is not _UNSET:
-            warnings.warn(
-                "translation_axis is deprecated. Use position_mask instead. "
-                "Note: semantics are inverted - position_mask='z' means "
-                "constrain z only, while translation_axis='z' meant ignore z.",
-                DeprecationWarning, stacklevel=2)
+            warn_translation_axis_deprecated()
             mask_vec, _ = convert_legacy_axis_to_mask(translation_axis)
         elif position_mask is not None:
             mask_vec = normalize_mask(position_mask)
@@ -996,12 +994,7 @@ class Coordinates(object):
 
         # Legacy API: use old implementation for backward compatibility
         if rotation_axis is not _UNSET:
-            warnings.warn(
-                "rotation_axis is deprecated. Use rotation_mask and "
-                "rotation_mirror instead. "
-                "Note: semantics are inverted - rotation_mask='yz' means "
-                "constrain y,z only, while rotation_axis='x' meant ignore x.",
-                DeprecationWarning, stacklevel=2)
+            warn_rotation_axis_deprecated()
             return self._difference_rotation_legacy(coords, rotation_axis,
                                                     need_mirror_for_nearest_axis)
 
