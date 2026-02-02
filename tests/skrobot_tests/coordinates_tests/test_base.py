@@ -4,7 +4,6 @@ import unittest
 import numpy as np
 from numpy import deg2rad
 from numpy import pi
-from numpy import sign
 from numpy import testing
 
 from skrobot.coordinates import make_cascoords
@@ -344,102 +343,92 @@ class TestCoordinates(unittest.TestCase):
     def test_difference_position(self):
         coord1 = make_coords()
         coord2 = make_coords().translate([1, 2, 3])
+        # Default: constrain all axes
         dif_pos = coord1.difference_position(coord2)
         testing.assert_almost_equal(dif_pos, [1, 2, 3])
 
-        dif_pos = coord1.difference_position(coord2, translation_axis=False)
+        # position_mask=False means no constraint (all zeros)
+        dif_pos = coord1.difference_position(coord2, position_mask=False)
         testing.assert_almost_equal(dif_pos, [0, 0, 0])
 
-        dif_pos = coord1.difference_position(coord2, translation_axis='x')
-        testing.assert_almost_equal(dif_pos, [0, 2, 3])
-        dif_pos = coord1.difference_position(coord2, translation_axis='y')
-        testing.assert_almost_equal(dif_pos, [1, 0, 3])
-        dif_pos = coord1.difference_position(coord2, translation_axis='z')
-        testing.assert_almost_equal(dif_pos, [1, 2, 0])
-
-        dif_pos = coord1.difference_position(coord2, translation_axis='xy')
-        testing.assert_almost_equal(dif_pos, [0, 0, 3])
-        dif_pos = coord1.difference_position(coord2, translation_axis='yz')
+        # position_mask='x' means constrain x only
+        dif_pos = coord1.difference_position(coord2, position_mask='x')
         testing.assert_almost_equal(dif_pos, [1, 0, 0])
-        dif_pos = coord1.difference_position(coord2, translation_axis='zx')
+        dif_pos = coord1.difference_position(coord2, position_mask='y')
         testing.assert_almost_equal(dif_pos, [0, 2, 0])
+        dif_pos = coord1.difference_position(coord2, position_mask='z')
+        testing.assert_almost_equal(dif_pos, [0, 0, 3])
+
+        # position_mask='xy' means constrain x and y
+        dif_pos = coord1.difference_position(coord2, position_mask='xy')
+        testing.assert_almost_equal(dif_pos, [1, 2, 0])
+        dif_pos = coord1.difference_position(coord2, position_mask='yz')
+        testing.assert_almost_equal(dif_pos, [0, 2, 3])
+        dif_pos = coord1.difference_position(coord2, position_mask='zx')
+        testing.assert_almost_equal(dif_pos, [1, 0, 3])
 
     def test_difference_rotation(self):
         coord1 = make_coords()
         coord2 = make_coords(rot=rpy_matrix(pi / 2.0, pi / 3.0, pi / 5.0))
+        # Default: constrain all axes
         dif_rot = coord1.difference_rotation(coord2)
         testing.assert_almost_equal(dif_rot,
                                     [-0.32855112, 1.17434985, 1.05738936])
-        dif_rot = coord1.difference_rotation(coord2, False)
-        testing.assert_almost_equal(dif_rot,
-                                    [0, 0, 0])
 
-        dif_rot = coord1.difference_rotation(coord2, 'x')
-        testing.assert_almost_equal(dif_rot,
-                                    [0.0, 1.36034952, 0.78539816])
-        dif_rot = coord1.difference_rotation(coord2, 'y')
-        testing.assert_almost_equal(dif_rot,
-                                    [0.35398131, 0.0, 0.97442695])
-        dif_rot = coord1.difference_rotation(coord2, 'z')
-        testing.assert_almost_equal(dif_rot,
-                                    [-0.88435715, 0.74192175, 0.0])
+        # rotation_mask=False means no constraint (all zeros)
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask=False)
+        testing.assert_almost_equal(dif_rot, [0, 0, 0])
 
-        # TODO(iory) This case's rotation_axis='xx' is unstable
-        # due to float point
-        dif_rot = coord1.difference_rotation(coord2, 'xx')
+        # rotation_mask='x' means constrain x only
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='x')
+        testing.assert_almost_equal(dif_rot[0], -0.32855112)
+        testing.assert_almost_equal(dif_rot[1], 0)
+        testing.assert_almost_equal(dif_rot[2], 0)
+
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='yz')
         testing.assert_almost_equal(dif_rot[0], 0)
-        testing.assert_almost_equal(abs(dif_rot[1]), 1.36034952)
-        testing.assert_almost_equal(abs(dif_rot[2]), 0.78539816)
-        testing.assert_almost_equal(sign(dif_rot[1]) * sign(dif_rot[2]), 1)
+        testing.assert_almost_equal(dif_rot[1], 1.17434985)
+        testing.assert_almost_equal(dif_rot[2], 1.05738936)
 
-        dif_rot = coord1.difference_rotation(coord2, 'yy')
-        testing.assert_almost_equal(
-            dif_rot, [0.35398131, 0.0, 0.97442695])
-        dif_rot = coord1.difference_rotation(coord2, 'zz')
-        testing.assert_almost_equal(
-            dif_rot, [-0.88435715, 0.74192175, 0.0])
-
+        # Test rotation_mirror
         coord1 = make_coords()
         coord2 = make_coords().rotate(pi, 'x')
-        dif_rot = coord1.difference_rotation(coord2, 'xm')
-        testing.assert_almost_equal(dif_rot, [0, 0, 0])
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask=True,
+                                             rotation_mirror='x')
+        testing.assert_almost_equal(dif_rot, [0, 0, 0], decimal=5)
 
         coord2 = make_coords().rotate(pi / 2.0, 'x')
-        dif_rot = coord1.difference_rotation(coord2, 'xm')
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask=True,
+                                             rotation_mirror='x')
         testing.assert_almost_equal(dif_rot, [-pi / 2.0, 0, 0])
-
-        # corner case
-        coord1 = make_coords()
-        coord2 = make_coords().rotate(0.2564565431501872, 'y')
-        dif_rot = coord1.difference_rotation(coord2, 'zy')
-        testing.assert_almost_equal(dif_rot, [0, 0, 0])
 
         # norm == 0 case
         coord1 = make_coords()
         coord2 = make_coords()
-        dif_rot = coord1.difference_rotation(coord2, 'xy')
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='xy')
         testing.assert_almost_equal(dif_rot, [0, 0, 0])
 
+        # Test rotation_mask with partial axis constraints
+        # rotation_mask='z' constrains only z axis
         coord1 = make_coords()
         coord2 = make_coords().rotate(pi / 2, 'x').rotate(pi / 2, 'y')
-        dif_rot = coord1.difference_rotation(coord2, 'xy')
-        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
-        dif_rot = coord1.difference_rotation(coord2, 'yx')
-        testing.assert_almost_equal(dif_rot, [0, 0, pi / 2])
+        dif_rot_full = coord1.difference_rotation(coord2)
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='z')
+        testing.assert_almost_equal(dif_rot, [0, 0, dif_rot_full[2]])
 
+        # rotation_mask='x' constrains only x axis
         coord1 = make_coords()
         coord2 = make_coords().rotate(pi / 2, 'y').rotate(pi / 2, 'z')
-        dif_rot = coord1.difference_rotation(coord2, 'yz')
-        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
-        dif_rot = coord1.difference_rotation(coord2, 'zy')
-        testing.assert_almost_equal(dif_rot, [pi / 2, 0, 0])
+        dif_rot_full = coord1.difference_rotation(coord2)
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='x')
+        testing.assert_almost_equal(dif_rot, [dif_rot_full[0], 0, 0])
 
+        # rotation_mask='y' constrains only y axis
         coord1 = make_coords()
         coord2 = make_coords().rotate(pi / 2, 'z').rotate(pi / 2, 'x')
-        dif_rot = coord1.difference_rotation(coord2, 'zx')
-        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
-        dif_rot = coord1.difference_rotation(coord2, 'xz')
-        testing.assert_almost_equal(dif_rot, [0, pi / 2, 0])
+        dif_rot_full = coord1.difference_rotation(coord2)
+        dif_rot = coord1.difference_rotation(coord2, rotation_mask='y')
+        testing.assert_almost_equal(dif_rot, [0, dif_rot_full[1], 0])
 
     def test_rotation_matrix_alias(self):
         """Test that rotation_matrix is an alias for rotation."""

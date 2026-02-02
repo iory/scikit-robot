@@ -163,7 +163,7 @@ class TestRobotModel(unittest.TestCase):
             base_link = fetch.link_list[0]
             jac_analytic = fetch.calc_jacobian_from_link_list(
                 move_target, link_list,
-                rotation_axis=None, transform_coords=base_link)
+                rotation_mask=False, transform_coords=base_link)
             testing.assert_almost_equal(jac_numerical, jac_analytic, decimal=5)
         for move_target in [fetch.rarm_end_coords] + link_list:
             compare(move_target)
@@ -239,10 +239,11 @@ class TestRobotModel(unittest.TestCase):
     def test_inverse_kinematics_args(self):
         kuka = self.kuka
         kuka.inverse_kinematics_args()
+        # Use normalized mask arrays for multi-target IK
         d = kuka.inverse_kinematics_args(
             union_link_list=kuka.rarm.link_list,
-            rotation_axis=[True],
-            translation_axis=[True])
+            rotation_mask=[[1, 1, 1]],
+            position_mask=[[1, 1, 1]])
         self.assertEqual(d['dim'], 6)
         self.assertEqual(d['n_joint_dimension'], 7)
 
@@ -258,8 +259,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True)
+            position_mask=True,
+            rotation_mask=True)
         dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
         dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
         self.assertLess(np.linalg.norm(dif_pos), 0.001)
@@ -268,21 +269,37 @@ class TestRobotModel(unittest.TestCase):
         target_coords = kuka.rarm.end_coords.copy_worldcoords().\
             rotate(- np.pi / 6.0, 'y', 'local')
 
-        for rotation_axis in [True,
+        for rotation_mask in [True,
                               'x', 'y', 'z',
-                              'xx', 'yy', 'zz',
-                              'xm', 'ym', 'zm']:
+                              'xx', 'yy', 'zz']:
             kuka.reset_manip_pose()
             kuka.inverse_kinematics(
                 target_coords,
                 move_target=move_target,
                 link_list=link_list,
-                translation_axis=True,
-                rotation_axis=rotation_axis)
+                position_mask=True,
+                rotation_mask=rotation_mask)
             dif_pos = kuka.rarm.end_coords.difference_position(
                 target_coords, True)
             dif_rot = kuka.rarm.end_coords.difference_rotation(
-                target_coords, rotation_axis)
+                target_coords, rotation_mask=rotation_mask)
+            self.assertLess(np.linalg.norm(dif_pos), 0.001)
+            self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+
+        # Test rotation with mirroring using explicit rotation_mirror parameter
+        for axis in ['x', 'y', 'z']:
+            kuka.reset_manip_pose()
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=move_target,
+                link_list=link_list,
+                position_mask=True,
+                rotation_mask=axis,
+                rotation_mirror=axis)
+            dif_pos = kuka.rarm.end_coords.difference_position(
+                target_coords, True)
+            dif_rot = kuka.rarm.end_coords.difference_rotation(
+                target_coords, rotation_mask=axis, rotation_mirror=axis)
             self.assertLess(np.linalg.norm(dif_pos), 0.001)
             self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
 
@@ -294,8 +311,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True)
+            position_mask=True,
+            rotation_mask=True)
         self.assertEqual(ik_result, False)
         testing.assert_array_equal(
             av, kuka.angle_vector())
@@ -357,13 +374,14 @@ class TestRobotModel(unittest.TestCase):
         dimension = fetch.calc_target_axis_dimension(
             False, False)
         self.assertEqual(dimension, 0)
+        # For multi-target IK, pass list of normalized masks
         dimension = fetch.calc_target_axis_dimension(
-            [True, True], [True, True])
+            [[1, 1, 1], [1, 1, 1]], [[1, 1, 1], [1, 1, 1]])
         self.assertEqual(dimension, 12)
 
         with self.assertRaises(ValueError):
             dimension = fetch.calc_target_axis_dimension(
-                [True, False], True)
+                [[1, 1, 1], [0, 0, 0]], [1, 1, 1])
 
     def test_calc_jacobian_for_interlocking_joints(self):
         r = self.fetch
@@ -762,30 +780,30 @@ class TestRobotModel(unittest.TestCase):
         self.assertLessEqual(attempt_counts[0], 5)
 
     def test_batch_inverse_kinematics_axis_constraints(self):
-        """Test batch IK with different axis constraints."""
+        """Test batch IK with different mask constraints."""
         fetch = self.fetch
         fetch.reset_pose()
 
         target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
 
-        # Test different rotation axis constraints
-        for rotation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+        # Test different rotation mask constraints
+        for rotation_mask in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
             solutions, success_flags, _ = fetch.batch_inverse_kinematics(
                 target_coords,
                 move_target=fetch.rarm.end_coords,
-                rotation_axis=rotation_axis,
+                rotation_mask=rotation_mask,
                 stop=20,
                 attempts_per_pose=1
             )
             self.assertEqual(len(solutions), 1)
             self.assertEqual(len(success_flags), 1)
 
-        # Test different translation axis constraints
-        for translation_axis in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
+        # Test different position mask constraints
+        for position_mask in [True, False, 'x', 'y', 'z', 'xy', 'xyz']:
             solutions, success_flags, _ = fetch.batch_inverse_kinematics(
                 target_coords,
                 move_target=fetch.rarm.end_coords,
-                translation_axis=translation_axis,
+                position_mask=position_mask,
                 stop=20,
                 attempts_per_pose=1
             )
@@ -1067,7 +1085,7 @@ class TestRobotModel(unittest.TestCase):
         solutions, success_flags, _ = pr2.batch_inverse_kinematics(
             target_coords,
             move_target=offset_end_coords,
-            rotation_axis=False,  # Only position
+            rotation_mask=False,  # Only position
             stop=200,
             attempts_per_pose=10,
             thre=0.001
@@ -1108,8 +1126,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             stop=100)
         dif_pos_no_tol = kuka.rarm.end_coords.difference_position(
             target_coords, True)
@@ -1122,8 +1140,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             translation_tolerance=[0.1, 0.1, 0.1],
             stop=100)
         # Parameter should be accepted without error
@@ -1149,8 +1167,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             rotation_tolerance=[np.deg2rad(10), None, None],
             stop=100)
 
@@ -1174,8 +1192,8 @@ class TestRobotModel(unittest.TestCase):
             target_coords,
             move_target=move_target,
             link_list=link_list,
-            translation_axis=True,
-            rotation_axis=True,
+            position_mask=True,
+            rotation_mask=True,
             translation_tolerance=[0.01, 0.01, 0.01],
             rotation_tolerance=[np.deg2rad(5), np.deg2rad(5), np.deg2rad(5)],
             stop=50)
@@ -1360,31 +1378,6 @@ class TestRobotModel(unittest.TestCase):
         dif = c1.difference_position(c2, position_mask=[1, 0, 1])
         testing.assert_array_almost_equal(dif, [1.0, 0.0, 3.0])
 
-    def test_difference_position_deprecation_warning(self):
-        """Test that translation_axis emits DeprecationWarning."""
-        import warnings
-
-        from skrobot.coordinates import Coordinates
-
-        c1 = Coordinates()
-        c2 = Coordinates().translate([1.0, 2.0, 3.0])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            c1.difference_position(c2, translation_axis=True)
-            self.assertTrue(
-                any(issubclass(x.category, DeprecationWarning) for x in w))
-
-    def test_difference_position_conflict_error(self):
-        """Test that specifying both APIs raises ValueError."""
-        from skrobot.coordinates import Coordinates
-
-        c1 = Coordinates()
-        c2 = Coordinates().translate([1.0, 2.0, 3.0])
-
-        with self.assertRaises(ValueError):
-            c1.difference_position(c2, position_mask=True, translation_axis=True)
-
     def test_difference_rotation_with_rotation_mask(self):
         """Test difference_rotation with rotation_mask parameter."""
         from skrobot.coordinates import Coordinates
@@ -1404,32 +1397,6 @@ class TestRobotModel(unittest.TestCase):
         # Constrain none
         dif_none = c1.difference_rotation(c2, rotation_mask=False)
         testing.assert_array_almost_equal(dif_none, [0, 0, 0])
-
-    def test_difference_rotation_deprecation_warning(self):
-        """Test that rotation_axis emits DeprecationWarning."""
-        import warnings
-
-        from skrobot.coordinates import Coordinates
-        from skrobot.coordinates.math import rpy_matrix
-
-        c1 = Coordinates()
-        c2 = Coordinates(rot=rpy_matrix(np.pi / 4, 0, 0))
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            c1.difference_rotation(c2, rotation_axis=True)
-            self.assertTrue(
-                any(issubclass(x.category, DeprecationWarning) for x in w))
-
-    def test_difference_rotation_conflict_error(self):
-        """Test that specifying both APIs raises ValueError."""
-        from skrobot.coordinates import Coordinates
-
-        c1 = Coordinates()
-        c2 = Coordinates()
-
-        with self.assertRaises(ValueError):
-            c1.difference_rotation(c2, rotation_mask=True, rotation_axis=True)
 
     def test_inverse_kinematics_with_mask(self):
         """Test inverse_kinematics with position_mask and rotation_mask."""
@@ -1459,54 +1426,6 @@ class TestRobotModel(unittest.TestCase):
             rotation_mask=False,
             stop=50)
         self.assertIsNot(result, False)
-
-    def test_inverse_kinematics_legacy_compatibility(self):
-        """Test that legacy API still works with deprecation warning."""
-        import warnings
-        kuka = self.kuka
-        kuka.reset_manip_pose()
-
-        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
-            [0.02, 0.0, 0.0], 'local')
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            kuka.reset_manip_pose()
-            result = kuka.inverse_kinematics(
-                target_coords,
-                move_target=kuka.rarm.end_coords,
-                link_list=kuka.rarm.link_list,
-                translation_axis=True,
-                rotation_axis=True,
-                stop=50)
-            self.assertTrue(
-                any(issubclass(x.category, DeprecationWarning) for x in w))
-            self.assertIsNot(result, False)
-
-    def test_inverse_kinematics_conflict_error(self):
-        """Test that specifying both APIs raises ValueError."""
-        kuka = self.kuka
-        kuka.reset_manip_pose()
-
-        target_coords = kuka.rarm.end_coords.copy_worldcoords()
-
-        with self.assertRaises(ValueError):
-            kuka.inverse_kinematics(
-                target_coords,
-                move_target=kuka.rarm.end_coords,
-                link_list=kuka.rarm.link_list,
-                position_mask=True,
-                translation_axis=True,
-                stop=10)
-
-        with self.assertRaises(ValueError):
-            kuka.inverse_kinematics(
-                target_coords,
-                move_target=kuka.rarm.end_coords,
-                link_list=kuka.rarm.link_list,
-                rotation_mask=True,
-                rotation_axis=True,
-                stop=10)
 
     def test_batch_inverse_kinematics_with_mask(self):
         """Test batch_inverse_kinematics with position_mask and rotation_mask."""
