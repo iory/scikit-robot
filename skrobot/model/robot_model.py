@@ -2963,10 +2963,23 @@ class RobotModel(CascadedLink):
 
                 # Handle both mask array format and legacy format
                 if isinstance(rmask, np.ndarray):
-                    # Mask format: zero out unconstrained axes
-                    for axis_idx in range(3):
-                        if rmask[axis_idx] == 0:
-                            constrained_pose_error[3 + axis_idx] = 0
+                    # For partial rotation constraints, use difference_rotation
+                    # to properly compute the rotation error
+                    if not np.all(rmask == 1) and not np.all(rmask == 0):
+                        current_coord = Coordinates()
+                        current_coord.newcoords(
+                            quaternion2matrix(current_poses_updated[i, 3:]),
+                            current_poses_updated[i, :3])
+                        target_coord = Coordinates()
+                        target_coord.newcoords(
+                            quaternion2matrix(target_poses_unsolved[i, 3:]),
+                            target_poses_unsolved[i, :3])
+                        dif_rot = current_coord.difference_rotation(
+                            target_coord, rotation_mask=rmask)
+                        constrained_pose_error[3:] = dif_rot
+                    elif np.all(rmask == 0):
+                        # No rotation constraint
+                        constrained_pose_error[3:] = 0
                 elif rmask is False:
                     constrained_pose_error[3:] = 0
                 elif isinstance(rmask, str):
@@ -3285,6 +3298,22 @@ class RobotModel(CascadedLink):
         rotation_error_quat = quaternion_multiply(adjusted_target_poses[:, 3:], current_pose_quat_inv)
         rotation_error_rpy = quaternion2rpy(rotation_error_quat)[0][:, ::-1]
         pose_errors[:, 3:] = rotation_error_rpy
+
+        # Override rotation errors for numpy array masks using difference_rotation
+        # This is necessary because RPY decomposition doesn't work well with partial constraints
+        for i in range(batch_size):
+            rmask = rotation_mask_list[i]
+            if isinstance(rmask, np.ndarray) and not np.all(rmask == 1):
+                current_coord = Coordinates()
+                current_coord.newcoords(quaternion2matrix(current_poses[i, 3:]), current_poses[i, :3])
+
+                target_coord = Coordinates()
+                target_coord.newcoords(quaternion2matrix(target_poses[i, 3:]), target_poses[i, :3])
+
+                # Calculate rotation difference using the mask array
+                dif_rot = current_coord.difference_rotation(
+                    target_coord, rotation_mask=rmask)
+                pose_errors[i, 3:] = dif_rot
         pose_errors = pose_errors[:, [3, 4, 5, 0, 1, 2]]
 
         # Apply tolerance in target's local frame
@@ -3325,10 +3354,12 @@ class RobotModel(CascadedLink):
 
             # Handle mask array format
             if isinstance(rmask, np.ndarray):
-                # Mask format: 1=constrained, 0=free
-                for axis_idx in range(3):
-                    if rmask[axis_idx] == 1:
-                        active_rows.append(axis_idx)
+                # For numpy array masks with partial constraints (not all 1s),
+                # we need all rotation DOF because the error is computed via
+                # difference_rotation which returns a 3D rotation vector.
+                # For full constraint (all 1s), use all DOF as well.
+                if not np.all(rmask == 0):  # If any rotation is constrained
+                    active_rows.extend([0, 1, 2])  # Use all rotation DOF
             elif rmask is True:
                 active_rows.extend([0, 1, 2])  # All rotation DOF
             elif isinstance(rmask, str):
