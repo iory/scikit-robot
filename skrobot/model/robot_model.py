@@ -971,18 +971,7 @@ class CascadedLink(CascadedCoords):
             success = loop >= min_loop
 
         if success is True:
-            success = self.ik_convergence_check(
-                dif_pos,
-                dif_rot,
-                rotation_mask,
-                position_mask,
-                thre,
-                rthre,
-                centroid_thre,
-                target_centroid_pos,
-                centroid_offset_func,
-                cog_translation_axis,
-            )
+            success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
         if additional_check is not None:
             success &= additional_check()
 
@@ -1345,10 +1334,7 @@ class CascadedLink(CascadedCoords):
                             dif_rot[i][axis_idx] = 0.0
 
             if loop == 1 and self.ik_convergence_check(
-                    dif_pos, dif_rot, rotation_mask, position_mask,
-                    thre, rthre, centroid_thre, target_centroid_pos,
-                    centroid_offset_func, cog_translation_axis,
-            ):
+                    dif_pos, dif_rot, thre, rthre):
                 success = 'ik-succeed'
                 break
 
@@ -1387,18 +1373,7 @@ class CascadedLink(CascadedCoords):
                            move_target, target_coords, rotation_mask))
 
         # success
-        success = self.ik_convergence_check(
-            dif_pos,
-            dif_rot,
-            rotation_mask,
-            position_mask,
-            thre,
-            rthre,
-            centroid_thre,
-            target_centroid_pos,
-            centroid_offset_func,
-            cog_translation_axis,
-            update_mass_properties=False)
+        success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
 
         # reset joint angle limit weight
         self.reset_joint_angle_limit_weight(union_link_list)
@@ -1414,19 +1389,7 @@ class CascadedLink(CascadedCoords):
             self.newcoords(c0)
         return False
 
-    def ik_convergence_check(
-            self,
-            dif_pos,
-            dif_rot,
-            rotation_mask,
-            position_mask,
-            thre,
-            rthre,
-            centroid_thre=None,
-            target_centroid_pos=None,
-            centroid_offset_func=None,
-            cog_translation_axis=None,
-            update_mass_properties=True):
+    def ik_convergence_check(self, dif_pos, dif_rot, thre, rthre):
         """Check IK convergence.
 
         Parameters
@@ -1435,14 +1398,15 @@ class CascadedLink(CascadedCoords):
             Position differences for each target.
         dif_rot : list of np.ndarray
             Rotation differences for each target.
-        rotation_mask : list of np.ndarray
-            Rotation constraint masks (not used, kept for API compatibility).
-        position_mask : list of np.ndarray
-            Position constraint masks (not used, kept for API compatibility).
         thre : list of float
             Position error thresholds.
         rthre : list of float
             Rotation error thresholds.
+
+        Returns
+        -------
+        bool
+            True if converged, False otherwise.
         """
         for i in range(len(dif_pos)):
             if LA.norm(dif_pos[i]) > thre[i]:
@@ -1450,8 +1414,6 @@ class CascadedLink(CascadedCoords):
         for i in range(len(dif_rot)):
             if LA.norm(dif_rot[i]) > rthre[i]:
                 return False
-        if target_centroid_pos is not None:
-            raise NotImplementedError
         return True
 
     def calc_inverse_jacobian(self, jacobi,
