@@ -18,6 +18,7 @@ _AXIS_VECTORS = {
     'x': np.array([1, 0, 0]),
     'y': np.array([0, 1, 0]),
     'z': np.array([0, 0, 1]),
+    'xyz': np.array([1, 1, 1]),
     '-x': np.array([-1, 0, 0]),
     '-y': np.array([0, -1, 0]),
     '-z': np.array([0, 0, -1]),
@@ -143,6 +144,9 @@ def convert_legacy_axis_to_mask(axis):
             mask = np.array([1, 1, 1])
             mask[ignore_idx] = 0
             return mask, None
+        if axis == 'xyz':
+            # 'xyz' means constrain all axes (like True)
+            return np.array([1, 1, 1]), None
         if axis in _AXIS_VECTORS:
             # Legacy: axis indicates which to IGNORE
             # Invert: 1->0, 0->1

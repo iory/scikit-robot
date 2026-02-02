@@ -21,6 +21,7 @@ from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
+from skrobot.coordinates.math import convert_legacy_axis_to_mask
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
@@ -55,6 +56,9 @@ except ImportError:
     auto_ik_hook = None
 
 logger = getLogger(__name__)
+
+# Sentinel value to distinguish between "not passed" and "passed as None"
+_UNSET = object()
 
 
 class CascadedLink(CascadedCoords):
@@ -131,7 +135,7 @@ class CascadedLink(CascadedCoords):
 
     def _resolve_mask_params(self, position_mask, rotation_mask, rotation_mirror,
                              translation_axis, rotation_axis):
-        """Resolve new/legacy axis parameters with compatibility.
+        """Resolve new/legacy axis parameters to mask format.
 
         Parameters
         ----------
@@ -141,95 +145,71 @@ class CascadedLink(CascadedCoords):
             Specifies which rotation axes to constrain.
         rotation_mirror : str or None
             Mirror axis for rotation.
-        translation_axis : str, bool, or None
+        translation_axis : str, bool, None, or _UNSET
             Legacy API: specifies which axes to ignore.
-        rotation_axis : str, bool, or None
+        rotation_axis : str, bool, None, or _UNSET
             Legacy API: specifies which axes to ignore.
 
         Returns
         -------
-        translation_axis : str, bool, or None
-            Effective translation_axis for internal use.
-        rotation_axis : str, bool, or None
-            Effective rotation_axis for internal use.
+        position_mask : numpy.ndarray
+            3-element mask array (1=constrained, 0=free).
+        rotation_mask : numpy.ndarray
+            3-element mask array (1=constrained, 0=free).
+        rotation_mirror : str or None
+            Mirror axis if specified.
         """
+        def _is_resolved_mask_list(val):
+            """Check if val is already a list of mask arrays."""
+            if not isinstance(val, list):
+                return False
+            if len(val) == 0:
+                return False
+            first = val[0]
+            return isinstance(first, np.ndarray) and first.shape == (3,)
+
+        # If masks are already resolved (list of 3-element arrays), return as-is
+        if _is_resolved_mask_list(position_mask) and _is_resolved_mask_list(rotation_mask):
+            return position_mask, rotation_mask, rotation_mirror
+
+        # Check if legacy API was used (not _UNSET)
+        translation_axis_used = translation_axis is not _UNSET
+        rotation_axis_used = rotation_axis is not _UNSET
+
         # Position
-        if position_mask is not None and translation_axis is not None:
+        if position_mask is not None and translation_axis_used:
             raise ValueError(
                 "Cannot specify both position_mask and translation_axis")
-        if translation_axis is not None:
+        if translation_axis_used:
             warnings.warn(
                 "translation_axis is deprecated. Use position_mask instead. "
                 "Note: semantics are inverted - position_mask='z' means "
                 "constrain z only, while translation_axis='z' meant ignore z.",
                 DeprecationWarning, stacklevel=3)
-            # Use legacy value as-is
+            position_mask, _ = convert_legacy_axis_to_mask(translation_axis)
         elif position_mask is not None:
-            # Convert new mask to legacy axis format
-            mask_vec = normalize_mask(position_mask)
-            mask_sum = int(np.sum(mask_vec))
-            if mask_sum == 0:
-                translation_axis = False
-            elif mask_sum == 3:
-                translation_axis = True
-            elif mask_sum == 2:
-                # Two axes constrained
-                if np.array_equal(mask_vec, [0, 1, 1]):
-                    translation_axis = 'x'  # ignore x
-                elif np.array_equal(mask_vec, [1, 0, 1]):
-                    translation_axis = 'y'  # ignore y
-                elif np.array_equal(mask_vec, [1, 1, 0]):
-                    translation_axis = 'z'  # ignore z
-            elif mask_sum == 1:
-                # One axis constrained
-                if np.array_equal(mask_vec, [1, 0, 0]):
-                    translation_axis = 'yz'  # ignore y,z
-                elif np.array_equal(mask_vec, [0, 1, 0]):
-                    translation_axis = 'xz'  # ignore x,z
-                elif np.array_equal(mask_vec, [0, 0, 1]):
-                    translation_axis = 'xy'  # ignore x,y
+            position_mask = normalize_mask(position_mask)
+        else:
+            position_mask = np.array([1, 1, 1])  # Default: constrain all
 
         # Rotation
-        if rotation_mask is not None and rotation_axis is not None:
+        if rotation_mask is not None and rotation_axis_used:
             raise ValueError(
                 "Cannot specify both rotation_mask and rotation_axis")
-        if rotation_axis is not None:
+        if rotation_axis_used:
             warnings.warn(
                 "rotation_axis is deprecated. Use rotation_mask and "
                 "rotation_mirror instead.",
                 DeprecationWarning, stacklevel=3)
-            # Use legacy value as-is
-        elif rotation_mask is not None or rotation_mirror is not None:
-            if rotation_mask is None:
-                rotation_mask = True  # Default to constrain all when mirror is set
-            mask_vec = normalize_mask(rotation_mask)
-            mask_sum = int(np.sum(mask_vec))
+            rotation_mask, legacy_mirror = convert_legacy_axis_to_mask(rotation_axis)
+            if legacy_mirror is not None:
+                rotation_mirror = legacy_mirror
+        elif rotation_mask is not None:
+            rotation_mask = normalize_mask(rotation_mask)
+        else:
+            rotation_mask = np.array([1, 1, 1])  # Default: constrain all
 
-            if rotation_mirror is not None:
-                # Mirror mode
-                rotation_axis = rotation_mirror + 'm'
-            elif mask_sum == 0:
-                rotation_axis = False
-            elif mask_sum == 3:
-                rotation_axis = True
-            elif mask_sum == 2:
-                # Two axes constrained
-                if np.array_equal(mask_vec, [0, 1, 1]):
-                    rotation_axis = 'x'
-                elif np.array_equal(mask_vec, [1, 0, 1]):
-                    rotation_axis = 'y'
-                elif np.array_equal(mask_vec, [1, 1, 0]):
-                    rotation_axis = 'z'
-            elif mask_sum == 1:
-                # One axis constrained
-                if np.array_equal(mask_vec, [1, 0, 0]):
-                    rotation_axis = 'yz'
-                elif np.array_equal(mask_vec, [0, 1, 0]):
-                    rotation_axis = 'zx'
-                elif np.array_equal(mask_vec, [0, 0, 1]):
-                    rotation_axis = 'xy'
-
-        return translation_axis, rotation_axis
+        return position_mask, rotation_mask, rotation_mirror
 
     def angle_vector(self, av=None, return_av=None):
         """Get or set joint angle vector.
@@ -612,24 +592,20 @@ class CascadedLink(CascadedCoords):
         -------
         vel_p : np.ndarray
         """
-        # Handle mask parameters
+        if LA.norm(dif_pos) > p_limit:
+            dif_pos = p_limit * normalize_vector(dif_pos)
+
+        # Handle mask parameters (preferred)
         if position_mask is not None:
             if translation_axis is not None:
                 raise ValueError(
                     "Cannot specify both position_mask and translation_axis")
-            warnings.warn(
-                "position_mask in calc_vel_from_pos is not directly supported. "
-                "Use the mask-based API in inverse_kinematics instead.",
-                DeprecationWarning, stacklevel=2)
             mask_vec = normalize_mask(position_mask)
-            if LA.norm(dif_pos) > p_limit:
-                dif_pos = p_limit * normalize_vector(dif_pos)
             return calc_dif_with_mask(dif_pos, mask_vec)
 
+        # Legacy API
         if translation_axis is None:
             translation_axis = True
-        if LA.norm(dif_pos) > p_limit:
-            dif_pos = p_limit * normalize_vector(dif_pos)
         vel_p = calc_dif_with_axis(dif_pos, translation_axis)
         return vel_p
 
@@ -658,24 +634,20 @@ class CascadedLink(CascadedCoords):
         -------
         vel_r : np.ndarray
         """
-        # Handle mask parameters
+        if LA.norm(dif_rot) > r_limit:
+            dif_rot = r_limit * normalize_vector(dif_rot)
+
+        # Handle mask parameters (preferred)
         if rotation_mask is not None:
             if rotation_axis is not None:
                 raise ValueError(
                     "Cannot specify both rotation_mask and rotation_axis")
-            warnings.warn(
-                "rotation_mask in calc_vel_from_rot is not directly supported. "
-                "Use the mask-based API in inverse_kinematics instead.",
-                DeprecationWarning, stacklevel=2)
             mask_vec = normalize_mask(rotation_mask)
-            if LA.norm(dif_rot) > r_limit:
-                dif_rot = r_limit * normalize_vector(dif_rot)
             return calc_dif_with_mask(dif_rot, mask_vec, rotation_mirror)
 
+        # Legacy API
         if rotation_axis is None:
             rotation_axis = True
-        if LA.norm(dif_rot) > r_limit:
-            dif_rot = r_limit * normalize_vector(dif_rot)
         vel_r = calc_dif_with_axis(dif_rot, rotation_axis)
         return vel_r
 
@@ -843,8 +815,8 @@ class CascadedLink(CascadedCoords):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            rotation_axis=None,  # Legacy API (deprecated)
-            translation_axis=None,  # Legacy API (deprecated)
+            rotation_axis=_UNSET,  # Legacy API (deprecated)
+            translation_axis=_UNSET,  # Legacy API (deprecated)
             thre=None,
             rthre=None,
             dif_pos_ratio=1.0,
@@ -883,15 +855,23 @@ class CascadedLink(CascadedCoords):
 
         n = len(move_target)
 
-        # Resolve new/legacy mask parameters
-        translation_axis, rotation_axis = self._resolve_mask_params(
-            position_mask, rotation_mask, rotation_mirror,
-            translation_axis, rotation_axis)
+        # Resolve new/legacy mask parameters only if legacy params are used
+        # or if masks haven't been resolved yet
+        def _is_resolved_mask_list(val):
+            """Check if val is already a list of mask arrays."""
+            if not isinstance(val, list):
+                return False
+            if len(val) == 0:
+                return False
+            first = val[0]
+            return isinstance(first, np.ndarray) and first.shape == (3,)
 
-        if rotation_axis is None:
-            rotation_axis = listify(True, n)
-        if translation_axis is None:
-            translation_axis = listify(True, n)
+        if not _is_resolved_mask_list(position_mask):
+            position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
+                position_mask, rotation_mask, rotation_mirror,
+                translation_axis, rotation_axis)
+            position_mask = listify(position_mask, n)
+            rotation_mask = listify(rotation_mask, n)
         if thre is None:
             thre = listify(0.001, n)
         if rthre is None:
@@ -920,28 +900,26 @@ class CascadedLink(CascadedCoords):
         target_coords = listify(target_coords)
         dif_pos = listify(dif_pos)
         dif_rot = listify(dif_rot)
-        rotation_axis = listify(rotation_axis)
-        translation_axis = listify(translation_axis)
         thre = listify(thre)
         rthre = listify(rthre)
 
         # argument check
-        if not (len(translation_axis)
-                == len(rotation_axis)
+        if not (len(position_mask)
+                == len(rotation_mask)
                 == len(move_target)
                 == len(link_list)
                 == len(dif_pos)
                 == len(dif_rot)):
             logger.error(
-                'list length differ : translation-axis %s rotation-axis %s '
+                'list length differ : position_mask %s rotation_mask %s '
                 'move-target %s link-list %s dif-pos %s dif-rot %s',
-                len(translation_axis), len(rotation_axis), len(move_target),
+                len(position_mask), len(rotation_mask), len(move_target),
                 len(link_list), len(dif_pos), len(dif_rot))
             return 'ik-continuous'
 
-        for i in range(len(rotation_axis)):
+        for i in range(len(rotation_mask)):
             union_vels.append(np.zeros(self.calc_target_axis_dimension(
-                rotation_axis[i], translation_axis[i]), 'f'))
+                rotation_mask[i], position_mask[i]), 'f'))
 
         tmp_additional_jacobi = map(
             lambda aj: aj(link_list) if callable(aj) else aj,
@@ -956,7 +934,7 @@ class CascadedLink(CascadedCoords):
             tmp_additional_jacobi))
 
         union_vel = np.zeros(self.calc_target_axis_dimension(
-            rotation_axis, translation_axis)
+            rotation_mask, position_mask)
             + additional_jacobi_dimension, 'f')
 
         # (if (memq :tmp-dims ik-args)
@@ -977,20 +955,16 @@ class CascadedLink(CascadedCoords):
             jacobi = jacobi(
                 link_list,
                 move_target,
-                translation_axis,
-                rotation_axis)
+                position_mask,
+                rotation_mask)
         if jacobi is None:
-            # Suppress internal deprecation warning
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore', DeprecationWarning)
-                jacobi = self.calc_jacobian_from_link_list(
-                    move_target=move_target,
-                    link_list=link_list,
-                    translation_axis=translation_axis,
-                    rotation_axis=rotation_axis,
-                    additional_jacobi_dimension=additional_jacobi_dimension,
-                    # method_args
-                )
+            jacobi = self.calc_jacobian_from_link_list(
+                move_target=move_target,
+                link_list=link_list,
+                position_mask=position_mask,
+                rotation_mask=rotation_mask,
+                additional_jacobi_dimension=additional_jacobi_dimension,
+            )
 
         # convergence check
         if min_loop is not None:
@@ -998,18 +972,16 @@ class CascadedLink(CascadedCoords):
 
         if success is True:
             success = self.ik_convergence_check(
-                # loop >= min_loop if min_loop is not None else True,
                 dif_pos,
                 dif_rot,
-                rotation_axis,
-                translation_axis,
+                rotation_mask,
+                position_mask,
                 thre,
                 rthre,
                 centroid_thre,
                 target_centroid_pos,
                 centroid_offset_func,
                 cog_translation_axis,
-                # update_mass_properties=False
             )
         if additional_check is not None:
             success &= additional_check()
@@ -1019,16 +991,18 @@ class CascadedLink(CascadedCoords):
             tmp_union_vel = union_vels[i]
             if p_limit is not None:
                 vel_p = self.calc_vel_from_pos(
-                    dif_pos[i], translation_axis[i], p_limit)
+                    dif_pos[i], position_mask=position_mask[i], p_limit=p_limit)
             else:
                 vel_p = self.calc_vel_from_pos(
-                    dif_pos[i], translation_axis[i])
+                    dif_pos[i], position_mask=position_mask[i])
             if r_limit is not None:
                 vel_r = self.calc_vel_from_rot(
-                    dif_rot[i], rotation_axis[i], r_limit)
+                    dif_rot[i], rotation_mask=rotation_mask[i],
+                    r_limit=r_limit, rotation_mirror=rotation_mirror)
             else:
                 vel_r = self.calc_vel_from_rot(
-                    dif_rot[i], rotation_axis[i])
+                    dif_rot[i], rotation_mask=rotation_mask[i],
+                    rotation_mirror=rotation_mirror)
             for j in range(len(vel_p)):
                 tmp_union_vel[j] = dif_pos_ratio * vel_p[j]
             for j in range(len(vel_r)):
@@ -1092,8 +1066,8 @@ class CascadedLink(CascadedCoords):
             union_vel,
             union_link_list=union_link_list,
             link_list=link_list,
-            rotation_axis=rotation_axis,
-            translation_axis=translation_axis,
+            position_mask=position_mask,
+            rotation_mask=rotation_mask,
             jacobi=jacobi,
             **kwargs)
         return 'ik-continuous'
@@ -1101,30 +1075,60 @@ class CascadedLink(CascadedCoords):
     def inverse_kinematics_args(
             self,
             union_link_list=None,
+            position_mask=None,
+            rotation_mask=None,
+            rotation_mirror=None,
+            # Legacy API (deprecated)
             rotation_axis=None,
             translation_axis=None,
             additional_jacobi_dimension=0,
             **kwargs):
         if union_link_list is None:
             union_link_list = []
-        if translation_axis is None:
-            translation_axis = []
-        if rotation_axis is None:
-            rotation_axis = []
+
+        # Handle legacy API: convert single values to lists if needed
+        if translation_axis is not None and position_mask is None:
+            warnings.warn(
+                "translation_axis is deprecated. Use position_mask instead. "
+                "Note: semantics are inverted - position_mask='z' means "
+                "constrain z only, while translation_axis='z' meant ignore z.",
+                DeprecationWarning, stacklevel=2)
+            if not isinstance(translation_axis, list):
+                translation_axis = [translation_axis]
+            position_mask = []
+            for ta in translation_axis:
+                pmask, _ = convert_legacy_axis_to_mask(ta)
+                position_mask.append(pmask)
+
+        if rotation_axis is not None and rotation_mask is None:
+            warnings.warn(
+                "rotation_axis is deprecated. Use rotation_mask and "
+                "rotation_mirror instead.",
+                DeprecationWarning, stacklevel=2)
+            if not isinstance(rotation_axis, list):
+                rotation_axis = [rotation_axis]
+            rotation_mask = []
+            for ra in rotation_axis:
+                rmask, _ = convert_legacy_axis_to_mask(ra)
+                rotation_mask.append(rmask)
+
+        if position_mask is None:
+            position_mask = []
+        if rotation_mask is None:
+            rotation_mask = []
         c = self.calc_target_joint_dimension(
             union_link_list)
         # add dimensions of additional-jacobi
         r = self.calc_target_axis_dimension(
-            rotation_axis, translation_axis) + additional_jacobi_dimension
+            rotation_mask, position_mask) + additional_jacobi_dimension
 
         jacobian = make_matrix(r, c)
         ret = make_matrix(c, r)
 
         union_vels = []
-        for ta, ra in zip(translation_axis, rotation_axis):
-            union_vels.append(np.zeros
-                              (self.calc_target_axis_dimension(ra, ta),
-                               'f'))
+        for pmask, rmask in zip(position_mask, rotation_mask):
+            union_vels.append(np.zeros(
+                self.calc_target_axis_dimension(rmask, pmask), 'f'))
         return dict(dim=r,
                     jacobian=jacobian,
                     n_joint_dimension=c,
@@ -1141,8 +1145,8 @@ class CascadedLink(CascadedCoords):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            rotation_axis=None,  # Legacy API (deprecated)
-            translation_axis=None,  # Legacy API (deprecated)
+            rotation_axis=_UNSET,  # Legacy API (deprecated)
+            translation_axis=_UNSET,  # Legacy API (deprecated)
             joint_args=None,
             thre=None,
             rthre=None,
@@ -1209,15 +1213,9 @@ class CascadedLink(CascadedCoords):
             Joint angle vector if successful, False otherwise.
         """
         # Resolve new/legacy mask parameters
-        translation_axis, rotation_axis = self._resolve_mask_params(
+        position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror,
             translation_axis, rotation_axis)
-
-        # Set defaults if not specified
-        if translation_axis is None:
-            translation_axis = True
-        if rotation_axis is None:
-            rotation_axis = True
 
         additional_jacobi = additional_jacobi or []
         additional_vel = additional_vel or []
@@ -1256,26 +1254,26 @@ class CascadedLink(CascadedCoords):
         if link_list is None or move_target is None:
             logger.error('both :link-list and :move-target required')
             return True
-        if (translation_axis is None or translation_axis is False) and \
-           (rotation_axis is None or rotation_axis is False):
+        # Check if no constraint at all
+        if np.sum(position_mask) == 0 and np.sum(rotation_mask) == 0:
             return True
         if not isinstance(link_list[0], list):
             link_list = [link_list]
         move_target = listify(move_target)
-        rotation_axis = listify(rotation_axis)
-        translation_axis = listify(translation_axis)
+        position_mask = listify(position_mask)
+        rotation_mask = listify(rotation_mask)
         thre = listify(thre)
         rthre = listify(rthre)
 
-        if not (len(translation_axis)
-                == len(rotation_axis)
+        if not (len(position_mask)
+                == len(rotation_mask)
                 == len(move_target)
                 == len(link_list)
                 == len(target_coords)):
-            logger.error('list length differ : translation_axis %s'
-                         ', rotation_axis %s, move_target %s '
+            logger.error('list length differ : position_mask %s'
+                         ', rotation_mask %s, move_target %s '
                          'link_list %s, target_coords %s',
-                         len(translation_axis), len(rotation_axis),
+                         len(position_mask), len(rotation_mask),
                          len(move_target), len(link_list), len(target_coords))
             return False
 
@@ -1298,8 +1296,8 @@ class CascadedLink(CascadedCoords):
             tmp_additional_jacobi))
         ik_args = self.inverse_kinematics_args(
             union_link_list=union_link_list,
-            translation_axis=translation_axis,
-            rotation_axis=rotation_axis,
+            position_mask=position_mask,
+            rotation_mask=rotation_mask,
             # evaluate additional-jacobi function and
             # calculate row dimension of additional_jacobi
             additional_jacobi_dimension=additional_jacobi_dimension,
@@ -1314,19 +1312,14 @@ class CascadedLink(CascadedCoords):
             target_coords = list(map(
                 lambda x: x() if callable(x) else x,
                 target_coords))
-            # Suppress internal deprecation warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore', DeprecationWarning)
-                dif_pos = list(map(lambda mv, tc, trans_axis:
-                                   mv.difference_position(
-                                       tc, translation_axis=trans_axis),
-                                   move_target, target_coords,
-                                   translation_axis))
-                dif_rot = list(map(lambda mv, tc, rot_axis:
-                                   mv.difference_rotation(
-                                       tc, rotation_axis=rot_axis),
-                                   move_target, target_coords,
-                                   rotation_axis))
+            dif_pos = list(map(lambda mv, tc, pmask:
+                               mv.difference_position(tc, position_mask=pmask),
+                               move_target, target_coords, position_mask))
+            dif_rot = list(map(lambda mv, tc, rmask:
+                               mv.difference_rotation(
+                                   tc, rotation_mask=rmask,
+                                   rotation_mirror=rotation_mirror),
+                               move_target, target_coords, rotation_mask))
 
             # Apply translation tolerance in target_coords' local frame
             # Note: tol > 0 check ensures 0.0 means "no special tolerance"
@@ -1352,7 +1345,7 @@ class CascadedLink(CascadedCoords):
                             dif_rot[i][axis_idx] = 0.0
 
             if loop == 1 and self.ik_convergence_check(
-                    dif_pos, dif_rot, rotation_axis, translation_axis,
+                    dif_pos, dif_rot, rotation_mask, position_mask,
                     thre, rthre, centroid_thre, target_centroid_pos,
                     centroid_offset_func, cog_translation_axis,
             ):
@@ -1365,8 +1358,9 @@ class CascadedLink(CascadedCoords):
                 periodic_time=periodic_time,
                 stop=stop,
                 loop=loop,
-                rotation_axis=rotation_axis,
-                translation_axis=translation_axis,
+                position_mask=position_mask,
+                rotation_mask=rotation_mask,
+                rotation_mirror=rotation_mirror,
                 move_target=move_target,
                 link_list=link_list,
                 union_link_list=union_link_list,
@@ -1383,23 +1377,21 @@ class CascadedLink(CascadedCoords):
 
         target_coords = list(map(lambda x: x() if callable(x) else x,
                                  target_coords))
-        # Suppress internal deprecation warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', DeprecationWarning)
-            dif_pos = list(map(lambda mv, tc, trans_axis:
-                               mv.difference_position(
-                                   tc, translation_axis=trans_axis),
-                               move_target, target_coords, translation_axis))
-            dif_rot = list(map(lambda mv, tc, rot_axis:
-                               mv.difference_rotation(tc, rotation_axis=rot_axis),
-                               move_target, target_coords, rotation_axis))
+        dif_pos = list(map(lambda mv, tc, pmask:
+                           mv.difference_position(tc, position_mask=pmask),
+                           move_target, target_coords, position_mask))
+        dif_rot = list(map(lambda mv, tc, rmask:
+                           mv.difference_rotation(
+                               tc, rotation_mask=rmask,
+                               rotation_mirror=rotation_mirror),
+                           move_target, target_coords, rotation_mask))
 
         # success
         success = self.ik_convergence_check(
             dif_pos,
             dif_rot,
-            rotation_axis,
-            translation_axis,
+            rotation_mask,
+            position_mask,
             thre,
             rthre,
             centroid_thre,
@@ -1513,29 +1505,60 @@ class CascadedLink(CascadedCoords):
                                    null_space)
         return j_sharp_x
 
-    def calc_target_axis_dimension(self, rotation_axis, translation_axis):
-        """rotation-axis, translation-axis -> both list and atom OK."""
-        if not isinstance(translation_axis, list):
-            translation_axis = [translation_axis]
-        if not isinstance(rotation_axis, list):
-            rotation_axis = [rotation_axis]
-            dim = 6 * 1
-        else:
-            dim = 6 * len(rotation_axis)
-        if len(rotation_axis) != len(translation_axis):
-            raise ValueError('list length differ: '
-                             'len(translation_axis)!=len(rotation_axis) '
-                             '{}!={}'.
-                             format(len(rotation_axis),
-                                    len(translation_axis)))
+    def calc_target_axis_dimension(self, rotation_mask, position_mask):
+        """Calculate target axis dimension from masks.
 
-        for axis in itertools.chain(translation_axis, rotation_axis):
-            if axis in ['x', 'y', 'z', 'xx', 'yy', 'zz']:
-                dim -= 1
-            elif axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
-                dim -= 2
-            elif axis is False or axis is None:
-                dim -= 3
+        Parameters
+        ----------
+        rotation_mask : numpy.ndarray, list, str, bool, or None
+            Rotation mask (1=constrained, 0=free) or legacy axis string.
+        position_mask : numpy.ndarray, list, str, bool, or None
+            Position mask (1=constrained, 0=free) or legacy axis string.
+
+        Returns
+        -------
+        dim : int
+            Total dimension of constrained axes.
+        """
+        def _is_mask_array(val):
+            if isinstance(val, np.ndarray):
+                return val.ndim == 1 and len(val) == 3
+            if isinstance(val, list) and len(val) == 3:
+                return all(isinstance(x, (int, float, np.integer, np.floating))
+                           for x in val)
+            return False
+
+        def _count_dim(mask_or_axis):
+            if _is_mask_array(mask_or_axis):
+                return int(np.sum(np.asarray(mask_or_axis)))
+            elif mask_or_axis in ['x', 'y', 'z', 'xx', 'yy', 'zz']:
+                return 2  # 3 - 1 (ignore one axis)
+            elif mask_or_axis in ['xy', 'yx', 'yz', 'zy', 'zx', 'xz']:
+                return 1  # 3 - 2 (ignore two axes)
+            elif mask_or_axis is False or mask_or_axis is None:
+                return 0  # No constraint
+            elif mask_or_axis is True or mask_or_axis in ['xm', 'ym', 'zm']:
+                return 3  # All axes constrained
+            else:
+                return 3  # Default to all
+
+        # Convert to lists for uniform handling
+        if not isinstance(position_mask, list) or _is_mask_array(position_mask):
+            position_mask = [position_mask]
+        if not isinstance(rotation_mask, list) or _is_mask_array(rotation_mask):
+            rotation_mask = [rotation_mask]
+
+        if len(rotation_mask) != len(position_mask):
+            raise ValueError('list length differ: '
+                             'len(position_mask)!=len(rotation_mask) '
+                             '{}!={}'.
+                             format(len(position_mask),
+                                    len(rotation_mask)))
+
+        dim = 0
+        for pmask, rmask in zip(position_mask, rotation_mask):
+            dim += _count_dim(pmask)
+            dim += _count_dim(rmask)
         return dim
 
     def find_link_route(self, to, frm=None):
@@ -1613,8 +1636,8 @@ class CascadedLink(CascadedCoords):
                                      rotation_mask=None,
                                      rotation_mirror=None,
                                      # Legacy API (deprecated)
-                                     rotation_axis=None,
-                                     translation_axis=None,
+                                     rotation_axis=_UNSET,
+                                     translation_axis=_UNSET,
                                      col_offset=0,
                                      dim=None,
                                      jacobian=None,
@@ -1625,27 +1648,17 @@ class CascadedLink(CascadedCoords):
             "relevant table must be set beforehand"
 
         # Resolve new/legacy mask parameters
-        translation_axis, rotation_axis = self._resolve_mask_params(
+        position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror,
             translation_axis, rotation_axis)
 
         if link_list is None:
             link_list = self.link_list
-        if rotation_axis is None:
-            if not isinstance(move_target, list):
-                rotation_axis = False
-            else:
-                rotation_axis = [False] * len(move_target)
-        if translation_axis is None:
-            if not isinstance(move_target, list):
-                translation_axis = True
-            else:
-                translation_axis = [True] * len(move_target)
         if transform_coords is None:
             transform_coords = move_target
         if dim is None:
             dim = self.calc_target_axis_dimension(
-                rotation_axis, translation_axis) + additional_jacobi_dimension
+                rotation_mask, position_mask) + additional_jacobi_dimension
         if n_joint_dimension is None:
             n_joint_dimension = self.calc_target_joint_dimension(link_list)
         if jacobian is None:
@@ -1663,14 +1676,15 @@ class CascadedLink(CascadedCoords):
             move_targets = move_target
         if not isinstance(transform_coords, list):
             transform_coords = [transform_coords]
-        if not isinstance(rotation_axis, list):
-            rotation_axes = [rotation_axis]
+        # Convert masks to lists for iteration
+        if not isinstance(rotation_mask, list):
+            rotation_masks = [rotation_mask]
         else:
-            rotation_axes = rotation_axis
-        if not isinstance(translation_axis, list):
-            translation_axes = [translation_axis]
+            rotation_masks = rotation_mask
+        if not isinstance(position_mask, list):
+            position_masks = [position_mask]
         else:
-            translation_axes = translation_axis
+            position_masks = position_mask
 
         col = col_offset
         i = 0
@@ -1682,13 +1696,13 @@ class CascadedLink(CascadedCoords):
             for (link_list,
                  move_target,
                  transform_coord,
-                 rotation_axis,
-                 translation_axis) in zip(
+                 rot_mask,
+                 pos_mask) in zip(
                      link_lists,
                      move_targets,
                      transform_coords,
-                     rotation_axes,
-                     translation_axes):
+                     rotation_masks,
+                     position_masks):
                 if ul in link_list:
                     joint = ul.joint
 
@@ -1714,10 +1728,10 @@ class CascadedLink(CascadedCoords):
                             world_default_coords,
                             move_target,
                             transform_coord,
-                            rotation_axis,
-                            translation_axis)
-                row += self.calc_target_axis_dimension(rotation_axis,
-                                                       translation_axis)
+                            rot_mask,
+                            pos_mask)
+                row += self.calc_target_axis_dimension(rot_mask,
+                                                       pos_mask)
             col += joint.joint_dof
             i += 1
         return jacobian
@@ -2586,8 +2600,8 @@ class RobotModel(CascadedLink):
             rotation_mask=None,
             rotation_mirror=None,
             # Legacy API (deprecated)
-            rotation_axis=None,
-            translation_axis=None,
+            rotation_axis=_UNSET,
+            translation_axis=_UNSET,
             stop=100,
             thre=0.001,
             rthre=np.deg2rad(1.0),
@@ -2688,25 +2702,19 @@ class RobotModel(CascadedLink):
         ...         break
         """
         # Resolve new/legacy mask parameters
-        translation_axis, rotation_axis = self._resolve_mask_params(
+        position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror,
             translation_axis, rotation_axis)
 
-        # Set defaults if not specified
-        if translation_axis is None:
-            translation_axis = True
-        if rotation_axis is None:
-            rotation_axis = True
-
         return self._batch_inverse_kinematics_impl(
             target_coords, move_target, link_list,
-            rotation_axis, translation_axis, stop, thre, rthre,
+            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, **kwargs)
 
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
-            rotation_axis, translation_axis, stop, thre, rthre,
+            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, **kwargs):
         """Internal implementation of batch inverse kinematics."""
@@ -2822,15 +2830,15 @@ class RobotModel(CascadedLink):
         else:
             base_to_source = source_link.parent.copy_worldcoords().T()
 
-        if not isinstance(rotation_axis, list):
-            rotation_axis = [rotation_axis] * n_poses
-        if not isinstance(translation_axis, list):
-            translation_axis = [translation_axis] * n_poses
+        if not isinstance(rotation_mask, list):
+            rotation_mask = [rotation_mask] * n_poses
+        if not isinstance(position_mask, list):
+            position_mask = [position_mask] * n_poses
 
         solutions, success_flags, attempt_counts = self._solve_batch_ik(
             single_link_list, target_poses_xyz_qwxyz, joint_angles_current, ndof, min_angles, max_angles,
             stop, thre, rthre, alpha, base_to_source,
-            rotation_axis, translation_axis, actual_joint_list,
+            rotation_mask, position_mask, actual_joint_list,
             attempts_per_pose, random_initial_range,
             move_target_offset_pos, move_target_offset_rot,
             translation_tolerance, rotation_tolerance
@@ -2851,7 +2859,7 @@ class RobotModel(CascadedLink):
     def _solve_batch_ik(
             self, link_list, target_poses_xyz_qwxyz, initial_angles, ndof, min_angles, max_angles,
             stop, thre, rthre, alpha, base_to_source,
-            rotation_axis, translation_axis, joint_list_without_fixed,
+            rotation_mask, position_mask, joint_list_without_fixed,
             attempts_per_pose, random_initial_range,
             move_target_offset_pos=None, move_target_offset_rot=None,
             translation_tolerance=None, rotation_tolerance=None):
@@ -2883,25 +2891,25 @@ class RobotModel(CascadedLink):
                 )
                 expanded_initials[start_idx:end_idx] = random_initials
 
-        expanded_rotation_axis = []
-        expanded_translation_axis = []
+        expanded_rotation_mask = []
+        expanded_position_mask = []
         for i in range(n_poses):
             for _ in range(attempts_per_pose):
-                if isinstance(rotation_axis, list):
-                    expanded_rotation_axis.append(rotation_axis[i])
+                if isinstance(rotation_mask, list):
+                    expanded_rotation_mask.append(rotation_mask[i])
                 else:
-                    expanded_rotation_axis.append(rotation_axis)
+                    expanded_rotation_mask.append(rotation_mask)
 
-                if isinstance(translation_axis, list):
-                    expanded_translation_axis.append(translation_axis[i])
+                if isinstance(position_mask, list):
+                    expanded_position_mask.append(position_mask[i])
                 else:
-                    expanded_translation_axis.append(translation_axis)
+                    expanded_position_mask.append(position_mask)
 
         # Solve all attempts in parallel using batch processing
         expanded_solutions, expanded_success = self._solve_batch_ik_internal(
             link_list, expanded_targets, expanded_initials,
             stop, thre, rthre, alpha, base_to_source,
-            expanded_rotation_axis, expanded_translation_axis,
+            expanded_rotation_mask, expanded_position_mask,
             joint_list_without_fixed, min_angles, max_angles,
             move_target_offset_pos, move_target_offset_rot,
             translation_tolerance, rotation_tolerance
@@ -2938,7 +2946,7 @@ class RobotModel(CascadedLink):
     def _solve_batch_ik_internal(
             self, link_list, target_poses_xyz_qwxyz, joint_angles_current,
             stop, thre, rthre, alpha, base_to_source,
-            rotation_axis, translation_axis,
+            rotation_mask, position_mask,
             joint_list_without_fixed, min_angles, max_angles,
             move_target_offset_pos=None, move_target_offset_rot=None,
             translation_tolerance=None, rotation_tolerance=None):
@@ -2965,20 +2973,20 @@ class RobotModel(CascadedLink):
             target_poses_unsolved = target_poses_xyz_qwxyz[unsolved_mask]
 
             # Use unified constrained IK (handles both constrained and unconstrained cases)
-            if isinstance(rotation_axis, list):
-                rotation_axis_unsolved = [rotation_axis[i] for i in unsolved_indices]
+            if isinstance(rotation_mask, list):
+                rotation_mask_unsolved = [rotation_mask[i] for i in unsolved_indices]
             else:
-                rotation_axis_unsolved = [rotation_axis] * len(unsolved_indices)
+                rotation_mask_unsolved = [rotation_mask] * len(unsolved_indices)
 
-            if isinstance(translation_axis, list):
-                translation_axis_unsolved = [translation_axis[i] for i in unsolved_indices]
+            if isinstance(position_mask, list):
+                position_mask_unsolved = [position_mask[i] for i in unsolved_indices]
             else:
-                translation_axis_unsolved = [translation_axis] * len(unsolved_indices)
+                position_mask_unsolved = [position_mask] * len(unsolved_indices)
 
             joint_angles_updated, pose_errors_before_update = self._batch_ik_step_with_constraints(
                 link_list, target_poses_unsolved, joint_angles_unsolved,
                 alpha, base_to_source,
-                rotation_axis_unsolved, translation_axis_unsolved,
+                rotation_mask_unsolved, position_mask_unsolved,
                 joint_list_without_fixed, min_angles, max_angles,
                 joint_list_for_fk=None,  # Will be derived from link_list in the function
                 move_target_offset_pos=move_target_offset_pos,
@@ -3025,43 +3033,51 @@ class RobotModel(CascadedLink):
                 constrained_pose_error = pose_errors[i].copy()
 
                 # Handle translation constraints (indices 0-2)
-                if isinstance(translation_axis, list):
-                    trans_axis = translation_axis[global_idx]
+                if isinstance(position_mask, list):
+                    pmask = position_mask[global_idx]
                 else:
-                    trans_axis = translation_axis
+                    pmask = position_mask
 
-                if trans_axis is False:
+                # Handle both mask array format and legacy format
+                if isinstance(pmask, np.ndarray):
+                    # Mask format: zero out unconstrained axes
+                    for axis_idx in range(3):
+                        if pmask[axis_idx] == 0:
+                            constrained_pose_error[axis_idx] = 0
+                elif pmask is False:
                     constrained_pose_error[:3] = 0
-                elif isinstance(trans_axis, str):
-                    # For mirror constraints (xm, ym, zm), don't zero out any translation errors
-                    # since we want to converge on the mirrored solution
-                    if trans_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in trans_axis.lower():
+                elif isinstance(pmask, str):
+                    # Legacy format (shouldn't normally reach here)
+                    if pmask.lower() not in ['xm', 'ym', 'zm']:
+                        if 'x' not in pmask.lower():
                             constrained_pose_error[0] = 0
-                        if 'y' not in trans_axis.lower():
+                        if 'y' not in pmask.lower():
                             constrained_pose_error[1] = 0
-                        if 'z' not in trans_axis.lower():
+                        if 'z' not in pmask.lower():
                             constrained_pose_error[2] = 0
 
                 # Handle rotation constraints (indices 3-5)
-                if isinstance(rotation_axis, list):
-                    rot_axis = rotation_axis[global_idx]
+                if isinstance(rotation_mask, list):
+                    rmask = rotation_mask[global_idx]
                 else:
-                    rot_axis = rotation_axis
+                    rmask = rotation_mask
 
-                if rot_axis is False:
+                # Handle both mask array format and legacy format
+                if isinstance(rmask, np.ndarray):
+                    # Mask format: zero out unconstrained axes
+                    for axis_idx in range(3):
+                        if rmask[axis_idx] == 0:
+                            constrained_pose_error[3 + axis_idx] = 0
+                elif rmask is False:
                     constrained_pose_error[3:] = 0
-                elif isinstance(rot_axis, str):
-                    # For mirror constraints (xm, ym, zm), don't zero out any rotation errors
-                    # since we want to converge on the mirrored solution
-                    if rot_axis.lower() not in ['xm', 'ym', 'zm']:
-                        # Standard axis constraints
-                        if 'x' not in rot_axis.lower():
+                elif isinstance(rmask, str):
+                    # Legacy format (shouldn't normally reach here)
+                    if rmask.lower() not in ['xm', 'ym', 'zm']:
+                        if 'x' not in rmask.lower():
                             constrained_pose_error[3] = 0
-                        if 'y' not in rot_axis.lower():
+                        if 'y' not in rmask.lower():
                             constrained_pose_error[4] = 0
-                        if 'z' not in rot_axis.lower():
+                        if 'z' not in rmask.lower():
                             constrained_pose_error[5] = 0
 
                 # Apply translation tolerance in target's local frame
@@ -3227,7 +3243,7 @@ class RobotModel(CascadedLink):
 
     def _batch_ik_step_with_constraints(
             self, link_list, target_poses, joint_angles_current, alpha, base_to_source,
-            rotation_axis_list, translation_axis_list,
+            rotation_mask_list, position_mask_list,
             actual_joint_list, min_angles, max_angles,
             joint_list_for_fk=None,
             move_target_offset_pos=None, move_target_offset_rot=None,
@@ -3280,11 +3296,12 @@ class RobotModel(CascadedLink):
         translation_errors = target_poses[:, :3] - current_poses[:, :3]
 
         for i in range(batch_size):
-            trans_axis = translation_axis_list[i]
+            pmask = position_mask_list[i]
 
-            if isinstance(trans_axis, str) and trans_axis.lower() in ['xm', 'ym', 'zm']:
+            # Handle legacy string 'xm', 'ym', 'zm' mirror constraints
+            if isinstance(pmask, str) and pmask.lower() in ['xm', 'ym', 'zm']:
                 # For translation mirror constraints, check if mirrored translation gives smaller error
-                axis_char = trans_axis[0].lower()
+                axis_char = pmask[0].lower()
 
                 # Calculate error with original translation difference
                 original_error = translation_errors[i].copy()
@@ -3314,11 +3331,12 @@ class RobotModel(CascadedLink):
         adjusted_target_poses = target_poses.copy()
 
         for i in range(batch_size):
-            rot_axis = rotation_axis_list[i]
+            rmask = rotation_mask_list[i]
 
-            if isinstance(rot_axis, str) and rot_axis.lower() in ['xm', 'ym', 'zm']:
+            # Handle legacy string 'xm', 'ym', 'zm' mirror constraints
+            if isinstance(rmask, str) and rmask.lower() in ['xm', 'ym', 'zm']:
                 # For mirror constraints, check if mirrored target gives smaller error
-                axis_char = rot_axis[0].lower()
+                axis_char = rmask[0].lower()
                 target_rot_matrix = quaternion2matrix(target_poses[i, 3:])
                 current_rot_matrix = quaternion2matrix(current_poses[i, 3:])
 
@@ -3342,8 +3360,8 @@ class RobotModel(CascadedLink):
                 if mirrored_error_norm < original_error_norm:
                     adjusted_target_poses[i, 3:] = matrix2quaternion(mirrored_target_rot)
 
-            elif isinstance(rot_axis, str) and rot_axis.lower() in ['x', 'y', 'z']:
-                # For single axis constraints, use coordinate frame difference_rotation method
+            elif isinstance(rmask, str) and rmask.lower() in ['x', 'y', 'z']:
+                # For single axis constraints (legacy format), use coordinate frame difference_rotation
                 # This ensures the same behavior as regular IK
 
                 # Create coordinate objects
@@ -3357,7 +3375,7 @@ class RobotModel(CascadedLink):
                 # Suppress internal deprecation warning
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore', DeprecationWarning)
-                    dif_rot = current_coord.difference_rotation(target_coord, rotation_axis=rot_axis.lower())
+                    dif_rot = current_coord.difference_rotation(target_coord, rotation_axis=rmask.lower())
 
                 # Apply the calculated rotation to current pose to get the adjusted target
                 if np.linalg.norm(dif_rot) > 1e-6:
@@ -3408,47 +3426,61 @@ class RobotModel(CascadedLink):
             active_rows = []
 
             # Handle rotation constraints
-            rot_axis = rotation_axis_list[i]
-            if rot_axis is True:
+            rmask = rotation_mask_list[i]
+
+            # Handle mask array format
+            if isinstance(rmask, np.ndarray):
+                # Mask format: 1=constrained, 0=free
+                for axis_idx in range(3):
+                    if rmask[axis_idx] == 1:
+                        active_rows.append(axis_idx)
+            elif rmask is True:
                 active_rows.extend([0, 1, 2])  # All rotation DOF
-            elif isinstance(rot_axis, str):
+            elif isinstance(rmask, str):
                 # Handle mirror constraints (xm, ym, zm)
-                if rot_axis.lower() in ['xm', 'ym', 'zm']:
+                if rmask.lower() in ['xm', 'ym', 'zm']:
                     # For mirror constraints, allow all rotation DOF but we'll handle mirroring in error calculation
                     active_rows.extend([0, 1, 2])
                 else:
                     # For single axis constraints, use all rotation DOF
                     # The constraint is applied in the error calculation phase
-                    if rot_axis.lower() in ['x', 'y', 'z']:
+                    if rmask.lower() in ['x', 'y', 'z']:
                         active_rows.extend([0, 1, 2])  # All rotation DOF for single axis constraints
                     else:
                         # Multi-axis constraints like 'xy', 'xyz', etc.
-                        if 'x' in rot_axis.lower():
+                        if 'x' in rmask.lower():
                             active_rows.append(0)
-                        if 'y' in rot_axis.lower():
+                        if 'y' in rmask.lower():
                             active_rows.append(1)
-                        if 'z' in rot_axis.lower():
+                        if 'z' in rmask.lower():
                             active_rows.append(2)
-            # If rot_axis is False, no rotation rows are added
+            # If rmask is False, no rotation rows are added
 
             # Handle translation constraints
-            trans_axis = translation_axis_list[i]
-            if trans_axis is True:
+            pmask = position_mask_list[i]
+
+            # Handle mask array format
+            if isinstance(pmask, np.ndarray):
+                # Mask format: 1=constrained, 0=free
+                for axis_idx in range(3):
+                    if pmask[axis_idx] == 1:
+                        active_rows.append(3 + axis_idx)
+            elif pmask is True:
                 active_rows.extend([3, 4, 5])  # All translation DOF
-            elif isinstance(trans_axis, str):
+            elif isinstance(pmask, str):
                 # Handle mirror constraints (xm, ym, zm) for translation
-                if trans_axis.lower() in ['xm', 'ym', 'zm']:
+                if pmask.lower() in ['xm', 'ym', 'zm']:
                     # For translation mirror constraints, allow all translation DOF
                     active_rows.extend([3, 4, 5])
                 else:
                     # Standard axis constraints
-                    if 'x' in trans_axis.lower():
+                    if 'x' in pmask.lower():
                         active_rows.append(3)
-                    if 'y' in trans_axis.lower():
+                    if 'y' in pmask.lower():
                         active_rows.append(4)
-                    if 'z' in trans_axis.lower():
+                    if 'z' in pmask.lower():
                         active_rows.append(5)
-            # If trans_axis is False, no translation rows are added
+            # If pmask is False, no translation rows are added
 
             # Extract only the active rows (exclude unwanted constraints)
             if len(active_rows) > 0:

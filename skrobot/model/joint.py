@@ -459,6 +459,11 @@ class FixedJoint(Joint):
         return calc_jacobian_rotational(*args, **kwargs)
 
 
+def _is_mask_array(val):
+    """Check if val is a mask array (numpy array with shape (3,))."""
+    return isinstance(val, np.ndarray) and val.shape == (3,)
+
+
 def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords,
                              move_target, transform_coords, rotation_axis,
@@ -468,9 +473,16 @@ def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
     p_diff = np.matmul(transform_coords.worldrot().T,
                        (move_target.worldpos() - child_link.worldpos()))
     j_translation = cross_product(j_rot, p_diff)
-    j_translation = calc_dif_with_axis(j_translation, translation_axis)
+    # Handle both mask format and legacy axis format
+    if _is_mask_array(translation_axis):
+        j_translation = calc_dif_with_mask(j_translation, translation_axis)
+    else:
+        j_translation = calc_dif_with_axis(j_translation, translation_axis)
     jacobian[row:row + len(j_translation), column] = j_translation
-    j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
+    if _is_mask_array(rotation_axis):
+        j_rotation = calc_dif_with_mask(j_rot, rotation_axis)
+    else:
+        j_rotation = calc_dif_with_axis(j_rot, rotation_axis)
     jacobian[row + len(j_translation):
              row + len(j_translation) + len(j_rotation),
              column] = j_rotation
@@ -485,9 +497,16 @@ def calc_jacobian_linear(jacobian, row, column,
     j_trans = calc_jacobian_default_rotate_vector(
         paxis, world_default_coords, transform_coords)
     j_rot = np.array([0, 0, 0])
-    j_trans = calc_dif_with_axis(j_trans, translation_axis)
+    # Handle both mask format and legacy axis format
+    if _is_mask_array(translation_axis):
+        j_trans = calc_dif_with_mask(j_trans, translation_axis)
+    else:
+        j_trans = calc_dif_with_axis(j_trans, translation_axis)
     jacobian[row:row + len(j_trans), column] = j_trans
-    j_rot = calc_dif_with_axis(j_rot, rotation_axis)
+    if _is_mask_array(rotation_axis):
+        j_rot = calc_dif_with_mask(j_rot, rotation_axis)
+    else:
+        j_rot = calc_dif_with_axis(j_rot, rotation_axis)
     jacobian[row + len(j_trans):
              row + len(j_trans) + len(j_rot),
              column] = j_rot
