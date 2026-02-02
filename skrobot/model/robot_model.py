@@ -1067,9 +1067,8 @@ class CascadedLink(CascadedCoords):
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            # Legacy API (deprecated)
-            rotation_axis=None,
-            translation_axis=None,
+            rotation_axis=None,  # Legacy API (deprecated)
+            translation_axis=None,  # Legacy API (deprecated)
             additional_jacobi_dimension=0,
             **kwargs):
         if union_link_list is None:
@@ -1599,13 +1598,11 @@ class CascadedLink(CascadedCoords):
                                      move_target,
                                      link_list=None,
                                      transform_coords=None,
-
                                      position_mask=None,
                                      rotation_mask=None,
                                      rotation_mirror=None,
-                                     # Legacy API (deprecated)
-                                     rotation_axis=_UNSET,
-                                     translation_axis=_UNSET,
+                                     rotation_axis=_UNSET,  # Legacy API (deprecated)
+                                     translation_axis=_UNSET,  # Legacy API (deprecated)
                                      col_offset=0,
                                      dim=None,
                                      jacobian=None,
@@ -2563,13 +2560,11 @@ class RobotModel(CascadedLink):
             target_coords,
             move_target=None,
             link_list=None,
-
             position_mask=None,
             rotation_mask=None,
             rotation_mirror=None,
-            # Legacy API (deprecated)
-            rotation_axis=_UNSET,
-            translation_axis=_UNSET,
+            rotation_axis=_UNSET,  # Legacy API (deprecated)
+            translation_axis=_UNSET,  # Legacy API (deprecated)
             stop=100,
             thre=0.001,
             rthre=np.deg2rad(1.0),
