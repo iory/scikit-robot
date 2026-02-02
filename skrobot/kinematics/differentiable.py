@@ -1188,26 +1188,33 @@ def _create_numpy_optimized_solver(fk_params):
             combined_err = combined_err.reshape(n_targets, attempts_per_pose)
 
             if select_closest_to_initial and initial_angles is not None:
-                # Select from successful solutions the one closest to initial angles
+                # Prefer first attempt (starts from current angles) if successful
+                # Otherwise select from successful solutions the one closest to initial
                 init_angles = np.asarray(initial_angles)
                 if init_angles.ndim == 1:
                     init_angles = np.tile(init_angles, (n_targets, 1))
 
                 best_indices = []
+                err_threshold = 0.02  # Consider solutions with error < 2cm as valid
                 for i in range(n_targets):
-                    # Find successful attempts (or low error if none succeed)
-                    err_threshold = 0.05  # Consider solutions with error < 5cm as valid
-                    valid_mask = success[i] | (combined_err[i] < err_threshold)
-                    if np.any(valid_mask):
-                        # Compute distance to initial angles for valid solutions
-                        distances = np.linalg.norm(
-                            full_angles[i, valid_mask] - init_angles[i], axis=1
-                        )
-                        valid_indices = np.where(valid_mask)[0]
-                        best_idx = valid_indices[np.argmin(distances)]
+                    # First attempt (index 0) starts from current angles
+                    first_success = success[i, 0] or combined_err[i, 0] < err_threshold
+                    if first_success:
+                        # Use first attempt if it succeeded
+                        best_idx = 0
                     else:
-                        # Fall back to minimum error
-                        best_idx = np.argmin(combined_err[i])
+                        # Find other successful attempts
+                        valid_mask = success[i] | (combined_err[i] < err_threshold)
+                        if np.any(valid_mask):
+                            # Select the one closest to initial angles
+                            distances = np.linalg.norm(
+                                full_angles[i, valid_mask] - init_angles[i], axis=1
+                            )
+                            valid_indices = np.where(valid_mask)[0]
+                            best_idx = valid_indices[np.argmin(distances)]
+                        else:
+                            # Fall back to minimum error
+                            best_idx = np.argmin(combined_err[i])
                     best_indices.append(best_idx)
                 best_indices = np.array(best_indices)
             else:
@@ -1692,26 +1699,33 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
 
             if select_closest_to_initial and initial_angles is not None:
-                # Select from successful solutions the one closest to initial angles
+                # Prefer first attempt (starts from current angles) if successful
+                # Otherwise select from successful solutions the one closest to initial
                 init_angles_np = np.asarray(initial_angles)
                 if init_angles_np.ndim == 1:
                     init_angles_np = np.tile(init_angles_np, (n_targets, 1))
 
                 best_indices = []
+                err_threshold = 0.02  # Consider solutions with error < 2cm as valid
                 for i in range(n_targets):
-                    # Find successful attempts (or low error if none succeed)
-                    err_threshold = 0.05  # Consider solutions with error < 5cm as valid
-                    valid_mask = all_success_np[i] | (all_errors_np[i] < err_threshold)
-                    if np.any(valid_mask):
-                        # Compute distance to initial angles for valid solutions
-                        distances = np.linalg.norm(
-                            all_solutions_np[i, valid_mask] - init_angles_np[i], axis=1
-                        )
-                        valid_indices = np.where(valid_mask)[0]
-                        best_idx = valid_indices[np.argmin(distances)]
+                    # First attempt (index 0) starts from current angles
+                    first_success = all_success_np[i, 0] or all_errors_np[i, 0] < err_threshold
+                    if first_success:
+                        # Use first attempt if it succeeded
+                        best_idx = 0
                     else:
-                        # Fall back to minimum error
-                        best_idx = np.argmin(all_errors_np[i])
+                        # Find other successful attempts
+                        valid_mask = all_success_np[i] | (all_errors_np[i] < err_threshold)
+                        if np.any(valid_mask):
+                            # Select the one closest to initial angles
+                            distances = np.linalg.norm(
+                                all_solutions_np[i, valid_mask] - init_angles_np[i], axis=1
+                            )
+                            valid_indices = np.where(valid_mask)[0]
+                            best_idx = valid_indices[np.argmin(distances)]
+                        else:
+                            # Fall back to minimum error
+                            best_idx = np.argmin(all_errors_np[i])
                     best_indices.append(best_idx)
                 best_indices = np.array(best_indices)
             else:
