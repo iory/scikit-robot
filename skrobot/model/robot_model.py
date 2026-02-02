@@ -24,6 +24,7 @@ from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_inverse
@@ -126,6 +127,99 @@ class CascadedLink(CascadedCoords):
         if key in self._relevance_predicate_table:
             return self._relevance_predicate_table[key]
         return False
+
+    def _resolve_mask_params(self, position_mask, rotation_mask, rotation_mirror,
+                             translation_axis, rotation_axis):
+        """Resolve new/legacy axis parameters with compatibility.
+
+        Parameters
+        ----------
+        position_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which position axes to constrain.
+        rotation_mask : str, bool, list, numpy.ndarray, or None
+            Specifies which rotation axes to constrain.
+        rotation_mirror : str or None
+            Mirror axis for rotation.
+        translation_axis : str, bool, or None
+            Legacy API: specifies which axes to ignore.
+        rotation_axis : str, bool, or None
+            Legacy API: specifies which axes to ignore.
+
+        Returns
+        -------
+        effective_translation_axis : str, bool, or None
+            Effective translation_axis value for internal use.
+        effective_rotation_axis : str, bool, or None
+            Effective rotation_axis value for internal use.
+        """
+        # Position
+        if position_mask is not None and translation_axis is not None:
+            raise ValueError(
+                "Cannot specify both position_mask and translation_axis")
+        if translation_axis is not None:
+            pass  # Use legacy value as-is
+        elif position_mask is not None:
+            # Convert new mask to legacy axis format
+            mask_vec = normalize_mask(position_mask)
+            mask_sum = int(np.sum(mask_vec))
+            if mask_sum == 0:
+                translation_axis = False
+            elif mask_sum == 3:
+                translation_axis = True
+            elif mask_sum == 2:
+                # Two axes constrained
+                if np.array_equal(mask_vec, [0, 1, 1]):
+                    translation_axis = 'x'  # ignore x
+                elif np.array_equal(mask_vec, [1, 0, 1]):
+                    translation_axis = 'y'  # ignore y
+                elif np.array_equal(mask_vec, [1, 1, 0]):
+                    translation_axis = 'z'  # ignore z
+            elif mask_sum == 1:
+                # One axis constrained
+                if np.array_equal(mask_vec, [1, 0, 0]):
+                    translation_axis = 'yz'  # ignore y,z
+                elif np.array_equal(mask_vec, [0, 1, 0]):
+                    translation_axis = 'xz'  # ignore x,z
+                elif np.array_equal(mask_vec, [0, 0, 1]):
+                    translation_axis = 'xy'  # ignore x,y
+
+        # Rotation
+        if rotation_mask is not None and rotation_axis is not None:
+            raise ValueError(
+                "Cannot specify both rotation_mask and rotation_axis")
+        if rotation_axis is not None:
+            pass  # Use legacy value as-is
+        elif rotation_mask is not None or rotation_mirror is not None:
+            if rotation_mask is None:
+                rotation_mask = True  # Default to constrain all when mirror is set
+            mask_vec = normalize_mask(rotation_mask)
+            mask_sum = int(np.sum(mask_vec))
+
+            if rotation_mirror is not None:
+                # Mirror mode
+                rotation_axis = rotation_mirror + 'm'
+            elif mask_sum == 0:
+                rotation_axis = False
+            elif mask_sum == 3:
+                rotation_axis = True
+            elif mask_sum == 2:
+                # Two axes constrained
+                if np.array_equal(mask_vec, [0, 1, 1]):
+                    rotation_axis = 'yz'
+                elif np.array_equal(mask_vec, [1, 0, 1]):
+                    rotation_axis = 'zx'
+                elif np.array_equal(mask_vec, [1, 1, 0]):
+                    rotation_axis = 'xy'
+            elif mask_sum == 1:
+                # One axis constrained
+                if np.array_equal(mask_vec, [1, 0, 0]):
+                    rotation_axis = 'x'
+                elif np.array_equal(mask_vec, [0, 1, 0]):
+                    rotation_axis = 'y'
+                elif np.array_equal(mask_vec, [0, 0, 1]):
+                    rotation_axis = 'z'
+
+        return translation_axis, rotation_axis
 
     def angle_vector(self, av=None, return_av=None):
         """Get or set joint angle vector.
@@ -965,8 +1059,11 @@ class CascadedLink(CascadedCoords):
             link_list=None,
             move_target=None,
             revert_if_fail=True,
-            rotation_axis=True,
-            translation_axis=True,
+            rotation_axis=None,
+            translation_axis=None,
+            position_mask=None,
+            rotation_mask=None,
+            rotation_mirror=None,
             joint_args=None,
             thre=None,
             rthre=None,
@@ -998,10 +1095,18 @@ class CascadedLink(CascadedCoords):
         revert_if_fail : bool
             If True, revert to initial joint angles on failure.
         rotation_axis : bool, str, or list
-            Which rotation axes to constrain. True=all, False=none,
-            'x'/'y'/'z'=single axis, 'xy'/'yz'/'zx'=two axes.
+            (Legacy) Which rotation axes to constrain. Use rotation_mask instead.
         translation_axis : bool, str, or list
-            Which translation axes to constrain. Same format as rotation_axis.
+            (Legacy) Which translation axes to constrain. Use position_mask instead.
+        position_mask : bool, str, list, or None
+            Which position axes to constrain. True=all, False=none,
+            'x'/'y'/'z'=single axis, 'xy'/'yz'/'zx'=two axes.
+            Semantics: 'z' means constrain z-axis only.
+        rotation_mask : bool, str, list, or None
+            Which rotation axes to constrain. Same format as position_mask.
+        rotation_mirror : str or None
+            Mirror axis for rotation ('x', 'y', or 'z').
+            Allows matching target orientation or its 180-degree flip.
         translation_tolerance : list or None
             Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
             in meters. If error on an axis is within tolerance, it's treated
@@ -1018,6 +1123,16 @@ class CascadedLink(CascadedCoords):
         numpy.ndarray or False
             Joint angle vector if successful, False otherwise.
         """
+        # Resolve mask parameters to legacy axis format
+        translation_axis, rotation_axis = self._resolve_mask_params(
+            position_mask, rotation_mask, rotation_mirror,
+            translation_axis, rotation_axis)
+        # Default to True if neither mask nor axis specified
+        if translation_axis is None:
+            translation_axis = True
+        if rotation_axis is None:
+            rotation_axis = True
+
         additional_jacobi = additional_jacobi or []
         additional_vel = additional_vel or []
         target_coords = listify(target_coords)

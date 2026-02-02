@@ -29,6 +29,72 @@ _AXIS_VECTORS = {
     'xz': np.array([1, 0, 1]),
 }
 
+# Mask vectors: 1 = constrained, 0 = free
+_MASK_VECTORS = {
+    'x': np.array([1, 0, 0]),
+    'y': np.array([0, 1, 0]),
+    'z': np.array([0, 0, 1]),
+    'xy': np.array([1, 1, 0]),
+    'yx': np.array([1, 1, 0]),
+    'yz': np.array([0, 1, 1]),
+    'zy': np.array([0, 1, 1]),
+    'zx': np.array([1, 0, 1]),
+    'xz': np.array([1, 0, 1]),
+    'xyz': np.array([1, 1, 1]),
+}
+
+
+def normalize_mask(mask):
+    """Normalize mask specification to a 3-element array.
+
+    Mask values indicate which axes to CONSTRAIN.
+
+    Parameters
+    ----------
+    mask : bool, str, list, or numpy.ndarray
+        - True: constrain all axes -> [1, 1, 1]
+        - False/None: no constraint -> [0, 0, 0]
+        - 'z': constrain z-axis only -> [0, 0, 1]
+        - 'xy': constrain x,y axes -> [1, 1, 0]
+        - [1, 1, 0]: direct specification
+
+    Returns
+    -------
+    mask_vector : numpy.ndarray
+        3-element array, 1=constrained, 0=free
+
+    Examples
+    --------
+    >>> from skrobot.coordinates.math import normalize_mask
+    >>> normalize_mask(True)
+    array([1, 1, 1])
+    >>> normalize_mask(False)
+    array([0, 0, 0])
+    >>> normalize_mask('z')
+    array([0, 0, 1])
+    >>> normalize_mask('xy')
+    array([1, 1, 0])
+    >>> normalize_mask([1, 0, 1])
+    array([1, 0, 1])
+    """
+    if mask is None or mask is False:
+        return np.array([0, 0, 0])
+    if mask is True:
+        return np.array([1, 1, 1])
+    if isinstance(mask, str):
+        if mask in ['xx', 'yy', 'zz']:
+            axis = mask[0]
+            return _MASK_VECTORS[axis].copy()
+        if mask in _MASK_VECTORS:
+            return _MASK_VECTORS[mask].copy()
+        raise ValueError("Unknown mask string: {}".format(mask))
+    if isinstance(mask, (list, np.ndarray)):
+        arr = np.asarray(mask)
+        if arr.shape != (3,):
+            raise ValueError("Mask must have 3 elements")
+        return arr
+    raise ValueError("Invalid mask type: {}".format(type(mask)))
+
 
 def convert_to_axis_vector(axis):
     """Convert axis to float vector.
