@@ -1418,8 +1418,8 @@ class CascadedLink(CascadedCoords):
             self,
             dif_pos,
             dif_rot,
-            rotation_axis,
-            translation_axis,
+            rotation_mask,
+            position_mask,
             thre,
             rthre,
             centroid_thre=None,
@@ -1427,16 +1427,22 @@ class CascadedLink(CascadedCoords):
             centroid_offset_func=None,
             cog_translation_axis=None,
             update_mass_properties=True):
-        """check ik convergence.
+        """Check IK convergence.
 
         Parameters
         ----------
         dif_pos : list of np.ndarray
+            Position differences for each target.
         dif_rot : list of np.ndarray
-
-        translation_axis : list of axis
-        rotation_axis : list of axis
-            see convert_to_axis_vector
+            Rotation differences for each target.
+        rotation_mask : list of np.ndarray
+            Rotation constraint masks (not used, kept for API compatibility).
+        position_mask : list of np.ndarray
+            Position constraint masks (not used, kept for API compatibility).
+        thre : list of float
+            Position error thresholds.
+        rthre : list of float
+            Rotation error thresholds.
         """
         for i in range(len(dif_pos)):
             if LA.norm(dif_pos[i]) > thre[i]:
