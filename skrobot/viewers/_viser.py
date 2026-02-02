@@ -86,17 +86,6 @@ class ViserViewer:
     def is_active(self) -> bool:
         return self._is_active
 
-    @property
-    def server(self):
-        """Return the underlying viser server for advanced usage.
-
-        Returns
-        -------
-        viser.ViserServer
-            The viser server instance.
-        """
-        return self._server
-
     def close(self):
         self._is_active = False
         self._server.stop()
