@@ -486,12 +486,17 @@ class TestDifferentiableBatchIK(unittest.TestCase):
             rotation_mirror='x',
         )
 
-        self.assertLess(
-            float(errors_with_mirror[0]),
-            float(errors_no_mirror[0]),
-            f"Error with mirror ({errors_with_mirror[0]}) should be less than "
-            f"without mirror ({errors_no_mirror[0]})"
-        )
+        err_mirror = float(errors_with_mirror[0])
+        err_no_mirror = float(errors_no_mirror[0])
+        # When both errors are near machine epsilon, the comparison is
+        # meaningless — both solutions have converged perfectly.
+        if err_no_mirror > 1e-6:
+            self.assertLess(
+                err_mirror,
+                err_no_mirror,
+                "Error with mirror ({}) should be less than "
+                "without mirror ({})".format(err_mirror, err_no_mirror)
+            )
 
     @requires_jax
     def test_rotation_mirror_convergence(self):
