@@ -98,6 +98,10 @@ def normalize_mask(mask):
     raise ValueError("Invalid mask type: {}".format(type(mask)))
 
 
+# Alias for normalize_mask (used by differentiable kinematics)
+normalize_axis_mask = normalize_mask
+
+
 def convert_legacy_axis_to_mask(axis):
     """Convert legacy axis specification to new mask format.
 

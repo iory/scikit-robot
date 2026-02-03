@@ -6,6 +6,137 @@ with any differentiable backend (NumPy, JAX, PyTorch).
 
 import numpy as np
 
+from skrobot.coordinates.math import normalize_axis_mask
+
+
+# =============================================================================
+# Helper Functions for IK Solvers
+# =============================================================================
+
+def _create_mirror_rotation_matrix(axis, backend=None):
+    """Create a 180-degree rotation matrix around the specified axis.
+
+    Parameters
+    ----------
+    axis : str
+        Axis to rotate around ('x', 'y', or 'z').
+    backend : object, optional
+        Backend to use. If None, returns numpy array.
+
+    Returns
+    -------
+    array
+        3x3 rotation matrix, or None if axis is None.
+    """
+    if axis is None:
+        return None
+
+    if axis == 'x':
+        mat = np.array([[1., 0., 0.], [0., -1., 0.], [0., 0., -1.]])
+    elif axis == 'y':
+        mat = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
+    elif axis == 'z':
+        mat = np.array([[-1., 0., 0.], [0., -1., 0.], [0., 0., 1.]])
+    else:
+        return None
+
+    if backend is not None:
+        return backend.array(mat)
+    return mat
+
+
+def _get_mimic_joint_info(fk_params):
+    """Extract mimic joint information from FK parameters.
+
+    Parameters
+    ----------
+    fk_params : dict
+        FK parameters from extract_fk_parameters.
+
+    Returns
+    -------
+    tuple
+        (mimic_parent_indices, mimic_multipliers, mimic_offsets, non_mimic_indices, n_opt)
+    """
+    n_joints = fk_params['n_joints']
+    mimic_parent_indices = fk_params.get(
+        'mimic_parent_indices', np.array([-1] * n_joints, dtype=np.int32))
+    mimic_multipliers = fk_params.get('mimic_multipliers', np.ones(n_joints))
+    mimic_offsets = fk_params.get('mimic_offsets', np.zeros(n_joints))
+
+    non_mimic_indices = np.array(
+        [i for i in range(n_joints) if mimic_parent_indices[i] < 0],
+        dtype=np.int32)
+    n_opt = len(non_mimic_indices)
+
+    return mimic_parent_indices, mimic_multipliers, mimic_offsets, non_mimic_indices, n_opt
+
+
+def _select_best_attempts(solutions, success_flags, errors, n_targets, attempts_per_pose,
+                          n_joints, select_closest_to_initial=False, initial_angles=None):
+    """Select the best solution from multiple attempts per target.
+
+    Parameters
+    ----------
+    solutions : np.ndarray
+        All solutions (n_targets * attempts_per_pose, n_joints).
+    success_flags : np.ndarray
+        Success flags (n_targets * attempts_per_pose,).
+    errors : np.ndarray
+        Combined errors (n_targets * attempts_per_pose,).
+    n_targets : int
+        Number of target poses.
+    attempts_per_pose : int
+        Number of attempts per target.
+    n_joints : int
+        Number of joints.
+    select_closest_to_initial : bool
+        If True, prefer solutions closest to initial angles.
+    initial_angles : np.ndarray, optional
+        Initial angles for distance comparison.
+
+    Returns
+    -------
+    tuple
+        (best_solutions, best_success, best_errors)
+    """
+    solutions = solutions.reshape(n_targets, attempts_per_pose, n_joints)
+    success_flags = success_flags.reshape(n_targets, attempts_per_pose)
+    errors = errors.reshape(n_targets, attempts_per_pose)
+
+    if select_closest_to_initial and initial_angles is not None:
+        init_angles = np.asarray(initial_angles)
+        if init_angles.ndim == 1:
+            init_angles = np.tile(init_angles, (n_targets, 1))
+
+        best_indices = []
+        err_threshold = 0.02  # Consider solutions with error < 2cm as valid
+        for i in range(n_targets):
+            # First attempt (index 0) starts from current angles
+            first_success = success_flags[i, 0] or errors[i, 0] < err_threshold
+            if first_success:
+                best_idx = 0
+            else:
+                valid_mask = success_flags[i] | (errors[i] < err_threshold)
+                if np.any(valid_mask):
+                    distances = np.linalg.norm(
+                        solutions[i, valid_mask] - init_angles[i], axis=1)
+                    valid_indices = np.where(valid_mask)[0]
+                    best_idx = valid_indices[np.argmin(distances)]
+                else:
+                    best_idx = np.argmin(errors[i])
+            best_indices.append(best_idx)
+        best_indices = np.array(best_indices)
+    else:
+        best_indices = np.argmin(errors, axis=1)
+
+    target_indices = np.arange(n_targets)
+    best_solutions = solutions[target_indices, best_indices]
+    best_success = success_flags[target_indices, best_indices]
+    best_errors = errors[target_indices, best_indices]
+
+    return best_solutions, best_success, best_errors
+
 
 def extract_fk_parameters(robot_model, link_list, move_target):
     """Extract FK parameters from a robot model for differentiable computation.
@@ -904,7 +1035,753 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
-def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='jax'):
+def _create_numpy_optimized_solver(fk_params):
+    """Create an optimized batch IK solver using pure NumPy with vectorized operations.
+
+    This uses batched FK and gradient computation for better performance than
+    the generic vmap-based approach.
+    """
+    n_joints = fk_params['n_joints']
+
+    # Identify non-mimic joints using helper
+    (mimic_parent_indices, mimic_multipliers, mimic_offsets,
+     non_mimic_indices, n_opt) = _get_mimic_joint_info(fk_params)
+
+    joint_limits_lower = fk_params['joint_limits_lower'][non_mimic_indices]
+    joint_limits_upper = fk_params['joint_limits_upper'][non_mimic_indices]
+
+    def _expand_to_full_angles_batch(opt_angles_batch):
+        """Expand optimization variables to full joint angles (batched)."""
+        batch_size = opt_angles_batch.shape[0]
+        full_angles = np.zeros((batch_size, n_joints))
+
+        # Fill non-mimic joints
+        full_angles[:, non_mimic_indices] = opt_angles_batch
+
+        # Fill mimic joints
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                full_angles[:, i] = (
+                    full_angles[:, parent_idx] * mimic_multipliers[i] + mimic_offsets[i]
+                )
+
+        return full_angles
+
+    def solve(target_positions, target_rotations,
+              initial_angles=None,
+              max_iterations=100,
+              learning_rate=0.1,
+              pos_weight=1.0,
+              rot_weight=0.1,
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_mask=True,
+              rotation_mask=True,
+              rotation_mirror=None,
+              attempts_per_pose=1,
+              use_current_angles=True,
+              select_closest_to_initial=False):
+        """Solve batch IK using optimized NumPy operations."""
+        target_positions = np.asarray(target_positions)
+        target_rotations = np.asarray(target_rotations)
+
+        if target_positions.ndim == 1:
+            target_positions = target_positions.reshape(1, 3)
+            target_rotations = target_rotations.reshape(1, 3, 3)
+
+        n_targets = target_positions.shape[0]
+
+        # Parse masks
+        pos_mask_arr = normalize_axis_mask(position_mask)
+        rot_mask_arr = normalize_axis_mask(rotation_mask)
+
+        pos_mask_sum = np.sum(pos_mask_arr)
+        rot_mask_sum = np.sum(rot_mask_arr)
+        has_pos_constraint = pos_mask_sum > 0
+        has_rot_constraint = rot_mask_sum > 0
+        is_single_axis_rot = rot_mask_sum == 1
+
+        # Create mirror rotation if specified
+        mirror_rot = _create_mirror_rotation_matrix(rotation_mirror)
+
+        # Handle attempts_per_pose
+        if attempts_per_pose > 1:
+            # Repeat targets
+            target_positions_expanded = np.repeat(target_positions, attempts_per_pose, axis=0)
+            target_rotations_expanded = np.repeat(target_rotations, attempts_per_pose, axis=0)
+
+            # Generate initial angles
+            n_expanded = n_targets * attempts_per_pose
+            if initial_angles is not None and use_current_angles:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                # First attempt uses provided angles, rest are random
+                init_opt_angles = np.zeros((n_expanded, n_opt))
+                for t in range(n_targets):
+                    init_opt_angles[t * attempts_per_pose] = init_angles[t, non_mimic_indices]
+                    for a in range(1, attempts_per_pose):
+                        idx = t * attempts_per_pose + a
+                        init_opt_angles[idx] = np.random.uniform(
+                            joint_limits_lower, joint_limits_upper
+                        )
+            else:
+                init_opt_angles = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt)
+                )
+        else:
+            target_positions_expanded = target_positions
+            target_rotations_expanded = target_rotations
+            n_expanded = n_targets
+
+            if initial_angles is not None:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                init_opt_angles = init_angles[:, non_mimic_indices]
+            else:
+                init_opt_angles = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt)
+                )
+
+        def compute_errors_batch(full_angles_batch, target_pos, target_rot):
+            """Compute position and rotation errors for a batch."""
+            pos, rot = forward_kinematics_ee_batched_numpy(full_angles_batch, fk_params)
+
+            # Position error
+            if has_pos_constraint:
+                pos_diff = pos - target_pos
+                pos_diff_masked = pos_diff * pos_mask_arr
+                pos_err = np.sqrt(np.sum(pos_diff_masked ** 2, axis=1))
+            else:
+                pos_err = np.zeros(full_angles_batch.shape[0])
+
+            # Rotation error
+            if has_rot_constraint:
+                if mirror_rot is not None:
+                    # Try both original and mirrored target
+                    target_rot_mirrored = target_rot @ mirror_rot
+
+                if is_single_axis_rot:
+                    # Single axis: use dot product
+                    axis_idx = np.argmax(rot_mask_arr)
+                    target_axis = target_rot[:, :, axis_idx]  # (batch, 3)
+                    current_axis = rot[:, :, axis_idx]  # (batch, 3)
+
+                    dots = np.sum(target_axis * current_axis, axis=1)
+                    rot_err = 1.0 - np.abs(dots)
+
+                    if mirror_rot is not None:
+                        target_axis_m = target_rot_mirrored[:, :, axis_idx]
+                        dots_m = np.sum(target_axis_m * current_axis, axis=1)
+                        rot_err_m = 1.0 - np.abs(dots_m)
+                        rot_err = np.minimum(rot_err, rot_err_m)
+                else:
+                    # Full rotation: Frobenius norm
+                    rot_diff = rot - target_rot
+                    rot_err = np.sqrt(np.sum(rot_diff ** 2, axis=(1, 2)))
+
+                    if mirror_rot is not None:
+                        rot_diff_m = rot - target_rot_mirrored
+                        rot_err_m = np.sqrt(np.sum(rot_diff_m ** 2, axis=(1, 2)))
+                        rot_err = np.minimum(rot_err, rot_err_m)
+            else:
+                rot_err = np.zeros(full_angles_batch.shape[0])
+
+            return pos_err, rot_err
+
+        def loss_fn_batch(opt_angles_batch, target_pos, target_rot):
+            """Batched loss function."""
+            full_angles = _expand_to_full_angles_batch(opt_angles_batch)
+            pos_err, rot_err = compute_errors_batch(full_angles, target_pos, target_rot)
+            return pos_weight * pos_err ** 2 + rot_weight * rot_err ** 2
+
+        # Optimization loop
+        opt_angles = init_opt_angles.copy()
+        eps = 1e-7
+
+        # Precompute perturbation pattern for all parameters at once
+        # Shape: (2 * n_opt, n_opt) - first n_opt are +eps, next n_opt are -eps
+        perturbation_pattern = np.zeros((2 * n_opt, n_opt))
+        for j in range(n_opt):
+            perturbation_pattern[j, j] = eps          # +eps for parameter j
+            perturbation_pattern[n_opt + j, j] = -eps  # -eps for parameter j
+
+        for iteration in range(max_iterations):
+            batch_size = opt_angles.shape[0]
+
+            # Create all perturbed angles at once: (batch_size * 2 * n_opt, n_opt)
+            # For each sample, we have 2*n_opt perturbations
+            # Use np.repeat so each sample's angles are repeated 2*n_opt times consecutively
+            opt_angles_expanded = np.repeat(opt_angles, 2 * n_opt, axis=0)  # (batch * 2*n_opt, n_opt)
+            perturbations = np.tile(perturbation_pattern, (batch_size, 1))  # (batch * 2*n_opt, n_opt)
+            opt_angles_perturbed = opt_angles_expanded + perturbations
+            # Ordering: [s0+eps_0, s0+eps_1, ..., s0-eps_n, s1+eps_0, ...]
+
+            # Expand targets similarly (each target repeated 2*n_opt times)
+            target_pos_exp = np.repeat(target_positions_expanded, 2 * n_opt, axis=0)
+            target_rot_exp = np.repeat(target_rotations_expanded, 2 * n_opt, axis=0)
+
+            # Single FK call for all perturbations
+            full_angles_perturbed = _expand_to_full_angles_batch(opt_angles_perturbed)
+            pos_err_all, rot_err_all = compute_errors_batch(
+                full_angles_perturbed, target_pos_exp, target_rot_exp
+            )
+            loss_all = pos_weight * pos_err_all ** 2 + rot_weight * rot_err_all ** 2
+
+            # Reshape: (batch, 2*n_opt) -> split into plus and minus
+            loss_all = loss_all.reshape(batch_size, 2 * n_opt)
+            loss_plus = loss_all[:, :n_opt]      # (batch, n_opt)
+            loss_minus = loss_all[:, n_opt:]     # (batch, n_opt)
+
+            # Compute gradients
+            grad = (loss_plus - loss_minus) / (2 * eps)  # (batch, n_opt)
+
+            # Update
+            opt_angles = opt_angles - learning_rate * grad
+            opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
+
+            # Early stopping check
+            full_angles = _expand_to_full_angles_batch(opt_angles)
+            pos_err, rot_err = compute_errors_batch(
+                full_angles, target_positions_expanded, target_rotations_expanded
+            )
+            converged = (pos_err < pos_threshold) & (rot_err < rot_threshold)
+            if np.all(converged):
+                break
+
+        # Final results
+        full_angles = _expand_to_full_angles_batch(opt_angles)
+        pos_err, rot_err = compute_errors_batch(
+            full_angles, target_positions_expanded, target_rotations_expanded
+        )
+        combined_err = pos_err + rot_err
+        success = (pos_err < pos_threshold) & (rot_err < rot_threshold)
+
+        # Select best attempt for each target
+        if attempts_per_pose > 1:
+            solutions, success_out, errors_out = _select_best_attempts(
+                full_angles, success, combined_err, n_targets, attempts_per_pose,
+                n_joints, select_closest_to_initial, initial_angles)
+        else:
+            solutions = full_angles
+            success_out = success
+            errors_out = combined_err
+
+        return solutions, success_out, errors_out
+
+    # Attach metadata
+    solve.n_joints = n_joints
+    solve.joint_limits_lower = fk_params['joint_limits_lower']
+    solve.joint_limits_upper = fk_params['joint_limits_upper']
+    solve.fk_params = fk_params
+    solve.backend_name = 'numpy'
+
+    return solve
+
+
+def compute_geometric_jacobian_jax(joint_angles, fk_params, return_non_mimic=True):
+    """Compute the geometric Jacobian using JAX.
+
+    Computes the 6xN Jacobian matrix where:
+    - Rows 0-2: Linear velocity Jacobian
+    - Rows 3-5: Angular velocity Jacobian
+
+    For revolute joint i: J_v[:,i] = z_i × (p_ee - p_i), J_ω[:,i] = z_i
+    For prismatic joint i: J_v[:,i] = z_i, J_ω[:,i] = 0
+
+    Parameters
+    ----------
+    joint_angles : jax array
+        Joint angles (n_joints,).
+    fk_params : dict
+        FK parameters.
+    return_non_mimic : bool
+        If True, return Jacobian for non-mimic joints only (with mimic
+        contributions folded in). Default True.
+
+    Returns
+    -------
+    jacobian : jax array
+        Geometric Jacobian (6, n_opt) where n_opt is non-mimic joint count.
+    ee_pos : jax array
+        End-effector position (3,).
+    ee_rot : jax array
+        End-effector rotation (3, 3).
+    """
+    import jax.numpy as jnp
+
+    n_joints = fk_params['n_joints']
+    joint_axes = fk_params['joint_axes']
+    joint_types = fk_params['joint_types']
+    link_translations = fk_params['link_translations']
+    link_rotations = fk_params['link_rotations']
+    base_position = fk_params['base_position']
+    base_rotation = fk_params['base_rotation']
+    ee_offset_position = fk_params['ee_offset_position']
+    ee_offset_rotation = fk_params['ee_offset_rotation']
+    ref_angles = fk_params['ref_angles']
+
+    # Get mimic joint info
+    mimic_parent_indices = fk_params.get(
+        'mimic_parent_indices', np.array([-1] * n_joints))
+    mimic_multipliers = fk_params.get('mimic_multipliers', np.ones(n_joints))
+    mimic_offsets = fk_params.get('mimic_offsets', np.zeros(n_joints))
+
+    # Handle mimic joints: compute effective joint angles
+    effective_angles = []
+    for i in range(n_joints):
+        parent_idx = mimic_parent_indices[i]
+        if parent_idx >= 0:
+            # Mimic joint: angle = parent_angle * multiplier + offset
+            parent_angle = joint_angles[parent_idx]
+            effective_angle = parent_angle * mimic_multipliers[i] + mimic_offsets[i]
+            effective_angles.append(effective_angle)
+        else:
+            # Regular joint
+            effective_angles.append(joint_angles[i])
+    joint_angles = jnp.stack(effective_angles)
+
+    # Compute FK and joint positions/axes in world frame
+    current_pos = jnp.array(base_position)
+    current_rot = jnp.array(base_rotation)
+
+    joint_positions = []
+    joint_axes_world = []
+
+    for i in range(n_joints):
+        # Apply link transform
+        link_trans = jnp.array(link_translations[i])
+        link_rot = jnp.array(link_rotations[i])
+        current_pos = current_pos + current_rot @ link_trans
+        current_rot = current_rot @ link_rot
+
+        # Store joint position and axis in world frame
+        joint_positions.append(current_pos.copy())
+        axis_local = jnp.array(joint_axes[i])
+        joint_axes_world.append(current_rot @ axis_local)
+
+        # Apply joint rotation/translation
+        angle = joint_angles[i] - ref_angles[i]
+        if joint_types[i] in ('revolute', 'continuous'):
+            # Rodrigues formula for rotation
+            axis = axis_local / (jnp.linalg.norm(axis_local) + 1e-10)
+            K = jnp.array([
+                [0, -axis[2], axis[1]],
+                [axis[2], 0, -axis[0]],
+                [-axis[1], axis[0], 0]
+            ])
+            joint_rot = (jnp.eye(3) + jnp.sin(angle) * K
+                         + (1 - jnp.cos(angle)) * (K @ K))
+            current_rot = current_rot @ joint_rot
+        else:  # prismatic
+            current_pos = current_pos + current_rot @ (axis_local * angle)
+
+    # Apply end-effector offset
+    ee_pos = current_pos + current_rot @ jnp.array(ee_offset_position)
+    ee_rot = current_rot @ jnp.array(ee_offset_rotation)
+
+    # Compute full Jacobian columns (all joints)
+    J_v_full = jnp.zeros((3, n_joints))
+    J_w_full = jnp.zeros((3, n_joints))
+
+    for i in range(n_joints):
+        z_i = joint_axes_world[i]
+        p_i = joint_positions[i]
+
+        if joint_types[i] in ('revolute', 'continuous'):
+            # J_v = z × (p_ee - p_i)
+            r = ee_pos - p_i
+            j_v = jnp.cross(z_i, r)
+            j_w = z_i
+        else:  # prismatic
+            j_v = z_i
+            j_w = jnp.zeros(3)
+
+        J_v_full = J_v_full.at[:, i].set(j_v)
+        J_w_full = J_w_full.at[:, i].set(j_w)
+
+    J_full = jnp.vstack([J_v_full, J_w_full])
+
+    if not return_non_mimic:
+        return J_full, ee_pos, ee_rot
+
+    # Fold mimic joint contributions into parent joints
+    # For mimic joint i with parent p: dq_i = multiplier * dq_p
+    # So J[:,p] += multiplier * J[:,i]
+    non_mimic_indices = [i for i in range(n_joints) if mimic_parent_indices[i] < 0]
+    n_opt = len(non_mimic_indices)
+
+    # Build mapping from full joint index to non-mimic index
+    full_to_opt = {}
+    for opt_idx, full_idx in enumerate(non_mimic_indices):
+        full_to_opt[full_idx] = opt_idx
+
+    # Create reduced Jacobian
+    J_opt = jnp.zeros((6, n_opt))
+    for i in range(n_joints):
+        parent_idx = mimic_parent_indices[i]
+        if parent_idx < 0:
+            # Non-mimic joint
+            opt_idx = full_to_opt[i]
+            J_opt = J_opt.at[:, opt_idx].set(J_opt[:, opt_idx] + J_full[:, i])
+        else:
+            # Mimic joint - add contribution to parent
+            if parent_idx in full_to_opt:
+                opt_idx = full_to_opt[parent_idx]
+                multiplier = mimic_multipliers[i]
+                J_opt = J_opt.at[:, opt_idx].set(
+                    J_opt[:, opt_idx] + multiplier * J_full[:, i])
+
+    return J_opt, ee_pos, ee_rot
+
+
+def _create_jax_jacobian_solver(fk_params, backend):
+    """Create a JAX-based Jacobian IK solver with full JIT compilation.
+
+    This solver uses damped least-squares with the analytical Jacobian,
+    fully JIT-compiled using lax.fori_loop for maximum performance.
+
+    Parameters
+    ----------
+    fk_params : dict
+        FK parameters from extract_fk_parameters.
+    backend : object
+        JAX backend instance.
+
+    Returns
+    -------
+    callable
+        Solver function.
+    """
+    from jax import lax
+    import jax.numpy as jnp
+
+    n_joints = fk_params['n_joints']
+
+    # Get mimic joint info using helper
+    (mimic_parent_indices, mimic_multipliers, mimic_offsets,
+     non_mimic_indices, n_opt) = _get_mimic_joint_info(fk_params)
+
+    # Joint limits for non-mimic joints
+    joint_limits_lower = jnp.array(fk_params['joint_limits_lower'][non_mimic_indices])
+    joint_limits_upper = jnp.array(fk_params['joint_limits_upper'][non_mimic_indices])
+
+    # Full joint limits for clipping after expansion
+    jnp.array(fk_params['joint_limits_lower'])
+    jnp.array(fk_params['joint_limits_upper'])
+
+    # Precompute mimic info as JAX arrays
+    jnp.array(mimic_parent_indices.astype(np.int32))
+    jnp.array(mimic_multipliers)
+    jnp.array(mimic_offsets)
+    non_mimic_indices_jax = jnp.array(non_mimic_indices.astype(np.int32))
+
+    def _expand_to_full_angles(opt_angles):
+        """Expand optimization variables to full joint angles."""
+        full_angles = jnp.zeros(n_joints)
+        # Fill non-mimic joints
+        full_angles = full_angles.at[non_mimic_indices_jax].set(opt_angles)
+        # Fill mimic joints
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                mimic_val = (full_angles[parent_idx] * mimic_multipliers[i]
+                             + mimic_offsets[i])
+                full_angles = full_angles.at[i].set(mimic_val)
+        return full_angles
+
+    # JIT cache for different parameters
+    _jit_cache = {}
+
+    def _create_jacobian_solver_fn(max_iterations, damping, pos_threshold, rot_threshold,
+                                   pos_mask_arr, rot_mask_arr, rotation_mirror):
+        """Create JIT-compiled Jacobian-based solver."""
+        pos_mask = jnp.array(pos_mask_arr)
+        rot_mask = jnp.array(rot_mask_arr)
+
+        pos_mask_sum = float(np.sum(pos_mask_arr))
+        rot_mask_sum = float(np.sum(rot_mask_arr))
+        has_pos_constraint = pos_mask_sum > 0
+        has_rot_constraint = rot_mask_sum > 0
+        is_single_axis_rot = rot_mask_sum == 1
+
+        # Mirror rotation matrix
+        mirror_rot_np = _create_mirror_rotation_matrix(rotation_mirror)
+        mirror_rot = jnp.array(mirror_rot_np) if mirror_rot_np is not None else None
+
+        # Determine active DOF for Jacobian rows
+        # Position: rows 0,1,2; Rotation: rows 3,4,5
+        active_rows = []
+        if has_pos_constraint:
+            for i in range(3):
+                if pos_mask_arr[i] > 0:
+                    active_rows.append(i)
+        if has_rot_constraint:
+            for i in range(3):
+                if rot_mask_arr[i] > 0:
+                    active_rows.append(3 + i)
+        active_rows = jnp.array(active_rows, dtype=jnp.int32)
+        n_active = len(active_rows)
+
+        def solve_single_jacobian(init_angles, target_pos, target_rot):
+            """Solve IK for single target using Jacobian method."""
+            # State is optimization variables (non-mimic joints only)
+            init_opt = init_angles  # Already n_opt size
+
+            # Convergence threshold for early stopping (squared)
+            conv_threshold_sq = pos_threshold * pos_threshold
+
+            def _compute_rot_err_vec(target_r, current_r):
+                """Compute rotation error vector from target and current rotation."""
+                r_err = target_r @ current_r.T
+                return 0.5 * jnp.array([
+                    r_err[2, 1] - r_err[1, 2],
+                    r_err[0, 2] - r_err[2, 0],
+                    r_err[1, 0] - r_err[0, 1]
+                ])
+
+            def body_fn(state):
+                i, opt_angles, _ = state
+
+                # Expand to full angles for FK/Jacobian computation
+                full_angles = _expand_to_full_angles(opt_angles)
+
+                # Compute geometric Jacobian (reduced, n_opt columns) and FK
+                J_opt, pos, rot = compute_geometric_jacobian_jax(
+                    full_angles, fk_params, return_non_mimic=True)
+
+                # Position error
+                pos_err = target_pos - pos
+                pos_err_sq = jnp.sum((pos_err * pos_mask) ** 2)
+
+                rot_err_vec = _compute_rot_err_vec(target_rot, rot)
+
+                # Handle mirror rotation
+                if mirror_rot is not None:
+                    target_rot_m = target_rot @ mirror_rot
+                    rot_err_vec_m = _compute_rot_err_vec(target_rot_m, rot)
+
+                    # Use Frobenius norm of rotation difference for mirror selection
+                    frob_direct = jnp.sum((target_rot - rot) ** 2)
+                    frob_mirror = jnp.sum((target_rot_m - rot) ** 2)
+
+                    # Choose mirrored only if significantly smaller
+                    rot_err_vec = jnp.where(
+                        frob_mirror < 0.8 * frob_direct, rot_err_vec_m, rot_err_vec)
+
+                # Full error vector [pos_err, rot_err]
+                full_err = jnp.concatenate([pos_err, rot_err_vec])
+
+                # Apply mask to error
+                err_mask = jnp.concatenate([pos_mask, rot_mask])
+                masked_err = full_err * err_mask
+
+                # Select active rows based on mask
+                J = J_opt[active_rows, :]
+                err = masked_err[active_rows]
+
+                # Damped least squares: Δq = J^T (J J^T + λI)^{-1} e
+                JJT = J @ J.T + damping * jnp.eye(n_active)
+                delta_q = J.T @ jnp.linalg.solve(JJT, err)
+
+                # Update optimization angles (non-mimic joints only)
+                new_opt_angles = opt_angles + delta_q
+                new_opt_angles = jnp.clip(
+                    new_opt_angles, joint_limits_lower, joint_limits_upper)
+
+                return (i + 1, new_opt_angles, pos_err_sq)
+
+            def cond_fn(state):
+                i, _, pos_err_sq = state
+                # Continue if not converged and under max iterations
+                return (i < max_iterations) & (pos_err_sq > conv_threshold_sq)
+
+            # Run optimization loop with early stopping
+            # Initial error is set high to ensure at least one iteration
+            init_state = (0, init_opt, jnp.array(1e10))
+            _, final_opt_angles, _ = lax.while_loop(cond_fn, body_fn, init_state)
+
+            # Expand to full angles for return
+            final_angles = _expand_to_full_angles(final_opt_angles)
+
+            # Compute final FK for error metrics
+            # Note: This is one extra FK call, but needed for accurate final error
+            pos, rot = forward_kinematics_ee(backend, final_angles, fk_params)
+            pos_err = jnp.sqrt(jnp.sum(((target_pos - pos) * pos_mask) ** 2))
+
+            if is_single_axis_rot:
+                achieved_axis = rot @ rot_mask
+                target_axis = target_rot @ rot_mask
+                if mirror_rot is not None:
+                    target_axis_m = (target_rot @ mirror_rot) @ rot_mask
+                    dot1 = jnp.abs(jnp.sum(achieved_axis * target_axis))
+                    dot2 = jnp.abs(jnp.sum(achieved_axis * target_axis_m))
+                    rot_err = 1.0 - jnp.maximum(dot1, dot2)
+                else:
+                    rot_err = 1.0 - jnp.abs(jnp.sum(achieved_axis * target_axis))
+            else:
+                rot_diff = rot - target_rot
+                rot_err = jnp.sqrt(jnp.sum((rot_diff * rot_mask) ** 2))
+                if mirror_rot is not None:
+                    rot_diff_m = rot - target_rot @ mirror_rot
+                    rot_err_m = jnp.sqrt(jnp.sum((rot_diff_m * rot_mask) ** 2))
+                    rot_err = jnp.minimum(rot_err, rot_err_m)
+
+            # Check success
+            if has_pos_constraint and has_rot_constraint:
+                success = (pos_err < pos_threshold) & (rot_err < rot_threshold)
+            elif has_pos_constraint:
+                success = pos_err < pos_threshold
+            elif has_rot_constraint:
+                success = rot_err < rot_threshold
+            else:
+                success = jnp.array(True)
+
+            combined_err = pos_err + rot_err
+
+            return final_angles, success, combined_err
+
+        # Vectorize and JIT
+        batched_solve = backend.vmap(solve_single_jacobian)
+        return backend.compile(batched_solve)
+
+    def solve(target_positions, target_rotations,
+              initial_angles=None,
+              max_iterations=30,
+              damping=0.01,
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_mask=True,
+              rotation_mask=True,
+              rotation_mirror=None,
+              attempts_per_pose=1,
+              use_current_angles=True,
+              select_closest_to_initial=False,
+              **kwargs):
+        """Solve batch IK using Jacobian-based method.
+
+        Parameters
+        ----------
+        target_positions : array-like
+            Target positions (N, 3).
+        target_rotations : array-like
+            Target rotation matrices (N, 3, 3).
+        initial_angles : array-like, optional
+            Initial joint angles.
+        max_iterations : int
+            Maximum iterations (default 30, typically sufficient).
+        damping : float
+            Damping factor for least squares (default 0.01).
+        pos_threshold : float
+            Position error threshold for success.
+        rot_threshold : float
+            Rotation error threshold for success.
+        position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
+        use_current_angles, select_closest_to_initial : same as gradient descent solver.
+
+        Returns
+        -------
+        tuple
+            (solutions, success_flags, combined_errors)
+        """
+        target_positions = backend.array(np.asarray(target_positions, dtype=np.float64))
+        target_rotations = backend.array(np.asarray(target_rotations, dtype=np.float64))
+        n_targets = target_positions.shape[0]
+
+        # Handle initial angles
+        if initial_angles is None:
+            init = (joint_limits_lower + joint_limits_upper) / 2
+            base_initial_opt_angles = backend.stack([init] * n_targets)
+        else:
+            initial_angles = backend.array(np.asarray(initial_angles, dtype=np.float64))
+            if len(initial_angles.shape) == 1:
+                initial_angles = backend.stack([initial_angles] * n_targets)
+            base_initial_opt_angles = initial_angles[:, non_mimic_indices]
+
+        # Handle multiple attempts
+        if attempts_per_pose > 1:
+            target_positions_np = backend.to_numpy(target_positions)
+            target_rotations_np = backend.to_numpy(target_rotations)
+            expanded_target_positions_np = np.repeat(
+                target_positions_np, attempts_per_pose, axis=0)
+            expanded_target_rotations_np = np.repeat(
+                target_rotations_np, attempts_per_pose, axis=0)
+
+            lower_np = backend.to_numpy(joint_limits_lower)
+            upper_np = backend.to_numpy(joint_limits_upper)
+            base_initial_np = backend.to_numpy(base_initial_opt_angles)
+
+            n_expanded = n_targets * attempts_per_pose
+            if use_current_angles:
+                all_initial = np.random.uniform(
+                    lower_np, upper_np,
+                    size=(n_targets, attempts_per_pose, n_opt))
+                all_initial[:, 0, :] = base_initial_np
+                all_initial = all_initial.reshape(n_expanded, n_opt)
+            else:
+                all_initial = np.random.uniform(
+                    lower_np, upper_np, size=(n_expanded, n_opt))
+
+            initial_opt_angles = backend.array(all_initial.astype(np.float64))
+            target_positions_solve = backend.array(
+                expanded_target_positions_np.astype(np.float64))
+            target_rotations_solve = backend.array(
+                expanded_target_rotations_np.astype(np.float64))
+        else:
+            initial_opt_angles = base_initial_opt_angles
+            target_positions_solve = target_positions
+            target_rotations_solve = target_rotations
+
+        # Normalize masks
+        pos_mask_arr = normalize_axis_mask(position_mask)
+        rot_mask_arr = normalize_axis_mask(rotation_mask)
+
+        # Get or create JIT-compiled solver
+        cache_key = (max_iterations, damping, pos_threshold, rot_threshold,
+                     tuple(pos_mask_arr), tuple(rot_mask_arr), rotation_mirror)
+        if cache_key not in _jit_cache:
+            _jit_cache[cache_key] = _create_jacobian_solver_fn(
+                max_iterations, damping, pos_threshold, rot_threshold,
+                pos_mask_arr, rot_mask_arr, rotation_mirror)
+
+        solver_fn = _jit_cache[cache_key]
+
+        # Solve
+        all_solutions, all_success, all_errors = solver_fn(
+            initial_opt_angles, target_positions_solve, target_rotations_solve)
+
+        # Select best from multiple attempts
+        if attempts_per_pose > 1:
+            all_solutions_np = backend.to_numpy(all_solutions)
+            all_success_np = backend.to_numpy(all_success)
+            all_errors_np = backend.to_numpy(all_errors)
+
+            solutions, success_flags, errors = _select_best_attempts(
+                all_solutions_np, all_success_np, all_errors_np,
+                n_targets, attempts_per_pose, n_joints,
+                select_closest_to_initial, initial_angles)
+
+            return (backend.array(solutions),
+                    backend.array(success_flags),
+                    backend.array(errors))
+        else:
+            return all_solutions, all_success, all_errors
+
+    # Attach metadata
+    solve.n_joints = n_joints
+    solve.joint_limits_lower = fk_params['joint_limits_lower']
+    solve.joint_limits_upper = fk_params['joint_limits_upper']
+    solve.fk_params = fk_params
+    solve.backend = backend
+    solve.method = 'jacobian'
+
+    return solve
+
+
+def create_batch_ik_solver(robot_model, link_list, move_target,
+                           backend_name='jax', method='jacobian'):
     """Create a high-performance batch IK solver.
 
     This is the recommended way to solve batch IK problems. It:
@@ -922,38 +1799,62 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
         End effector coordinates.
     backend_name : str
         Backend to use ('jax', 'numpy'). Default is 'jax'.
+    method : str
+        IK solving method. Default is 'jacobian'.
+        - 'jacobian': Uses damped least-squares with analytical Jacobian.
+          Faster convergence (typically 30 iterations), fully JIT-compiled.
+          Recommended for most use cases.
+        - 'gradient_descent': Uses gradient descent optimization.
+          More flexible for custom cost functions but slower convergence.
 
     Returns
     -------
     callable
         Batch IK solver function with signature:
         solve(target_positions, target_rotations, initial_angles=None,
-              max_iterations=100, learning_rate=0.1) -> (solutions, success, errors)
+              max_iterations=30, damping=0.01,  # for jacobian method
+              position_mask=True, rotation_mask=True) -> (solutions, success, errors)
 
     Examples
     --------
+    >>> # Jacobian-based solver (default, fastest)
     >>> solver = create_batch_ik_solver(robot, link_list, move_target)
     >>> solutions, success, errors = solver(target_positions, target_rotations)
+    >>> # Gradient descent solver
+    >>> solver = create_batch_ik_solver(robot, link_list, move_target,
+    ...                                  method='gradient_descent')
+    >>> solutions, success, errors = solver(
+    ...     target_positions, target_rotations,
+    ...     position_mask='xy',  # constrain x, y position only
+    ...     rotation_mask='x',   # constrain x-axis direction only
+    ... )
     """
     import numpy as np
 
     from skrobot.backend import get_backend
 
-    backend = get_backend(backend_name)
-
     # Extract FK parameters
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)
+
+    # Use optimized NumPy solver for numpy backend
+    if backend_name == 'numpy':
+        return _create_numpy_optimized_solver(fk_params)
+
+    backend = get_backend(backend_name)
+
+    # Use Jacobian-based solver for JAX (faster)
+    if method == 'jacobian' and backend_name == 'jax':
+        return _create_jax_jacobian_solver(fk_params, backend)
+
+    # Fall through to gradient descent solver
+    if method not in ('jacobian', 'gradient_descent'):
+        raise ValueError(f"Unknown method: {method}. Use 'jacobian' or 'gradient_descent'.")
 
     n_joints = fk_params['n_joints']
 
     # Identify non-mimic joints (these are the actual optimization variables)
-    mimic_parent_indices = fk_params.get('mimic_parent_indices', np.array([-1] * n_joints))
-    mimic_multipliers = fk_params.get('mimic_multipliers', np.ones(n_joints))
-    mimic_offsets = fk_params.get('mimic_offsets', np.zeros(n_joints))
-
-    # Build list of non-mimic joint indices
-    non_mimic_indices = [i for i in range(n_joints) if mimic_parent_indices[i] < 0]
-    len(non_mimic_indices)
+    (mimic_parent_indices, mimic_multipliers, mimic_offsets,
+     non_mimic_indices, _) = _get_mimic_joint_info(fk_params)
 
     # Get joint limits for non-mimic joints only
     joint_limits_lower = backend.array(fk_params['joint_limits_lower'][non_mimic_indices])
@@ -963,8 +1864,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
     _jit_cache = {}
 
     # Precompute arrays for expanding opt angles to full angles
-    _non_mimic_indices_arr = backend.array(np.array(non_mimic_indices, dtype=np.int32))
-    _mimic_parent_indices_arr = backend.array(mimic_parent_indices.astype(np.int32))
+    _non_mimic_indices_arr = backend.array(non_mimic_indices)
+    _mimic_parent_indices_arr = backend.array(mimic_parent_indices)
     _mimic_multipliers_arr = backend.array(mimic_multipliers)
     _mimic_offsets_arr = backend.array(mimic_offsets)
 
@@ -992,41 +1893,151 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
 
         return full_angles
 
-    def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold):
+    def _create_solver_fn(max_iterations, learning_rate, pos_weight, rot_weight,
+                          pos_threshold, rot_threshold, pos_mask_arr, rot_mask_arr,
+                          rotation_mirror):
         """Create a JIT-compiled solver for given parameters."""
 
+        # Convert masks to backend arrays
+        pos_mask = backend.array(pos_mask_arr)
+        rot_mask = backend.array(rot_mask_arr)
+
+        # Check mask sums for determining constraint types
+        pos_mask_sum = np.sum(pos_mask_arr)
+        rot_mask_sum = np.sum(rot_mask_arr)
+        is_single_axis_rot = rot_mask_sum == 1
+        has_pos_constraint = pos_mask_sum > 0
+        has_rot_constraint = rot_mask_sum > 0
+
+        # Create 180° rotation matrix for mirror axis
+        mirror_rot = _create_mirror_rotation_matrix(rotation_mirror, backend)
+
+        def compute_rot_error_single(rot, target_rot):
+            """Compute rotation error for a single target rotation."""
+            if is_single_axis_rot:
+                achieved_axis = backend.matmul(rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                return 1.0 - dot_product ** 2
+            else:
+                rot_masked = rot * rot_mask
+                target_rot_masked = target_rot * rot_mask
+                return backend.sum((rot_masked - target_rot_masked) ** 2)
+
+        def compute_rot_error_single_for_check(rot, target_rot):
+            """Compute rotation error for convergence check."""
+            if is_single_axis_rot:
+                achieved_axis = backend.matmul(rot, rot_mask)
+                target_axis = backend.matmul(target_rot, rot_mask)
+                dot_product = backend.sum(achieved_axis * target_axis)
+                return 1.0 - backend.abs(dot_product)
+            else:
+                rot_diff = rot - target_rot
+                return backend.sqrt(backend.sum((rot_diff * rot_mask) ** 2))
+
         def loss_fn(opt_angles, target_pos, target_rot):
-            """Compute weighted pose error."""
+            """Compute weighted pose error with mask constraints."""
             # Expand to full angles (including mimic joints)
             full_angles = _expand_to_full_angles(opt_angles)
             pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
-            pos_err = backend.sum((pos - target_pos) ** 2)
-            rot_err = backend.sum((rot - target_rot) ** 2)
+
+            # Position error with mask
+            pos_diff = pos - target_pos
+            pos_err = backend.sum((pos_diff * pos_mask) ** 2)
+
+            # Rotation error with mask (and optional mirror)
+            if mirror_rot is not None:
+                # Compute error for both normal and mirrored target
+                rot_err_normal = compute_rot_error_single(rot, target_rot)
+                target_rot_mirrored = backend.matmul(target_rot, mirror_rot)
+                rot_err_mirror = compute_rot_error_single(rot, target_rot_mirrored)
+                # Take minimum
+                rot_err = backend.minimum(rot_err_normal, rot_err_mirror)
+            else:
+                rot_err = compute_rot_error_single(rot, target_rot)
+
             return pos_weight * pos_err + rot_weight * rot_err
 
         loss_and_grad = backend.value_and_grad(loss_fn)
 
-        def solve_single(init_opt_angles, target_pos, target_rot):
-            """Solve IK for a single target using scan for efficient JIT."""
+        def compute_errors(opt_angles, target_pos, target_rot):
+            """Compute position and rotation errors."""
+            full_angles = _expand_to_full_angles(opt_angles)
+            pos, rot = forward_kinematics_ee(backend, full_angles, fk_params)
 
-            def body_fn(carry, _):
+            # Position error
+            pos_diff = pos - target_pos
+            pos_err = backend.sqrt(backend.sum((pos_diff * pos_mask) ** 2))
+
+            # Rotation error (with optional mirror)
+            if mirror_rot is not None:
+                rot_err_normal = compute_rot_error_single_for_check(rot, target_rot)
+                target_rot_mirrored = backend.matmul(target_rot, mirror_rot)
+                rot_err_mirror = compute_rot_error_single_for_check(rot, target_rot_mirrored)
+                rot_err = backend.minimum(rot_err_normal, rot_err_mirror)
+            else:
+                rot_err = compute_rot_error_single_for_check(rot, target_rot)
+
+            return pos_err, rot_err
+
+        def check_converged(pos_err, rot_err):
+            """Check if converged based on mask constraints."""
+            if has_pos_constraint and has_rot_constraint:
+                return (pos_err < pos_threshold) & (rot_err < rot_threshold)
+            elif has_pos_constraint:
+                return pos_err < pos_threshold
+            elif has_rot_constraint:
+                return rot_err < rot_threshold
+            else:
+                return backend.array(True)
+
+        def solve_single(init_opt_angles, target_pos, target_rot):
+            """Solve IK for a single target with early stopping."""
+
+            def cond_fn(state):
+                """Continue if not converged and not at max iterations."""
+                opt_angles, iteration, pos_err, rot_err = state
+                not_converged = ~check_converged(pos_err, rot_err)
+                not_max_iter = iteration < max_iterations
+                return not_converged & not_max_iter
+
+            def body_fn(state):
                 """Single iteration step."""
-                opt_angles = carry
+                opt_angles, iteration, _, _ = state
+
+                # Compute gradient and update
                 loss, grad = loss_and_grad(opt_angles, target_pos, target_rot)
                 new_opt_angles = opt_angles - learning_rate * grad
-                new_opt_angles = backend.clip(new_opt_angles, joint_limits_lower, joint_limits_upper)
-                return new_opt_angles, loss
+                new_opt_angles = backend.clip(
+                    new_opt_angles, joint_limits_lower, joint_limits_upper
+                )
 
-            # Use scan for efficient JIT compilation
-            final_opt_angles, _ = backend.scan(body_fn, init_opt_angles, None, length=max_iterations)
+                # Compute errors for convergence check
+                pos_err, rot_err = compute_errors(new_opt_angles, target_pos, target_rot)
 
-            # Expand to full angles for final error check
+                return (new_opt_angles, iteration + 1, pos_err, rot_err)
+
+            # Initial state: (angles, iteration=0, pos_err=inf, rot_err=inf)
+            init_pos_err, init_rot_err = compute_errors(
+                init_opt_angles, target_pos, target_rot
+            )
+            init_state = (init_opt_angles, 0, init_pos_err, init_rot_err)
+
+            # Run optimization with early stopping
+            final_opt_angles, final_iter, final_pos_err, final_rot_err = backend.while_loop(
+                cond_fn, body_fn, init_state
+            )
+
+            # Expand to full angles
             final_full_angles = _expand_to_full_angles(final_opt_angles)
-            final_pos, _ = forward_kinematics_ee(backend, final_full_angles, fk_params)
-            pos_err = backend.sqrt(backend.sum((final_pos - target_pos) ** 2))
-            success = pos_err < pos_threshold
 
-            return final_full_angles, success, pos_err
+            # Check success
+            success = check_converged(final_pos_err, final_rot_err)
+
+            # Combined error for best solution selection
+            combined_err = final_pos_err + final_rot_err
+
+            return final_full_angles, success, combined_err
 
         # Vectorize over batch dimension (only batched args now)
         batched_solve = backend.vmap(solve_single)
@@ -1043,7 +2054,14 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
               learning_rate=0.1,
               pos_weight=1.0,
               rot_weight=0.1,
-              pos_threshold=0.001):
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_mask=True,
+              rotation_mask=True,
+              rotation_mirror=None,
+              attempts_per_pose=1,
+              use_current_angles=True,
+              select_closest_to_initial=False):
         """Solve batch IK.
 
         Parameters
@@ -1054,6 +2072,8 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
             Target rotation matrices (N, 3, 3).
         initial_angles : array-like, optional
             Initial joint angles (N, n_joints) or (n_joints,).
+            If attempts_per_pose > 1 and use_current_angles=True, this is used
+            as the first attempt for each target.
         max_iterations : int
             Maximum gradient descent iterations.
         learning_rate : float
@@ -1063,38 +2083,198 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
         rot_weight : float
             Rotation error weight.
         pos_threshold : float
-            Position error threshold for success.
+            Position error threshold for success (in meters).
+        rot_threshold : float
+            Rotation error threshold for success.
+            For single-axis constraint: 0 = aligned, 1 = perpendicular.
+            For multi-axis constraint: Frobenius norm of rotation matrix diff.
+            Default is 0.1.
+        position_mask : bool, str, list, or numpy.ndarray
+            Position constraint mask. Specifies which position axes to constrain.
+            - True: constrain all axes (default)
+            - False: no position constraint
+            - 'x', 'y', 'z': constrain single axis
+            - 'xy', 'xz', 'yz': constrain two axes
+            - [1, 1, 0]: array form (1=constrain, 0=free)
+        rotation_mask : bool, str, list, or numpy.ndarray
+            Rotation constraint mask. Specifies which rotation axes to constrain.
+            - True: constrain all rotation axes (default)
+            - False: no rotation constraint
+            - 'x', 'y', 'z': constrain single axis direction
+            - 'xy', 'xz', 'yz': constrain two axis directions
+            - [1, 1, 0]: array form (1=constrain, 0=free)
+        rotation_mirror : str or None
+            Allow 180° rotated orientation around specified axis.
+            - None: no mirror (default)
+            - 'x': allow 180° rotation around x-axis
+            - 'y': allow 180° rotation around y-axis
+            - 'z': allow 180° rotation around z-axis
+            Useful when gripper orientation can be flipped (e.g., up or down).
+        attempts_per_pose : int
+            Number of IK attempts per target pose. Each attempt uses a different
+            initial configuration. The best solution (lowest error) is returned.
+            Default is 1 (single attempt).
+        use_current_angles : bool
+            If True and attempts_per_pose > 1, use initial_angles as the first
+            attempt (like viser's strategy). Remaining attempts use random
+            initial values. Default is True.
 
         Returns
         -------
         tuple
-            (solutions, success_flags, position_errors)
+            (solutions, success_flags, combined_errors)
+            combined_errors is the sum of position and rotation errors.
         """
-        target_positions = backend.array(target_positions)
-        target_rotations = backend.array(target_rotations)
+        target_positions = backend.array(np.asarray(target_positions, dtype=np.float64))
+        target_rotations = backend.array(np.asarray(target_rotations, dtype=np.float64))
         n_targets = target_positions.shape[0]
+        n_opt_joints = len(non_mimic_indices)
 
+        # Handle initial angles
         if initial_angles is None:
             # Use middle of joint limits as initial guess (for non-mimic joints only)
             init = (joint_limits_lower + joint_limits_upper) / 2
-            initial_opt_angles = backend.stack([init] * n_targets)
+            base_initial_opt_angles = backend.stack([init] * n_targets)
         else:
-            initial_angles = backend.array(initial_angles)
+            initial_angles = backend.array(np.asarray(initial_angles, dtype=np.float64))
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
             # Extract non-mimic joint angles
-            initial_opt_angles = initial_angles[:, non_mimic_indices]
+            base_initial_opt_angles = initial_angles[:, non_mimic_indices]
+
+        # Generate multiple initial values if attempts_per_pose > 1
+        if attempts_per_pose > 1:
+            # Convert to numpy for expansion
+            target_positions_np = backend.to_numpy(target_positions)
+            target_rotations_np = backend.to_numpy(target_rotations)
+
+            # Expand targets to (n_targets * attempts_per_pose)
+            # Each target is repeated attempts_per_pose times
+            expanded_target_positions_np = np.repeat(
+                target_positions_np, attempts_per_pose, axis=0
+            )
+            expanded_target_rotations_np = np.repeat(
+                target_rotations_np, attempts_per_pose, axis=0
+            )
+
+            # Generate initial angles for all attempts (vectorized)
+            # Convert joint limits to numpy for random generation
+            lower_np = backend.to_numpy(joint_limits_lower)
+            upper_np = backend.to_numpy(joint_limits_upper)
+            base_initial_opt_angles_np = backend.to_numpy(base_initial_opt_angles)
+
+            n_expanded = n_targets * attempts_per_pose
+
+            if use_current_angles:
+                # First attempt uses provided angles, rest are random
+                # Shape: (n_targets, attempts_per_pose, n_opt_joints)
+                all_initial_opt_angles = np.random.uniform(
+                    lower_np, upper_np,
+                    size=(n_targets, attempts_per_pose, n_opt_joints)
+                )
+                # Set first attempt to provided initial angles
+                all_initial_opt_angles[:, 0, :] = base_initial_opt_angles_np
+                # Reshape to (n_expanded, n_opt_joints)
+                all_initial_opt_angles = all_initial_opt_angles.reshape(
+                    n_expanded, n_opt_joints
+                )
+            else:
+                # All attempts are random
+                all_initial_opt_angles = np.random.uniform(
+                    lower_np, upper_np, size=(n_expanded, n_opt_joints)
+                )
+
+            initial_opt_angles = backend.array(
+                all_initial_opt_angles.astype(np.float64))
+            target_positions_for_solve = backend.array(
+                expanded_target_positions_np.astype(np.float64))
+            target_rotations_for_solve = backend.array(
+                expanded_target_rotations_np.astype(np.float64))
+        else:
+            initial_opt_angles = base_initial_opt_angles
+            target_positions_for_solve = target_positions
+            target_rotations_for_solve = target_rotations
+
+        # Normalize masks to arrays
+        pos_mask_arr = normalize_axis_mask(position_mask)
+        rot_mask_arr = normalize_axis_mask(rotation_mask)
 
         # Get or create JIT-compiled solver for these parameters
-        cache_key = (max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold)
+        # Include masks, thresholds, and mirror in cache key
+        cache_key = (max_iterations, learning_rate, pos_weight, rot_weight,
+                     pos_threshold, rot_threshold,
+                     tuple(pos_mask_arr), tuple(rot_mask_arr), rotation_mirror)
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_solver_fn(
-                max_iterations, learning_rate, pos_weight, rot_weight, pos_threshold
+                max_iterations, learning_rate, pos_weight, rot_weight,
+                pos_threshold, rot_threshold, pos_mask_arr, rot_mask_arr,
+                rotation_mirror
             )
 
         solver_fn = _jit_cache[cache_key]
 
-        return solver_fn(initial_opt_angles, target_positions, target_rotations)
+        # Solve all (targets × attempts)
+        all_solutions, all_success, all_errors = solver_fn(
+            initial_opt_angles, target_positions_for_solve, target_rotations_for_solve
+        )
+
+        # If multiple attempts, select best solution for each target
+        if attempts_per_pose > 1:
+            # Convert to numpy for selection
+            all_solutions_np = backend.to_numpy(all_solutions)
+            all_success_np = backend.to_numpy(all_success)
+            all_errors_np = backend.to_numpy(all_errors)
+
+            # Reshape to (n_targets, attempts_per_pose, ...)
+            all_solutions_np = all_solutions_np.reshape(
+                n_targets, attempts_per_pose, n_joints
+            )
+            all_success_np = all_success_np.reshape(n_targets, attempts_per_pose)
+            all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
+
+            if select_closest_to_initial and initial_angles is not None:
+                # Prefer first attempt (starts from current angles) if successful
+                # Otherwise select from successful solutions the one closest to initial
+                init_angles_np = np.asarray(initial_angles)
+                if init_angles_np.ndim == 1:
+                    init_angles_np = np.tile(init_angles_np, (n_targets, 1))
+
+                best_indices = []
+                err_threshold = 0.02  # Consider solutions with error < 2cm as valid
+                for i in range(n_targets):
+                    # First attempt (index 0) starts from current angles
+                    first_success = all_success_np[i, 0] or all_errors_np[i, 0] < err_threshold
+                    if first_success:
+                        # Use first attempt if it succeeded
+                        best_idx = 0
+                    else:
+                        # Find other successful attempts
+                        valid_mask = all_success_np[i] | (all_errors_np[i] < err_threshold)
+                        if np.any(valid_mask):
+                            # Select the one closest to initial angles
+                            distances = np.linalg.norm(
+                                all_solutions_np[i, valid_mask] - init_angles_np[i], axis=1
+                            )
+                            valid_indices = np.where(valid_mask)[0]
+                            best_idx = valid_indices[np.argmin(distances)]
+                        else:
+                            # Fall back to minimum error
+                            best_idx = np.argmin(all_errors_np[i])
+                    best_indices.append(best_idx)
+                best_indices = np.array(best_indices)
+            else:
+                # Select best attempt for each target (lowest error) - vectorized
+                best_indices = np.argmin(all_errors_np, axis=1)
+
+            # Use advanced indexing instead of Python loop
+            target_indices = np.arange(n_targets)
+            solutions = all_solutions_np[target_indices, best_indices]
+            success_flags = all_success_np[target_indices, best_indices]
+            errors = all_errors_np[target_indices, best_indices]
+
+            return backend.array(solutions), backend.array(success_flags), backend.array(errors)
+        else:
+            return all_solutions, all_success, all_errors
 
     # Create FK function for external use
     def fk_fn(angles):
@@ -1107,6 +2287,7 @@ def create_batch_ik_solver(robot_model, link_list, move_target, backend_name='ja
     solve.fk_fn = fk_fn
     solve.fk_params = fk_params
     solve.backend = backend
+    solve.method = 'gradient_descent'
 
     return solve
 
@@ -1147,6 +2328,173 @@ def _axis_angle_to_matrix(backend, axis, angle):
     s = backend.sin(angle)
 
     return I + s * K + (1 - c) * backend.matmul(K, K)
+
+
+def _axis_angle_to_matrix_batched(axis, angles):
+    """Convert axis-angle to rotation matrices for a batch of angles.
+
+    Uses Rodrigues' formula with NumPy broadcasting for efficiency.
+
+    Parameters
+    ----------
+    axis : numpy.ndarray
+        Rotation axis (3,).
+    angles : numpy.ndarray
+        Rotation angles (batch,).
+
+    Returns
+    -------
+    rotations : numpy.ndarray
+        Rotation matrices (batch, 3, 3).
+    """
+    # Normalize axis
+    axis = axis / (np.linalg.norm(axis) + 1e-10)
+
+    # Skew-symmetric matrix K
+    K = np.array([
+        [0, -axis[2], axis[1]],
+        [axis[2], 0, -axis[0]],
+        [-axis[1], axis[0], 0]
+    ])
+
+    # K @ K precomputed
+    K2 = K @ K
+
+    # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
+    # angles: (batch,)
+    c = np.cos(angles)[:, None, None]  # (batch, 1, 1)
+    s = np.sin(angles)[:, None, None]  # (batch, 1, 1)
+
+    I = np.eye(3)
+    return I + s * K + (1 - c) * K2  # (batch, 3, 3)
+
+
+def forward_kinematics_ee_batched_numpy(joint_angles_batch, fk_params):
+    """Compute end-effector pose for a batch of joint angles using NumPy.
+
+    Optimized version that processes all batch elements simultaneously.
+
+    Parameters
+    ----------
+    joint_angles_batch : numpy.ndarray
+        Joint angles (batch, n_joints).
+    fk_params : dict
+        FK parameters from extract_fk_parameters().
+
+    Returns
+    -------
+    positions : numpy.ndarray
+        End-effector positions (batch, 3).
+    rotations : numpy.ndarray
+        End-effector rotations (batch, 3, 3).
+    """
+    batch_size = joint_angles_batch.shape[0]
+    n_joints = fk_params['n_joints']
+
+    translations = fk_params['link_translations']  # (n_joints, 3)
+    local_rotations = fk_params['link_rotations']  # (n_joints, 3, 3)
+    axes = fk_params['joint_axes']  # (n_joints, 3)
+    base_pos = fk_params['base_position']  # (3,)
+    base_rot = fk_params['base_rotation']  # (3, 3)
+    ref_angles = fk_params['ref_angles']  # (n_joints,)
+    joint_types = fk_params['joint_types']
+    ee_offset_pos = fk_params['ee_offset_position']  # (3,)
+    ee_offset_rot = fk_params['ee_offset_rotation']  # (3, 3)
+
+    # Handle mimic joints
+    mimic_parent_indices = fk_params.get('mimic_parent_indices')
+    if mimic_parent_indices is not None:
+        mimic_multipliers = fk_params['mimic_multipliers']
+        mimic_offsets = fk_params['mimic_offsets']
+
+        effective_angles = joint_angles_batch.copy()
+        for i in range(n_joints):
+            parent_idx = mimic_parent_indices[i]
+            if parent_idx >= 0:
+                effective_angles[:, i] = (
+                    joint_angles_batch[:, parent_idx] * mimic_multipliers[i]
+                    + mimic_offsets[i]
+                )
+        joint_angles_batch = effective_angles
+
+    # Initialize batch transforms
+    current_pos = np.tile(base_pos, (batch_size, 1))  # (batch, 3)
+    current_rot = np.tile(base_rot, (batch_size, 1, 1))  # (batch, 3, 3)
+
+    for i in range(n_joints):
+        # Apply link static transform
+        # pos = pos + rot @ translation
+        current_pos = current_pos + np.einsum(
+            'bij,j->bi', current_rot, translations[i]
+        )
+        # rot = rot @ local_rotation
+        current_rot = np.einsum(
+            'bij,jk->bik', current_rot, local_rotations[i]
+        )
+
+        # Apply joint motion
+        delta_angles = joint_angles_batch[:, i] - ref_angles[i]  # (batch,)
+
+        if joint_types[i] == 'prismatic':
+            # Translate along axis
+            current_pos = current_pos + np.einsum(
+                'bij,j,b->bi', current_rot, axes[i], delta_angles
+            )
+        else:
+            # Revolute: rotate around axis
+            joint_rots = _axis_angle_to_matrix_batched(
+                axes[i], delta_angles
+            )  # (batch, 3, 3)
+            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+
+    # Apply end-effector offset
+    current_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
+    current_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+
+    return current_pos, current_rot
+
+
+def _compute_gradient_batched_numpy(loss_fn_batched, angles_batch, eps=1e-7):
+    """Compute gradients for a batch of angles using vectorized finite differences.
+
+    Parameters
+    ----------
+    loss_fn_batched : callable
+        Loss function that takes (batch, n_joints) and returns (batch,).
+    angles_batch : numpy.ndarray
+        Joint angles (batch, n_joints).
+    eps : float
+        Finite difference step size.
+
+    Returns
+    -------
+    gradients : numpy.ndarray
+        Gradients (batch, n_joints).
+    """
+    batch_size, n_joints = angles_batch.shape
+
+    # Create perturbed angles for all parameters at once
+    # Shape: (batch, n_joints, 2) - plus and minus perturbations
+    angles_plus = np.tile(angles_batch[:, :, None], (1, 1, n_joints))  # (batch, n_joints, n_joints)
+    angles_minus = angles_plus.copy()
+
+    # Add perturbations along diagonal (perturbing each joint independently)
+    for j in range(n_joints):
+        angles_plus[:, j, j] += eps
+        angles_minus[:, j, j] -= eps
+
+    # Reshape for batch evaluation: (batch * n_joints, n_joints)
+    angles_plus_flat = angles_plus.reshape(-1, n_joints)
+    angles_minus_flat = angles_minus.reshape(-1, n_joints)
+
+    # Evaluate loss for all perturbed inputs
+    loss_plus = loss_fn_batched(angles_plus_flat).reshape(batch_size, n_joints)
+    loss_minus = loss_fn_batched(angles_minus_flat).reshape(batch_size, n_joints)
+
+    # Central difference
+    gradients = (loss_plus - loss_minus) / (2 * eps)
+
+    return gradients
 
 
 def create_jax_fk_function(fk_params):
@@ -1291,8 +2639,8 @@ def solve_ik_scipy(
     target_coords,
     link_list,
     move_target,
-    rotation_axis=True,
-    translation_axis=True,
+    rotation_mask=True,
+    position_mask=True,
     max_iterations=100,
     pos_threshold=0.001,
     rot_threshold=0.017,
@@ -1312,9 +2660,9 @@ def solve_ik_scipy(
         List of links in the kinematic chain.
     move_target : CascadedCoords
         End effector coordinates.
-    rotation_axis : bool
+    rotation_mask : bool
         Whether to constrain rotation.
-    translation_axis : bool
+    position_mask : bool
         Whether to constrain translation.
     max_iterations : int
         Maximum iterations.
@@ -1367,7 +2715,7 @@ def solve_ik_scipy(
         pos_err = np.sum((current_pos - target_pos) ** 2)
 
         # Rotation error
-        if rotation_axis:
+        if rotation_mask:
             rot_err = np.sum((current_rot - target_rot) ** 2)
         else:
             rot_err = 0.0
