@@ -57,7 +57,13 @@ class NumpyBackend:
     # === Array Creation ===
 
     def array(self, data) -> np.ndarray:
-        """Convert data to numpy array."""
+        """Convert data to numpy array.
+
+        Preserves boolean dtype if input is boolean, otherwise uses default dtype.
+        """
+        arr = np.asarray(data)
+        if arr.dtype == np.bool_:
+            return arr
         return np.asarray(data, dtype=self._dtype)
 
     def zeros(self, shape: Union[int, Tuple[int, ...]]) -> np.ndarray:
@@ -260,19 +266,22 @@ class NumpyBackend:
     def gradient(self, fn: Callable, eps: float = 1e-7) -> Callable:
         """Return function that computes numerical gradient.
 
+        Computes gradient with respect to the first argument only,
+        consistent with JAX's behavior.
+
         Parameters
         ----------
         fn : callable
-            Scalar-valued function.
+            Scalar-valued function. Can take multiple arguments.
         eps : float
             Finite difference step size.
 
         Returns
         -------
         callable
-            Function that computes numerical gradient.
+            Function that computes numerical gradient w.r.t. first argument.
         """
-        def grad_fn(x):
+        def grad_fn(x, *args):
             x = np.asarray(x, dtype=self._dtype)
             grad = np.zeros_like(x)
             for i in range(x.size):
@@ -280,7 +289,7 @@ class NumpyBackend:
                 x_plus.flat[i] += eps
                 x_minus = x.copy()
                 x_minus.flat[i] -= eps
-                grad.flat[i] = (fn(x_plus) - fn(x_minus)) / (2 * eps)
+                grad.flat[i] = (fn(x_plus, *args) - fn(x_minus, *args)) / (2 * eps)
             return grad
         return grad_fn
 
@@ -317,10 +326,13 @@ class NumpyBackend:
     def value_and_grad(self, fn: Callable, eps: float = 1e-7) -> Callable:
         """Return function that computes value and numerical gradient.
 
+        Computes gradient with respect to the first argument only,
+        consistent with JAX's behavior.
+
         Parameters
         ----------
         fn : callable
-            Scalar-valued function.
+            Scalar-valued function. Can take multiple arguments.
         eps : float
             Finite difference step size.
 
@@ -331,8 +343,8 @@ class NumpyBackend:
         """
         grad_fn = self.gradient(fn, eps)
 
-        def val_grad_fn(x):
-            return fn(x), grad_fn(x)
+        def val_grad_fn(x, *args):
+            return fn(x, *args), grad_fn(x, *args)
         return val_grad_fn
 
     def hessian(self, fn: Callable, eps: float = 1e-5) -> Callable:
@@ -394,20 +406,121 @@ class NumpyBackend:
         ----------
         fn : callable
             Function to vectorize.
-        in_axes : int
-            Input axis to vectorize over.
+        in_axes : int, tuple, or None
+            Input axes to vectorize over. Can be:
+            - int: same axis for all arguments
+            - tuple: per-argument axis specification (None means broadcast)
+            - None: no batching (broadcast all)
 
         Returns
         -------
         callable
             Vectorized function.
         """
-        def batched_fn(x):
-            if in_axes != 0:
-                x = np.moveaxis(x, in_axes, 0)
-            results = [fn(xi) for xi in x]
-            return np.stack(results, axis=0)
+        def batched_fn(*args):
+            if len(args) == 0:
+                return fn()
+
+            # Normalize in_axes to a tuple
+            if isinstance(in_axes, int):
+                axes = (in_axes,) * len(args)
+            elif in_axes is None:
+                axes = (None,) * len(args)
+            else:
+                axes = tuple(in_axes)
+                if len(axes) < len(args):
+                    # Pad with 0 for remaining args
+                    axes = axes + (0,) * (len(args) - len(axes))
+
+            # Determine batch size from the first batched input
+            batch_size = None
+            for arg, axis in zip(args, axes):
+                if axis is not None:
+                    arg = np.asarray(arg)
+                    if arg.ndim > 0:
+                        batch_size = arg.shape[axis]
+                        break
+
+            if batch_size is None:
+                # No batched inputs, just call the function
+                return fn(*args)
+
+            # Move batch axis to front for all batched inputs
+            processed_args = []
+            for arg, axis in zip(args, axes):
+                arg = np.asarray(arg)
+                if axis is not None and axis != 0 and arg.ndim > 0:
+                    processed_args.append(np.moveaxis(arg, axis, 0))
+                else:
+                    processed_args.append(arg)
+
+            # Run function for each batch element
+            results = []
+            for i in range(batch_size):
+                batch_args = []
+                for arg, axis in zip(processed_args, axes):
+                    if axis is not None and np.asarray(arg).ndim > 0:
+                        batch_args.append(arg[i])
+                    else:
+                        batch_args.append(arg)  # Broadcast non-batched args
+                results.append(fn(*batch_args))
+
+            # Stack results
+            if isinstance(results[0], tuple):
+                # Multiple outputs
+                return tuple(
+                    np.stack([r[j] for r in results], axis=0)
+                    for j in range(len(results[0]))
+                )
+            else:
+                return np.stack(results, axis=0)
         return batched_fn
+
+    # === Control Flow ===
+
+    def while_loop(self, cond_fn: Callable, body_fn: Callable, init):
+        """While loop.
+
+        Parameters
+        ----------
+        cond_fn : callable
+            Condition function that takes state and returns bool.
+        body_fn : callable
+            Loop body function that takes state and returns new state.
+        init
+            Initial state value.
+
+        Returns
+        -------
+        Final state after loop terminates.
+        """
+        state = init
+        while cond_fn(state):
+            state = body_fn(state)
+        return state
+
+    def fori_loop(self, lower: int, upper: int, body_fn: Callable, init):
+        """For loop with integer indices.
+
+        Parameters
+        ----------
+        lower : int
+            Lower bound (inclusive).
+        upper : int
+            Upper bound (exclusive).
+        body_fn : callable
+            Loop body function that takes (i, val) and returns new val.
+        init
+            Initial value.
+
+        Returns
+        -------
+        Final value after loop completes.
+        """
+        val = init
+        for i in range(lower, upper):
+            val = body_fn(i, val)
+        return val
 
     # === Indexing and Slicing ===
 
