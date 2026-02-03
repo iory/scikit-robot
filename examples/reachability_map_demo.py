@@ -380,7 +380,9 @@ def main():
             print(f"  Z-slice [{z_min:.2f}, {z_max:.2f}]: {len(positions)} points")
 
         # Create viewer
-        viewer = skrobot.viewers.ViserViewer(enable_ik=True)
+        viewer = skrobot.viewers.ViserViewer(
+            enable_ik=True,
+            enable_motion_planning=True)
 
         # Add robot
         viewer.add(robot)
