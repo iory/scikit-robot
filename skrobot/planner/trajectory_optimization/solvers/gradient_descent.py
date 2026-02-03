@@ -60,13 +60,22 @@ class GradientDescentSolver(BaseSolver):
     def _get_problem_cache_key(self, problem):
         """Generate cache key from problem structure."""
         residual_names = tuple(sorted(r.name for r in problem.residuals))
+        residual_weights = tuple(
+            (r.name, r.weight) for r in problem.residuals
+        )
+        wp_constraints = tuple(
+            (idx, tuple(angles.tolist()))
+            for idx, angles in problem.waypoint_constraints
+        )
         return (
             problem.n_waypoints,
             problem.n_joints,
             residual_names,
+            residual_weights,
             problem.fixed_start,
             problem.fixed_end,
             problem.collision_spheres is not None,
+            wp_constraints,
         )
 
     def solve(
@@ -99,6 +108,13 @@ class GradientDescentSolver(BaseSolver):
 
         max_iterations = kwargs.get('max_iterations', self.max_iterations)
         learning_rate = kwargs.get('learning_rate', self.learning_rate)
+
+        # Auto-scale learning rate based on maximum cost weight
+        max_weight = max(
+            (r.weight for r in problem.residuals), default=1.0
+        )
+        if max_weight > 1.0:
+            learning_rate = learning_rate / (max_weight ** 0.25)
 
         # Check cache for JIT-compiled solver
         cache_key = self._get_problem_cache_key(problem)
@@ -139,12 +155,19 @@ class GradientDescentSolver(BaseSolver):
         fixed_start = problem.fixed_start
         fixed_end = problem.fixed_end
 
+        # Collect waypoint constraints as static data
+        wp_constraints = [
+            (idx, jnp.array(angles))
+            for idx, angles in problem.waypoint_constraints
+        ]
+
         def solve_fn(trajectory, lower, upper, learning_rate, max_iterations):
             start = trajectory[0]
             end = trajectory[-1]
 
+            # State: (current_traj, best_traj, best_cost)
             def body_fn(i, state):
-                traj, prev_cost = state
+                traj, best_traj, best_cost = state
                 cost, grad = cost_and_grad(traj)
 
                 # Gradient clipping
@@ -156,14 +179,8 @@ class GradientDescentSolver(BaseSolver):
                     grad
                 )
 
-                # Update
-                should_update = (cost > 1e-6) & (cost <= prev_cost * 1.1)
-                new_traj = jax.lax.cond(
-                    should_update,
-                    lambda t: t - learning_rate * grad,
-                    lambda t: t,
-                    traj
-                )
+                # Gradient step
+                new_traj = traj - learning_rate * grad
 
                 # Clip to joint limits
                 new_traj = jnp.clip(new_traj, lower, upper)
@@ -174,13 +191,29 @@ class GradientDescentSolver(BaseSolver):
                 if fixed_end:
                     new_traj = new_traj.at[-1].set(end)
 
-                return (new_traj, cost)
+                # Fix intermediate waypoints
+                for wp_idx, wp_angles in wp_constraints:
+                    new_traj = new_traj.at[wp_idx].set(wp_angles)
+
+                # Track best trajectory
+                new_cost = cost_fn(new_traj)
+                is_better = new_cost < best_cost
+                new_best_traj = jax.lax.cond(
+                    is_better,
+                    lambda _: new_traj,
+                    lambda _: best_traj,
+                    None,
+                )
+                new_best_cost = jnp.where(is_better, new_cost, best_cost)
+
+                return (new_traj, new_best_traj, new_best_cost)
 
             initial_cost = cost_fn(trajectory)
-            trajectory, final_cost = jax.lax.fori_loop(
-                0, max_iterations, body_fn, (trajectory, initial_cost + 1.0)
+            _, best_traj, best_cost = jax.lax.fori_loop(
+                0, max_iterations, body_fn,
+                (trajectory, trajectory, initial_cost),
             )
-            return trajectory, final_cost
+            return best_traj, best_cost
 
         # JIT compile with static argnums for max_iterations
         return jax.jit(solve_fn, static_argnums=(4,))
@@ -206,19 +239,31 @@ class GradientDescentSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances
         from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector
 
         dt = problem.dt
 
         # Collision data
         has_collision = problem.collision_spheres is not None
 
+        # Check if cartesian_path cost is present
+        has_cartesian = any(
+            s.name == 'cartesian_path' for s in problem.residuals
+        )
+
         get_sphere_positions = None
+        get_ee_pose = None
         sphere_radii = None
 
-        if has_collision:
+        # Build FK data if needed for collision or cartesian path
+        if has_collision or has_cartesian:
             fk_data = prepare_fk_data(problem, jnp)
-            sphere_radii = fk_data['sphere_radii']
-            _, get_sphere_positions = build_fk_functions(fk_data, jnp)
+            if has_collision:
+                sphere_radii = fk_data['sphere_radii']
+            _, get_sphere_positions_fn, _, get_ee_pose_fn = \
+                build_fk_functions(fk_data, jnp)
+            get_sphere_positions = get_sphere_positions_fn
+            get_ee_pose = get_ee_pose_fn
 
         # Parse residual specs
         costs_config = []
@@ -302,6 +347,46 @@ class GradientDescentSolver(BaseSolver):
                         )(trajectory)
                         total_cost = (total_cost
                                       + weight * jnp.sum(self_coll_costs))
+
+                elif name == 'cartesian_path' and has_cartesian:
+                    target_pos = jnp.array(params['target_positions'])
+                    target_rots = params.get('target_rotations')
+                    rot_w = params.get('rotation_weight', 1.0)
+
+                    if target_rots is not None:
+                        target_rots = jnp.array(target_rots)
+
+                        def cart_cost_single(args):
+                            angles, t_pos, t_rot = args
+                            ee_pos, ee_rot = get_ee_pose(angles)
+                            pos_err = jnp.sum((ee_pos - t_pos) ** 2)
+                            rot_err = rotation_error_vector(
+                                ee_rot, t_rot, jnp)
+                            return pos_err + rot_w * jnp.sum(rot_err ** 2)
+
+                        cart_costs = jax.vmap(cart_cost_single)(
+                            (trajectory, target_pos, target_rots)
+                        )
+                    else:
+                        def cart_cost_pos_only(args):
+                            angles, t_pos = args
+                            ee_pos, _ = get_ee_pose(angles)
+                            return jnp.sum((ee_pos - t_pos) ** 2)
+
+                        cart_costs = jax.vmap(cart_cost_pos_only)(
+                            (trajectory, target_pos)
+                        )
+                    total_cost = total_cost + weight * jnp.sum(cart_costs)
+
+                elif name == 'joint_velocity_limit':
+                    v_max = jnp.array(params['max_velocities'])
+                    vel_dt = params['dt']
+                    v_limit = v_max * vel_dt
+                    dq = trajectory[1:] - trajectory[:-1]
+                    # Hinge penalty: max(0, |dq| - v_limit)^2
+                    violation = jnp.maximum(jnp.abs(dq) - v_limit, 0.0)
+                    total_cost = (total_cost
+                                  + weight * jnp.sum(violation ** 2))
 
             return total_cost
 
