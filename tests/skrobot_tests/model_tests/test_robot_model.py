@@ -810,6 +810,103 @@ class TestRobotModel(unittest.TestCase):
             self.assertEqual(len(solutions), 1)
             self.assertEqual(len(success_flags), 1)
 
+        # Test that rotation masks work correctly (regression test)
+        # Previously, rotation error was computed in world frame instead of
+        # local (end-effector) frame, causing incorrect behavior:
+        # - rotation_mask='yz' should align the X-axis (only allow rotation around X)
+        #   but was allowing rotation around world X instead of local X
+        # Now uses local-frame masking matching difference_rotation semantics
+        from skrobot.coordinates.base import normalize_mask
+        target = skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])
+
+        # Map from mask to the axes that should be ALIGNED
+        # 'yz' constrains Y,Z → only rotation around X is free → X-axis aligns
+        mask_to_aligned_axes = {
+            'x': [],       # only X constrained; Y,Z free
+            'y': [],       # only Y constrained; X,Z free
+            'z': [],       # only Z constrained; X,Y free
+            'xy': ['z'],   # X,Y constrained → Z-axis aligns
+            'yz': ['x'],   # Y,Z constrained → X-axis aligns
+            'xz': ['y'],   # X,Z constrained → Y-axis aligns
+            'xyz': ['x', 'y', 'z'],  # all constrained → all axes align
+        }
+        axis_name_to_idx = {'x': 0, 'y': 1, 'z': 2}
+
+        # Test all rotation mask variants
+        for rotation_mask in ['x', 'y', 'z', 'xy', 'yz', 'xz', 'xyz']:
+            with self.subTest(rotation_mask=rotation_mask):
+                fetch.reset_pose()
+                solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                    [target],
+                    move_target=fetch.rarm.end_coords,
+                    rotation_mask=rotation_mask,
+                    stop=50,
+                    attempts_per_pose=50
+                )
+                self.assertTrue(
+                    success_flags[0],
+                    f"rotation_mask='{rotation_mask}' should succeed"
+                )
+
+                # Apply solution and verify
+                fetch.angle_vector(solutions[0])
+                end_coords = fetch.rarm.end_coords
+                pos_err = np.linalg.norm(end_coords.worldpos() - target.worldpos())
+                self.assertLess(pos_err, 0.01)
+
+                # Verify constrained axes have small error via difference_rotation
+                dif_rot = end_coords.difference_rotation(
+                    target, rotation_mask=rotation_mask)
+                rot_err = np.linalg.norm(dif_rot)
+                self.assertLess(
+                    rot_err, 0.5,
+                    f"rotation_mask='{rotation_mask}' constrained error too large"
+                )
+
+                # For two-axis masks, verify the implied axis alignment
+                for axis_name in mask_to_aligned_axes[rotation_mask]:
+                    idx = axis_name_to_idx[axis_name]
+                    achieved_axis = end_coords.worldrot()[:, idx]
+                    target_axis = target.worldrot()[:, idx]
+                    dot = np.dot(achieved_axis, target_axis)
+                    angle_deg = np.rad2deg(np.arccos(np.clip(abs(dot), 0, 1)))
+                    self.assertLess(
+                        angle_deg, 5.0,
+                        f"rotation_mask='{rotation_mask}': "
+                        f"{axis_name}-axis should be aligned "
+                        f"(got {angle_deg:.1f}°)"
+                    )
+
+        # Test all position mask variants
+        for position_mask in ['x', 'y', 'z', 'xy', 'yz', 'xz', 'xyz']:
+            with self.subTest(position_mask=position_mask):
+                fetch.reset_pose()
+                solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                    [target],
+                    move_target=fetch.rarm.end_coords,
+                    position_mask=position_mask,
+                    rotation_mask=False,  # Disable rotation constraint
+                    stop=50,
+                    attempts_per_pose=20
+                )
+                # Partial masks should succeed since some positions are unconstrained
+                self.assertTrue(
+                    success_flags[0],
+                    f"position_mask='{position_mask}' should succeed"
+                )
+
+                # Apply solution and verify constrained world-frame axes
+                fetch.angle_vector(solutions[0])
+                end_coords = fetch.rarm.end_coords
+                mask_vec = normalize_mask(position_mask)
+                world_pos_diff = (
+                    end_coords.worldpos() - target.worldpos()) * mask_vec
+                pos_err = np.linalg.norm(world_pos_diff)
+                self.assertLess(
+                    pos_err, 0.01,
+                    f"position_mask='{position_mask}' constrained error too large"
+                )
+
     def test_batch_inverse_kinematics_parameters(self):
         """Test batch IK with different parameter values."""
         fetch = self.fetch
@@ -990,24 +1087,89 @@ class TestRobotModel(unittest.TestCase):
             skrobot.coordinates.Coordinates(pos=current_pos + [0.0, 0.0, 0.05]),
         ]
 
-        # Run batch IK with rotated robot
-        solutions, success_flags, _ = r8_6.batch_inverse_kinematics(
-            target_coords,
-            move_target=r8_6.rarm.end_coords,
-            stop=100,
-            attempts_per_pose=10
-        )
+        backends_to_test = ['numpy']
+        from skrobot.pycompat import HAS_JAX
+        if HAS_JAX:
+            backends_to_test.append('jax')
 
-        # Verify at least some poses were solved
-        self.assertGreater(sum(success_flags), 0, "At least one pose should be solved with rotated base")
+        for backend in backends_to_test:
+            with self.subTest(backend=backend):
+                r8_6.reset_pose()
 
-        # Verify position accuracy for successful solutions
-        for i, (solution, success) in enumerate(zip(solutions, success_flags)):
-            if success:
-                r8_6.angle_vector(solution)
-                achieved_pos = r8_6.rarm.end_coords.worldpos()
-                pos_error = np.linalg.norm(achieved_pos - target_coords[i].worldpos())
-                self.assertLess(pos_error, 0.01, f"Position error too large for pose {i}: {pos_error}m")
+                # Run batch IK with rotated robot
+                solutions, success_flags, _ = r8_6.batch_inverse_kinematics(
+                    target_coords,
+                    move_target=r8_6.rarm.end_coords,
+                    stop=100,
+                    attempts_per_pose=10,
+                    backend=backend
+                )
+
+                # Verify at least some poses were solved
+                self.assertGreater(
+                    sum(success_flags), 0,
+                    "At least one pose should be solved with rotated base")
+
+                # Verify position accuracy for successful solutions
+                for i, (solution, success) in enumerate(
+                        zip(solutions, success_flags)):
+                    if success:
+                        r8_6.angle_vector(solution)
+                        achieved_pos = r8_6.rarm.end_coords.worldpos()
+                        pos_error = np.linalg.norm(
+                            achieved_pos - target_coords[i].worldpos())
+                        self.assertLess(
+                            pos_error, 0.01,
+                            "Position error too large for pose "
+                            "{}: {}m".format(i, pos_error))
+
+    def test_batch_inverse_kinematics_both_backends(self):
+        """Test batch IK with both NumPy and JAX backends explicitly."""
+        fetch = self.fetch
+        fetch.reset_pose()
+
+        # Create target coordinates
+        current_coords = fetch.rarm.end_coords.copy_worldcoords()
+        target1 = current_coords.copy_worldcoords()
+        target1.translate([0.02, 0, 0])
+        target2 = current_coords.copy_worldcoords()
+        target2.translate([0, 0.02, 0])
+        target_coords = [target1, target2]
+
+        backends_to_test = ['numpy']
+
+        # Add JAX backend if available
+        from skrobot.pycompat import HAS_JAX
+        if HAS_JAX:
+            backends_to_test.append('jax')
+
+        for backend in backends_to_test:
+            with self.subTest(backend=backend):
+                fetch.reset_pose()
+
+                solutions, success_flags, _ = fetch.batch_inverse_kinematics(
+                    target_coords,
+                    move_target=fetch.rarm.end_coords,
+                    stop=100,
+                    attempts_per_pose=5,
+                    backend=backend
+                )
+
+                # Check that we got solutions for all targets
+                self.assertEqual(len(solutions), len(target_coords))
+                self.assertEqual(len(success_flags), len(target_coords))
+
+                # For successful solutions, verify accuracy
+                for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+                    if success:
+                        fetch.angle_vector(solution)
+                        achieved_pos = fetch.rarm.end_coords.worldpos()
+                        target_pos = target_coords[i].worldpos()
+                        pos_error = np.linalg.norm(achieved_pos - target_pos)
+                        self.assertLess(
+                            pos_error, 0.01,
+                            f"Backend {backend}: Position error too large for pose {i}: {pos_error}m"
+                        )
 
     def test_joint_type_alias(self):
         """Test that joint_type is an alias for type."""
