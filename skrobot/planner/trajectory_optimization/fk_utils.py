@@ -4,33 +4,7 @@ This module provides backend-agnostic FK computation functions
 shared across different solvers (scipy, jaxls, gradient_descent).
 """
 
-
-def rotation_matrix_from_axis_angle(axis, theta, backend):
-    """Compute rotation matrix from axis-angle representation.
-
-    Parameters
-    ----------
-    axis : array
-        Rotation axis (3,). Will be normalized.
-    theta : float or array
-        Rotation angle in radians.
-    backend : Backend
-        Array backend (numpy or jax).
-
-    Returns
-    -------
-    array
-        3x3 rotation matrix.
-    """
-    xp = backend
-    axis = axis / xp.sqrt(xp.dot(axis, axis) + 1e-10)
-    K = xp.array([
-        [0, -axis[2], axis[1]],
-        [axis[2], 0, -axis[0]],
-        [-axis[1], axis[0], 0]
-    ])
-    I = xp.eye(3)
-    return I + xp.sin(theta) * K + (1 - xp.cos(theta)) * (K @ K)
+from skrobot.kinematics.differentiable import _axis_angle_to_matrix
 
 
 def build_fk_functions(fk_data, backend):
@@ -67,6 +41,7 @@ def build_fk_functions(fk_data, backend):
     base_pos = fk_data['base_position']
     base_rot = fk_data['base_rotation']
     n_joints = fk_data['n_joints']
+    ref_angles = fk_data.get('ref_angles')
 
     coll_link_idx = fk_data.get('collision_link_to_chain_idx')
     coll_offsets_pos = fk_data.get('collision_link_offsets_pos')
@@ -96,13 +71,64 @@ def build_fk_functions(fk_data, backend):
         for i in range(n_joints):
             current_pos = current_pos + current_rot @ link_trans[i]
             current_rot = current_rot @ link_rots[i]
-            joint_rot = rotation_matrix_from_axis_angle(
-                joint_axes[i], angles[i], xp)
+            # Subtract ref_angles because link_rots already includes
+            # the rotation at the reference configuration
+            delta = angles[i]
+            if ref_angles is not None:
+                delta = delta - ref_angles[i]
+            joint_rot = _axis_angle_to_matrix(xp, joint_axes[i], delta)
             current_rot = current_rot @ joint_rot
             positions.append(current_pos)
             rotations.append(current_rot)
 
         return xp.stack(positions), xp.stack(rotations)
+
+    ee_offset_pos = fk_data.get('ee_offset_position')
+    ee_offset_rot = fk_data.get('ee_offset_rotation')
+
+    def get_ee_position(angles):
+        """Compute end-effector position for given joint angles.
+
+        Parameters
+        ----------
+        angles : array
+            Joint angles (n_joints,).
+
+        Returns
+        -------
+        array
+            End-effector position in world frame (3,).
+        """
+        pos, _ = get_ee_pose(angles)
+        return pos
+
+    def get_ee_pose(angles):
+        """Compute end-effector position and rotation for given joint angles.
+
+        Parameters
+        ----------
+        angles : array
+            Joint angles (n_joints,).
+
+        Returns
+        -------
+        position : array
+            End-effector position in world frame (3,).
+        rotation : array
+            End-effector rotation matrix in world frame (3, 3).
+        """
+        positions, rotations = get_link_transforms(angles)
+        last_pos = positions[-1]
+        last_rot = rotations[-1]
+        if ee_offset_pos is not None:
+            ee_pos = last_pos + last_rot @ ee_offset_pos
+        else:
+            ee_pos = last_pos
+        if ee_offset_rot is not None:
+            ee_rot = last_rot @ ee_offset_rot
+        else:
+            ee_rot = last_rot
+        return ee_pos, ee_rot
 
     def get_sphere_positions(angles):
         """Compute collision sphere positions for given joint angles.
@@ -138,7 +164,7 @@ def build_fk_functions(fk_data, backend):
             + xp.einsum('ijk,ik->ij', sphere_link_rot, local)
         return world
 
-    return get_link_transforms, get_sphere_positions
+    return get_link_transforms, get_sphere_positions, get_ee_position, get_ee_pose
 
 
 def compute_sphere_obstacle_distances(sphere_positions, sphere_radii,
@@ -208,6 +234,36 @@ def compute_self_collision_distances(sphere_positions, sphere_radii,
     return signed_dists
 
 
+def rotation_error_vector(actual_rot, target_rot, backend):
+    """Compute rotation error vector from anti-symmetric part of R_err.
+
+    Extracts three independent components from the anti-symmetric part
+    of ``actual_rot @ target_rot^T``.  The resulting 3-vector is zero
+    when the two rotations are identical.
+
+    Parameters
+    ----------
+    actual_rot : array
+        Actual rotation matrix (3, 3).
+    target_rot : array
+        Target rotation matrix (3, 3).
+    backend : module
+        Array module (numpy or jax.numpy).
+
+    Returns
+    -------
+    array
+        Rotation error vector (3,).
+    """
+    xp = backend
+    R_err = xp.matmul(actual_rot, xp.transpose(target_rot))
+    return xp.stack([
+        R_err[1, 0] - R_err[0, 1],
+        R_err[2, 0] - R_err[0, 2],
+        R_err[2, 1] - R_err[1, 2],
+    ])
+
+
 def compute_collision_residuals(signed_distances, activation_distance, backend):
     """Convert signed distances to collision residuals.
 
@@ -254,6 +310,9 @@ def prepare_fk_data(problem, backend):
         'base_position': xp.array(fk_params['base_position']),
         'base_rotation': xp.array(fk_params['base_rotation']),
         'n_joints': fk_params['n_joints'],
+        'ee_offset_position': xp.array(fk_params['ee_offset_position']),
+        'ee_offset_rotation': xp.array(fk_params['ee_offset_rotation']),
+        'ref_angles': xp.array(fk_params['ref_angles']),
     }
 
     # Add collision data if available
@@ -275,8 +334,8 @@ def prepare_fk_data(problem, backend):
 
 
 __all__ = [
-    'rotation_matrix_from_axis_angle',
     'build_fk_functions',
+    'rotation_error_vector',
     'compute_sphere_obstacle_distances',
     'compute_self_collision_distances',
     'compute_collision_residuals',

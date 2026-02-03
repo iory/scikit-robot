@@ -222,7 +222,7 @@ class ScipySolver(BaseSolver):
         fk_data = prepare_fk_data(problem, np)
         sphere_radii = fk_data['sphere_radii']
         n_joints = fk_data['n_joints']
-        _, get_sphere_positions = build_fk_functions(fk_data, np)
+        _, get_sphere_positions, _, _ = build_fk_functions(fk_data, np)
 
         safety_margin = self.safety_margin
 

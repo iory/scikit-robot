@@ -93,6 +93,9 @@ class TrajectoryProblem:
         self.fixed_start = True
         self.fixed_end = True
 
+        # Intermediate waypoint constraints: list of (index, angles)
+        self.waypoint_constraints = []
+
     @property
     def fk_params(self):
         """Get FK parameters (lazily computed)."""
@@ -331,6 +334,69 @@ class TrajectoryProblem:
             weight=1.0,  # Weights are in params
         ))
 
+    def add_joint_velocity_limit(self, scale=1.0):
+        """Add joint velocity limit constraint.
+
+        Constrains ``|q[t+1] - q[t]| / dt <= max_joint_velocity * scale``
+        for every consecutive pair of waypoints and every joint.
+
+        Parameters
+        ----------
+        scale : float
+            Fraction of maximum joint velocity to allow (0, 1].
+            For example, 0.8 uses 80 % of each joint's velocity limit.
+        """
+        max_velocities = np.array([
+            j.max_joint_velocity for j in self.joint_list
+        ])
+        self.residuals.append(ResidualSpec(
+            name='joint_velocity_limit',
+            residual_fn='joint_velocity_limit',
+            params={
+                'max_velocities': max_velocities * scale,
+                'dt': self.dt,
+            },
+            kind='geq',
+            weight=1.0,
+        ))
+
+    def add_cartesian_path_cost(
+        self,
+        target_positions,
+        target_rotations=None,
+        weight=10.0,
+        rotation_weight=1.0,
+    ):
+        """Add end-effector pose tracking cost for Cartesian path.
+
+        Penalizes deviation of the end-effector pose from the target
+        poses at each trajectory waypoint, encouraging the end-effector
+        to follow a straight line in Cartesian space with smooth rotation.
+
+        Parameters
+        ----------
+        target_positions : ndarray
+            Target EE positions (n_waypoints, 3).
+        target_rotations : ndarray, optional
+            Target EE rotation matrices (n_waypoints, 3, 3).
+            If None, only position is tracked.
+        weight : float
+            Position tracking weight.
+        rotation_weight : float
+            Rotation tracking weight relative to position weight.
+        """
+        self.residuals.append(ResidualSpec(
+            name='cartesian_path',
+            residual_fn='cartesian_path',
+            params={
+                'target_positions': target_positions,
+                'target_rotations': target_rotations,
+                'rotation_weight': rotation_weight,
+            },
+            kind='soft',
+            weight=weight,
+        ))
+
     def set_fixed_endpoints(self, start=True, end=True):
         """Set whether to fix start and end waypoints.
 
@@ -343,6 +409,20 @@ class TrajectoryProblem:
         """
         self.fixed_start = start
         self.fixed_end = end
+
+    def add_waypoint_constraint(self, waypoint_index, joint_angles):
+        """Pin a specific trajectory waypoint to given joint angles.
+
+        Parameters
+        ----------
+        waypoint_index : int
+            Index in the trajectory to pin.
+        joint_angles : array-like
+            Joint angles to enforce at this index.
+        """
+        self.waypoint_constraints.append(
+            (waypoint_index, np.array(joint_angles))
+        )
 
     def to_dict(self):
         """Export problem to dictionary for serialization."""
