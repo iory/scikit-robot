@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import Dict
 from typing import Optional
 from typing import Union
@@ -61,7 +63,22 @@ class ViserViewer:
         # robot_id -> {group_name -> solver}
         self._batch_ik_solvers: Dict[int, Dict[str, object]] = {}
         self._batch_ik_samples = None
-        self._jax_warning_shown = False
+
+        # JAX availability check (done once at init)
+        self._jax_available = False
+        try:
+            from skrobot.backend import list_backends
+            self._jax_available = 'jax' in list_backends()
+        except Exception:
+            pass
+
+        # Throttling for IK callbacks
+        self._last_ik_time: Dict[tuple, float] = {}  # (robot_id, group_name) -> timestamp
+        self._ik_throttle_interval = 0.05  # 50ms throttle
+
+        # Thread safety for IK solver creation
+        self._ik_lock = threading.Lock()
+        self._solver_creating_keys: set = set()
 
     @property
     def is_active(self) -> bool:
@@ -353,104 +370,167 @@ class ViserViewer:
                 pitch_input.on_update(numeric_callback)
                 yaw_input.on_update(numeric_callback)
 
-    def _solve_ik(self, robot_id: int, group_name: str):
-        """Solve IK for a group when its target is moved."""
-        if self._updating_from_ik:
-            return
+    def _get_ik_target(self, robot_id, group_name):
+        """Get IK target info dict, or None if not found.
 
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+
+        Returns
+        -------
+        dict or None
+            Target info dict if found, None otherwise.
+        """
         robot_targets = self._ik_targets.get(robot_id)
         if robot_targets is None:
-            return
+            return None
+        return robot_targets.get(group_name)
 
-        target = robot_targets.get(group_name)
+    def _is_throttled(self, robot_id, group_name):
+        """Return True if this IK call should be skipped (throttled).
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+
+        Returns
+        -------
+        bool
+            True if the call should be throttled.
+        """
+        now = time.time()
+        key = (robot_id, group_name)
+        if now - self._last_ik_time.get(key, 0) < self._ik_throttle_interval:
+            return True
+        self._last_ik_time[key] = now
+        return False
+
+    def _update_pose_inputs(self, target, pos, rot):
+        """Update numeric pos/rot input fields for a target.
+
+        Parameters
+        ----------
+        target : dict
+            IK target info dict.
+        pos : numpy.ndarray
+            Position (3,).
+        rot : numpy.ndarray
+            Rotation matrix (3, 3).
+        """
+        pos_inputs = target['pos_inputs']
+        for i in range(3):
+            pos_inputs[i].value = float(pos[i])
+        roll, pitch, yaw = matrix2rpy(rot)
+        rot_inputs = target['rot_inputs']
+        rot_inputs[0].value = float(np.rad2deg(roll))
+        rot_inputs[1].value = float(np.rad2deg(pitch))
+        rot_inputs[2].value = float(np.rad2deg(yaw))
+
+    def _run_ik(self, robot_id, group_name, target_pos, target_rot):
+        """Core IK solving: regular IK with batch IK fallback.
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+        target_pos : numpy.ndarray
+            Target position (3,).
+        target_rot : numpy.ndarray
+            Target rotation matrix (3, 3).
+
+        Returns
+        -------
+        numpy.ndarray, bool, or None
+            Joint angles if successful, False or None otherwise.
+        """
+        target = self._get_ik_target(robot_id, group_name)
         if target is None:
-            return
-
+            return None
         robot_model = target['robot_model']
-        control = target['control']
-        target_pos = np.array(control.position)
-        target_rot = vtf.SO3(control.wxyz).as_matrix()
         target_coords = Coordinates(pos=target_pos, rot=target_rot)
-
         constrain_rot = self._ik_constrain_rotation.value
 
         result = robot_model.inverse_kinematics(
             target_coords,
             link_list=target['link_list'],
             move_target=target['end_coords'],
-            rotation_axis=constrain_rot,
+            rotation_mask=constrain_rot,
             stop=30,
             revert_if_fail=True,
         )
+        if (result is False or result is None) and self._jax_available:
+            result = self._solve_ik_batch(
+                robot_id, group_name, target_pos, target_rot)
+        return result
 
-        # If regular IK fails, try batch IK
-        if result is False or result is None:
-            result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
-            if result is not False and result is not None:
-                pass
+    def _solve_ik(self, robot_id: int, group_name: str):
+        """Solve IK for a group when its transform control is moved."""
+        if self._updating_from_ik:
+            return
+        if self._is_throttled(robot_id, group_name):
+            return
+
+        target = self._get_ik_target(robot_id, group_name)
+        if target is None:
+            return
+
+        control = target['control']
+        target_pos = np.array(control.position)
+        target_rot = vtf.SO3(control.wxyz).as_matrix()
+
+        result = self._run_ik(robot_id, group_name, target_pos, target_rot)
 
         if result is not False and result is not None:
             self.redraw()
             self._sync_joint_sliders(robot_id)
-            # Always exclude the current target to prevent it from moving
-            # when IK doesn't reach the exact target position
             self._sync_ik_targets(robot_id, exclude=group_name)
-            # Sync numeric inputs with the target position
             self._sync_numeric_inputs(robot_id, group_name)
         else:
-            # IK failed: force update all link coordinates and redraw
-            # This ensures cached worldcoords are recomputed after revert
-            for link in robot_model.link_list:
+            # IK failed: refresh cached worldcoords after revert_if_fail,
+            # and update mesh handles only.  Do NOT call redraw() here
+            # because it would _sync_ik_targets without exclude, which
+            # snaps the user's dragged control back to the current EE pose.
+            for link in target['robot_model'].link_list:
                 link.update(force=True)
-            self.redraw()
+            for link_id, handle in self._linkid_to_handle.items():
+                link = self._linkid_to_link[link_id]
+                handle.position = link.worldpos()
+                handle.wxyz = matrix2quaternion(link.worldrot())
 
     def _solve_ik_from_numeric(self, robot_id: int, group_name: str):
         """Solve IK when numeric input fields are changed."""
         if self._updating_from_ik:
             return
-
-        robot_targets = self._ik_targets.get(robot_id)
-        if robot_targets is None:
+        if self._is_throttled(robot_id, group_name):
             return
 
-        target = robot_targets.get(group_name)
+        target = self._get_ik_target(robot_id, group_name)
         if target is None:
             return
 
-        robot_model = target['robot_model']
-
-        # Get position from numeric inputs
+        # Build target from numeric inputs
         pos_inputs = target['pos_inputs']
         target_pos = np.array([
             pos_inputs[0].value,
             pos_inputs[1].value,
-            pos_inputs[2].value
+            pos_inputs[2].value,
         ])
-
-        # Get rotation from numeric inputs (degrees to radians)
         rot_inputs = target['rot_inputs']
         roll = np.deg2rad(rot_inputs[0].value)
         pitch = np.deg2rad(rot_inputs[1].value)
         yaw = np.deg2rad(rot_inputs[2].value)
-
-        # Convert RPY to rotation matrix
         target_rot = rotation_matrix_from_rpy([yaw, pitch, roll])
-        target_coords = Coordinates(pos=target_pos, rot=target_rot)
 
-        constrain_rot = self._ik_constrain_rotation.value
-
-        result = robot_model.inverse_kinematics(
-            target_coords,
-            link_list=target['link_list'],
-            move_target=target['end_coords'],
-            rotation_axis=constrain_rot,
-            stop=30,
-            revert_if_fail=True,
-        )
-
-        # If regular IK fails, try batch IK
-        if result is False or result is None:
-            result = self._solve_ik_batch(robot_id, group_name, target_pos, target_rot)
+        result = self._run_ik(robot_id, group_name, target_pos, target_rot)
 
         if result is not False and result is not None:
             self.redraw()
@@ -463,55 +543,30 @@ class ViserViewer:
                 control.wxyz = matrix2quaternion(target_rot)
             finally:
                 self._updating_from_ik = False
-            # Sync other IK targets
             self._sync_ik_targets(robot_id, exclude=group_name)
         else:
-            # IK failed: revert numeric inputs and control to current pose
             self._revert_ik_target(robot_id, group_name)
 
     def _revert_ik_target(self, robot_id: int, group_name: str):
         """Revert IK target to current end-effector pose when IK fails."""
-        robot_targets = self._ik_targets.get(robot_id)
-        if robot_targets is None:
-            return
-
-        target = robot_targets.get(group_name)
+        target = self._get_ik_target(robot_id, group_name)
         if target is None:
             return
 
-        # Get current end-effector pose
         pos = target['end_coords'].worldpos()
         rot = target['end_coords'].worldrot()
 
         self._updating_from_ik = True
         try:
-            # Revert transform control
             target['control'].position = pos
             target['control'].wxyz = matrix2quaternion(rot)
-
-            # Revert numeric inputs
-            if 'pos_inputs' in target:
-                pos_inputs = target['pos_inputs']
-                pos_inputs[0].value = float(pos[0])
-                pos_inputs[1].value = float(pos[1])
-                pos_inputs[2].value = float(pos[2])
-
-            if 'rot_inputs' in target:
-                roll, pitch, yaw = matrix2rpy(rot)
-                rot_inputs = target['rot_inputs']
-                rot_inputs[0].value = float(np.rad2deg(roll))
-                rot_inputs[1].value = float(np.rad2deg(pitch))
-                rot_inputs[2].value = float(np.rad2deg(yaw))
+            self._update_pose_inputs(target, pos, rot)
         finally:
             self._updating_from_ik = False
 
     def _sync_numeric_inputs(self, robot_id: int, group_name: str):
         """Sync numeric input fields with the transform control position."""
-        robot_targets = self._ik_targets.get(robot_id)
-        if robot_targets is None:
-            return
-
-        target = robot_targets.get(group_name)
+        target = self._get_ik_target(robot_id, group_name)
         if target is None:
             return
 
@@ -519,25 +574,125 @@ class ViserViewer:
         pos = np.array(control.position)
         rot = vtf.SO3(control.wxyz).as_matrix()
 
-        # Update position inputs
         self._updating_from_ik = True
         try:
-            pos_inputs = target['pos_inputs']
-            pos_inputs[0].value = float(pos[0])
-            pos_inputs[1].value = float(pos[1])
-            pos_inputs[2].value = float(pos[2])
-
-            # Convert rotation matrix to RPY
-            # matrix2rpy returns [roll, pitch, yaw]
-            roll, pitch, yaw = matrix2rpy(rot)
-
-            # Update rotation inputs (radians to degrees)
-            rot_inputs = target['rot_inputs']
-            rot_inputs[0].value = float(np.rad2deg(roll))
-            rot_inputs[1].value = float(np.rad2deg(pitch))
-            rot_inputs[2].value = float(np.rad2deg(yaw))
+            self._update_pose_inputs(target, pos, rot)
         finally:
             self._updating_from_ik = False
+
+    def _get_or_create_solver(self, robot_id, group_name,
+                              target_pos, target_rot, current_angles):
+        """Get an existing batch IK solver, or start async creation.
+
+        If the solver does not exist yet, a background thread is spawned to
+        create and JIT-warm it.  The caller receives ``None`` immediately so
+        that the Viser callback thread is never blocked for seconds (which
+        would cause race conditions with concurrent ``inverse_kinematics``
+        calls that use ``revert_if_fail``).
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+        target_pos : numpy.ndarray
+            Target position (3,) used for JIT warmup.
+        target_rot : numpy.ndarray
+            Target rotation matrix (3, 3) used for JIT warmup.
+        current_angles : numpy.ndarray
+            Current joint angles used for JIT warmup.
+
+        Returns
+        -------
+        callable or None
+            The batch IK solver if already available, None otherwise.
+        """
+        # Fast path: solver already exists (no lock needed)
+        robot_solvers = self._batch_ik_solvers.get(robot_id, {})
+        if group_name in robot_solvers:
+            return robot_solvers[group_name]
+
+        solver_key = (robot_id, group_name)
+
+        with self._ik_lock:
+            # Double-check after acquiring lock
+            robot_solvers = self._batch_ik_solvers.get(robot_id, {})
+            if group_name in robot_solvers:
+                return robot_solvers[group_name]
+            if solver_key in self._solver_creating_keys:
+                # Background thread is already creating this solver
+                return None
+            self._solver_creating_keys.add(solver_key)
+
+        # Capture immutable data for the background thread
+        target = self._get_ik_target(robot_id, group_name)
+        if target is None:
+            with self._ik_lock:
+                self._solver_creating_keys.discard(solver_key)
+            return None
+
+        warmup_pos = target_pos.copy()
+        warmup_rot = target_rot.copy()
+        warmup_angles = current_angles.copy()
+        robot_model = target['robot_model']
+        link_list = target['link_list']
+        end_coords = target['end_coords']
+
+        def _create_solver_background():
+            try:
+                from skrobot.kinematics.differentiable import create_batch_ik_solver
+                print(f"[Batch IK] Creating JAX solver for {group_name}...")
+                t0 = time.time()
+                solver = create_batch_ik_solver(
+                    robot_model, link_list, end_coords,
+                    backend_name='jax',
+                )
+                t1 = time.time()
+                print(f"[Batch IK] Solver created "
+                      f"({(t1 - t0) * 1000:.0f}ms), warming up JIT...")
+
+                dummy_pos = warmup_pos.reshape(1, 3)
+                dummy_rot = warmup_rot.reshape(1, 3, 3)
+                dummy_angles = warmup_angles.reshape(1, -1)
+                warmup_attempts = 50
+                warmup_kwargs = dict(
+                    max_iterations=20, damping=0.01,
+                    pos_threshold=0.01,
+                    attempts_per_pose=warmup_attempts,
+                )
+
+                t2 = time.time()
+                solver(dummy_pos, dummy_rot,
+                       initial_angles=dummy_angles,
+                       rotation_mask=True, **warmup_kwargs)
+                t3 = time.time()
+                print(f"[Batch IK] JIT warmup 1/2 "
+                      f"({(t3 - t2) * 1000:.0f}ms)")
+
+                solver(dummy_pos, dummy_rot,
+                       initial_angles=dummy_angles,
+                       rotation_mask=False, **warmup_kwargs)
+                t4 = time.time()
+                print(f"[Batch IK] JIT warmup 2/2 "
+                      f"({(t4 - t3) * 1000:.0f}ms)")
+                print(f"[Batch IK] Solver ready for {group_name} "
+                      f"(total: {(t4 - t0) * 1000:.0f}ms)")
+
+                with self._ik_lock:
+                    if robot_id not in self._batch_ik_solvers:
+                        self._batch_ik_solvers[robot_id] = {}
+                    self._batch_ik_solvers[robot_id][group_name] = solver
+                    self._solver_creating_keys.discard(solver_key)
+            except Exception as e:
+                print(f"[Batch IK] Failed to create solver: {e}")
+                with self._ik_lock:
+                    self._solver_creating_keys.discard(solver_key)
+
+        thread = threading.Thread(
+            target=_create_solver_background, daemon=True)
+        thread.start()
+        return None
 
     def _solve_ik_batch(self, robot_id: int, group_name: str,
                         target_pos: np.ndarray, target_rot: np.ndarray):
@@ -549,113 +704,66 @@ class ViserViewer:
             Robot model ID.
         group_name : str
             Name of the IK group.
-        target_pos : np.ndarray
+        target_pos : numpy.ndarray
             Target position (3,).
-        target_rot : np.ndarray
+        target_rot : numpy.ndarray
             Target rotation matrix (3, 3).
 
         Returns
         -------
-        np.ndarray or False
+        numpy.ndarray or False
             Joint angles if successful, False otherwise.
         """
         if self._batch_ik_samples is None:
             return False
 
-        robot_targets = self._ik_targets.get(robot_id)
-        if robot_targets is None:
-            return False
-
-        target = robot_targets.get(group_name)
+        target = self._get_ik_target(robot_id, group_name)
         if target is None:
             return False
 
-        robot_model = target['robot_model']
         link_list = target['link_list']
-        move_target = target['end_coords']
+        current_angles = np.array(
+            [link.joint.joint_angle() for link in link_list])
 
-        # Get or create batch IK solver for this group
-        robot_solvers = self._batch_ik_solvers.get(robot_id, {})
-        if group_name not in robot_solvers:
-            try:
-                from skrobot.backend import list_backends
-                if 'jax' not in list_backends():
-                    if not self._jax_warning_shown:
-                        print("[Batch IK] JAX not available. "
-                              "Install with: pip install jax jaxlib")
-                        self._jax_warning_shown = True
-                    return False
-                from skrobot.kinematics.differentiable import create_batch_ik_solver
-                solver = create_batch_ik_solver(
-                    robot_model, link_list, move_target,
-                    backend_name='jax'
-                )
-                self._batch_ik_solvers[robot_id][group_name] = solver
-            except Exception:
-                return False
-        else:
-            solver = robot_solvers[group_name]
+        solver = self._get_or_create_solver(
+            robot_id, group_name, target_pos, target_rot, current_angles)
+        if solver is None:
+            return False
 
-        # Get batch size from slider
-        batch_size = int(self._batch_ik_samples.value)
+        attempts = int(self._batch_ik_samples.value)
+        rotation_mask = bool(self._ik_constrain_rotation.value)
 
-        # Generate random initial configurations
-        lower = np.array(solver.joint_limits_lower)
-        upper = np.array(solver.joint_limits_upper)
-        n_joints = solver.n_joints
-
-        # Use current joint angles as one of the initial guesses
-        current_angles = np.array([link.joint.joint_angle() for link in link_list])
-        random_init = np.random.uniform(lower, upper, size=(batch_size - 1, n_joints))
-        initial_angles = np.vstack([current_angles.reshape(1, -1), random_init])
-
-        # Prepare target arrays (same target for all batch)
-        target_positions = np.tile(target_pos, (batch_size, 1))
-        target_rotations = np.tile(target_rot, (batch_size, 1, 1))
-
-        # Rotation weight based on constraint setting
-        constrain_rot = self._ik_constrain_rotation.value
-        rot_weight = 0.1 if constrain_rot else 0.0
-
-        # Solve batch IK
         try:
+            t0 = time.time()
             solutions, success_flags, errors = solver(
-                target_positions,
-                target_rotations,
-                initial_angles=initial_angles,
-                max_iterations=100,
-                learning_rate=0.1,
-                pos_weight=1.0,
-                rot_weight=rot_weight,
+                target_pos.reshape(1, 3),
+                target_rot.reshape(1, 3, 3),
+                initial_angles=current_angles.reshape(1, -1),
+                max_iterations=20,
+                damping=0.01,
+                rotation_mask=rotation_mask,
                 pos_threshold=0.01,
+                attempts_per_pose=attempts,
+                use_current_angles=True,
+                select_closest_to_initial=True,
             )
+            t1 = time.time()
+            solve_ms = (t1 - t0) * 1000
+            if solve_ms > 5:
+                print(
+                    f"[Batch IK] Solve: {solve_ms:.1f}ms, "
+                    f"attempts={attempts}, rot_mask={rotation_mask}, "
+                    f"err={float(np.asarray(errors)[0]):.4f}")
 
-            # Convert JAX arrays to numpy if needed
-            success_flags = np.asarray(success_flags)
-            errors = np.asarray(errors)
-            solutions = np.asarray(solutions)
+            best_solution = np.asarray(solutions)[0]
+            success = bool(np.asarray(success_flags)[0])
+            error = float(np.asarray(errors)[0])
 
-            min_error = np.min(errors)
-            best_idx = np.argmin(errors)
-
-            # Find the best successful solution
-            if np.any(success_flags):
-                successful_indices = np.where(success_flags)[0]
-                best_idx = successful_indices[np.argmin(errors[successful_indices])]
-                best_solution = solutions[best_idx]
-
-                # Apply the solution to the robot
+            if success or error < 0.05:
                 for i, link in enumerate(link_list):
                     link.joint.joint_angle(float(best_solution[i]))
-
                 return best_solution
-            else:
-                # Even if no "success", use the best solution if error is reasonable
-                if min_error < 0.02:  # 2cm threshold for fallback
-                    best_solution = solutions[best_idx]
-                    for i, link in enumerate(link_list):
-                        link.joint.joint_angle(float(best_solution[i]))
-                    return best_solution
+
         except Exception as e:
             print(f"[Batch IK] Exception: {e}")
 
@@ -693,21 +801,7 @@ class ViserViewer:
                 rot = target['end_coords'].worldrot()
                 target['control'].position = pos
                 target['control'].wxyz = matrix2quaternion(rot)
-
-                # Update numeric inputs if they exist
-                if 'pos_inputs' in target:
-                    pos_inputs = target['pos_inputs']
-                    pos_inputs[0].value = float(pos[0])
-                    pos_inputs[1].value = float(pos[1])
-                    pos_inputs[2].value = float(pos[2])
-
-                if 'rot_inputs' in target:
-                    # matrix2rpy returns [roll, pitch, yaw]
-                    roll, pitch, yaw = matrix2rpy(rot)
-                    rot_inputs = target['rot_inputs']
-                    rot_inputs[0].value = float(np.rad2deg(roll))
-                    rot_inputs[1].value = float(np.rad2deg(pitch))
-                    rot_inputs[2].value = float(np.rad2deg(yaw))
+                self._update_pose_inputs(target, pos, rot)
         finally:
             self._updating_from_ik = False
 
@@ -927,14 +1021,14 @@ class ViserViewer:
                     "Constrain Rotation", initial_value=True
                 )
                 self._batch_ik_samples = self._server.gui.add_slider(
-                    "Batch IK Samples",
-                    min=10,
-                    max=500,
+                    "Batch IK Attempts",
+                    min=1,
+                    max=2000,
                     step=10,
-                    initial_value=100,
+                    initial_value=50,
                 )
                 self._server.gui.add_markdown(
-                    "*Batch IK runs when regular IK fails*"
+                    "*JAX batch IK: faster interactive solving*"
                 )
         self._export_folder = self._server.gui.add_folder(
             "Export Joint Angles", expand_by_default=False
