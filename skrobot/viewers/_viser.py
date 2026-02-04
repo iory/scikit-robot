@@ -1816,6 +1816,7 @@ class ViserViewer:
 
         self._is_animating = True
         self._mp_play_btn.name = "Stop"
+        self._mp_progress.value = 0.0
         self._update_mp_status()
 
         self._animation_thread = threading.Thread(
