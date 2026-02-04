@@ -96,6 +96,9 @@ class TrajectoryProblem:
         # Intermediate waypoint constraints: list of (index, angles)
         self.waypoint_constraints = []
 
+        # End-effector waypoint costs: list of dicts
+        self.ee_waypoint_costs = []
+
     @property
     def fk_params(self):
         """Get FK parameters (lazily computed)."""
@@ -135,6 +138,32 @@ class TrajectoryProblem:
             name='acceleration',
             residual_fn='acceleration',
             params={'weight': weight, 'dt': self.dt},
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_posture_cost(self, nominal_angles, weight=0.1):
+        """Add posture regularization cost.
+
+        Penalizes deviation from a nominal set of joint angles.
+        This encourages the robot to stay close to a comfortable
+        pose, avoiding unnecessary large joint movements and
+        producing more natural-looking trajectories.
+
+        Parameters
+        ----------
+        nominal_angles : array-like
+            Target nominal joint angles (n_joints,).
+        weight : float
+            Cost weight.
+        """
+        nominal_angles = np.array(nominal_angles)
+        self.residuals.append(ResidualSpec(
+            name='posture',
+            residual_fn='posture',
+            params={
+                'nominal_angles': nominal_angles,
+            },
             kind='soft',
             weight=weight,
         ))
@@ -423,6 +452,42 @@ class TrajectoryProblem:
         self.waypoint_constraints.append(
             (waypoint_index, np.array(joint_angles))
         )
+
+    def add_ee_waypoint_cost(
+        self,
+        waypoint_index,
+        target_position,
+        target_rotation,
+        position_weight=100.0,
+        rotation_weight=10.0,
+    ):
+        """Constrain end-effector pose at a specific trajectory waypoint.
+
+        Unlike ``add_waypoint_constraint`` which fixes all joint angles,
+        this only constrains the end-effector pose, leaving the optimizer
+        free to choose joint configurations. Combined with posture
+        regularization, this produces more natural robot motions.
+
+        Parameters
+        ----------
+        waypoint_index : int
+            Index in the trajectory to constrain.
+        target_position : array-like
+            Target EE position (3,).
+        target_rotation : array-like
+            Target EE rotation matrix (3, 3).
+        position_weight : float
+            Position tracking weight.
+        rotation_weight : float
+            Rotation tracking weight.
+        """
+        self.ee_waypoint_costs.append({
+            'waypoint_index': waypoint_index,
+            'target_position': np.array(target_position),
+            'target_rotation': np.array(target_rotation),
+            'position_weight': position_weight,
+            'rotation_weight': rotation_weight,
+        })
 
     def to_dict(self):
         """Export problem to dictionary for serialization."""

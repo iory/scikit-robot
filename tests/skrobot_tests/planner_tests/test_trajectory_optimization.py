@@ -193,6 +193,31 @@ class TestTrajectoryProblem(unittest.TestCase):
         testing.assert_almost_equal(
             problem.waypoint_constraints[0][1], angles)
 
+    def test_add_posture_cost(self):
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=3)
+        nominal = np.zeros(self.n_joints)
+        problem.add_posture_cost(nominal, weight=0.5)
+        self.assertEqual(len(problem.residuals), 1)
+        self.assertEqual(problem.residuals[0].name, 'posture')
+        self.assertEqual(problem.residuals[0].weight, 0.5)
+        testing.assert_almost_equal(
+            problem.residuals[0].params['nominal_angles'], nominal)
+
+    def test_add_ee_waypoint_cost(self):
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=5,
+            move_target=self.robot.rarm_end_coords)
+        target_pos = np.array([0.5, 0.0, 0.5])
+        target_rot = np.eye(3)
+        problem.add_ee_waypoint_cost(
+            2, target_pos, target_rot,
+            position_weight=100.0, rotation_weight=10.0)
+        self.assertEqual(len(problem.ee_waypoint_costs), 1)
+        self.assertEqual(problem.ee_waypoint_costs[0]['waypoint_index'], 2)
+        testing.assert_almost_equal(
+            problem.ee_waypoint_costs[0]['target_position'], target_pos)
+
     def test_add_cartesian_path_cost(self):
         problem = TrajectoryProblem(
             self.robot, self.link_list, n_waypoints=3,
@@ -503,6 +528,74 @@ class TestJaxlsSolver(unittest.TestCase):
 
         testing.assert_almost_equal(
             result.trajectory[1], mid_angles, decimal=3)
+
+    def test_posture_cost(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=5)
+        problem.add_smoothness_cost(weight=0.1)
+
+        # Set nominal angles to zeros
+        nominal = np.zeros(self.n_joints)
+        problem.add_posture_cost(nominal, weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.3
+        initial_traj = interpolate_trajectory(start, end, 5)
+        # Perturb middle waypoints away from nominal
+        initial_traj[1] += 0.5
+        initial_traj[2] += 0.5
+        initial_traj[3] += 0.5
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # After optimization, middle waypoints should be closer to nominal
+        # than the perturbed initial trajectory
+        deviation_before = np.sum(
+            (initial_traj[1:-1] - nominal) ** 2)
+        deviation_after = np.sum(
+            (result.trajectory[1:-1] - nominal) ** 2)
+        self.assertLess(deviation_after, deviation_before)
+
+    def test_ee_waypoint_cost(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        move_target = self.robot.rarm_end_coords
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=5,
+            move_target=move_target)
+        problem.add_smoothness_cost(weight=0.1)
+
+        # Compute EE pose at a target configuration
+        target_angles = np.ones(self.n_joints) * 0.3
+        for link, angle in zip(self.link_list, target_angles):
+            link.joint.joint_angle(angle)
+        target_pos = move_target.worldpos().copy()
+        target_rot = move_target.worldrot().copy()
+
+        # Add EE waypoint cost at middle waypoint
+        problem.add_ee_waypoint_cost(
+            2, target_pos, target_rot,
+            position_weight=100.0, rotation_weight=10.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 5)
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # Verify EE pose at waypoint 2 is close to target
+        for link, angle in zip(
+            self.link_list, result.trajectory[2]
+        ):
+            link.joint.joint_angle(angle)
+        result_pos = move_target.worldpos()
+
+        pos_err = np.linalg.norm(result_pos - target_pos)
+        self.assertLess(pos_err, 0.05)
 
     def test_caching(self):
         from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver

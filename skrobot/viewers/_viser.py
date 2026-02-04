@@ -1105,6 +1105,24 @@ class ViserViewer:
                     "Cartesian Path Weight",
                     initial_value=1000.0, step=100.0,
                 )
+                self._mp_posture_reg = self._server.gui.add_checkbox(
+                    "Posture Regularization", initial_value=False,
+                )
+                self._mp_posture_weight = self._server.gui.add_number(
+                    "Posture Weight",
+                    initial_value=0.1, step=0.01,
+                )
+                self._mp_task_space_wp = self._server.gui.add_checkbox(
+                    "Task-Space Waypoints", initial_value=False,
+                )
+                self._mp_ee_wp_pos_weight = self._server.gui.add_number(
+                    "EE Waypoint Pos Weight",
+                    initial_value=100.0, step=10.0,
+                )
+                self._mp_ee_wp_rot_weight = self._server.gui.add_number(
+                    "EE Waypoint Rot Weight",
+                    initial_value=10.0, step=1.0,
+                )
 
             # Plan button
             plan_btn = self._server.gui.add_button("Plan Trajectory")
@@ -1489,6 +1507,11 @@ class ViserViewer:
             solver_type = self._mp_solver_dropdown.value
             use_self_collision = self._mp_self_collision.value
             use_cartesian = self._mp_cartesian_interp.value
+            use_posture_reg = self._mp_posture_reg.value
+            posture_w = float(self._mp_posture_weight.value)
+            use_task_space_wp = self._mp_task_space_wp.value
+            ee_wp_pos_w = float(self._mp_ee_wp_pos_weight.value)
+            ee_wp_rot_w = float(self._mp_ee_wp_rot_weight.value)
 
             # Extract group joint angles for each waypoint
             waypoint_angles = []
@@ -1505,6 +1528,68 @@ class ViserViewer:
                             [link.joint.joint_angle() for link in link_list]
                         )
                         waypoint_angles.append(angles)
+
+            # When task-space waypoints are enabled, re-solve IK for
+            # non-start waypoints using the nominal pose (start angles)
+            # as seed so the optimizer begins from a posture-friendly
+            # configuration.
+            ee_wp_targets = {}  # wp_index -> {pos, rot}
+            if use_task_space_wp and move_target is not None:
+                from skrobot.coordinates import Coordinates
+
+                nominal_angles = waypoint_angles[0]
+
+                # Compute EE poses for all non-start waypoints
+                target_coords_list = []
+                wp_indices = list(range(1, len(waypoint_angles)))
+                with self._preserved_angle_vector(
+                    robot_model, update_links=False
+                ):
+                    for wp_i in wp_indices:
+                        for link, angle in zip(
+                            link_list, waypoint_angles[wp_i]
+                        ):
+                            link.joint.joint_angle(angle)
+                        ee_pos = move_target.worldpos().copy()
+                        ee_rot = move_target.worldrot().copy()
+                        ee_wp_targets[wp_i] = {
+                            'pos': ee_pos, 'rot': ee_rot,
+                        }
+                        target_coords_list.append(
+                            Coordinates(pos=ee_pos, rot=ee_rot))
+
+                # Build initial angles: full robot angle_vector with
+                # group joints set to nominal pose
+                joint_indices = [
+                    robot_model.joint_list.index(link.joint)
+                    for link in link_list
+                ]
+                nominal_av = robot_model.angle_vector().copy()
+                for idx, val in zip(joint_indices, nominal_angles):
+                    nominal_av[idx] = val
+                init_angles_batch = np.tile(
+                    nominal_av, (len(target_coords_list), 1))
+
+                try:
+                    solutions, success_flags, _ = \
+                        robot_model.batch_inverse_kinematics(
+                            target_coords_list,
+                            move_target=move_target,
+                            link_list=link_list,
+                            initial_angles=init_angles_batch,
+                            stop=50,
+                            thre=0.005,
+                            rthre=np.deg2rad(5.0),
+                            attempts_per_pose=10,
+                        )
+                    for i, (sol, ok) in enumerate(
+                        zip(solutions, success_flags)
+                    ):
+                        wp_i = wp_indices[i]
+                        if ok:
+                            waypoint_angles[wp_i] = sol[joint_indices]
+                except Exception as e:
+                    print(f"[Motion Planning] Batch IK failed: {e}")
 
             # Detect world obstacles
             world_obstacles = self._detect_world_obstacles()
@@ -1551,8 +1636,25 @@ class ViserViewer:
                 move_target=move_target,
             )
 
+            # When task-space waypoints are enabled, the end waypoint
+            # is constrained by EE pose only (not joint angles).
+            if use_task_space_wp and move_target is not None:
+                problem.set_fixed_endpoints(start=True, end=False)
+                n_wps = len(waypoint_angles)
+                end_target = ee_wp_targets[n_wps - 1]
+                problem.add_ee_waypoint_cost(
+                    total_points - 1,
+                    end_target['pos'], end_target['rot'],
+                    position_weight=ee_wp_pos_w,
+                    rotation_weight=ee_wp_rot_w,
+                )
+
             problem.add_smoothness_cost(weight=smoothness_w)
             problem.add_acceleration_cost(weight=smoothness_w * 0.1)
+
+            if use_posture_reg and posture_w > 0:
+                nominal_angles = waypoint_angles[0]
+                problem.add_posture_cost(nominal_angles, weight=posture_w)
 
             if cartesian_target_positions is not None:
                 cartesian_w = float(self._mp_cartesian_weight.value)
@@ -1592,12 +1694,22 @@ class ViserViewer:
                     activation_distance=0.02,
                 )
 
-            # Pin intermediate waypoints as equality constraints
+            # Pin intermediate waypoints
             for wp_i in range(1, n_segments):
                 traj_idx = (points_per_seg - 1) * wp_i
-                problem.add_waypoint_constraint(
-                    traj_idx, waypoint_angles[wp_i]
-                )
+                if use_task_space_wp and wp_i in ee_wp_targets:
+                    # Task-space: constrain only EE pose, not joint angles
+                    target = ee_wp_targets[wp_i]
+                    problem.add_ee_waypoint_cost(
+                        traj_idx, target['pos'], target['rot'],
+                        position_weight=ee_wp_pos_w,
+                        rotation_weight=ee_wp_rot_w,
+                    )
+                else:
+                    # Joint-space: fix all joint angles (default)
+                    problem.add_waypoint_constraint(
+                        traj_idx, waypoint_angles[wp_i]
+                    )
 
             if (self._cached_mp_solver is None
                     or self._cached_mp_solver_type != solver_type):
