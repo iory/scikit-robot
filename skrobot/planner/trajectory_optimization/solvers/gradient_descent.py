@@ -250,13 +250,15 @@ class GradientDescentSolver(BaseSolver):
         has_cartesian = any(
             s.name == 'cartesian_path' for s in problem.residuals
         )
+        has_ee_waypoints = len(problem.ee_waypoint_costs) > 0
 
         get_sphere_positions = None
         get_ee_pose = None
         sphere_radii = None
 
-        # Build FK data if needed for collision or cartesian path
-        if has_collision or has_cartesian:
+        # Build FK data if needed for collision, cartesian path,
+        # or EE waypoint costs
+        if has_collision or has_cartesian or has_ee_waypoints:
             fk_data = prepare_fk_data(problem, jnp)
             if has_collision:
                 sphere_radii = fk_data['sphere_radii']
@@ -296,6 +298,11 @@ class GradientDescentSolver(BaseSolver):
                            + trajectory[:-2]) / (dt ** 2)
                     jerk = (acc[1:] - acc[:-1]) / dt
                     total_cost = total_cost + weight * jnp.sum(jerk ** 2)
+
+                elif name == 'posture':
+                    nominal = jnp.array(params['nominal_angles'])
+                    diff = trajectory - nominal[None, :]
+                    total_cost = total_cost + weight * jnp.sum(diff ** 2)
 
                 elif name == 'world_collision' and has_collision:
                     obstacles = params['obstacles']
@@ -387,6 +394,22 @@ class GradientDescentSolver(BaseSolver):
                     violation = jnp.maximum(jnp.abs(dq) - v_limit, 0.0)
                     total_cost = (total_cost
                                   + weight * jnp.sum(violation ** 2))
+
+            # EE waypoint costs (not part of residuals loop)
+            if has_ee_waypoints:
+                for c in problem.ee_waypoint_costs:
+                    wp_idx = c['waypoint_index']
+                    t_pos = jnp.array(c['target_position'])
+                    t_rot = jnp.array(c['target_rotation'])
+                    pw = c['position_weight']
+                    rw = c['rotation_weight']
+                    angles = trajectory[wp_idx]
+                    ee_pos, ee_rot = get_ee_pose(angles)
+                    pos_err = jnp.sum((ee_pos - t_pos) ** 2)
+                    rot_err = rotation_error_vector(ee_rot, t_rot, jnp)
+                    total_cost = (total_cost
+                                  + pw * pos_err
+                                  + rw * jnp.sum(rot_err ** 2))
 
             return total_cost
 

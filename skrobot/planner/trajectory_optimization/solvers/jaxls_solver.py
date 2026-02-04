@@ -51,9 +51,12 @@ class JaxlsSolver(BaseSolver):
         self._cached_constraint_param_var = None
         self._cached_cartesian_pos_param_var = None
         self._cached_cartesian_rot_param_var = None
+        self._cached_ee_wp_pos_param_var = None
+        self._cached_ee_wp_rot_param_var = None
         self._cached_constraint_ids = None
         self._cached_has_cartesian = False
         self._cached_has_cart_rot = False
+        self._cached_has_ee_waypoints = False
         self._cache_key = None
 
     def _make_cache_key(self, problem):
@@ -88,6 +91,11 @@ class JaxlsSolver(BaseSolver):
             for r in problem.residuals
         )
 
+        ee_wp_key = tuple(
+            (c['waypoint_index'], c['position_weight'], c['rotation_weight'])
+            for c in problem.ee_waypoint_costs
+        )
+
         key = (
             problem.n_waypoints,
             problem.n_joints,
@@ -99,6 +107,7 @@ class JaxlsSolver(BaseSolver):
             tuple(problem.joint_limits_upper.tolist()),
             wp_constraint_indices,
             has_cart_rot,
+            ee_wp_key,
         )
         return key
 
@@ -144,9 +153,12 @@ class JaxlsSolver(BaseSolver):
             ConstraintParamVar = self._cached_constraint_param_var
             CartesianPosParamVar = self._cached_cartesian_pos_param_var
             CartesianRotParamVar = self._cached_cartesian_rot_param_var
+            EEWpPosParamVar = self._cached_ee_wp_pos_param_var
+            EEWpRotParamVar = self._cached_ee_wp_rot_param_var
             constraint_ids = self._cached_constraint_ids
             has_cartesian = self._cached_has_cartesian
             has_cart_rot = self._cached_has_cart_rot
+            has_ee_waypoints = self._cached_has_ee_waypoints
         else:
             default_cfg = jnp.zeros(n_joints)
             default_pos = jnp.zeros(3)
@@ -184,6 +196,22 @@ class JaxlsSolver(BaseSolver):
             ):
                 pass
 
+            class EEWpPosParamVar(
+                jaxls.Var[jnp.ndarray],
+                default_factory=lambda: default_pos,
+                retract_fn=lambda x, delta: x,
+                tangent_dim=0,
+            ):
+                pass
+
+            class EEWpRotParamVar(
+                jaxls.Var[jnp.ndarray],
+                default_factory=lambda: default_rot,
+                retract_fn=lambda x, delta: x,
+                tangent_dim=0,
+            ):
+                pass
+
             traj_vars = TrajectoryVar(jnp.arange(T))
 
             # Prepare FK data
@@ -194,6 +222,7 @@ class JaxlsSolver(BaseSolver):
 
             has_cartesian = False
             has_cart_rot = False
+            has_ee_waypoints = len(problem.ee_waypoint_costs) > 0
 
             for residual_spec in problem.residuals:
                 if residual_spec.name == 'smoothness':
@@ -212,6 +241,10 @@ class JaxlsSolver(BaseSolver):
                     costs.append(self._make_self_collision_cost(
                         problem, TrajectoryVar, fk_data, residual_spec
                     ))
+                elif residual_spec.name == 'posture':
+                    costs.append(self._make_posture_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
                 elif residual_spec.name == 'cartesian_path':
                     has_cartesian = True
                     has_cart_rot = (
@@ -227,6 +260,14 @@ class JaxlsSolver(BaseSolver):
                     costs.append(self._make_joint_velocity_limit(
                         problem, TrajectoryVar, residual_spec
                     ))
+
+            # --- EE waypoint costs ---
+            if has_ee_waypoints:
+                costs.append(self._make_ee_waypoint_costs(
+                    problem, TrajectoryVar,
+                    EEWpPosParamVar, EEWpRotParamVar,
+                    fk_data,
+                ))
 
             # --- Constraint targets as frozen ParamVars ---
             constraint_ids = {}
@@ -315,6 +356,14 @@ class JaxlsSolver(BaseSolver):
                     all_variables.append(
                         CartesianRotParamVar(jnp.arange(T))
                     )
+            if has_ee_waypoints:
+                n_ee_wps = len(problem.ee_waypoint_costs)
+                all_variables.append(
+                    EEWpPosParamVar(jnp.arange(n_ee_wps))
+                )
+                all_variables.append(
+                    EEWpRotParamVar(jnp.arange(n_ee_wps))
+                )
 
             ls_problem = jaxls.LeastSquaresProblem(
                 costs=costs,
@@ -326,9 +375,12 @@ class JaxlsSolver(BaseSolver):
             self._cached_constraint_param_var = ConstraintParamVar
             self._cached_cartesian_pos_param_var = CartesianPosParamVar
             self._cached_cartesian_rot_param_var = CartesianRotParamVar
+            self._cached_ee_wp_pos_param_var = EEWpPosParamVar
+            self._cached_ee_wp_rot_param_var = EEWpRotParamVar
             self._cached_constraint_ids = constraint_ids
             self._cached_has_cartesian = has_cartesian
             self._cached_has_cart_rot = has_cart_rot
+            self._cached_has_ee_waypoints = has_ee_waypoints
             self._cache_key = cache_key
 
         # --- Build init_vals with current dynamic values ---
@@ -351,6 +403,25 @@ class JaxlsSolver(BaseSolver):
             init_pairs.append(
                 ConstraintParamVar(jnp.arange(n_ct)).with_value(
                     jnp.array(ct_values)
+                )
+            )
+
+        # EE waypoint param values
+        if has_ee_waypoints:
+            ee_wps = problem.ee_waypoint_costs
+            n_ee_wps = len(ee_wps)
+            ee_pos_values = np.stack(
+                [c['target_position'] for c in ee_wps])
+            ee_rot_values = np.stack(
+                [c['target_rotation'].flatten() for c in ee_wps])
+            init_pairs.append(
+                EEWpPosParamVar(jnp.arange(n_ee_wps)).with_value(
+                    jnp.array(ee_pos_values)
+                )
+            )
+            init_pairs.append(
+                EEWpRotParamVar(jnp.arange(n_ee_wps)).with_value(
+                    jnp.array(ee_rot_values)
                 )
             )
 
@@ -430,6 +501,72 @@ class JaxlsSolver(BaseSolver):
             TrajectoryVar(jnp.arange(1, T - 1)),
             TrajectoryVar(jnp.arange(2, T)),
             TrajectoryVar(jnp.arange(0, T - 2)),
+        )
+
+    def _make_posture_cost(self, problem, TrajectoryVar, spec):
+        """Create posture regularization cost.
+
+        Penalizes deviation from nominal joint angles at each waypoint.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        nominal = jnp.array(spec.params['nominal_angles'])
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='posture')
+        def posture_cost(vals, var):
+            q = vals[var]
+            diff = q - nominal
+            return (weight * diff).flatten()
+
+        return posture_cost(TrajectoryVar(jnp.arange(T)))
+
+    def _make_ee_waypoint_costs(
+        self, problem, TrajectoryVar,
+        EEWpPosParamVar, EEWpRotParamVar,
+        fk_data,
+    ):
+        """Create end-effector waypoint tracking costs.
+
+        Constrains end-effector pose at specific trajectory waypoints
+        without fixing joint angles, leaving the optimizer free to find
+        natural joint configurations.  Targets are stored in frozen
+        ParamVar objects for JIT cache reuse.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
+        from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector
+
+        _, _, _, get_ee_pose = build_fk_functions(fk_data, jnp)
+
+        ee_wps = problem.ee_waypoint_costs
+        n_ee_wps = len(ee_wps)
+        indices = jnp.array([c['waypoint_index'] for c in ee_wps])
+
+        # Use uniform weight (from first EE waypoint); weights are
+        # part of the cache key so changing them rebuilds the problem.
+        pos_weight = jnp.sqrt(ee_wps[0]['position_weight'])
+        rot_weight = jnp.sqrt(ee_wps[0]['rotation_weight'])
+
+        @jaxls.Cost.factory(name='ee_waypoint')
+        def ee_waypoint_cost(vals, var, pos_param, rot_param):
+            angles = vals[var]
+            ee_pos, ee_rot = get_ee_pose(angles)
+            target_pos = vals[pos_param]
+            target_rot = vals[rot_param].reshape(3, 3)
+            pos_err = pos_weight * (ee_pos - target_pos)
+            rot_err = rot_weight * rotation_error_vector(
+                ee_rot, target_rot, jnp)
+            return jnp.concatenate([pos_err, rot_err]).flatten()
+
+        return ee_waypoint_cost(
+            TrajectoryVar(indices),
+            EEWpPosParamVar(jnp.arange(n_ee_wps)),
+            EEWpRotParamVar(jnp.arange(n_ee_wps)),
         )
 
     def _make_world_collision_cost(self, problem, TrajectoryVar, fk_data, spec):
