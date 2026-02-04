@@ -69,7 +69,21 @@ except ImportError:
 
 try:
     from ._viser import ViserViewer
-except ImportError:
+except ImportError as e:
+    import importlib
+
+    _viser_spec = importlib.util.find_spec("viser")
+    if _viser_spec is not None:
+        import warnings
+
+        warnings.warn(
+            "viser is installed but failed to import: {}\n"
+            "This may be caused by an incompatible version of a dependency "
+            "(e.g. imageio < 2.0).\n"
+            "Try: pip install -U viser".format(e),
+            stacklevel=1,
+        )
+
     class ViserViewer(DummyViewer):
         pass
 
