@@ -96,6 +96,18 @@ class JaxlsSolver(BaseSolver):
             for c in problem.ee_waypoint_costs
         )
 
+        # Include obstacle positions in cache key
+        # (obstacles change position, so compiled problem must be invalidated)
+        obstacle_key = tuple()
+        for r in problem.residuals:
+            if r.name == 'world_collision':
+                obstacles = r.params.get('obstacles', [])
+                obstacle_key = tuple(
+                    (tuple(o['center']), o['radius'])
+                    for o in obstacles
+                )
+                break
+
         key = (
             problem.n_waypoints,
             problem.n_joints,
@@ -108,6 +120,7 @@ class JaxlsSolver(BaseSolver):
             wp_constraint_indices,
             has_cart_rot,
             ee_wp_key,
+            obstacle_key,  # Include obstacle positions
         )
         return key
 
