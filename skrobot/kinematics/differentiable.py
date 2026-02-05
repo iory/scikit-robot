@@ -10,6 +10,134 @@ from skrobot.coordinates.math import normalize_axis_mask
 
 
 # =============================================================================
+# Lie Group Utilities for Rotation Error
+# =============================================================================
+
+def rotation_error_so3_log(actual_rot, target_rot):
+    """Compute rotation error using SO(3) logarithmic map.
+
+    Uses jaxlie's SO3 logarithmic map to compute the rotation error
+    as an axis-angle vector. This provides better numerical properties
+    than the anti-symmetric extraction method, especially for large rotations.
+
+    The error is computed as: log(actual_rot^T @ target_rot)
+    which gives the rotation needed to go from actual to target in the
+    local (body) frame.
+
+    Parameters
+    ----------
+    actual_rot : jax.Array
+        Actual rotation matrix (3, 3).
+    target_rot : jax.Array
+        Target rotation matrix (3, 3).
+
+    Returns
+    -------
+    jax.Array
+        Rotation error vector (3,) in axis-angle representation.
+        The magnitude is the rotation angle in radians.
+
+    Notes
+    -----
+    This function requires jaxlie to be installed. It is designed
+    for use with JAX-based solvers.
+
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> actual = jnp.eye(3)
+    >>> target = jnp.eye(3)
+    >>> err = rotation_error_so3_log(actual, target)
+    >>> jnp.allclose(err, jnp.zeros(3))
+    True
+    """
+    import jaxlie
+
+    actual_so3 = jaxlie.SO3.from_matrix(actual_rot)
+    target_so3 = jaxlie.SO3.from_matrix(target_rot)
+    # Compute error in local frame: (actual^{-1} @ target).log()
+    # This gives the rotation from actual to target
+    error_so3 = actual_so3.inverse() @ target_so3
+    return error_so3.log()
+
+
+def pose_error_se3_log(actual_pos, actual_rot, target_pos, target_rot):
+    """Compute pose error using SE(3) logarithmic map.
+
+    Uses jaxlie's SE3 logarithmic map to compute the full pose error
+    as a 6D vector (3D translation + 3D rotation). This provides a
+    unified error representation on the SE(3) manifold.
+
+    Parameters
+    ----------
+    actual_pos : jax.Array
+        Actual position (3,).
+    actual_rot : jax.Array
+        Actual rotation matrix (3, 3).
+    target_pos : jax.Array
+        Target position (3,).
+    target_rot : jax.Array
+        Target rotation matrix (3, 3).
+
+    Returns
+    -------
+    jax.Array
+        Pose error vector (6,) where:
+        - [0:3] is the translation error
+        - [3:6] is the rotation error (axis-angle)
+
+    Notes
+    -----
+    This function requires jaxlie to be installed. The SE(3) logarithmic
+    map provides a mathematically principled way to measure pose differences
+    that respects the geometry of rigid body transformations.
+    """
+    import jaxlie
+
+    actual_so3 = jaxlie.SO3.from_matrix(actual_rot)
+    target_so3 = jaxlie.SO3.from_matrix(target_rot)
+    actual_se3 = jaxlie.SE3.from_rotation_and_translation(actual_so3, actual_pos)
+    target_se3 = jaxlie.SE3.from_rotation_and_translation(target_so3, target_pos)
+    # Compute error: (actual^{-1} @ target).log()
+    error_se3 = actual_se3.inverse() @ target_se3
+    return error_se3.log()
+
+
+def rotation_error_so3_log_batch(actual_rot_batch, target_rot_batch):
+    """Compute batched rotation error using SO(3) logarithmic map.
+
+    Vectorized version of rotation_error_so3_log for batch processing.
+
+    Parameters
+    ----------
+    actual_rot_batch : jax.Array
+        Actual rotation matrices (batch, 3, 3).
+    target_rot_batch : jax.Array
+        Target rotation matrices (batch, 3, 3).
+
+    Returns
+    -------
+    jax.Array
+        Rotation error vectors (batch, 3) in axis-angle representation.
+
+    Notes
+    -----
+    This function requires jaxlie to be installed. Uses jax.vmap for
+    efficient batch processing.
+    """
+    import jax
+    import jaxlie
+
+    def single_rot_error(actual_rot, target_rot):
+        actual_so3 = jaxlie.SO3.from_matrix(actual_rot)
+        target_so3 = jaxlie.SO3.from_matrix(target_rot)
+        error_so3 = actual_so3.inverse() @ target_so3
+        return error_so3.log()
+
+    return jax.vmap(single_rot_error)(actual_rot_batch, target_rot_batch)
+
+
+# =============================================================================
 # Helper Functions for IK Solvers
 # =============================================================================
 
@@ -860,10 +988,19 @@ def solve_ik_gradient_descent(
     target_position = backend.array(target_position)
     target_rotation = backend.array(target_rotation)
 
+    # Use SO(3) log rotation error if JAX backend is available
+    use_so3_log = backend.name == 'jax'
+
     def loss_fn(q):
         pos, rot = forward_kinematics_ee(backend, q, fk_params)
         pos_error = backend.sum((pos - target_position) ** 2)
-        rot_error = backend.sum((rot - target_rotation) ** 2)
+        if use_so3_log:
+            # Use SO(3) logarithmic map for rotation error
+            rot_err_vec = rotation_error_so3_log(rot, target_rotation)
+            rot_error = backend.sum(rot_err_vec ** 2)
+        else:
+            # Fallback to matrix difference (less accurate for large rotations)
+            rot_error = backend.sum((rot - target_rotation) ** 2)
         return pos_weight * pos_error + rot_weight * rot_error
 
     grad_fn = backend.gradient(loss_fn)
@@ -1676,23 +1813,14 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 pos_err = (target_pos - pos) * pos_mask
 
                 # Rotation error in local frame, masked, rotated to world
+                # Use SO(3) logarithmic map for better accuracy
                 if has_rot_constraint:
-                    rot_T = jnp.transpose(rot, (0, 2, 1))
-                    r_diff = jnp.matmul(rot_T, target_rot)
-                    rot_err_local = 0.5 * jnp.stack([
-                        r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                        r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                        r_diff[:, 1, 0] - r_diff[:, 0, 1]
-                    ], axis=1)
+                    rot_err_local = rotation_error_so3_log_batch(rot, target_rot)
 
                     if mirror_rot is not None:
                         target_rot_m = target_rot @ mirror_rot
-                        r_diff_m = jnp.matmul(rot_T, target_rot_m)
-                        rot_err_local_m = 0.5 * jnp.stack([
-                            r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                            r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                            r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                        ], axis=1)
+                        rot_err_local_m = rotation_error_so3_log_batch(
+                            rot, target_rot_m)
                         frob_direct = jnp.sum(
                             (target_rot - rot) ** 2, axis=(1, 2))
                         frob_mirror = jnp.sum(
@@ -1738,27 +1866,17 @@ def _create_jax_jacobian_solver(fk_params, backend):
             pos_err_final = jnp.sqrt(jnp.sum(
                 ((target_pos - pos_final) * pos_mask) ** 2, axis=1))
 
-            # Rotation error
+            # Rotation error using SO(3) logarithmic map
             if has_rot_constraint:
-                rot_T = jnp.transpose(rot_final, (0, 2, 1))
-                r_diff = jnp.matmul(rot_T, target_rot)
-                rot_err_local = 0.5 * jnp.stack([
-                    r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                    r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                    r_diff[:, 1, 0] - r_diff[:, 0, 1]
-                ], axis=1)
+                rot_err_local = rotation_error_so3_log_batch(rot_final, target_rot)
                 rot_err_masked = rot_err_local * rot_mask
                 rot_err_final = jnp.sqrt(jnp.sum(
                     rot_err_masked ** 2, axis=1))
 
                 if mirror_rot is not None:
                     target_rot_m = target_rot @ mirror_rot
-                    r_diff_m = jnp.matmul(rot_T, target_rot_m)
-                    rot_err_local_m = 0.5 * jnp.stack([
-                        r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                        r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                        r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                    ], axis=1)
+                    rot_err_local_m = rotation_error_so3_log_batch(
+                        rot_final, target_rot_m)
                     rot_err_m = jnp.sqrt(jnp.sum(
                         (rot_err_local_m * rot_mask) ** 2, axis=1))
                     rot_err_final = jnp.minimum(rot_err_final, rot_err_m)
@@ -2045,17 +2163,26 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
         # Create 180° rotation matrix for mirror axis
         mirror_rot = _create_mirror_rotation_matrix(rotation_mirror, backend)
 
+        # Use SO(3) log rotation error if JAX backend is available
+        use_so3_log = backend.name == 'jax'
+
         def _compute_rot_err_local_gd(target_r, current_r):
             """Compute rotation error vector in local (current) frame.
 
-            Matches difference_rotation semantics: R_diff = current.T @ target.
+            Uses SO(3) logarithmic map when JAX backend is available,
+            otherwise falls back to anti-symmetric extraction.
             """
-            r_diff = backend.matmul(backend.transpose(current_r), target_r)
-            return 0.5 * backend.stack([
-                r_diff[2, 1] - r_diff[1, 2],
-                r_diff[0, 2] - r_diff[2, 0],
-                r_diff[1, 0] - r_diff[0, 1]
-            ])
+            if use_so3_log:
+                # Use SO(3) logarithmic map for better accuracy
+                return rotation_error_so3_log(current_r, target_r)
+            else:
+                # Fallback: anti-symmetric extraction
+                r_diff = backend.matmul(backend.transpose(current_r), target_r)
+                return 0.5 * backend.stack([
+                    r_diff[2, 1] - r_diff[1, 2],
+                    r_diff[0, 2] - r_diff[2, 0],
+                    r_diff[1, 0] - r_diff[0, 1]
+                ])
 
         def compute_rot_error_single(rot, target_rot):
             """Compute rotation error for a single target rotation."""
