@@ -25,6 +25,7 @@ from skrobot.model.primitives import PointCloudLink
 from skrobot.model.primitives import Sphere
 from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
+from skrobot.viewers._manipulability_ellipse import ManipulabilityEllipse
 
 
 class ViserViewer:
@@ -446,6 +447,54 @@ class ViserViewer:
                         step=1.0,
                     )
 
+                # Create manipulability ellipse
+                manip_ellipse = ManipulabilityEllipse(
+                    server=self._server,
+                    robot_model=robot_model,
+                    link_list=link_list,
+                    root_node_name=f"/manipulability/{robot_name}/{group_name}",
+                    target_link=end_coords.parent,
+                    scaling_factor=0.2,
+                    visible=False,  # Hidden by default
+                    wireframe=True,
+                    color=(200, 200, 255),
+                )
+
+                # Add manipulability checkbox in target folder
+                with self._server.gui.add_folder(
+                    f"{robot_name}/{group_name} Manipulability",
+                    expand_by_default=False,
+                ):
+                    manip_checkbox = self._server.gui.add_checkbox(
+                        "Show Ellipsoid", initial_value=False
+                    )
+                    manip_scale = self._server.gui.add_slider(
+                        "Scale", min=0.05, max=1.0, step=0.05, initial_value=0.2
+                    )
+                    manip_value_text = self._server.gui.add_text(
+                        "Manipulability", initial_value="0.000"
+                    )
+
+                    def make_manip_visibility_callback(ellipse, checkbox):
+                        def callback(_):
+                            ellipse.set_visibility(checkbox.value)
+                            if checkbox.value:
+                                ellipse.update()
+                        return callback
+
+                    manip_checkbox.on_update(
+                        make_manip_visibility_callback(manip_ellipse, manip_checkbox)
+                    )
+
+                    def make_manip_scale_callback(ellipse, slider):
+                        def callback(_):
+                            ellipse.set_scaling_factor(slider.value)
+                        return callback
+
+                    manip_scale.on_update(
+                        make_manip_scale_callback(manip_ellipse, manip_scale)
+                    )
+
                 # Store target info
                 self._ik_targets[robot_id][group_name] = {
                     'link_list': link_list,
@@ -455,6 +504,9 @@ class ViserViewer:
                     'pos_inputs': (pos_x, pos_y, pos_z),
                     'rot_inputs': (roll_input, pitch_input, yaw_input),
                     'robot_model': robot_model,
+                    'manipulability_ellipse': manip_ellipse,
+                    'manipulability_checkbox': manip_checkbox,
+                    'manipulability_text': manip_value_text,
                 }
 
                 # Callback for when control is moved (updates numeric inputs)
@@ -598,6 +650,7 @@ class ViserViewer:
             self._sync_joint_sliders(robot_id)
             self._sync_ik_targets(robot_id, exclude=group_name)
             self._sync_numeric_inputs(robot_id, group_name)
+            self._update_manipulability_ellipse(robot_id, group_name)
         else:
             # IK failed: refresh cached worldcoords after revert_if_fail,
             # and update mesh handles only.  Do NOT call redraw() here
@@ -609,6 +662,47 @@ class ViserViewer:
                 link = self._linkid_to_link[link_id]
                 self._update_handle_pose(
                     handle, link.worldpos(), link.worldrot())
+
+    def _update_manipulability_ellipse(self, robot_id: int, group_name: str):
+        """Update the manipulability ellipse for a given IK target.
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+        """
+        target = self._get_ik_target(robot_id, group_name)
+        if target is None:
+            return
+
+        manip_ellipse = target.get('manipulability_ellipse')
+        manip_text = target.get('manipulability_text')
+        manip_checkbox = target.get('manipulability_checkbox')
+
+        if manip_ellipse is not None:
+            # Only update if visible
+            if manip_checkbox is not None and manip_checkbox.value:
+                manip_ellipse.update()
+                # Update manipulability text
+                if manip_text is not None:
+                    manip_text.value = f"{manip_ellipse.manipulability:.4f}"
+
+    def _update_all_manipulability_ellipses(self, robot_id: int):
+        """Update all manipulability ellipses for a robot.
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        """
+        robot_targets = self._ik_targets.get(robot_id)
+        if robot_targets is None:
+            return
+
+        for group_name in robot_targets:
+            self._update_manipulability_ellipse(robot_id, group_name)
 
     def _solve_ik_from_numeric(self, robot_id: int, group_name: str):
         """Solve IK when numeric input fields are changed."""
@@ -639,6 +733,7 @@ class ViserViewer:
                 self._update_handle_pose(
                     target['control'], target_pos, target_rot)
             self._sync_ik_targets(robot_id, exclude=group_name)
+            self._update_manipulability_ellipse(robot_id, group_name)
         else:
             self._revert_ik_target(robot_id, group_name)
 
@@ -1550,6 +1645,7 @@ class ViserViewer:
                                 j.joint_angle(self._joint_sliders[j.name].value)
                                 self.redraw()
                                 self._sync_ik_targets(rid)
+                                self._update_all_manipulability_ellipses(rid)
                             return callback
 
                         slider.on_update(make_callback(joint, robot_id))
