@@ -623,5 +623,101 @@ class TestJaxlsSolver(unittest.TestCase):
         self.assertIsNotNone(solver._cached_problem)
 
 
+@requires_jax
+class TestAugmentedLagrangianSolver(unittest.TestCase):
+
+    @classmethod
+    def setup_class(cls):
+        cls.robot, cls.link_list, cls.n_joints = _make_kuka()
+
+    def test_smoothness_convergence(self):
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=3)
+        problem.add_smoothness_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 3)
+        initial_traj[1] += 0.3
+
+        solver = AugmentedLagrangianSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        diff_before = np.sum(
+            (initial_traj[1:] - initial_traj[:-1]) ** 2)
+        diff_after = np.sum(
+            (result.trajectory[1:] - result.trajectory[:-1]) ** 2)
+        self.assertLess(diff_after, diff_before)
+
+    def test_endpoints_preserved(self):
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=3)
+        problem.add_smoothness_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.3
+        initial_traj = interpolate_trajectory(start, end, 3)
+
+        solver = AugmentedLagrangianSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        testing.assert_almost_equal(result.trajectory[0], start, decimal=4)
+        testing.assert_almost_equal(result.trajectory[-1], end, decimal=4)
+
+    def test_joint_limit_constraint(self):
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=5)
+        problem.add_smoothness_cost(weight=1.0)
+        problem.add_joint_limit_constraint()
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.3
+        initial_traj = interpolate_trajectory(start, end, 5)
+
+        solver = AugmentedLagrangianSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        lower = problem.joint_limits_lower
+        upper = problem.joint_limits_upper
+        for t in range(result.trajectory.shape[0]):
+            self.assertTrue(
+                np.all(result.trajectory[t] >= lower - 1e-4),
+                msg=f"Joint limits lower violated at waypoint {t}")
+            self.assertTrue(
+                np.all(result.trajectory[t] <= upper + 1e-4),
+                msg=f"Joint limits upper violated at waypoint {t}")
+
+    def test_caching(self):
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=3)
+        problem.add_smoothness_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.3
+        initial_traj = interpolate_trajectory(start, end, 3)
+
+        solver = AugmentedLagrangianSolver(max_iterations=20)
+
+        # First solve builds cache
+        solver.solve(problem, initial_traj)
+        cache_keys_after_first = list(solver._jit_cache.keys())
+
+        # Second solve with same structure should reuse cache
+        end2 = np.ones(self.n_joints) * 0.4
+        initial_traj2 = interpolate_trajectory(start, end2, 3)
+        solver.solve(problem, initial_traj2)
+
+        cache_keys_after_second = list(solver._jit_cache.keys())
+        self.assertEqual(cache_keys_after_first, cache_keys_after_second)
+
+
 if __name__ == '__main__':
     unittest.main()
