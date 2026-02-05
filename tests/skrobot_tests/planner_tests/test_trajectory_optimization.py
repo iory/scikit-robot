@@ -622,6 +622,214 @@ class TestJaxlsSolver(unittest.TestCase):
         self.assertEqual(solver._cache_key, cache_key_after_first)
         self.assertIsNotNone(solver._cached_problem)
 
+    def test_five_point_velocity_cost(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=10, dt=0.1)
+        problem.add_smoothness_cost(weight=0.1)
+        problem.add_five_point_velocity_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 10)
+        # Add perturbation that creates high velocity
+        initial_traj[3] += 0.8
+        initial_traj[4] -= 0.5
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # After optimization, velocities should be smoother
+        # Compute 5-point velocity at waypoint 5
+        dt = 0.1
+        vel_before = (
+            -initial_traj[7] + 8 * initial_traj[6]
+            - 8 * initial_traj[4] + initial_traj[3]
+        ) / (12 * dt)
+        vel_after = (
+            -result.trajectory[7] + 8 * result.trajectory[6]
+            - 8 * result.trajectory[4] + result.trajectory[3]
+        ) / (12 * dt)
+        self.assertLess(
+            np.max(np.abs(vel_after)),
+            np.max(np.abs(vel_before)))
+
+    def test_five_point_acceleration_cost(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=10, dt=0.1)
+        problem.add_smoothness_cost(weight=0.1)
+        problem.add_five_point_acceleration_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 10)
+        # Add perturbation that creates high acceleration
+        initial_traj[4] += 0.5
+        initial_traj[5] -= 0.3
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # Compute 5-point acceleration at waypoint 5
+        dt = 0.1
+
+        def compute_5pt_acc(traj, t):
+            return (
+                -traj[t + 2] + 16 * traj[t + 1] - 30 * traj[t]
+                + 16 * traj[t - 1] - traj[t - 2]
+            ) / (12 * dt ** 2)
+
+        acc_before = compute_5pt_acc(initial_traj, 5)
+        acc_after = compute_5pt_acc(result.trajectory, 5)
+        self.assertLess(
+            np.max(np.abs(acc_after)),
+            np.max(np.abs(acc_before)))
+
+    def test_five_point_jerk_cost(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=12, dt=0.1)
+        problem.add_smoothness_cost(weight=0.1)
+        problem.add_five_point_jerk_cost(weight=1.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 12)
+        # Add perturbation that creates high jerk
+        initial_traj[5] += 0.5
+        initial_traj[6] -= 0.4
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # Compute 7-point jerk at waypoint 6
+        dt = 0.1
+
+        def compute_7pt_jerk(traj, t):
+            return (
+                -traj[t + 3] + 8 * traj[t + 2] - 13 * traj[t + 1]
+                + 13 * traj[t - 1] - 8 * traj[t - 2] + traj[t - 3]
+            ) / (8 * dt ** 3)
+
+        jerk_before = compute_7pt_jerk(initial_traj, 6)
+        jerk_after = compute_7pt_jerk(result.trajectory, 6)
+        self.assertLess(
+            np.max(np.abs(jerk_after)),
+            np.max(np.abs(jerk_before)))
+
+    def test_acceleration_limit(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=10, dt=0.1)
+        problem.add_smoothness_cost(weight=0.1)
+        problem.add_acceleration_limit(acceleration_limit=5.0, weight=10.0)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 10)
+        # Add perturbation that creates high acceleration
+        initial_traj[4] += 1.0
+        initial_traj[5] -= 0.8
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # Compute 5-point acceleration
+        dt = 0.1
+        for t in range(2, 8):
+            acc = (
+                -result.trajectory[t + 2] + 16 * result.trajectory[t + 1]
+                - 30 * result.trajectory[t] + 16 * result.trajectory[t - 1]
+                - result.trajectory[t - 2]
+            ) / (12 * dt ** 2)
+            # Allow some slack for optimization tolerance
+            self.assertTrue(
+                np.all(np.abs(acc) < 6.0),
+                msg=f"Acceleration limit violated at waypoint {t}")
+
+    def test_five_point_waypoint_requirement(self):
+        # Test that 5-point methods raise error for insufficient waypoints
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=4)
+        with self.assertRaises(ValueError):
+            problem.add_five_point_velocity_cost()
+        with self.assertRaises(ValueError):
+            problem.add_five_point_acceleration_cost()
+
+    def test_seven_point_waypoint_requirement(self):
+        # Test that 7-point jerk method raises error for insufficient waypoints
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=6)
+        with self.assertRaises(ValueError):
+            problem.add_five_point_jerk_cost()
+
+    def test_smooth_trajectory_costs_high_precision(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        # Test with enough waypoints for full high precision (>=7)
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=12, dt=0.1)
+        problem.add_smooth_trajectory_costs(weight=1.0, use_high_precision=True)
+
+        # Should have added 3 residuals: velocity, acceleration, jerk
+        residual_names = [r.name for r in problem.residuals]
+        self.assertIn('five_point_velocity', residual_names)
+        self.assertIn('five_point_acceleration', residual_names)
+        self.assertIn('five_point_jerk', residual_names)
+
+        start = np.zeros(self.n_joints)
+        end = np.ones(self.n_joints) * 0.5
+        initial_traj = interpolate_trajectory(start, end, 12)
+        initial_traj[5] += 0.5
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+
+        # Trajectory should be smoother after optimization
+        diff_before = np.sum((initial_traj[1:] - initial_traj[:-1]) ** 2)
+        diff_after = np.sum(
+            (result.trajectory[1:] - result.trajectory[:-1]) ** 2)
+        self.assertLess(diff_after, diff_before)
+
+    def test_smooth_trajectory_costs_medium_waypoints(self):
+        # Test with 5-6 waypoints (no jerk, but velocity and acceleration)
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=6, dt=0.1)
+        problem.add_smooth_trajectory_costs(weight=1.0, use_high_precision=True)
+
+        residual_names = [r.name for r in problem.residuals]
+        self.assertIn('five_point_velocity', residual_names)
+        self.assertIn('five_point_acceleration', residual_names)
+        self.assertNotIn('five_point_jerk', residual_names)
+
+    def test_smooth_trajectory_costs_low_waypoints(self):
+        # Test with few waypoints (fallback to simple differences)
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=4, dt=0.1)
+        problem.add_smooth_trajectory_costs(weight=1.0, use_high_precision=True)
+
+        residual_names = [r.name for r in problem.residuals]
+        self.assertIn('smoothness', residual_names)
+        self.assertIn('acceleration', residual_names)
+        self.assertNotIn('five_point_velocity', residual_names)
+
+    def test_smooth_trajectory_costs_disabled_high_precision(self):
+        # Test with high precision disabled
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=12, dt=0.1)
+        problem.add_smooth_trajectory_costs(
+            weight=1.0, use_high_precision=False)
+
+        residual_names = [r.name for r in problem.residuals]
+        self.assertIn('smoothness', residual_names)
+        self.assertIn('acceleration', residual_names)
+        self.assertNotIn('five_point_velocity', residual_names)
+
 
 @requires_jax
 class TestAugmentedLagrangianSolver(unittest.TestCase):

@@ -273,6 +273,26 @@ class JaxlsSolver(BaseSolver):
                     costs.append(self._make_joint_velocity_limit(
                         problem, TrajectoryVar, residual_spec
                     ))
+                elif residual_spec.name == 'five_point_velocity':
+                    costs.append(self._make_five_point_velocity_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
+                elif residual_spec.name == 'five_point_acceleration':
+                    costs.append(self._make_five_point_acceleration_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
+                elif residual_spec.name == 'five_point_jerk':
+                    costs.append(self._make_five_point_jerk_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
+                elif residual_spec.name == 'acceleration_limit':
+                    costs.append(self._make_acceleration_limit_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
+                elif residual_spec.name == 'jerk_limit':
+                    costs.append(self._make_jerk_limit_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
 
             # --- EE waypoint costs ---
             if has_ee_waypoints:
@@ -765,4 +785,201 @@ class JaxlsSolver(BaseSolver):
         return velocity_limit(
             TrajectoryVar(jnp.arange(1, T)),
             TrajectoryVar(jnp.arange(0, T - 1)),
+        )
+
+    def _make_five_point_velocity_cost(self, problem, TrajectoryVar, spec):
+        """Create velocity cost using 5-point stencil.
+
+        Computes velocity with O(h^4) accuracy:
+            v = (-q[t+2] + 8*q[t+1] - 8*q[t-1] + q[t-2]) / (12*dt)
+
+        Penalizes velocities that exceed the velocity limits.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        dt = spec.params['dt']
+        velocity_limits = jnp.array(spec.params['velocity_limits'])
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='five_point_velocity')
+        def five_point_velocity_cost(
+            vals, var_tp2, var_tp1, var_tm1, var_tm2
+        ):
+            q_tp2 = vals[var_tp2]
+            q_tp1 = vals[var_tp1]
+            q_tm1 = vals[var_tm1]
+            q_tm2 = vals[var_tm2]
+
+            velocity = (-q_tp2 + 8 * q_tp1 - 8 * q_tm1 + q_tm2) / (12 * dt)
+            # Penalize only when |velocity| > limit
+            residual = jnp.maximum(0.0, jnp.abs(velocity) - velocity_limits)
+            return (weight * residual).flatten()
+
+        # Apply to waypoints [2, T-2] (need 2 points on each side)
+        return five_point_velocity_cost(
+            TrajectoryVar(jnp.arange(4, T)),      # t+2
+            TrajectoryVar(jnp.arange(3, T - 1)),  # t+1
+            TrajectoryVar(jnp.arange(1, T - 3)),  # t-1
+            TrajectoryVar(jnp.arange(0, T - 4)),  # t-2
+        )
+
+    def _make_five_point_acceleration_cost(self, problem, TrajectoryVar, spec):
+        """Create acceleration cost using 5-point stencil.
+
+        Computes acceleration with O(h^4) accuracy:
+            a = (-q[t+2] + 16*q[t+1] - 30*q[t] + 16*q[t-1] - q[t-2]) / (12*dt^2)
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        dt = spec.params['dt']
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='five_point_acceleration')
+        def five_point_acceleration_cost(
+            vals, var_t, var_tp2, var_tp1, var_tm1, var_tm2
+        ):
+            q_t = vals[var_t]
+            q_tp2 = vals[var_tp2]
+            q_tp1 = vals[var_tp1]
+            q_tm1 = vals[var_tm1]
+            q_tm2 = vals[var_tm2]
+
+            acceleration = (
+                -q_tp2 + 16 * q_tp1 - 30 * q_t + 16 * q_tm1 - q_tm2
+            ) / (12 * dt ** 2)
+            return (weight * jnp.abs(acceleration)).flatten()
+
+        # Apply to waypoints [2, T-2]
+        return five_point_acceleration_cost(
+            TrajectoryVar(jnp.arange(2, T - 2)),  # t
+            TrajectoryVar(jnp.arange(4, T)),      # t+2
+            TrajectoryVar(jnp.arange(3, T - 1)),  # t+1
+            TrajectoryVar(jnp.arange(1, T - 3)),  # t-1
+            TrajectoryVar(jnp.arange(0, T - 4)),  # t-2
+        )
+
+    def _make_five_point_jerk_cost(self, problem, TrajectoryVar, spec):
+        """Create jerk cost using 7-point stencil.
+
+        Computes jerk with O(h^4) accuracy:
+            j = (-q[t+3] + 8*q[t+2] - 13*q[t+1] + 13*q[t-1] - 8*q[t-2] + q[t-3])
+                / (8*dt^3)
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        dt = spec.params['dt']
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='five_point_jerk')
+        def five_point_jerk_cost(
+            vals, var_tp3, var_tp2, var_tp1, var_tm1, var_tm2, var_tm3
+        ):
+            q_tp3 = vals[var_tp3]
+            q_tp2 = vals[var_tp2]
+            q_tp1 = vals[var_tp1]
+            q_tm1 = vals[var_tm1]
+            q_tm2 = vals[var_tm2]
+            q_tm3 = vals[var_tm3]
+
+            jerk = (
+                -q_tp3 + 8 * q_tp2 - 13 * q_tp1 + 13 * q_tm1 - 8 * q_tm2 + q_tm3
+            ) / (8 * dt ** 3)
+            return (weight * jnp.abs(jerk)).flatten()
+
+        # Apply to waypoints [3, T-3]
+        return five_point_jerk_cost(
+            TrajectoryVar(jnp.arange(6, T)),      # t+3
+            TrajectoryVar(jnp.arange(5, T - 1)),  # t+2
+            TrajectoryVar(jnp.arange(4, T - 2)),  # t+1
+            TrajectoryVar(jnp.arange(2, T - 4)),  # t-1
+            TrajectoryVar(jnp.arange(1, T - 5)),  # t-2
+            TrajectoryVar(jnp.arange(0, T - 6)),  # t-3
+        )
+
+    def _make_acceleration_limit_cost(self, problem, TrajectoryVar, spec):
+        """Create acceleration limit cost using 5-point stencil.
+
+        Penalizes accelerations that exceed the specified limit.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        dt = spec.params['dt']
+        acceleration_limit = jnp.array(spec.params['acceleration_limit'])
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='acceleration_limit')
+        def acceleration_limit_cost(
+            vals, var_t, var_tp2, var_tp1, var_tm1, var_tm2
+        ):
+            q_t = vals[var_t]
+            q_tp2 = vals[var_tp2]
+            q_tp1 = vals[var_tp1]
+            q_tm1 = vals[var_tm1]
+            q_tm2 = vals[var_tm2]
+
+            acceleration = (
+                -q_tp2 + 16 * q_tp1 - 30 * q_t + 16 * q_tm1 - q_tm2
+            ) / (12 * dt ** 2)
+            # Penalize only when |acceleration| > limit
+            residual = jnp.maximum(
+                0.0, jnp.abs(acceleration) - acceleration_limit
+            )
+            return (weight * residual).flatten()
+
+        # Apply to waypoints [2, T-2]
+        return acceleration_limit_cost(
+            TrajectoryVar(jnp.arange(2, T - 2)),  # t
+            TrajectoryVar(jnp.arange(4, T)),      # t+2
+            TrajectoryVar(jnp.arange(3, T - 1)),  # t+1
+            TrajectoryVar(jnp.arange(1, T - 3)),  # t-1
+            TrajectoryVar(jnp.arange(0, T - 4)),  # t-2
+        )
+
+    def _make_jerk_limit_cost(self, problem, TrajectoryVar, spec):
+        """Create jerk limit cost using 7-point stencil.
+
+        Penalizes jerks that exceed the specified limit.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        dt = spec.params['dt']
+        jerk_limit = jnp.array(spec.params['jerk_limit'])
+        weight = jnp.sqrt(spec.weight)
+
+        @jaxls.Cost.factory(name='jerk_limit')
+        def jerk_limit_cost(
+            vals, var_tp3, var_tp2, var_tp1, var_tm1, var_tm2, var_tm3
+        ):
+            q_tp3 = vals[var_tp3]
+            q_tp2 = vals[var_tp2]
+            q_tp1 = vals[var_tp1]
+            q_tm1 = vals[var_tm1]
+            q_tm2 = vals[var_tm2]
+            q_tm3 = vals[var_tm3]
+
+            jerk = (
+                -q_tp3 + 8 * q_tp2 - 13 * q_tp1 + 13 * q_tm1 - 8 * q_tm2 + q_tm3
+            ) / (8 * dt ** 3)
+            # Penalize only when |jerk| > limit
+            residual = jnp.maximum(0.0, jnp.abs(jerk) - jerk_limit)
+            return (weight * residual).flatten()
+
+        # Apply to waypoints [3, T-3]
+        return jerk_limit_cost(
+            TrajectoryVar(jnp.arange(6, T)),      # t+3
+            TrajectoryVar(jnp.arange(5, T - 1)),  # t+2
+            TrajectoryVar(jnp.arange(4, T - 2)),  # t+1
+            TrajectoryVar(jnp.arange(2, T - 4)),  # t-1
+            TrajectoryVar(jnp.arange(1, T - 5)),  # t-2
+            TrajectoryVar(jnp.arange(0, T - 6)),  # t-3
         )
