@@ -417,6 +417,7 @@ class TrajectoryProblem:
         world_obstacles,
         weight=100.0,
         activation_distance=0.05,
+        as_constraint=True,
     ):
         """Add world collision avoidance cost.
 
@@ -427,9 +428,12 @@ class TrajectoryProblem:
         world_obstacles : list
             List of obstacle dicts with 'type', 'center', 'radius'.
         weight : float
-            Cost weight.
+            Cost weight (only used when as_constraint=False).
         activation_distance : float
             Distance below which collision cost activates.
+        as_constraint : bool
+            If True (default), treat as hard constraint for Augmented Lagrangian
+            solver (collision distance >= 0). If False, treat as soft cost.
         """
         self.collision_link_list = collision_link_list
         self.world_obstacles = world_obstacles
@@ -443,6 +447,10 @@ class TrajectoryProblem:
         # Compute collision link offsets
         self._compute_collision_link_offsets()
 
+        # Use 'geq' for hard constraint (Augmented Lagrangian)
+        # Use 'soft' for soft cost (gradient descent, etc.)
+        kind = 'geq' if as_constraint else 'soft'
+
         self.residuals.append(ResidualSpec(
             name='world_collision',
             residual_fn='world_collision',
@@ -450,7 +458,7 @@ class TrajectoryProblem:
                 'obstacles': world_obstacles,
                 'activation_distance': activation_distance,
             },
-            kind='soft',
+            kind=kind,
             weight=weight,
         ))
 
@@ -458,15 +466,19 @@ class TrajectoryProblem:
         self,
         weight=100.0,
         activation_distance=0.02,
+        as_constraint=True,
     ):
         """Add self-collision avoidance cost.
 
         Parameters
         ----------
         weight : float
-            Cost weight.
+            Cost weight (only used when as_constraint=False).
         activation_distance : float
             Distance below which collision cost activates.
+        as_constraint : bool
+            If True (default), treat as hard constraint for Augmented Lagrangian
+            solver (collision distance >= 0). If False, treat as soft cost.
         """
         if self.collision_link_list is None:
             raise ValueError(
@@ -497,6 +509,10 @@ class TrajectoryProblem:
 
         self.self_collision_pairs = (np.array(pairs_i), np.array(pairs_j))
 
+        # Use 'geq' for hard constraint (Augmented Lagrangian)
+        # Use 'soft' for soft cost (gradient descent, etc.)
+        kind = 'geq' if as_constraint else 'soft'
+
         self.residuals.append(ResidualSpec(
             name='self_collision',
             residual_fn='self_collision',
@@ -504,7 +520,7 @@ class TrajectoryProblem:
                 'pair_indices': self.self_collision_pairs,
                 'activation_distance': activation_distance,
             },
-            kind='soft',
+            kind=kind,
             weight=weight,
         ))
 

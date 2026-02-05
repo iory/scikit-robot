@@ -2309,6 +2309,10 @@ class ViserViewer:
                 use_high_precision=True,
             )
 
+            # Add joint velocity limit to prevent large jumps between waypoints
+            # Scale=0.3 limits to 30% of max velocity for smoother trajectories
+            problem.add_joint_velocity_limit(scale=0.3)
+
             # Add collision cost if obstacles exist
             if self._obstacle_link_ids and collision_w > 0:
                 # Use dummy obstacles for warmup
@@ -2324,9 +2328,11 @@ class ViserViewer:
                     activation_distance=0.05,
                 )
                 if use_self_collision:
+                    # Use soft cost for self-collision for smoother trajectories
                     problem.add_self_collision_cost(
                         weight=collision_w,
                         activation_distance=0.02,
+                        as_constraint=False,  # Soft cost for smoother trajectories
                     )
 
             # Add cartesian path cost structure if enabled
@@ -2589,6 +2595,10 @@ class ViserViewer:
                 use_high_precision=True,
             )
 
+            # Add joint velocity limit to prevent large jumps between waypoints
+            # Scale=0.3 limits to 30% of max velocity for smoother trajectories
+            problem.add_joint_velocity_limit(scale=0.3)
+
             if use_posture_reg and posture_w > 0:
                 nominal_angles = waypoint_angles[0]
                 problem.add_posture_cost(nominal_angles, weight=posture_w)
@@ -2611,9 +2621,13 @@ class ViserViewer:
                     activation_distance=activation_dist,
                 )
                 if use_self_collision:
+                    # Use soft cost for self-collision for smoother trajectories
+                    # This allows smoother trajectories by balancing
+                    # smoothness vs self-collision avoidance
                     problem.add_self_collision_cost(
                         weight=collision_w,
                         activation_distance=0.02,
+                        as_constraint=False,  # Soft cost, not hard constraint
                     )
             elif use_self_collision and collision_w > 0:
                 dummy_obstacles = [{
@@ -2626,10 +2640,13 @@ class ViserViewer:
                     world_obstacles=dummy_obstacles,
                     weight=0.0,
                     activation_distance=0.0,
+                    as_constraint=False,  # Just for FK setup
                 )
+                # Use soft cost for self-collision for smoother trajectories
                 problem.add_self_collision_cost(
                     weight=collision_w,
                     activation_distance=0.02,
+                    as_constraint=False,  # Soft cost, not hard constraint
                 )
 
             # Pin intermediate waypoints
