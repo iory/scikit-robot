@@ -178,15 +178,15 @@ class AugmentedLagrangianSolver(BaseSolver):
         objective_fn, constraint_fn, n_constraints = \
             self._jit_cache[structure_key]['functions']
 
-        # Initialize
-        trajectory = jnp.array(initial_trajectory)
-        lower = jnp.array(problem.joint_limits_lower)
-        upper = jnp.array(problem.joint_limits_upper)
+        # Initialize (use float32 for consistency with JAX JIT)
+        trajectory = jnp.array(initial_trajectory, dtype=jnp.float32)
+        lower = jnp.array(problem.joint_limits_lower, dtype=jnp.float32)
+        upper = jnp.array(problem.joint_limits_upper, dtype=jnp.float32)
 
         # Initialize Lagrange multipliers (for inequality: λ >= 0)
         # For g(x) >= 0 constraints, we have n_constraints multipliers
-        lambdas = jnp.zeros(n_constraints)
-        rho = self.initial_penalty
+        lambdas = jnp.zeros(n_constraints, dtype=jnp.float32)
+        rho = jnp.float32(self.initial_penalty)
 
         # Build augmented Lagrangian and its gradient
         def augmented_lagrangian(traj, lam, penalty):
@@ -207,6 +207,12 @@ class AugmentedLagrangianSolver(BaseSolver):
         beta1 = 0.9
         beta2 = 0.999
         eps = 1e-8
+
+        # Collect waypoint constraints as JAX arrays (float32 for consistency)
+        wp_constraints = [
+            (idx, jnp.array(angles, dtype=jnp.float32))
+            for idx, angles in problem.waypoint_constraints
+        ]
 
         # JIT compile inner loop with Adam optimizer
         @jax.jit
@@ -246,6 +252,10 @@ class AugmentedLagrangianSolver(BaseSolver):
                 if problem.fixed_end:
                     new_t = new_t.at[-1].set(traj[-1])
 
+                # Fix intermediate waypoints
+                for wp_idx, wp_angles in wp_constraints:
+                    new_t = new_t.at[wp_idx].set(wp_angles)
+
                 # Track best
                 new_cost = augmented_lagrangian(new_t, lam, penalty)
                 is_better = new_cost < best_cost
@@ -255,8 +265,8 @@ class AugmentedLagrangianSolver(BaseSolver):
                 return (new_t, m_new, v_new, new_best_t, new_best_cost)
 
             init_cost = augmented_lagrangian(traj, lam, penalty)
-            m_init = jnp.zeros(traj_shape)
-            v_init = jnp.zeros(traj_shape)
+            m_init = jnp.zeros(traj_shape, dtype=jnp.float32)
+            v_init = jnp.zeros(traj_shape, dtype=jnp.float32)
             _, _, _, best_traj, best_cost = jax.lax.fori_loop(
                 0, n_iters, body_fn,
                 (traj, m_init, v_init, traj, init_cost)
@@ -267,10 +277,13 @@ class AugmentedLagrangianSolver(BaseSolver):
         total_inner_iters = 0
         prev_max_violation = float('inf')
 
+        # Convert learning_rate to float32 for consistency
+        lr_f32 = jnp.float32(learning_rate)
+
         for outer_iter in range(max_outer):
             # Inner loop: minimize AL
             trajectory, al_cost = inner_loop(
-                trajectory, lambdas, rho, learning_rate, max_inner
+                trajectory, lambdas, rho, lr_f32, max_inner
             )
             total_inner_iters += max_inner
 
@@ -294,11 +307,11 @@ class AugmentedLagrangianSolver(BaseSolver):
 
             # Update multipliers: λ = max(0, λ - ρ * g)
             # For g >= 0 constraints
-            lambdas = jnp.maximum(0.0, lambdas - rho * g)
+            lambdas = jnp.maximum(jnp.float32(0.0), lambdas - rho * g)
 
             # Increase penalty if insufficient progress
             if max_violation > 0.25 * prev_max_violation:
-                rho = min(rho * self.penalty_multiplier, self.max_penalty)
+                rho = jnp.float32(min(float(rho) * self.penalty_multiplier, self.max_penalty))
 
             prev_max_violation = max_violation
 
@@ -559,7 +572,7 @@ class AugmentedLagrangianSolver(BaseSolver):
 
                 if name == 'world_collision':
                     obstacles = params['obstacles']
-                    params['activation_distance']
+                    activation = params['activation_distance']
 
                     sphere_obs = [o for o in obstacles if o['type'] == 'sphere']
                     if sphere_obs:
@@ -579,14 +592,14 @@ class AugmentedLagrangianSolver(BaseSolver):
 
                         # (n_waypoints, n_spheres * n_obstacles)
                         dists = jax.vmap(coll_dist_single)(trajectory)
-                        # Constraint: dist >= 0 (with margin)
-                        # g = dist - activation means g >= 0 when dist >= activation
-                        g = dists.flatten()
+                        # Constraint: dist - activation >= 0
+                        # g >= 0 when dist >= activation (safety margin)
+                        g = dists.flatten() - activation
                         all_constraints.append(g)
 
                 elif name == 'self_collision':
                     pairs_i, pairs_j = params['pair_indices']
-                    params['activation_distance']
+                    activation = params['activation_distance']
 
                     if len(pairs_i) > 0:
                         pairs_i_arr = jnp.array(pairs_i)
@@ -601,7 +614,9 @@ class AugmentedLagrangianSolver(BaseSolver):
                             return signed_dists
 
                         dists = jax.vmap(self_coll_dist_single)(trajectory)
-                        g = dists.flatten()
+                        # Constraint: dist - activation >= 0
+                        # g >= 0 when dist >= activation (safety margin)
+                        g = dists.flatten() - activation
                         all_constraints.append(g)
 
                 elif name == 'joint_limits':
