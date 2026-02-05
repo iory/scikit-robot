@@ -125,6 +125,11 @@ class ViserViewer:
         self._cached_mp_solver = None
         self._cached_mp_solver_type = None
 
+        # Solver warmup state
+        self._warmup_thread = None
+        self._warmup_in_progress = False
+        self._warmup_config_hash = None  # Track config to avoid redundant warmups
+
         # Collision visualization state
         self._obstacle_link_ids: set = set()  # link IDs that are obstacles
         self._obstacle_original_colors: Dict[str, tuple] = {}  # link_id -> original RGB
@@ -999,6 +1004,9 @@ class ViserViewer:
         # Update GUI status
         self._update_mp_status()
 
+        # Trigger background warmup for the solver
+        self._trigger_solver_warmup()
+
     def _remove_last_waypoint(self):
         """Remove the last saved waypoint."""
         if not self._waypoints:
@@ -1353,6 +1361,12 @@ class ViserViewer:
                     "Interpolation Points",
                     min=5, max=50, step=1, initial_value=15,
                 )
+
+                @self._mp_n_points.on_update
+                def _on_n_points_change(_):
+                    self._warmup_config_hash = None
+                    self._trigger_solver_warmup()
+
                 self._mp_smoothness_weight = self._server.gui.add_number(
                     "Smoothness Weight",
                     initial_value=1.0, step=0.1,
@@ -1371,15 +1385,37 @@ class ViserViewer:
                 )
                 self._mp_solver_dropdown = self._server.gui.add_dropdown(
                     "Solver",
-                    options=["jaxls", "scipy", "gradient_descent"],
-                    initial_value="jaxls",
+                    options=["augmented_lagrangian", "jaxls", "gradient_descent", "scipy"],
+                    initial_value="augmented_lagrangian",
                 )
+
+                @self._mp_solver_dropdown.on_update
+                def _on_solver_change(_):
+                    # Invalidate warmup cache when solver changes
+                    self._warmup_config_hash = None
+                    self._cached_mp_solver = None
+                    self._cached_mp_solver_type = None
+                    # Trigger warmup for compatible solvers
+                    self._trigger_solver_warmup()
+
                 self._mp_self_collision = self._server.gui.add_checkbox(
                     "Self-Collision", initial_value=True,
                 )
+
+                @self._mp_self_collision.on_update
+                def _on_self_collision_change(_):
+                    self._warmup_config_hash = None
+                    self._trigger_solver_warmup()
+
                 self._mp_cartesian_interp = self._server.gui.add_checkbox(
                     "Cartesian Interpolation", initial_value=False,
                 )
+
+                @self._mp_cartesian_interp.on_update
+                def _on_cartesian_change(_):
+                    self._warmup_config_hash = None
+                    self._trigger_solver_warmup()
+
                 self._mp_cartesian_weight = self._server.gui.add_number(
                     "Cartesian Path Weight",
                     initial_value=1000.0, step=100.0,
@@ -1394,6 +1430,12 @@ class ViserViewer:
                 self._mp_task_space_wp = self._server.gui.add_checkbox(
                     "Task-Space Waypoints", initial_value=False,
                 )
+
+                @self._mp_task_space_wp.on_update
+                def _on_task_space_wp_change(_):
+                    self._warmup_config_hash = None
+                    self._trigger_solver_warmup()
+
                 self._mp_ee_wp_pos_weight = self._server.gui.add_number(
                     "EE Waypoint Pos Weight",
                     initial_value=100.0, step=10.0,
@@ -2068,6 +2110,176 @@ class ViserViewer:
 
         return initial_traj, target_ee_positions, target_ee_rotations
 
+    def _get_warmup_config_hash(self):
+        """Generate a hash of current planning configuration for warmup."""
+        if not hasattr(self, '_mp_solver_dropdown'):
+            return None
+
+        config = (
+            len(self._waypoints),
+            self._selected_planning_group,
+            self._mp_solver_dropdown.value if hasattr(self, '_mp_solver_dropdown') else None,
+            int(self._mp_n_points.value) if hasattr(self, '_mp_n_points') else 10,
+            self._mp_self_collision.value if hasattr(self, '_mp_self_collision') else False,
+            self._mp_cartesian_interp.value if hasattr(self, '_mp_cartesian_interp') else False,
+            self._mp_task_space_wp.value if hasattr(self, '_mp_task_space_wp') else False,
+            bool(self._obstacle_link_ids),
+        )
+        return hash(config)
+
+    def _trigger_solver_warmup(self):
+        """Trigger background solver warmup if needed.
+
+        Note: Warmup is only effective for augmented_lagrangian solver.
+        jaxls requires recompilation when problem structure changes.
+        """
+        if not self._enable_motion_planning:
+            return
+        if len(self._waypoints) < 2:
+            return
+        if self._warmup_in_progress:
+            return
+
+        # Only warmup for augmented_lagrangian (jaxls doesn't benefit)
+        if not hasattr(self, '_mp_solver_dropdown'):
+            return
+        solver_type = self._mp_solver_dropdown.value
+        if solver_type not in ('augmented_lagrangian', 'gradient_descent'):
+            return
+
+        # Check if config changed
+        config_hash = self._get_warmup_config_hash()
+        if config_hash == self._warmup_config_hash:
+            return
+
+        self._warmup_in_progress = True
+        self._warmup_config_hash = config_hash
+
+        self._warmup_thread = threading.Thread(
+            target=self._warmup_solver_background, daemon=True
+        )
+        self._warmup_thread.start()
+
+    def _warmup_solver_background(self):
+        """Warmup solver JIT compilation in background thread."""
+        try:
+            import numpy as np
+
+            from skrobot.planner.trajectory_optimization import TrajectoryProblem
+            from skrobot.planner.trajectory_optimization.solvers import create_solver
+
+            if not self._robot_models:
+                return
+
+            robot_id = next(iter(self._robot_models))
+            robot_model = self._robot_models[robot_id]
+
+            # Get planning group
+            group_name = self._selected_planning_group
+            if not group_name or robot_id not in self._ik_targets:
+                return
+
+            target = self._ik_targets[robot_id].get(group_name)
+            if target is None:
+                return
+
+            link_list = target['link_list']
+            move_target = target['end_coords']
+            len(link_list)
+
+            # Get GUI parameters
+            n_segments = len(self._waypoints) - 1
+            points_per_seg = int(self._mp_n_points.value)
+            total_points = (points_per_seg - 1) * n_segments + 1
+            solver_type = self._mp_solver_dropdown.value
+            smoothness_w = float(self._mp_smoothness_weight.value)
+            collision_w = float(self._mp_collision_weight.value)
+            use_self_collision = self._mp_self_collision.value
+            use_cartesian = self._mp_cartesian_interp.value
+            use_task_space_wp = self._mp_task_space_wp.value
+            max_iters = int(self._mp_max_iterations.value)
+
+            # Create a minimal problem with same structure
+            problem = TrajectoryProblem(
+                robot_model=robot_model,
+                link_list=link_list,
+                n_waypoints=total_points,
+                dt=0.1,
+                move_target=move_target,
+            )
+
+            problem.add_smoothness_cost(weight=smoothness_w)
+            problem.add_acceleration_cost(weight=smoothness_w * 0.1)
+
+            # Add collision cost if obstacles exist
+            if self._obstacle_link_ids and collision_w > 0:
+                # Use dummy obstacles for warmup
+                dummy_obstacles = [{
+                    'type': 'sphere',
+                    'center': [0.0, 0.0, -10.0],
+                    'radius': 0.01,
+                }]
+                problem.add_collision_cost(
+                    collision_link_list=link_list,
+                    world_obstacles=dummy_obstacles,
+                    weight=collision_w,
+                    activation_distance=0.05,
+                )
+                if use_self_collision:
+                    problem.add_self_collision_cost(
+                        weight=collision_w,
+                        activation_distance=0.02,
+                    )
+
+            # Add cartesian path cost structure if enabled
+            if use_cartesian and move_target is not None:
+                ee_pos = move_target.worldpos()
+                ee_rot = move_target.worldrot()
+                dummy_positions = np.tile(ee_pos, (total_points, 1))
+                dummy_rotations = np.tile(ee_rot, (total_points, 1, 1))
+                problem.add_cartesian_path_cost(
+                    target_positions=dummy_positions,
+                    target_rotations=dummy_rotations,
+                    weight=1000.0,
+                    rotation_weight=1.0,
+                )
+
+            # Add EE waypoint costs if task-space waypoints enabled
+            if use_task_space_wp and move_target is not None:
+                problem.set_fixed_endpoints(start=True, end=False)
+                ee_pos = move_target.worldpos()
+                ee_rot = move_target.worldrot()
+                problem.add_ee_waypoint_cost(
+                    total_points - 1,
+                    ee_pos, ee_rot,
+                    position_weight=100.0,
+                    rotation_weight=10.0,
+                )
+
+            # Create solver and do warmup solve
+            solver = create_solver(
+                solver_type, max_iterations=max_iters, verbose=False
+            )
+
+            # Create dummy initial trajectory
+            start_angles = np.array([
+                link.joint.joint_angle() for link in link_list
+            ])
+            initial_traj = np.tile(start_angles, (total_points, 1))
+
+            # Do warmup solve (triggers JIT compilation)
+            solver.solve(problem, initial_traj)
+
+            # Cache the warmed-up solver
+            with self._mp_lock:
+                self._cached_mp_solver = solver
+                self._cached_mp_solver_type = solver_type
+
+        except Exception as e:
+            print(f"[Warmup] Warning: {e}")
+        finally:
+            self._warmup_in_progress = False
+
     def _start_planning(self):
         """Start trajectory planning in a background thread."""
         if self._is_planning:
@@ -2339,6 +2551,9 @@ class ViserViewer:
 
             if (self._cached_mp_solver is None
                     or self._cached_mp_solver_type != solver_type):
+                # First time using this solver - may need compilation
+                if solver_type == 'jaxls':
+                    self._mp_status_text.content = "**Compiling optimizer...**"
                 solver = create_solver(
                     solver_type, max_iterations=max_iters, verbose=False
                 )
@@ -2348,6 +2563,7 @@ class ViserViewer:
                 solver = self._cached_mp_solver
                 solver.max_iterations = max_iters
 
+            self._mp_status_text.content = "**Optimizing trajectory...**"
             result = solver.solve(problem, initial_traj)
             self._planned_trajectory = result.trajectory
 
