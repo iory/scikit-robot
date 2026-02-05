@@ -238,8 +238,8 @@ class GradientDescentSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
         from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances
         from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
+        from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
-        from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector
 
         dt = problem.dt
 
@@ -366,10 +366,12 @@ class GradientDescentSolver(BaseSolver):
                         def cart_cost_single(args):
                             angles, t_pos, t_rot = args
                             ee_pos, ee_rot = get_ee_pose(angles)
-                            pos_err = jnp.sum((ee_pos - t_pos) ** 2)
-                            rot_err = rotation_error_vector(
-                                ee_rot, t_rot, jnp)
-                            return pos_err + rot_w * jnp.sum(rot_err ** 2)
+                            # Use SE(3) logarithmic map for pose error
+                            pose_err = pose_error_log(
+                                ee_pos, ee_rot, t_pos, t_rot)
+                            pos_err = jnp.sum(pose_err[:3] ** 2)
+                            rot_err = jnp.sum(pose_err[3:] ** 2)
+                            return pos_err + rot_w * rot_err
 
                         cart_costs = jax.vmap(cart_cost_single)(
                             (trajectory, target_pos, target_rots)
@@ -405,11 +407,13 @@ class GradientDescentSolver(BaseSolver):
                     rw = c['rotation_weight']
                     angles = trajectory[wp_idx]
                     ee_pos, ee_rot = get_ee_pose(angles)
-                    pos_err = jnp.sum((ee_pos - t_pos) ** 2)
-                    rot_err = rotation_error_vector(ee_rot, t_rot, jnp)
+                    # Use SE(3) logarithmic map for pose error
+                    pose_err = pose_error_log(ee_pos, ee_rot, t_pos, t_rot)
+                    pos_err = jnp.sum(pose_err[:3] ** 2)
+                    rot_err = jnp.sum(pose_err[3:] ** 2)
                     total_cost = (total_cost
                                   + pw * pos_err
-                                  + rw * jnp.sum(rot_err ** 2))
+                                  + rw * rot_err)
 
             return total_cost
 

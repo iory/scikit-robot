@@ -552,7 +552,7 @@ class JaxlsSolver(BaseSolver):
         import jaxls
 
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
-        from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector
+        from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
 
         _, _, _, get_ee_pose = build_fk_functions(fk_data, jnp)
 
@@ -571,9 +571,11 @@ class JaxlsSolver(BaseSolver):
             ee_pos, ee_rot = get_ee_pose(angles)
             target_pos = vals[pos_param]
             target_rot = vals[rot_param].reshape(3, 3)
-            pos_err = pos_weight * (ee_pos - target_pos)
-            rot_err = rot_weight * rotation_error_vector(
-                ee_rot, target_rot, jnp)
+            # Use SE(3) logarithmic map for pose error
+            pose_err = pose_error_log(ee_pos, ee_rot, target_pos, target_rot)
+            # pose_err is (6,): [tx, ty, tz, rx, ry, rz]
+            pos_err = pos_weight * pose_err[:3]
+            rot_err = rot_weight * pose_err[3:]
             return jnp.concatenate([pos_err, rot_err]).flatten()
 
         return ee_waypoint_cost(
@@ -690,7 +692,7 @@ class JaxlsSolver(BaseSolver):
         import jaxls
 
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
-        from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector
+        from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
 
         T = problem.n_waypoints
         rotation_weight = spec.params.get('rotation_weight', 1.0)
@@ -709,9 +711,10 @@ class JaxlsSolver(BaseSolver):
                 ee_pos, ee_rot = get_ee_pose(angles)
                 target_pos = vals[pos_param]
                 target_rot = vals[rot_param].reshape(3, 3)
-                pos_err = pos_weight * (ee_pos - target_pos)
-                rot_err = rot_weight * rotation_error_vector(
-                    ee_rot, target_rot, jnp)
+                # Use SE(3) logarithmic map for pose error
+                pose_err = pose_error_log(ee_pos, ee_rot, target_pos, target_rot)
+                pos_err = pos_weight * pose_err[:3]
+                rot_err = rot_weight * pose_err[3:]
                 return jnp.concatenate([pos_err, rot_err]).flatten()
 
             return cartesian_path_cost(
