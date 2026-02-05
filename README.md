@@ -17,6 +17,9 @@
 Scikit-Robot is a lightweight pure-Python library for robotic kinematics,
 motion planning, visualization and control.
 
+https://github.com/user-attachments/assets/1dad1a4d-ba59-4ec0-93b0-96c8718c9e8f
+
+
 ## Installation
 You may need to install some dependencies by apt-get install:
 ```bash
@@ -106,11 +109,51 @@ Running these commands should open a viewer displaying your robot's 3D model. Be
 
 ![Viewer Example](docs/image/viewer.jpg)
 
-The viser viewer opens in your browser and provides GUI sliders for manipulating joint angles in real-time:
+## Viser Viewer - Interactive Motion Planning
+
+The viser viewer opens in your browser and provides a full-featured interface for robot manipulation:
+
+- **Joint Control**: GUI sliders for manipulating joint angles in real-time
+- **Interactive IK**: Drag transform controls at each end-effector to solve inverse kinematics
+- **Motion Planning**: Plan collision-free trajectories between waypoints with obstacle avoidance
 
 ![Viser Viewer](docs/image/viser-viewer.jpg)
 
-The viser viewer also supports interactive inverse kinematics (IK). Drag the transform controls at each end-effector to solve IK in real-time:
+### Interactive Motion Planning Demo
+
+The following video demonstrates the motion planning capabilities with collision avoidance:
+
+https://github.com/user-attachments/assets/1dad1a4d-ba59-4ec0-93b0-96c8718c9e8f
+
+Use the viser viewer with motion planning enabled:
+
+```python
+from skrobot.viewers import ViserViewer
+from skrobot.models import Panda
+
+# Create viewer with IK and motion planning enabled
+viewer = ViserViewer(enable_ik=True, enable_motion_planning=True)
+robot = Panda()
+viewer.add(robot)
+viewer.show()
+```
+
+Or via command line:
+
+```bash
+skr visualize-urdf robot.urdf --viewer viser
+```
+
+**Key features:**
+- Save waypoints by posing the robot via IK
+- Add obstacles (sphere, box, cylinder) interactively
+- Plan collision-free trajectories using augmented Lagrangian optimization
+- Visualize planned trajectory as ghost robots
+- Animate the planned motion
+
+### Interactive IK Demo
+
+Drag the transform controls at each end-effector to solve IK in real-time:
 
 https://github.com/user-attachments/assets/1294307e-a901-4f5f-aa4e-433cfbfacd03
 
@@ -159,8 +202,9 @@ See [examples/notebooks/](examples/notebooks/) for more examples.
 - [x] Loading robot model from URDF ([examples/robot_models.py](examples/robot_models.py))
 - [x] Forward and inverse kinematics ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py) [examples/pr2_inverse_kinematics.py](examples/pr2_inverse_kinematics.py))
 - [x] Collision detection
+- [x] **Collision-free motion planning** with trajectory optimization ([examples/collision_free_trajectory.py](examples/collision_free_trajectory.py))
+- [x] **Interactive IK and motion planning** in the browser ([ViserViewer](#viser-viewer---interactive-motion-planning))
 - [x] Interactive viewer ([examples/trimesh_scene_viewer.py](examples/trimesh_scene_viewer.py))
 - [x] Jupyter notebook viewer ([examples/notebooks/](examples/notebooks/))
 - [x] Pybullet and ROS command interface ([examples/pybullet_robot_interface.py](examples/pybullet_robot_interface.py))
 - [x] Forward and inverse dynamics
-- [x] Path planning ([examples/collision_free_trajectory.py](examples/collision_free_trajectory.py))
