@@ -125,6 +125,21 @@ class ViserViewer:
         self._cached_mp_solver = None
         self._cached_mp_solver_type = None
 
+        # Collision visualization state
+        self._obstacle_link_ids: set = set()  # link IDs that are obstacles
+        self._obstacle_original_colors: Dict[str, tuple] = {}  # link_id -> original RGB
+        self._obstacle_collision_state: Dict[str, bool] = {}  # link_id -> is_colliding
+        self._collision_check_enabled = False
+        self._collision_distance_threshold = 0.02  # meters
+        # Cache for robot collision spheres (local coordinates)
+        self._collision_spheres_cache = None  # list of (link, local_centers, radii)
+
+        # Obstacle management state
+        self._managed_obstacles: Dict[str, dict] = {}  # name -> obstacle info
+        self._obstacle_counter = 0  # for generating unique names
+        self._selected_obstacle: Optional[str] = None  # currently selected obstacle name
+        self._obstacle_transform_control = None  # current transform control handle
+
     @property
     def is_active(self) -> bool:
         return self._is_active
@@ -1037,6 +1052,266 @@ class ViserViewer:
         else:
             self._mp_status_text.content = f"**{n} waypoints**"
 
+    def _setup_obstacles_gui(self):
+        """Set up GUI controls for obstacle management."""
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+
+        self._obstacles_folder = self._server.gui.add_folder(
+            "Obstacles", expand_by_default=True
+        )
+
+        with self._obstacles_folder:
+            # Obstacle type dropdown
+            self._obstacle_type_dropdown = self._server.gui.add_dropdown(
+                "Type",
+                options=["Sphere", "Box", "Cylinder"],
+                initial_value="Sphere",
+            )
+
+            # Parameter inputs - will show/hide based on type
+            # Sphere parameters
+            self._obs_radius = self._server.gui.add_number(
+                "Radius [m]", initial_value=0.1, step=0.01, min=0.01
+            )
+
+            # Box parameters (initially hidden)
+            self._obs_size_x = self._server.gui.add_number(
+                "Size X [m]", initial_value=0.1, step=0.01, min=0.01
+            )
+            self._obs_size_y = self._server.gui.add_number(
+                "Size Y [m]", initial_value=0.1, step=0.01, min=0.01
+            )
+            self._obs_size_z = self._server.gui.add_number(
+                "Size Z [m]", initial_value=0.1, step=0.01, min=0.01
+            )
+
+            # Cylinder parameters
+            self._obs_height = self._server.gui.add_number(
+                "Height [m]", initial_value=0.2, step=0.01, min=0.01
+            )
+
+            # Position inputs
+            with self._server.gui.add_folder("Position", expand_by_default=False):
+                self._obs_pos_x = self._server.gui.add_number(
+                    "X [m]", initial_value=0.5, step=0.05
+                )
+                self._obs_pos_y = self._server.gui.add_number(
+                    "Y [m]", initial_value=0.0, step=0.05
+                )
+                self._obs_pos_z = self._server.gui.add_number(
+                    "Z [m]", initial_value=0.5, step=0.05
+                )
+
+            # Color picker
+            self._obs_color = self._server.gui.add_rgb(
+                "Color", initial_value=(100, 150, 200)
+            )
+
+            # Add/Delete buttons
+            add_obs_btn = self._server.gui.add_button("Add Obstacle")
+            delete_obs_btn = self._server.gui.add_button("Delete Selected")
+
+            # Obstacle list dropdown (for selection)
+            self._obstacle_list_dropdown = self._server.gui.add_dropdown(
+                "Select Obstacle",
+                options=["(none)"],
+                initial_value="(none)",
+            )
+
+            # Collision visualization toggle
+            self._collision_viz_checkbox = self._server.gui.add_checkbox(
+                "Show Collisions", initial_value=False
+            )
+            self._collision_threshold = self._server.gui.add_number(
+                "Threshold [m]", initial_value=0.02, step=0.005, min=0.0
+            )
+
+        # Update visibility based on type
+        def update_param_visibility(_):
+            obs_type = self._obstacle_type_dropdown.value
+            # Radius: Sphere, Cylinder
+            self._obs_radius.visible = obs_type in ["Sphere", "Cylinder"]
+            # Box sizes: Box only
+            self._obs_size_x.visible = obs_type == "Box"
+            self._obs_size_y.visible = obs_type == "Box"
+            self._obs_size_z.visible = obs_type == "Box"
+            # Height: Cylinder only
+            self._obs_height.visible = obs_type == "Cylinder"
+
+        self._obstacle_type_dropdown.on_update(update_param_visibility)
+        # Initialize visibility
+        update_param_visibility(None)
+
+        # Add obstacle button callback
+        def on_add_obstacle(_):
+            obs_type = self._obstacle_type_dropdown.value
+            pos = [
+                self._obs_pos_x.value,
+                self._obs_pos_y.value,
+                self._obs_pos_z.value,
+            ]
+            color = list(self._obs_color.value)
+
+            self._obstacle_counter += 1
+            name = f"{obs_type}_{self._obstacle_counter}"
+
+            if obs_type == "Sphere":
+                obstacle = Sphere(
+                    radius=self._obs_radius.value,
+                    pos=pos,
+                    color=color,
+                    name=name,
+                )
+            elif obs_type == "Box":
+                obstacle = Box(
+                    extents=[
+                        self._obs_size_x.value,
+                        self._obs_size_y.value,
+                        self._obs_size_z.value,
+                    ],
+                    pos=pos,
+                    face_colors=color + [255],
+                    name=name,
+                )
+            elif obs_type == "Cylinder":
+                obstacle = Cylinder(
+                    radius=self._obs_radius.value,
+                    height=self._obs_height.value,
+                    pos=pos,
+                    color=color,
+                    name=name,
+                )
+            else:
+                return
+
+            # Add to viewer
+            self.add(obstacle)
+
+            # Store obstacle reference
+            link_id = str(id(obstacle))
+            self._managed_obstacles[name] = {
+                'link': obstacle,
+                'link_id': link_id,
+                'type': obs_type,
+            }
+
+            # Update dropdown
+            self._update_obstacle_list_dropdown()
+
+            # Select the newly added obstacle
+            self._obstacle_list_dropdown.value = name
+            self._select_obstacle(name)
+
+        add_obs_btn.on_click(on_add_obstacle)
+
+        # Delete obstacle button callback
+        def on_delete_obstacle(_):
+            if self._selected_obstacle is None:
+                return
+            name = self._selected_obstacle
+            if name not in self._managed_obstacles:
+                return
+
+            obstacle_info = self._managed_obstacles[name]
+            link = obstacle_info['link']
+
+            # Remove transform control if exists
+            self._remove_obstacle_transform_control()
+
+            # Delete from viewer
+            self.delete(link)
+
+            # Remove from managed obstacles
+            del self._managed_obstacles[name]
+            self._selected_obstacle = None
+
+            # Update dropdown
+            self._update_obstacle_list_dropdown()
+
+        delete_obs_btn.on_click(on_delete_obstacle)
+
+        # Obstacle selection callback
+        def on_obstacle_selected(_):
+            selected = self._obstacle_list_dropdown.value
+            if selected == "(none)":
+                self._remove_obstacle_transform_control()
+                self._selected_obstacle = None
+            else:
+                self._select_obstacle(selected)
+
+        self._obstacle_list_dropdown.on_update(on_obstacle_selected)
+
+        # Collision visualization callbacks
+        def on_collision_viz_change(_):
+            enabled = self._collision_viz_checkbox.value
+            threshold = self._collision_threshold.value
+            self.enable_collision_visualization(enabled, threshold)
+
+        self._collision_viz_checkbox.on_update(on_collision_viz_change)
+        self._collision_threshold.on_update(on_collision_viz_change)
+
+    def _update_obstacle_list_dropdown(self):
+        """Update the obstacle list dropdown with current obstacles."""
+        options = ["(none)"] + list(self._managed_obstacles.keys())
+        self._obstacle_list_dropdown.options = options
+        if self._selected_obstacle not in self._managed_obstacles:
+            self._obstacle_list_dropdown.value = "(none)"
+            self._selected_obstacle = None
+
+    def _select_obstacle(self, name):
+        """Select an obstacle and add transform control."""
+        if name not in self._managed_obstacles:
+            return
+
+        # Remove previous transform control
+        self._remove_obstacle_transform_control()
+
+        self._selected_obstacle = name
+        obstacle_info = self._managed_obstacles[name]
+        link = obstacle_info['link']
+
+        # Add transform control
+        pos = link.worldpos()
+        rot = link.worldrot()
+
+        self._obstacle_transform_control = self._server.scene.add_transform_controls(
+            f"obstacle_control/{name}",
+            scale=0.15,
+            position=pos,
+            wxyz=matrix2quaternion(rot),
+        )
+
+        # Callback for when transform control is moved
+        def on_transform_update(control):
+            if self._selected_obstacle != name:
+                return
+            if name not in self._managed_obstacles:
+                return
+
+            # Get new position and rotation from control
+            new_pos = np.array(control.position)
+            new_rot = vtf.SO3(control.wxyz).as_matrix()
+
+            # Update obstacle position
+            link.newcoords(Coordinates(pos=new_pos, rot=new_rot))
+
+            # Redraw to update visualization
+            self.redraw()
+
+        self._obstacle_transform_control.on_update(
+            lambda _: on_transform_update(self._obstacle_transform_control)
+        )
+
+    def _remove_obstacle_transform_control(self):
+        """Remove the current obstacle transform control."""
+        if self._obstacle_transform_control is not None:
+            try:
+                self._obstacle_transform_control.remove()
+            except Exception:
+                pass
+            self._obstacle_transform_control = None
+
     def _setup_motion_planning_gui(self):
         """Set up GUI controls for motion planning."""
         self._mp_folder = self._server.gui.add_folder(
@@ -1085,6 +1360,10 @@ class ViserViewer:
                 self._mp_collision_weight = self._server.gui.add_number(
                     "Collision Weight",
                     initial_value=100.0, step=10.0,
+                )
+                self._mp_activation_dist = self._server.gui.add_number(
+                    "Activation Distance [m]",
+                    initial_value=0.1, step=0.01, min=0.01,
                 )
                 self._mp_max_iterations = self._server.gui.add_slider(
                     "Max Iterations",
@@ -1291,6 +1570,9 @@ class ViserViewer:
     def _detect_world_obstacles(self):
         """Detect world obstacles from objects added to the viewer.
 
+        Uses sphere decomposition for Box and Cylinder to provide
+        better collision avoidance than single bounding spheres.
+
         Returns
         -------
         list
@@ -1316,23 +1598,366 @@ class ViserViewer:
                     'radius': float(link.radius),
                 })
             elif isinstance(link, Box):
+                # Sphere decomposition for Box
+                # Use smaller spheres at corners and center for better coverage
                 half_extents = np.array(link.extents) / 2
-                radius = float(np.linalg.norm(half_extents))
+                world_pos = link.worldpos()
+                world_rot = link.worldrot()
+
+                # Sphere radius: use smallest half-extent
+                sphere_radius = float(np.min(half_extents))
+
+                # Generate sphere centers at strategic points
+                # Center sphere
                 obstacles.append({
                     'type': 'sphere',
-                    'center': link.worldpos().tolist(),
-                    'radius': radius,
+                    'center': world_pos.tolist(),
+                    'radius': sphere_radius,
                 })
+
+                # Spheres along each axis (6 spheres on faces)
+                for axis in range(3):
+                    for sign in [-1, 1]:
+                        local_offset = np.zeros(3)
+                        local_offset[axis] = sign * (
+                            half_extents[axis] - sphere_radius * 0.5)
+                        world_offset = world_rot @ local_offset
+                        center = world_pos + world_offset
+                        obstacles.append({
+                            'type': 'sphere',
+                            'center': center.tolist(),
+                            'radius': sphere_radius,
+                        })
+
             elif isinstance(link, Cylinder):
+                # Sphere decomposition for Cylinder
+                # Place spheres along the cylinder axis
                 half_h = link.height / 2
-                r = link.radius
-                radius = float(np.sqrt(r ** 2 + half_h ** 2))
-                obstacles.append({
-                    'type': 'sphere',
-                    'center': link.worldpos().tolist(),
+                cyl_radius = link.radius
+                world_pos = link.worldpos()
+                world_rot = link.worldrot()
+
+                # Use cylinder radius as sphere radius
+                sphere_radius = float(cyl_radius)
+
+                # Number of spheres along height
+                n_spheres = max(2, int(np.ceil(link.height / cyl_radius)))
+
+                for i in range(n_spheres):
+                    # Position along Z axis (cylinder axis)
+                    t = -half_h + (i + 0.5) * link.height / n_spheres
+                    local_offset = np.array([0.0, 0.0, t])
+                    world_offset = world_rot @ local_offset
+                    center = world_pos + world_offset
+                    obstacles.append({
+                        'type': 'sphere',
+                        'center': center.tolist(),
+                        'radius': sphere_radius,
+                    })
+
+        return obstacles
+
+    def _build_collision_spheres_cache(self, n_spheres_per_link=3):
+        """Build cache of collision spheres in local coordinates.
+
+        Parameters
+        ----------
+        n_spheres_per_link : int
+            Number of spheres to use per link for capsule approximation.
+        """
+        try:
+            import trimesh
+        except ImportError:
+            trimesh = None
+
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+
+        cache = []
+
+        for robot_model in self._robot_models.values():
+            for link in robot_model.link_list:
+                link_id = str(id(link))
+                if link_id not in self._linkid_to_link:
+                    continue
+
+                # Get collision mesh or primitive shape
+                if isinstance(link, Sphere):
+                    cache.append({
+                        'link': link,
+                        'local_centers': [np.zeros(3)],
+                        'radii': [float(link.radius)],
+                    })
+                elif isinstance(link, Box):
+                    half_extents = np.array(link.extents) / 2
+                    radius = float(np.min(half_extents))
+                    cache.append({
+                        'link': link,
+                        'local_centers': [np.zeros(3)],
+                        'radii': [radius],
+                    })
+                elif isinstance(link, Cylinder):
+                    cache.append({
+                        'link': link,
+                        'local_centers': [np.zeros(3)],
+                        'radii': [float(link.radius)],
+                    })
+                else:
+                    mesh = getattr(link, 'collision_mesh', None)
+                    if mesh is None:
+                        mesh = getattr(link, 'concatenated_visual_mesh', None)
+
+                    if trimesh is not None and mesh is not None:
+                        if isinstance(mesh, trimesh.Trimesh) and not mesh.is_empty:
+                            try:
+                                result = trimesh.bounds.minimum_cylinder(mesh)
+                                height = result['height']
+                                radius = result['radius']
+                                transform = result['transform']
+
+                                local_centers = []
+                                radii = []
+                                t_values = np.linspace(
+                                    -0.5, 0.5, n_spheres_per_link)
+                                for t in t_values:
+                                    local_pos = np.array([0, 0, t * height])
+                                    mesh_pos = (transform[:3, :3] @ local_pos
+                                                + transform[:3, 3])
+                                    local_centers.append(mesh_pos)
+                                    radii.append(float(radius))
+
+                                cache.append({
+                                    'link': link,
+                                    'local_centers': local_centers,
+                                    'radii': radii,
+                                })
+                                continue
+                            except Exception:
+                                pass
+
+                    if mesh is not None:
+                        cache.append({
+                            'link': link,
+                            'local_centers': [np.zeros(3)],
+                            'radii': [0.03],
+                        })
+
+        self._collision_spheres_cache = cache
+
+    def _get_robot_collision_spheres(self):
+        """Get collision sphere positions and radii for all robot links.
+
+        Uses cached local coordinates and transforms to world coordinates.
+
+        Returns
+        -------
+        list of dict
+            List of dicts with 'center' (3,) and 'radius' (float).
+        """
+        # Build cache if not exists
+        if self._collision_spheres_cache is None:
+            self._build_collision_spheres_cache()
+
+        spheres = []
+        for entry in self._collision_spheres_cache:
+            link = entry['link']
+            world_rot = link.worldrot()
+            world_pos = link.worldpos()
+
+            for local_center, radius in zip(
+                entry['local_centers'], entry['radii']
+            ):
+                world_center = world_rot @ local_center + world_pos
+                spheres.append({
+                    'center': world_center,
                     'radius': radius,
                 })
-        return obstacles
+
+        return spheres
+
+    def _check_obstacle_collisions(self):
+        """Check collisions between robot and obstacles.
+
+        Returns
+        -------
+        dict
+            Mapping from obstacle link_id to collision status (bool).
+        """
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+        from skrobot.planner.trajectory_optimization.collision import point_to_box_distance
+        from skrobot.planner.trajectory_optimization.collision import point_to_cylinder_distance
+        from skrobot.planner.trajectory_optimization.collision import point_to_sphere_distance
+
+        collision_states = {}
+        robot_spheres = self._get_robot_collision_spheres()
+
+        if not robot_spheres:
+            return collision_states
+
+        # Check each obstacle
+        for link_id in self._obstacle_link_ids:
+            if link_id not in self._linkid_to_link:
+                continue
+            link = self._linkid_to_link[link_id]
+            is_colliding = False
+
+            # Check distance based on obstacle type
+            for robot_sphere in robot_spheres:
+                robot_center = robot_sphere['center']
+                robot_radius = robot_sphere['radius']
+
+                if isinstance(link, Sphere):
+                    dist = point_to_sphere_distance(
+                        robot_center, link.worldpos(), link.radius)
+                    margin = dist - robot_radius
+
+                elif isinstance(link, Box):
+                    dist = point_to_box_distance(
+                        robot_center,
+                        link.worldpos(),
+                        link.worldrot(),
+                        np.array(link.extents) / 2,
+                    )
+                    margin = dist - robot_radius
+
+                elif isinstance(link, Cylinder):
+                    dist = point_to_cylinder_distance(
+                        robot_center,
+                        link.worldpos(),
+                        link.worldrot(),
+                        link.radius,
+                        link.height / 2,
+                    )
+                    margin = dist - robot_radius
+                else:
+                    continue
+
+                if margin < self._collision_distance_threshold:
+                    is_colliding = True
+                    break
+
+            collision_states[link_id] = is_colliding
+
+        return collision_states
+
+    def _update_obstacle_colors(self, collision_states):
+        """Update obstacle colors based on collision states.
+
+        Parameters
+        ----------
+        collision_states : dict
+            Mapping from obstacle link_id to collision status (bool).
+        """
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+
+        for link_id, is_colliding in collision_states.items():
+            # Check if state changed
+            prev_state = self._obstacle_collision_state.get(link_id, False)
+            if is_colliding == prev_state:
+                continue
+
+            self._obstacle_collision_state[link_id] = is_colliding
+
+            if link_id not in self._linkid_to_link:
+                continue
+            if link_id not in self._linkid_to_handle:
+                continue
+
+            link = self._linkid_to_link[link_id]
+            old_handle = self._linkid_to_handle[link_id]
+
+            # Remove old handle
+            try:
+                old_handle.remove()
+            except Exception:
+                pass
+
+            # Determine color
+            if is_colliding:
+                color = (255, 50, 50)  # Red for collision
+                opacity = 0.8
+            else:
+                # Restore original color
+                color = self._obstacle_original_colors.get(
+                    link_id, (100, 100, 100))
+                opacity = 0.6
+
+            # Recreate handle with new color
+            new_handle = None
+            if isinstance(link, Sphere):
+                new_handle = self._server.scene.add_icosphere(
+                    link.name,
+                    radius=link.radius,
+                    position=link.worldpos(),
+                    color=color,
+                    opacity=opacity,
+                )
+            elif isinstance(link, Box):
+                # For Box, we need to recreate as mesh
+                mesh = link.concatenated_visual_mesh
+                if mesh is not None:
+                    new_handle = self._server.scene.add_mesh_simple(
+                        link.name,
+                        vertices=np.array(mesh.vertices, dtype=np.float32),
+                        faces=np.array(mesh.faces, dtype=np.uint32),
+                        color=color,
+                        opacity=opacity,
+                        wxyz=matrix2quaternion(link.worldrot()),
+                        position=link.worldpos(),
+                        flat_shading=False,
+                    )
+            elif isinstance(link, Cylinder):
+                mesh = link.concatenated_visual_mesh
+                if mesh is not None:
+                    new_handle = self._server.scene.add_mesh_simple(
+                        link.name,
+                        vertices=np.array(mesh.vertices, dtype=np.float32),
+                        faces=np.array(mesh.faces, dtype=np.uint32),
+                        color=color,
+                        opacity=opacity,
+                        wxyz=matrix2quaternion(link.worldrot()),
+                        position=link.worldpos(),
+                        flat_shading=False,
+                    )
+
+            if new_handle is not None:
+                self._linkid_to_handle[link_id] = new_handle
+
+    def enable_collision_visualization(self, enabled=True, threshold=0.02):
+        """Enable or disable collision visualization.
+
+        When enabled, obstacles will turn red when in collision with the robot.
+
+        Parameters
+        ----------
+        enabled : bool
+            Whether to enable collision visualization.
+        threshold : float
+            Distance threshold for collision detection in meters.
+        """
+        self._collision_check_enabled = enabled
+        self._collision_distance_threshold = threshold
+
+        if not enabled:
+            # Reset all obstacles to original colors
+            for link_id in self._obstacle_link_ids:
+                if self._obstacle_collision_state.get(link_id, False):
+                    self._obstacle_collision_state[link_id] = False
+            # Force color update
+            collision_states = {
+                lid: False for lid in self._obstacle_link_ids
+            }
+            self._update_obstacle_colors(collision_states)
+        else:
+            # Pre-build collision spheres cache for fast subsequent checks
+            if self._collision_spheres_cache is None:
+                self._build_collision_spheres_cache()
+            # Immediately check and update collision colors
+            if self._obstacle_link_ids:
+                collision_states = self._check_obstacle_collisions()
+                self._update_obstacle_colors(collision_states)
 
     def _build_cartesian_initial_trajectory(
         self, robot_model, link_list, move_target,
@@ -1665,12 +2290,13 @@ class ViserViewer:
                     rotation_weight=1.0,
                 )
 
+            activation_dist = float(self._mp_activation_dist.value)
             if world_obstacles and collision_w > 0:
                 problem.add_collision_cost(
                     collision_link_list=coll_link_list,
                     world_obstacles=world_obstacles,
                     weight=collision_w,
-                    activation_distance=0.05,
+                    activation_distance=activation_dist,
                 )
                 if use_self_collision:
                     problem.add_self_collision_cost(
@@ -1721,6 +2347,7 @@ class ViserViewer:
             else:
                 solver = self._cached_mp_solver
                 solver.max_iterations = max_iters
+
             result = solver.solve(problem, initial_traj)
             self._planned_trajectory = result.trajectory
 
@@ -1941,11 +2568,18 @@ class ViserViewer:
             position=np.array([0.0, 0.0, -0.01]),
         )
 
-    def _add_link(self, link: Link):
+    def _add_link(self, link: Link, is_obstacle: bool = False):
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+
         assert isinstance(link, Link)
         link_id = str(id(link))
         if link_id in self._linkid_to_handle:
             return
+
+        # Track obstacles for collision visualization
+        if is_obstacle and isinstance(link, (Sphere, Box, Cylinder)):
+            self._obstacle_link_ids.add(link_id)
 
         handle = None
         if isinstance(link, Sphere):
@@ -1955,6 +2589,9 @@ class ViserViewer:
             alpha = link.visual_mesh.visual.face_colors[0, 3]
             if alpha > 1.0:
                 alpha = alpha / 255.0
+            # Store original color for collision visualization
+            if is_obstacle:
+                self._obstacle_original_colors[link_id] = tuple(color)
             handle = self._server.scene.add_icosphere(
                 link.name,
                 radius=link.radius,
@@ -1987,6 +2624,20 @@ class ViserViewer:
         else:
             mesh = link.concatenated_visual_mesh
             if mesh is not None:
+                # Store original color for Box/Cylinder obstacles
+                if is_obstacle and isinstance(link, (Box, Cylinder)):
+                    # Extract color from mesh if available
+                    if hasattr(mesh.visual, 'face_colors'):
+                        fc = mesh.visual.face_colors
+                        if len(fc) > 0:
+                            self._obstacle_original_colors[link_id] = tuple(
+                                fc[0, :3])
+                        else:
+                            self._obstacle_original_colors[link_id] = (
+                                100, 100, 100)
+                    else:
+                        self._obstacle_original_colors[link_id] = (
+                            100, 100, 100)
                 handle = self._server.scene.add_mesh_trimesh(
                         link.name,
                         mesh=mesh,
@@ -2030,16 +2681,29 @@ class ViserViewer:
             "Export Joint Angles", expand_by_default=False
         )
 
+        # Obstacles management folder
+        self._setup_obstacles_gui()
+
         if self._enable_motion_planning:
             self._setup_motion_planning_gui()
 
     def add(self, geometry: Union[Link, CascadedLink]):
+        from skrobot.model.primitives import Box
+        from skrobot.model.primitives import Cylinder
+
         if isinstance(geometry, Link):
-            self._add_link(geometry)
+            # Single link added directly is treated as obstacle if primitive
+            is_obstacle = isinstance(geometry, (Sphere, Box, Cylinder))
+            self._add_link(geometry, is_obstacle=is_obstacle)
         elif isinstance(geometry, CascadedLink):
             for link in geometry.link_list:
-                self._add_link(link)
+                self._add_link(link, is_obstacle=False)
             if isinstance(geometry, RobotModel):
+                # Always register robot model for collision checking
+                robot_id = id(geometry)
+                self._robot_models[robot_id] = geometry
+                # Clear collision spheres cache when robot is added
+                self._collision_spheres_cache = None
                 self._ensure_gui_initialized()
                 self._add_joint_sliders(geometry)
                 if self._enable_ik:
@@ -2069,6 +2733,11 @@ class ViserViewer:
             for robot_id in self._ik_targets:
                 self._sync_ik_targets(robot_id)
 
+        # Check and visualize collisions if enabled
+        if self._collision_check_enabled and self._obstacle_link_ids:
+            collision_states = self._check_obstacle_collisions()
+            self._update_obstacle_colors(collision_states)
+
     def delete(self, geometry: Union[Link, CascadedLink]):
         if isinstance(geometry, Link):
             links = [geometry]
@@ -2085,3 +2754,7 @@ class ViserViewer:
             handle.remove()
             self._linkid_to_link.pop(link_id)
             self._linkid_to_handle.pop(link_id)
+            # Clean up obstacle tracking data
+            self._obstacle_link_ids.discard(link_id)
+            self._obstacle_original_colors.pop(link_id, None)
+            self._obstacle_collision_state.pop(link_id, None)
