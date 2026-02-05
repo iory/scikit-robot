@@ -5,6 +5,8 @@ shared across different solvers (scipy, jaxls, gradient_descent).
 """
 
 from skrobot.kinematics.differentiable import _axis_angle_to_matrix
+from skrobot.kinematics.differentiable import pose_error_se3_log as pose_error_log
+from skrobot.kinematics.differentiable import rotation_error_so3_log as rotation_error_log
 
 
 def build_fk_functions(fk_data, backend):
@@ -336,6 +338,8 @@ def prepare_fk_data(problem, backend):
 __all__ = [
     'build_fk_functions',
     'rotation_error_vector',
+    'rotation_error_log',
+    'pose_error_log',
     'compute_sphere_obstacle_distances',
     'compute_self_collision_distances',
     'compute_collision_residuals',
