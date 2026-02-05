@@ -2208,8 +2208,10 @@ class ViserViewer:
                 move_target=move_target,
             )
 
-            problem.add_smoothness_cost(weight=smoothness_w)
-            problem.add_acceleration_cost(weight=smoothness_w * 0.1)
+            problem.add_smooth_trajectory_costs(
+                weight=smoothness_w,
+                use_high_precision=True,
+            )
 
             # Add collision cost if obstacles exist
             if self._obstacle_link_ids and collision_w > 0:
@@ -2486,8 +2488,10 @@ class ViserViewer:
                     rotation_weight=ee_wp_rot_w,
                 )
 
-            problem.add_smoothness_cost(weight=smoothness_w)
-            problem.add_acceleration_cost(weight=smoothness_w * 0.1)
+            problem.add_smooth_trajectory_costs(
+                weight=smoothness_w,
+                use_high_precision=True,
+            )
 
             if use_posture_reg and posture_w > 0:
                 nominal_angles = waypoint_angles[0]

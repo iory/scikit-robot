@@ -184,6 +184,221 @@ class TrajectoryProblem:
             weight=weight,
         ))
 
+    def add_smooth_trajectory_costs(
+        self,
+        weight=1.0,
+        use_high_precision=True,
+        velocity_weight_scale=1.0,
+        acceleration_weight_scale=0.5,
+        jerk_weight_scale=0.1,
+    ):
+        """Add costs for generating smooth trajectories.
+
+        This is a convenience method that automatically selects the
+        appropriate smoothness costs based on the number of waypoints.
+        When high precision is enabled and sufficient waypoints are
+        available, it uses 5-point/7-point stencils for more accurate
+        derivative computation.
+
+        Parameters
+        ----------
+        weight : float
+            Base weight for smoothness costs.
+        use_high_precision : bool
+            If True, use 5-point/7-point stencils when possible.
+            If False, always use simple finite differences.
+        velocity_weight_scale : float
+            Scale factor for velocity cost relative to base weight.
+        acceleration_weight_scale : float
+            Scale factor for acceleration cost relative to base weight.
+        jerk_weight_scale : float
+            Scale factor for jerk cost relative to base weight.
+
+        Notes
+        -----
+        The method selects costs based on waypoint count:
+
+        - n_waypoints >= 7 and high_precision:
+            Uses 5-point velocity, 5-point acceleration, 7-point jerk
+        - n_waypoints >= 5 and high_precision:
+            Uses 5-point velocity, 5-point acceleration
+        - Otherwise:
+            Uses simple smoothness (velocity) and 3-point acceleration
+        """
+        velocity_w = weight * velocity_weight_scale
+        acceleration_w = weight * acceleration_weight_scale
+        jerk_w = weight * jerk_weight_scale
+
+        if use_high_precision and self.n_waypoints >= 7:
+            self.add_five_point_velocity_cost(weight=velocity_w)
+            self.add_five_point_acceleration_cost(weight=acceleration_w)
+            self.add_five_point_jerk_cost(weight=jerk_w)
+        elif use_high_precision and self.n_waypoints >= 5:
+            self.add_five_point_velocity_cost(weight=velocity_w)
+            self.add_five_point_acceleration_cost(weight=acceleration_w)
+        else:
+            self.add_smoothness_cost(weight=velocity_w)
+            self.add_acceleration_cost(weight=acceleration_w)
+
+    def add_five_point_velocity_cost(self, weight=1.0, velocity_limits=None):
+        """Add velocity cost using 5-point stencil for higher accuracy.
+
+        The 5-point stencil computes velocity with O(h^4) accuracy:
+            v = (-q[t+2] + 8*q[t+1] - 8*q[t-1] + q[t-2]) / (12*dt)
+
+        This method requires at least 5 waypoints and applies to
+        waypoints [2, n_waypoints-2].
+
+        Parameters
+        ----------
+        weight : float
+            Cost weight.
+        velocity_limits : array-like, optional
+            Maximum velocity for each joint. If None, uses joint velocity
+            limits from the robot model.
+        """
+        if self.n_waypoints < 5:
+            raise ValueError(
+                "5-point stencil requires at least 5 waypoints, "
+                f"got {self.n_waypoints}"
+            )
+        if velocity_limits is None:
+            velocity_limits = np.array([
+                j.max_joint_velocity for j in self.joint_list
+            ])
+        else:
+            velocity_limits = np.array(velocity_limits)
+        self.residuals.append(ResidualSpec(
+            name='five_point_velocity',
+            residual_fn='five_point_velocity',
+            params={
+                'dt': self.dt,
+                'velocity_limits': velocity_limits,
+            },
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_five_point_acceleration_cost(self, weight=1.0):
+        """Add acceleration cost using 5-point stencil for higher accuracy.
+
+        The 5-point stencil computes acceleration with O(h^4) accuracy:
+            a = (-q[t+2] + 16*q[t+1] - 30*q[t] + 16*q[t-1] - q[t-2]) / (12*dt^2)
+
+        This method requires at least 5 waypoints and applies to
+        waypoints [2, n_waypoints-2].
+
+        Parameters
+        ----------
+        weight : float
+            Cost weight.
+        """
+        if self.n_waypoints < 5:
+            raise ValueError(
+                "5-point stencil requires at least 5 waypoints, "
+                f"got {self.n_waypoints}"
+            )
+        self.residuals.append(ResidualSpec(
+            name='five_point_acceleration',
+            residual_fn='five_point_acceleration',
+            params={'dt': self.dt},
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_five_point_jerk_cost(self, weight=0.1):
+        """Add jerk cost using 7-point stencil for higher accuracy.
+
+        The 7-point stencil computes jerk with O(h^4) accuracy:
+            j = (-q[t+3] + 8*q[t+2] - 13*q[t+1] + 13*q[t-1] - 8*q[t-2] + q[t-3])
+                / (8*dt^3)
+
+        This method requires at least 7 waypoints and applies to
+        waypoints [3, n_waypoints-3].
+
+        Parameters
+        ----------
+        weight : float
+            Cost weight.
+        """
+        if self.n_waypoints < 7:
+            raise ValueError(
+                "7-point stencil for jerk requires at least 7 waypoints, "
+                f"got {self.n_waypoints}"
+            )
+        self.residuals.append(ResidualSpec(
+            name='five_point_jerk',
+            residual_fn='five_point_jerk',
+            params={'dt': self.dt},
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_acceleration_limit(self, acceleration_limit, weight=1.0):
+        """Add acceleration limit constraint using 5-point stencil.
+
+        Penalizes accelerations that exceed the specified limit.
+
+        Parameters
+        ----------
+        acceleration_limit : float or array-like
+            Maximum acceleration for each joint. If scalar, applies to
+            all joints.
+        weight : float
+            Cost weight.
+        """
+        if self.n_waypoints < 5:
+            raise ValueError(
+                "5-point stencil requires at least 5 waypoints, "
+                f"got {self.n_waypoints}"
+            )
+        if np.isscalar(acceleration_limit):
+            acceleration_limit = np.full(self.n_joints, acceleration_limit)
+        else:
+            acceleration_limit = np.array(acceleration_limit)
+        self.residuals.append(ResidualSpec(
+            name='acceleration_limit',
+            residual_fn='acceleration_limit',
+            params={
+                'dt': self.dt,
+                'acceleration_limit': acceleration_limit,
+            },
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_jerk_limit(self, jerk_limit, weight=0.1):
+        """Add jerk limit constraint using 7-point stencil.
+
+        Penalizes jerks that exceed the specified limit.
+
+        Parameters
+        ----------
+        jerk_limit : float or array-like
+            Maximum jerk for each joint. If scalar, applies to all joints.
+        weight : float
+            Cost weight.
+        """
+        if self.n_waypoints < 7:
+            raise ValueError(
+                "7-point stencil for jerk requires at least 7 waypoints, "
+                f"got {self.n_waypoints}"
+            )
+        if np.isscalar(jerk_limit):
+            jerk_limit = np.full(self.n_joints, jerk_limit)
+        else:
+            jerk_limit = np.array(jerk_limit)
+        self.residuals.append(ResidualSpec(
+            name='jerk_limit',
+            residual_fn='jerk_limit',
+            params={
+                'dt': self.dt,
+                'jerk_limit': jerk_limit,
+            },
+            kind='soft',
+            weight=weight,
+        ))
+
     def add_joint_limit_constraint(self):
         """Add joint limit constraints."""
         self.residuals.append(ResidualSpec(
