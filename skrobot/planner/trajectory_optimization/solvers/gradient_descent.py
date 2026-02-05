@@ -57,26 +57,15 @@ class GradientDescentSolver(BaseSolver):
         # Cache for JIT-compiled solve functions
         self._jit_cache = {}
 
-    def _get_problem_cache_key(self, problem):
+    def _get_problem_structure_key(self, problem):
         """Generate cache key from problem structure."""
-        residual_names = tuple(sorted(r.name for r in problem.residuals))
-        residual_weights = tuple(
-            (r.name, r.weight) for r in problem.residuals
-        )
-        wp_constraints = tuple(
-            (idx, tuple(angles.tolist()))
-            for idx, angles in problem.waypoint_constraints
-        )
-        return (
-            problem.n_waypoints,
-            problem.n_joints,
-            residual_names,
-            residual_weights,
-            problem.fixed_start,
-            problem.fixed_end,
-            problem.collision_spheres is not None,
-            wp_constraints,
-        )
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_structure_key
+        return get_problem_structure_key(problem)
+
+    def _get_problem_value_hash(self, problem):
+        """Generate hash of problem values."""
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_value_hash
+        return get_problem_value_hash(problem)
 
     def solve(
         self,
@@ -116,13 +105,25 @@ class GradientDescentSolver(BaseSolver):
         if max_weight > 1.0:
             learning_rate = learning_rate / (max_weight ** 0.25)
 
-        # Check cache for JIT-compiled solver
-        cache_key = self._get_problem_cache_key(problem)
-        if cache_key not in self._jit_cache:
-            # Build and cache the JIT-compiled solve function
-            self._jit_cache[cache_key] = self._build_jit_solver(problem)
+        # Check cache for JIT-compiled solver using two-level caching:
+        # 1. Structure key for cache slot identity
+        # 2. Value hash to detect when solver needs rebuilding
+        structure_key = self._get_problem_structure_key(problem)
+        value_hash = self._get_problem_value_hash(problem)
 
-        jit_solve = self._jit_cache[cache_key]
+        need_rebuild = False
+        if structure_key not in self._jit_cache:
+            need_rebuild = True
+        elif self._jit_cache[structure_key].get('value_hash') != value_hash:
+            need_rebuild = True
+
+        if need_rebuild:
+            self._jit_cache[structure_key] = {
+                'value_hash': value_hash,
+                'jit_solve': self._build_jit_solver(problem),
+            }
+
+        jit_solve = self._jit_cache[structure_key]['jit_solve']
 
         # Convert to JAX arrays
         trajectory = jnp.array(initial_trajectory)
