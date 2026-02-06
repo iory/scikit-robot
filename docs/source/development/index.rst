@@ -5,12 +5,37 @@ Development Guide
 
 Read this guide before doing development in ``skrobot``.
 
-Setting Up
-----------
+Setting Up with uv (Recommended)
+--------------------------------
 
-To set up the tools you'll need for developing, you'll need to install
-``skrobot`` in development mode. Start by installing the development
-dependencies:
+`uv <https://docs.astral.sh/uv/>`_ is a fast Python package manager that makes
+development setup simple and fast. First, install uv if you haven't already:
+
+.. code-block:: bash
+
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Then clone the repository, create a virtual environment, and install in development mode:
+
+.. code-block:: bash
+
+   git clone https://github.com/iory/scikit-robot.git
+   cd scikit-robot
+   uv venv
+   source .venv/bin/activate  # Linux/macOS
+   # .venv\Scripts\activate   # Windows
+   uv pip install -e .
+
+To install development dependencies (ruff, pytest, etc.):
+
+.. code-block:: bash
+
+   uv pip install -e ".[all]" ruff pytest
+
+Setting Up with pip
+-------------------
+
+Alternatively, you can use pip to install ``skrobot`` in development mode:
 
 .. code-block:: bash
 

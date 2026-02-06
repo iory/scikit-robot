@@ -21,6 +21,26 @@ https://github.com/user-attachments/assets/1dad1a4d-ba59-4ec0-93b0-96c8718c9e8f
 
 
 ## Installation
+
+### Quick Install with uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager. Create a virtual environment and install scikit-robot:
+
+```bash
+uv venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+uv pip install scikit-robot
+```
+
+Or with all optional dependencies:
+
+```bash
+uv pip install "scikit-robot[all]"
+```
+
+### Install with pip
+
 You may need to install some dependencies by apt-get install:
 ```bash
 sudo apt-get update
