@@ -124,8 +124,11 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
         force_stop : bool
             if force_stop is True, send go_velocity(0, 0, 0)
         """
-        if self.joint_action_enable is True:
+        if self.move_base_trajectory_action is None:
             ret = self.move_base_action.cancel_all_goals()
+        else:
+            ret = self.move_base_action.cancel_all_goals() and\
+                self.move_base_trajectory_action.cancel_all_goals()
         if force_stop is True:
             self.go_velocity(0.0, 0.0, 0.0)
         return ret
