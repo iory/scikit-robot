@@ -515,7 +515,10 @@ def forward_kinematics(backend, joint_angles, fk_params):
     # Handle mimic joints: compute effective joint angles
     # For mimic joints, angle = parent_angle * multiplier + offset
     mimic_parent_indices = fk_params.get('mimic_parent_indices')
-    if mimic_parent_indices is not None:
+    # Check if any mimic joints exist (using numpy, before JAX tracing)
+    has_mimic_joints = (mimic_parent_indices is not None
+                        and np.any(np.asarray(mimic_parent_indices) >= 0))
+    if has_mimic_joints:
         mimic_multipliers = backend.array(fk_params['mimic_multipliers'])
         mimic_offsets = backend.array(fk_params['mimic_offsets'])
 
