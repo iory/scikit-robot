@@ -39,10 +39,17 @@ def _register_optional_backends():
 _register_optional_backends()
 
 
+# Common math utilities
+from skrobot.backend.math_utils import rodrigues_rotation  # noqa: E402
+from skrobot.backend.math_utils import skew_symmetric  # noqa: E402
+
+
 __all__ = [
     'BackendRegistry',
     'get_backend',
     'set_default_backend',
     'list_backends',
     'use_backend',
+    'rodrigues_rotation',
+    'skew_symmetric',
 ]

@@ -6,6 +6,7 @@ with any differentiable backend (NumPy, JAX, PyTorch).
 
 import numpy as np
 
+from skrobot.backend import rodrigues_rotation as _rodrigues_rotation
 from skrobot.coordinates.math import normalize_axis_mask
 
 
@@ -561,7 +562,7 @@ def forward_kinematics(backend, joint_angles, fk_params):
             current_pos = current_pos + backend.matmul(current_rot, axes[i] * delta_angle)
         else:
             # Revolute joint: rotate around axis
-            joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
+            joint_rot = _rodrigues_rotation(backend, axes[i], delta_angle)
             current_rot = backend.matmul(current_rot, joint_rot)
 
         positions.append(current_pos)
@@ -685,7 +686,7 @@ def compute_jacobian_analytical(backend, joint_angles, fk_params):
             current_pos = current_pos + backend.matmul(current_rot, axes[i] * delta_angle)
         else:
             # Revolute joint: rotate around axis
-            joint_rot = _axis_angle_to_matrix(backend, axes[i], delta_angle)
+            joint_rot = _rodrigues_rotation(backend, axes[i], delta_angle)
             current_rot = backend.matmul(current_rot, joint_rot)
 
     # Apply end-effector offset
@@ -2554,44 +2555,6 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
     solve.method = 'gradient_descent'
 
     return solve
-
-
-def _axis_angle_to_matrix(backend, axis, angle):
-    """Convert axis-angle representation to rotation matrix.
-
-    Uses Rodrigues' rotation formula.
-
-    Parameters
-    ----------
-    backend : object
-        Backend to use for computation.
-    axis : array
-        Rotation axis (3,).
-    angle : float or array
-        Rotation angle in radians.
-
-    Returns
-    -------
-    rotation : array
-        Rotation matrix (3, 3).
-    """
-    # Normalize axis
-    axis_norm = backend.sqrt(backend.sum(axis ** 2) + 1e-10)
-    axis = axis / axis_norm
-
-    # Skew-symmetric matrix
-    K = backend.array([
-        [0, -axis[2], axis[1]],
-        [axis[2], 0, -axis[0]],
-        [-axis[1], axis[0], 0]
-    ])
-
-    # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
-    I = backend.eye(3)
-    c = backend.cos(angle)
-    s = backend.sin(angle)
-
-    return I + s * K + (1 - c) * backend.matmul(K, K)
 
 
 def _axis_angle_to_matrix_batched(axis, angles):
