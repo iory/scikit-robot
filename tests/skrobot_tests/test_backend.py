@@ -194,10 +194,17 @@ class TestBackendDynamicsJax(unittest.TestCase):
     def setUpClass(cls):
         """Check if JAX is available and compatible with current NumPy."""
         try:
+            import jax
             import jax.numpy as jnp
-            # Test actual computation to catch runtime incompatibilities
-            # (e.g., JAX requiring NumPy 2.0+ for asarray copy argument)
-            _ = jnp.zeros(1)
+
+            # Test JIT computation to catch runtime incompatibilities
+            # JAX 0.9+ requires NumPy 2.0+ and fails inside JIT traced context
+            # with "asarray() got an unexpected keyword argument 'copy'"
+            @jax.jit
+            def _test_fn(x):
+                return jnp.eye(3) @ x
+
+            _ = _test_fn(jnp.array([1.0, 2.0, 3.0]))
             cls.jax_available = True
         except Exception:
             # JAX may fail to import or run due to NumPy version incompatibility
