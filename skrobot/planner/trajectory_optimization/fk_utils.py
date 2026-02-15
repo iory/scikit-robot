@@ -4,7 +4,7 @@ This module provides backend-agnostic FK computation functions
 shared across different solvers (scipy, jaxls, gradient_descent).
 """
 
-from skrobot.kinematics.differentiable import _axis_angle_to_matrix
+from skrobot.backend import rodrigues_rotation
 from skrobot.kinematics.differentiable import pose_error_se3_log as pose_error_log
 from skrobot.kinematics.differentiable import rotation_error_so3_log as rotation_error_log
 
@@ -78,7 +78,7 @@ def build_fk_functions(fk_data, backend):
             delta = angles[i]
             if ref_angles is not None:
                 delta = delta - ref_angles[i]
-            joint_rot = _axis_angle_to_matrix(xp, joint_axes[i], delta)
+            joint_rot = rodrigues_rotation(xp, joint_axes[i], delta)
             current_rot = current_rot @ joint_rot
             positions.append(current_pos)
             rotations.append(current_rot)
