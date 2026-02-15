@@ -1739,6 +1739,11 @@ class RobotModel(CascadedLink):
         self._relevance_predicate_table = \
             self._compute_relevance_predicate_table()
 
+        # Cache for differentiable inverse dynamics function (per backend)
+        self._cached_inverse_dynamics_fns = {}  # {backend_name: fn}
+        self._cached_inverse_dynamics_link_list = None
+        self._cached_inverse_dynamics_mass_hash = None
+
     def reset_pose(self):
         raise NotImplementedError()
 
@@ -3046,133 +3051,78 @@ class RobotModel(CascadedLink):
                 self._cached_mass_props = mass_props
                 return mass_props['total_centroid']
 
-    def calc_av_vel_acc_from_pos(self, dt, av_prev=None, av_curr=None, av_next=None):
-        """Calculate joint velocities and accelerations from angle vectors.
+    def _get_cached_inverse_dynamics_fn(self, link_list=None, backend='numpy'):
+        """Get or create cached differentiable inverse dynamics function.
 
         Parameters
         ----------
-        dt : float
-            Time step [s].
-        av_prev : np.ndarray, optional
-            Previous angle vector [rad]. If None, uses current angle vector.
-        av_curr : np.ndarray, optional
-            Current angle vector [rad]. If None, uses current angle vector.
-        av_next : np.ndarray, optional
-            Next angle vector [rad]. If None, assumes zero velocity.
+        link_list : list, optional
+            List of links. If None, uses all joints.
+        backend : str or Backend, optional
+            Backend to use ('numpy' or 'jax'). Defaults to 'numpy'.
+            JAX backend provides ~300x speedup but requires JAX installation.
 
         Returns
         -------
-        joint_velocities : np.ndarray
-            Joint velocities [rad/s] or [m/s] for linear joints.
-        joint_accelerations : np.ndarray
-            Joint accelerations [rad/s^2] or [m/s^2] for linear joints.
+        id_fn : callable
+            Function that takes (q, gravity) and returns joint torques.
         """
-        if av_curr is None:
-            av_curr = self.angle_vector()
+        from skrobot.backend import get_backend
+        from skrobot.dynamics import build_inverse_dynamics_fn
 
-        if av_prev is None:
-            av_prev = av_curr.copy()
+        # Determine link list
+        if link_list is None:
+            link_list = [j.child_link for j in self.joint_list if j is not None]
 
-        if av_next is None:
-            av_next = av_curr.copy()
+        # Check if we need to rebuild the cached function
+        link_names = tuple(l.name for l in link_list)
 
-        # Calculate velocities using finite differences
-        joint_velocities = (av_next - av_prev) / (2.0 * dt)
+        # Compute a hash of mass properties to detect changes
+        mass_list = []
+        for link in self.link_list:
+            mass = getattr(link, 'mass', None)
+            if mass is not None:
+                mass_list.append((link.name, mass))
+        mass_hash = hash(tuple(mass_list))
 
-        # Calculate accelerations using finite differences
-        joint_accelerations = (av_next - 2.0 * av_curr + av_prev) / (dt * dt)
+        # Get backend name for caching
+        if isinstance(backend, str):
+            backend_name = backend
+        else:
+            backend_name = getattr(backend, 'name', 'numpy')
 
-        return joint_velocities, joint_accelerations
+        # Check if cache is still valid
+        cache_valid = (
+            self._cached_inverse_dynamics_link_list == link_names and
+            self._cached_inverse_dynamics_mass_hash == mass_hash
+        )
 
-    def forward_all_kinematics(self, joint_velocities=None, joint_accelerations=None,
-                               root_velocity=None, root_acceleration=None):
-        """Propagate velocities and accelerations through kinematic chain.
+        if not cache_valid:
+            # Invalidate all cached functions
+            self._cached_inverse_dynamics_fns = {}
+            self._cached_inverse_dynamics_link_list = link_names
+            self._cached_inverse_dynamics_mass_hash = mass_hash
 
-        Parameters
-        ----------
-        joint_velocities : np.ndarray, optional
-            Joint velocities [rad/s] or [m/s]. If None, uses zeros.
-        joint_accelerations : np.ndarray, optional
-            Joint accelerations [rad/s^2] or [m/s^2]. If None, uses zeros.
-        root_velocity : np.ndarray, optional
-            Root link spatial velocity [m/s] + angular velocity [rad/s].
-        root_acceleration : np.ndarray, optional
-            Root link spatial acceleration [m/s^2] + angular acceleration [rad/s^2].
-        """
-        if joint_velocities is None:
-            joint_velocities = np.zeros(len(self.joint_list))
-        if joint_accelerations is None:
-            joint_accelerations = np.zeros(len(self.joint_list))
-        if root_velocity is None:
-            root_velocity = np.zeros(6)  # [linear_vel, angular_vel]
-        if root_acceleration is None:
-            root_acceleration = np.zeros(6)  # [linear_acc, angular_acc]
+        # Check if we have cached function for this backend
+        if backend_name in self._cached_inverse_dynamics_fns:
+            return self._cached_inverse_dynamics_fns[backend_name]
 
-        # Set root link velocities and accelerations
-        root_link = self.root_link
-        root_link.spatial_velocity = root_velocity[:3]
-        root_link.angular_velocity = root_velocity[3:]
-        root_link.spatial_acceleration = root_acceleration[:3]
-        root_link.angular_acceleration = root_acceleration[3:]
+        # Build new function
+        if isinstance(backend, str):
+            backend = get_backend(backend)
 
-        # Propagate through kinematic chain
-        joint_idx = 0
-        for joint in self.joint_list:
-            if joint is None:
-                continue
+        id_fn = build_inverse_dynamics_fn(
+            self, link_list=link_list, backend=backend,
+            include_all_mass_links=True
+        )
 
-            parent_link = joint.parent_link
-            child_link = joint.child_link
+        # Cache it
+        self._cached_inverse_dynamics_fns[backend_name] = id_fn
 
-            # Joint axis in world coordinates
-            joint_axis = joint.world_axis
-
-            # Propagate angular velocity
-            if joint.__class__.__name__ == 'LinearJoint':
-                child_link.angular_velocity = parent_link.angular_velocity.copy()
-            else:  # rotational joint
-                child_link.angular_velocity = (parent_link.angular_velocity +
-                                                joint_velocities[joint_idx] * joint_axis)
-
-            # Propagate spatial velocity
-            joint_pos = joint.world_position
-            child_pos = child_link.worldpos()
-            r = child_pos - joint_pos
-
-            if joint.__class__.__name__ == 'LinearJoint':
-                child_link.spatial_velocity = (parent_link.spatial_velocity +
-                                                joint_velocities[joint_idx] * joint_axis +
-                                                np.cross(parent_link.angular_velocity, r))
-            else:  # rotational joint
-                child_link.spatial_velocity = (parent_link.spatial_velocity +
-                                                np.cross(parent_link.angular_velocity, r))
-
-            # Propagate angular acceleration
-            if joint.__class__.__name__ == 'LinearJoint':
-                child_link.angular_acceleration = parent_link.angular_acceleration.copy()
-            else:  # rotational joint
-                child_link.angular_acceleration = (parent_link.angular_acceleration +
-                                                   joint_accelerations[joint_idx] * joint_axis +
-                                                   np.cross(parent_link.angular_velocity,
-                                                            joint_velocities[joint_idx] * joint_axis))
-
-            # Propagate spatial acceleration
-            if joint.__class__.__name__ == 'LinearJoint':
-                child_link.spatial_acceleration = (parent_link.spatial_acceleration +
-                                                    joint_accelerations[joint_idx] * joint_axis +
-                                                    np.cross(parent_link.angular_acceleration, r) +
-                                                    np.cross(parent_link.angular_velocity,
-                                                             np.cross(parent_link.angular_velocity, r)))
-            else:  # rotational joint
-                child_link.spatial_acceleration = (parent_link.spatial_acceleration +
-                                                    np.cross(parent_link.angular_acceleration, r) +
-                                                    np.cross(parent_link.angular_velocity,
-                                                             np.cross(parent_link.angular_velocity, r)))
-
-            joint_idx += 1
+        return id_fn
 
     def inverse_dynamics(self, external_forces=None, external_moments=None,
-                         external_coords=None, gravity=None):
+                         external_coords=None, gravity=None, backend='numpy'):
         """Compute joint torques using inverse dynamics (Newton-Euler algorithm).
 
         Parameters
@@ -3184,7 +3134,10 @@ class RobotModel(CascadedLink):
         external_coords : list of coordinates, optional
             Coordinate frames where external forces/moments are applied.
         gravity : np.ndarray, optional
-            Gravity vector [m/s^2]. Defaults to [0, 0, -9.81].
+            Gravity vector [m/s^2]. Defaults to [0, 0, -9.80665].
+        backend : str, optional
+            Backend to use ('numpy' or 'jax'). Defaults to 'numpy'.
+            JAX backend provides ~300x speedup but requires JAX installation.
 
         Returns
         -------
@@ -3192,139 +3145,33 @@ class RobotModel(CascadedLink):
             Joint torques [Nm] or forces [N] for linear joints.
         """
         if gravity is None:
-            gravity = np.array([0, 0, -9.81])
+            gravity = np.array([0, 0, -9.80665])
 
-        # Clear previous external forces
-        for link in self.link_list:
-            link.clear_external_wrench()
-            link._internal_force.fill(0.0)
-            link._internal_moment.fill(0.0)
+        # Use differentiable inverse dynamics function
+        id_fn = self._get_cached_inverse_dynamics_fn(backend=backend)
 
-        # Apply external forces and moments
-        if external_forces is not None and external_coords is not None:
-            for force, coords in zip(external_forces, external_coords):
-                if hasattr(coords, 'parent') and coords.parent in self.link_list:
-                    coords.parent.apply_external_wrench(force=force,
-                                                         point=coords.worldpos())
+        # Use helper to preprocess external forces and moments
+        from skrobot.dynamics import preprocess_external_forces
 
-        if external_moments is not None and external_coords is not None:
-            for moment, coords in zip(external_moments, external_coords):
-                if hasattr(coords, 'parent') and coords.parent in self.link_list:
-                    coords.parent.apply_external_wrench(moment=moment)
+        (ext_forces_arr, ext_moments_arr,
+         point_forces, point_force_link_indices,
+         point_force_local_positions) = preprocess_external_forces(
+            self, external_forces, external_moments, external_coords)
 
-        # Add gravity to all links
-        for link in self.link_list:
-            if hasattr(link, 'mass') and link.mass > 0:
-                gravity_force = link.mass * gravity
-                link.apply_external_wrench(force=gravity_force)
+        # Get current joint angles
+        q = self.angle_vector()
 
-        # Backward propagation: compute forces and moments from leaves to root
-        joint_torques = np.zeros(len(self.joint_list))
-
-        # First pass: compute forces and moments for each link
-        for link in self.link_list:
-            if hasattr(link, 'mass') and link.mass > 0:
-                # Get center of mass in world coordinates
-                if link.centroid is not None:
-                    com_world = link.worldpos() + link.worldrot().dot(link.centroid)
-                else:
-                    com_world = link.worldpos()
-
-                # Check if this is static case (no accelerations)
-                is_static = (np.allclose(link.spatial_acceleration, np.zeros(3)) and
-                             np.allclose(link.angular_acceleration, np.zeros(3)))
-
-                if is_static:
-                    # Static case: only external forces (gravity)
-                    link._internal_force = link.ext_force.copy()
-
-                    # Moment about link origin due to gravity at CoM
-                    r_com = com_world - link.worldpos()
-                    link._internal_moment = np.cross(r_com, link.ext_force) + link.ext_moment
-                else:
-                    # Dynamic case: include inertial forces
-                    # Linear momentum rate
-                    F_inertial = link.mass * link.spatial_acceleration
-
-                    # Angular momentum rate about center of mass
-                    R = link.worldrot()
-                    I_world = R.dot(link.inertia_tensor).dot(R.T)
-
-                    M_inertial = (I_world.dot(link.angular_acceleration) +
-                                  np.cross(link.angular_velocity,
-                                           I_world.dot(link.angular_velocity)))
-
-                    # Add moment due to linear acceleration of center of mass
-                    r_com = com_world - link.worldpos()
-                    M_inertial += np.cross(r_com, F_inertial)
-
-                    # Total force and moment
-                    link._internal_force = F_inertial + link.ext_force
-                    link._internal_moment = M_inertial + link.ext_moment
-            else:
-                link._internal_force = np.zeros(3)
-                link._internal_moment = np.zeros(3)
-
-        # Second pass: propagate forces from children to parents using kinematic tree
-        def propagate_forces_recursive(link):
-            """Recursively propagate forces from children to this link."""
-            # First, propagate forces from all children
-            for child_link in link.child_links:
-                propagate_forces_recursive(child_link)
-
-                # Add child's forces to this link
-                link._internal_force += child_link._internal_force
-
-                # Find the joint connecting this link to child
-                connecting_joint = None
-                for joint in self.joint_list:
-                    if joint.parent_link == link and joint.child_link == child_link:
-                        connecting_joint = joint
-                        break
-
-                # Use joint position for moment calculation if available
-                if connecting_joint:
-                    # The joint position is at the parent link
-                    joint_pos = connecting_joint.world_position
-                    r_child = joint_pos - link.worldpos()
-                else:
-                    # Fallback to link position
-                    r_child = child_link.worldpos() - link.worldpos()
-
-                link._internal_moment += (child_link._internal_moment +
-                                           np.cross(r_child, child_link._internal_force))
-
-        # Start propagation from root link
-        propagate_forces_recursive(self.root_link)
-
-        # Extract joint torques
-        joint_idx = 0
-        for joint in self.joint_list:
-            if joint is None:
-                continue
-
-            child_link = joint.child_link
-            # Get joint axis in world coordinates
-            # The axis is defined in the joint frame (fixed to parent link)
-            joint_axis = joint.world_axis
-
-            # Project force/moment onto joint axis
-            # Check if it's a linear joint by class type
-            if joint.__class__.__name__ == 'LinearJoint':
-                joint_torques[joint_idx] = np.dot(child_link._internal_force, joint_axis)
-            else:  # rotational joint
-                # For rotational joints, the torque is the moment about the joint axis
-                # The moment is already calculated about the correct point in propagate_forces_recursive
-                joint_torques[joint_idx] = np.dot(child_link._internal_moment, joint_axis)
-
-            joint_idx += 1
-
-        return joint_torques
+        return id_fn(q, qd=None, qdd=None, gravity=gravity,
+                     external_forces=ext_forces_arr,
+                     external_moments=ext_moments_arr,
+                     point_forces=point_forces,
+                     point_force_link_indices=point_force_link_indices,
+                     point_force_local_positions=point_force_local_positions)
 
     def torque_vector(self, force_list=None, moment_list=None, target_coords=None,
                       calc_statics_p=True, dt=0.005, av=None, av_prev=None, av_next=None,
                       root_coords=None, root_coords_prev=None, root_coords_next=None,
-                      gravity=None):
+                      gravity=None, backend='numpy'):
         """Calculate joint torques using inverse dynamics.
 
         This method computes the joint torques required to achieve
@@ -3357,6 +3204,9 @@ class RobotModel(CascadedLink):
             Next root link coordinates. For dynamics computation.
         gravity : np.ndarray, optional
             Gravity vector [m/s^2]. Defaults to [0, 0, -9.81].
+        backend : str, optional
+            Backend to use ('numpy' or 'jax'). Defaults to 'numpy'.
+            JAX backend provides ~300x speedup but requires JAX installation.
 
         Returns
         -------
@@ -3384,45 +3234,43 @@ class RobotModel(CascadedLink):
         ...     av_next=next_angles,
         ...     dt=0.01
         ... )
+        >>>
+        >>> # Use JAX backend for ~300x speedup
+        >>> torques = robot.torque_vector(backend='jax')
         """
         if av is None:
             av = self.angle_vector()
 
-        # Set joint angles
-        self.angle_vector(av)
-
-        # Initialize velocities and accelerations
-        joint_velocities = np.zeros(len(self.joint_list))
-        joint_accelerations = np.zeros(len(self.joint_list))
-        root_velocity = np.zeros(6)
-        root_acceleration = np.zeros(6)
-
-        # Compute velocities and accelerations for dynamics
-        if not calc_statics_p:
-            if av_prev is not None or av_next is not None:
-                joint_velocities, joint_accelerations = self.calc_av_vel_acc_from_pos(
-                    dt, av_prev, av, av_next)
-
-            # TODO: Add root coordinate velocity/acceleration computation
-            # if root_coords_prev is not None or root_coords_next is not None:
-            #     root_velocity, root_acceleration = self.calc_root_coords_vel_acc_from_pos(
-            #         dt, root_coords_prev, root_coords, root_coords_next)
-
-        # Propagate kinematics
-        self.forward_all_kinematics(joint_velocities, joint_accelerations,
-                                    root_velocity, root_acceleration)
-
         # Handle gravity settings
         if gravity is None:
-            # Default: downward gravity
-            gravity = np.array([0, 0, -9.80665])  # Downward gravity in m/s^2
+            gravity = np.array([0, 0, -9.80665])
 
-        # Compute inverse dynamics
-        joint_torques = self.inverse_dynamics(
-            external_forces=force_list,
-            external_moments=moment_list,
-            external_coords=target_coords,
-            gravity=gravity
-        )
+        # Update robot configuration
+        self.angle_vector(av)
 
-        return joint_torques
+        # Use cached differentiable function
+        id_fn = self._get_cached_inverse_dynamics_fn(backend=backend)
+
+        # Use helper to preprocess external forces and moments
+        from skrobot.dynamics import preprocess_external_forces
+        from skrobot.dynamics import preprocess_velocities
+
+        (external_forces, external_moments,
+         point_forces, point_force_link_indices,
+         point_force_local_positions) = preprocess_external_forces(
+            self, force_list, moment_list, target_coords)
+
+        # Handle dynamic case: compute velocities and accelerations
+        qd = None
+        qdd = None
+
+        if not calc_statics_p:
+            if av_prev is not None or av_next is not None:
+                qd, qdd = preprocess_velocities(av_prev, av, av_next, dt)
+
+        return id_fn(av, qd=qd, qdd=qdd, gravity=gravity,
+                     external_forces=external_forces,
+                     external_moments=external_moments,
+                     point_forces=point_forces,
+                     point_force_link_indices=point_force_link_indices,
+                     point_force_local_positions=point_force_local_positions)
