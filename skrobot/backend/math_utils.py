@@ -35,7 +35,7 @@ def rodrigues_rotation(backend, axis, angle):
     >>> R = rodrigues_rotation(backend, axis, 0.5)
     """
     # Normalize axis
-    axis = axis / (backend.norm(axis) + 1e-10)
+    axis = axis / (backend.sqrt(backend.sum(axis ** 2)) + 1e-10)
 
     # Skew-symmetric matrix
     K = backend.array([
