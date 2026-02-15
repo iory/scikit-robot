@@ -192,11 +192,12 @@ class TestBackendDynamicsJax(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Check if JAX is available."""
+        """Check if JAX is available and compatible with current NumPy."""
         try:
-            import importlib.util
-            cls.jax_available = importlib.util.find_spec("jax") is not None
-        except ImportError:
+            import jax.numpy as jnp  # noqa: F401
+            cls.jax_available = True
+        except (ImportError, AttributeError, Exception):
+            # JAX may fail to import due to NumPy version incompatibility
             cls.jax_available = False
 
     def test_build_inverse_dynamics_fn_jax(self):
