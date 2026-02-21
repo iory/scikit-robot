@@ -450,6 +450,35 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     mimic_multipliers = np.array([m[1] for m in mimic_info])
     mimic_offsets = np.array([m[2] for m in mimic_info])
 
+    # Extract dynamic joint limit table information
+    # For each joint, store (target_joint_index, sample_angles, min_angles, max_angles)
+    # if it has a joint_min_max_table, otherwise store (-1, None, None, None)
+    dynamic_limit_tables = []
+    for i, link in enumerate(link_list):
+        joint = link.joint
+        if (hasattr(joint, 'joint_min_max_table')
+                and joint.joint_min_max_table is not None
+                and hasattr(joint, 'joint_min_max_target')
+                and joint.joint_min_max_target is not None):
+            # Find the target joint index
+            target_joint = joint.joint_min_max_target
+            target_idx = -1
+            for j, other_link in enumerate(link_list):
+                if other_link.joint == target_joint:
+                    target_idx = j
+                    break
+
+            if target_idx >= 0:
+                table = joint.joint_min_max_table
+                table_data = table.get_data_for_differentiable()
+                dynamic_limit_tables.append({
+                    'dependent_joint_index': i,
+                    'target_joint_index': target_idx,
+                    'sample_angles': table_data['sample_angles'],
+                    'min_angles': table_data['min_angles'],
+                    'max_angles': table_data['max_angles'],
+                })
+
     return {
         'n_joints': n_joints,
         'link_translations': np.array(link_translations),
@@ -466,6 +495,7 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         'mimic_parent_indices': mimic_parent_indices,
         'mimic_multipliers': mimic_multipliers,
         'mimic_offsets': mimic_offsets,
+        'dynamic_limit_tables': dynamic_limit_tables,
     }
 
 
@@ -1176,6 +1206,147 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
+def _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices):
+    """Create a function that applies dynamic joint limit clipping in NumPy.
+
+    Parameters
+    ----------
+    fk_params : dict
+        FK parameters containing dynamic_limit_tables.
+    non_mimic_indices : numpy.ndarray
+        Indices of non-mimic joints in the full joint array.
+
+    Returns
+    -------
+    callable or None
+        Function that applies dynamic limits, or None if no dynamic limits.
+    """
+    dynamic_tables = fk_params.get('dynamic_limit_tables', [])
+
+    if not dynamic_tables:
+        return None
+
+    # Build a mapping from full joint index to non-mimic index
+    full_to_opt = {int(full_idx): opt_idx
+                   for opt_idx, full_idx in enumerate(non_mimic_indices)}
+
+    # Preprocess the dynamic limit tables
+    limit_infos = []
+    for table in dynamic_tables:
+        dep_idx = table['dependent_joint_index']
+        tgt_idx = table['target_joint_index']
+
+        # Check if both joints are in the optimization variables
+        if dep_idx not in full_to_opt or tgt_idx not in full_to_opt:
+            continue
+
+        dep_opt_idx = full_to_opt[dep_idx]
+        tgt_opt_idx = full_to_opt[tgt_idx]
+
+        limit_infos.append({
+            'dep_opt_idx': dep_opt_idx,
+            'tgt_opt_idx': tgt_opt_idx,
+            'sample_angles': table['sample_angles'],
+            'min_angles': table['min_angles'],
+            'max_angles': table['max_angles'],
+        })
+
+    if not limit_infos:
+        return None
+
+    def apply_dynamic_limits(opt_angles):
+        """Apply dynamic joint limits based on target joint angles.
+
+        Parameters
+        ----------
+        opt_angles : numpy.ndarray
+            Optimization variables (batch, n_opt).
+
+        Returns
+        -------
+        numpy.ndarray
+            Clipped optimization variables.
+        """
+        result = opt_angles.copy()
+
+        for info in limit_infos:
+            dep_idx = info['dep_opt_idx']
+            tgt_idx = info['tgt_opt_idx']
+            sample_angles = info['sample_angles']
+            min_angles = info['min_angles']
+            max_angles = info['max_angles']
+
+            # Get target joint angles for all batch elements
+            target_angles = result[:, tgt_idx]
+
+            # Compute dynamic limits for each batch element using np.interp
+            # np.interp works on 1D arrays, so we need to vectorize
+            dynamic_min = np.interp(target_angles, sample_angles, min_angles)
+            dynamic_max = np.interp(target_angles, sample_angles, max_angles)
+
+            # Clip the dependent joint
+            result[:, dep_idx] = np.clip(
+                result[:, dep_idx], dynamic_min, dynamic_max)
+
+        return result
+
+    return apply_dynamic_limits
+
+
+def create_dynamic_limit_mask(fk_params, angles):
+    """Create a mask indicating which samples satisfy dynamic joint limits.
+
+    This function checks if each joint angle configuration satisfies all
+    dynamic joint limit constraints (joint limit tables).
+
+    Parameters
+    ----------
+    fk_params : dict
+        FK parameters containing dynamic_limit_tables.
+    angles : numpy.ndarray
+        Joint angles array of shape (n_samples, n_joints).
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask of shape (n_samples,). True means the sample
+        satisfies all dynamic constraints.
+
+    Examples
+    --------
+    >>> mask = create_dynamic_limit_mask(fk_params, angles)
+    >>> valid_angles = angles[mask]
+    """
+    dynamic_tables = fk_params.get('dynamic_limit_tables', [])
+
+    if not dynamic_tables:
+        # No dynamic constraints, all samples are valid
+        return np.ones(len(angles), dtype=bool)
+
+    mask = np.ones(len(angles), dtype=bool)
+
+    for table in dynamic_tables:
+        dep_idx = table['dependent_joint_index']
+        tgt_idx = table['target_joint_index']
+        sample_angles = table['sample_angles']
+        min_angles = table['min_angles']
+        max_angles = table['max_angles']
+
+        # Get target and dependent joint angles
+        target_angles = angles[:, tgt_idx]
+        dependent_angles = angles[:, dep_idx]
+
+        # Compute dynamic limits using interpolation
+        dynamic_min = np.interp(target_angles, sample_angles, min_angles)
+        dynamic_max = np.interp(target_angles, sample_angles, max_angles)
+
+        # Check if dependent joint is within limits
+        within_limits = (dependent_angles >= dynamic_min) & (dependent_angles <= dynamic_max)
+        mask &= within_limits
+
+    return mask
+
+
 def _create_numpy_optimized_solver(fk_params):
     """Create an optimized batch IK solver using pure NumPy with Jacobian method.
 
@@ -1190,6 +1361,9 @@ def _create_numpy_optimized_solver(fk_params):
 
     joint_limits_lower = fk_params['joint_limits_lower'][non_mimic_indices]
     joint_limits_upper = fk_params['joint_limits_upper'][non_mimic_indices]
+
+    # Create dynamic limit clipper if there are dynamic limits
+    dynamic_clipper = _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices)
 
     def _expand_to_full_angles_batch(opt_angles_batch):
         """Expand optimization variables to full joint angles (batched)."""
@@ -1388,6 +1562,10 @@ def _create_numpy_optimized_solver(fk_params):
 
             opt_angles = opt_angles + delta_q
             opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
+
+            # Apply dynamic joint limits if present
+            if dynamic_clipper is not None:
+                opt_angles = dynamic_clipper(opt_angles)
 
             # Early stopping: check convergence
             pos_err_sq = np.sum(
@@ -1623,6 +1801,100 @@ def compute_geometric_jacobian_jax(joint_angles, fk_params, return_non_mimic=Tru
     return J_opt, ee_pos, ee_rot
 
 
+def _create_dynamic_limit_clipper_jax(fk_params, non_mimic_indices):
+    """Create a JIT-compatible function for dynamic joint limit clipping in JAX.
+
+    Parameters
+    ----------
+    fk_params : dict
+        FK parameters containing dynamic_limit_tables.
+    non_mimic_indices : numpy.ndarray
+        Indices of non-mimic joints in the full joint array.
+
+    Returns
+    -------
+    callable or None
+        JAX-compatible function that applies dynamic limits, or None if none.
+    """
+    import jax.numpy as jnp
+
+    dynamic_tables = fk_params.get('dynamic_limit_tables', [])
+
+    if not dynamic_tables:
+        return None
+
+    # Build a mapping from full joint index to non-mimic index
+    full_to_opt = {int(full_idx): opt_idx
+                   for opt_idx, full_idx in enumerate(non_mimic_indices)}
+
+    # Preprocess the dynamic limit tables for JAX
+    limit_infos = []
+    for table in dynamic_tables:
+        dep_idx = table['dependent_joint_index']
+        tgt_idx = table['target_joint_index']
+
+        # Check if both joints are in the optimization variables
+        if dep_idx not in full_to_opt or tgt_idx not in full_to_opt:
+            continue
+
+        dep_opt_idx = full_to_opt[dep_idx]
+        tgt_opt_idx = full_to_opt[tgt_idx]
+
+        # Convert to JAX arrays
+        sample_angles = jnp.array(table['sample_angles'])
+        min_angles = jnp.array(table['min_angles'])
+        max_angles = jnp.array(table['max_angles'])
+
+        limit_infos.append({
+            'dep_opt_idx': dep_opt_idx,
+            'tgt_opt_idx': tgt_opt_idx,
+            'sample_angles': sample_angles,
+            'min_angles': min_angles,
+            'max_angles': max_angles,
+        })
+
+    if not limit_infos:
+        return None
+
+    def apply_dynamic_limits(opt_angles):
+        """Apply dynamic joint limits based on target joint angles (JAX version).
+
+        Parameters
+        ----------
+        opt_angles : jax.Array
+            Optimization variables (batch, n_opt).
+
+        Returns
+        -------
+        jax.Array
+            Clipped optimization variables.
+        """
+        result = opt_angles
+
+        for info in limit_infos:
+            dep_idx = info['dep_opt_idx']
+            tgt_idx = info['tgt_opt_idx']
+            sample_angles = info['sample_angles']
+            min_angles = info['min_angles']
+            max_angles = info['max_angles']
+
+            # Get target joint angles for all batch elements
+            target_angles = result[:, tgt_idx]
+
+            # Compute dynamic limits using jnp.interp (vectorized)
+            dynamic_min = jnp.interp(target_angles, sample_angles, min_angles)
+            dynamic_max = jnp.interp(target_angles, sample_angles, max_angles)
+
+            # Clip the dependent joint
+            dep_angles = result[:, dep_idx]
+            clipped = jnp.clip(dep_angles, dynamic_min, dynamic_max)
+            result = result.at[:, dep_idx].set(clipped)
+
+        return result
+
+    return apply_dynamic_limits
+
+
 def _create_jax_jacobian_solver(fk_params, backend):
     """Create a JAX-based Jacobian IK solver with full JIT compilation.
 
@@ -1657,6 +1929,9 @@ def _create_jax_jacobian_solver(fk_params, backend):
     joint_limits_upper = jnp.array(fk_params['joint_limits_upper'][non_mimic_indices])
 
     non_mimic_indices_jax = jnp.array(non_mimic_indices.astype(np.int32))
+
+    # Create dynamic limit clipper if there are dynamic limits
+    dynamic_clipper = _create_dynamic_limit_clipper_jax(fk_params, non_mimic_indices)
 
     # JIT cache for different parameters
     _jit_cache = {}
@@ -1857,6 +2132,11 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 new_opt = opt_angles + delta_q
                 new_opt = jnp.clip(
                     new_opt, joint_limits_lower, joint_limits_upper)
+
+                # Apply dynamic joint limits if present
+                if dynamic_clipper is not None:
+                    new_opt = dynamic_clipper(new_opt)
+
                 return new_opt
 
             # Run fixed-iteration loop

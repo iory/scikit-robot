@@ -693,5 +693,146 @@ class TestDifferentiableBatchIK(unittest.TestCase):
         )
 
 
+class TestDifferentiableDynamicLimits(unittest.TestCase):
+    """Test dynamic joint limit constraints in batch IK."""
+
+    @classmethod
+    def setUpClass(cls):
+        from skrobot.models import DifferentialWristSample
+
+        cls.robot = DifferentialWristSample(use_joint_limit_table=True)
+
+    def _check_dynamic_limit_violations(self, solutions, fk_params, tolerance=1e-6):
+        """Check if any solutions violate dynamic joint limits.
+
+        Parameters
+        ----------
+        solutions : numpy.ndarray
+            Joint angle solutions of shape (n_samples, n_joints).
+        fk_params : dict
+            FK parameters containing dynamic_limit_tables.
+        tolerance : float
+            Numerical tolerance for limit checking.
+
+        Returns
+        -------
+        violations : list
+            List of dicts with violation details.
+        """
+        dynamic_tables = fk_params.get('dynamic_limit_tables', [])
+        violations = []
+
+        for table in dynamic_tables:
+            dep_idx = table['dependent_joint_index']
+            tgt_idx = table['target_joint_index']
+            sample_angles = table['sample_angles']
+            min_angles = table['min_angles']
+            max_angles = table['max_angles']
+
+            target_angles = solutions[:, tgt_idx]
+            dependent_angles = solutions[:, dep_idx]
+
+            dynamic_min = np.interp(target_angles, sample_angles, min_angles)
+            dynamic_max = np.interp(target_angles, sample_angles, max_angles)
+
+            below_min = np.where(dependent_angles < dynamic_min - tolerance)[0]
+            above_max = np.where(dependent_angles > dynamic_max + tolerance)[0]
+
+            for i in below_min:
+                violations.append({
+                    'sample_idx': i,
+                    'violation_amount': dynamic_min[i] - dependent_angles[i],
+                })
+            for i in above_max:
+                violations.append({
+                    'sample_idx': i,
+                    'violation_amount': dependent_angles[i] - dynamic_max[i],
+                })
+
+        return violations
+
+    def _run_batch_ik_dynamic_limits_test(self, backend_name):
+        """Run batch IK test for dynamic limits with specified backend."""
+        from skrobot.kinematics.differentiable import create_batch_ik_solver
+        from skrobot.kinematics.differentiable import create_dynamic_limit_mask
+        from skrobot.kinematics.differentiable import extract_fk_parameters
+
+        robot = self.robot
+        robot.reset_manip_pose()
+
+        link_list = [
+            robot.ARM_LINK0, robot.ARM_LINK1, robot.ARM_LINK2,
+            robot.ARM_LINK3, robot.ARM_LINK4,
+            robot.WRIST_GEAR, robot.WRIST_END
+        ]
+        move_target = robot.end_coords
+
+        fk_params = extract_fk_parameters(robot, link_list, move_target)
+
+        self.assertGreater(
+            len(fk_params['dynamic_limit_tables']), 0,
+            "Robot should have dynamic limit tables"
+        )
+
+        solver = create_batch_ik_solver(
+            robot, link_list, move_target, backend_name=backend_name)
+
+        n_samples = 200
+        np.random.seed(42)
+
+        robot.reset_manip_pose()
+        base_pos = robot.end_coords.worldpos()
+
+        target_positions = base_pos + np.random.uniform(-0.1, 0.1, size=(n_samples, 3))
+        target_rotations = np.array([
+            robot.end_coords.worldrot() for _ in range(n_samples)
+        ])
+
+        initial_angles = np.tile(
+            robot.angle_vector()[None, :],
+            (n_samples, 1)
+        )
+
+        solutions, success_flags, errors = solver(
+            target_positions,
+            target_rotations,
+            initial_angles=initial_angles,
+            max_iterations=50,
+        )
+
+        if hasattr(solutions, 'block_until_ready'):
+            solutions = np.asarray(solutions)
+            success_flags = np.asarray(success_flags)
+
+        successful_solutions = solutions[success_flags]
+
+        if len(successful_solutions) == 0:
+            self.skipTest("No successful IK solutions to test")
+
+        violations = self._check_dynamic_limit_violations(
+            successful_solutions, fk_params)
+
+        self.assertEqual(
+            len(violations), 0,
+            f"Found {len(violations)} dynamic limit violations "
+            f"in {len(successful_solutions)} successful solutions"
+        )
+
+        mask = create_dynamic_limit_mask(fk_params, successful_solutions)
+        self.assertTrue(
+            np.all(mask),
+            f"create_dynamic_limit_mask found {np.sum(~mask)} invalid solutions"
+        )
+
+    def test_batch_ik_respects_dynamic_limits_numpy(self):
+        """Test that NumPy batch IK solutions respect dynamic joint limits."""
+        self._run_batch_ik_dynamic_limits_test('numpy')
+
+    @requires_jax
+    def test_batch_ik_respects_dynamic_limits_jax(self):
+        """Test that JAX batch IK solutions respect dynamic joint limits."""
+        self._run_batch_ik_dynamic_limits_test('jax')
+
+
 if __name__ == '__main__':
     unittest.main()
