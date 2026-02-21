@@ -77,6 +77,7 @@ class ViserViewer:
         self._is_active = True
         self._joint_sliders = dict()
         self._joint_folders = dict()
+        self._original_joint_limits = dict()  # joint_name -> (min, max)
 
         # Motion planning implies IK
         self._enable_motion_planning = enable_motion_planning
@@ -90,6 +91,7 @@ class ViserViewer:
         # robot_id -> RobotModel
         self._robot_models: Dict[int, RobotModel] = {}
         self._updating_from_ik = False
+        self._updating_slider_limits = False
 
         # Batch IK state
         # robot_id -> {group_name -> solver}
@@ -651,6 +653,7 @@ class ViserViewer:
             self._sync_ik_targets(robot_id, exclude=group_name)
             self._sync_numeric_inputs(robot_id, group_name)
             self._update_manipulability_ellipse(robot_id, group_name)
+            self._update_dynamic_joint_limits(robot_id)
         else:
             # IK failed: refresh cached worldcoords after revert_if_fail,
             # and update mesh handles only.  Do NOT call redraw() here
@@ -734,6 +737,7 @@ class ViserViewer:
                     target['control'], target_pos, target_rot)
             self._sync_ik_targets(robot_id, exclude=group_name)
             self._update_manipulability_ellipse(robot_id, group_name)
+            self._update_dynamic_joint_limits(robot_id)
         else:
             self._revert_ik_target(robot_id, group_name)
 
@@ -980,6 +984,72 @@ class ViserViewer:
                 rot = target['end_coords'].worldrot()
                 self._update_handle_pose(target['control'], pos, rot)
                 self._update_pose_inputs(target, pos, rot)
+
+    def update_joint_slider_limits(
+        self,
+        joint_name: str,
+        min_value: float,
+        max_value: float
+    ):
+        """Update the min/max limits of a joint slider.
+
+        This is useful for dynamic joint limits where one joint's range
+        depends on another joint's angle.
+
+        Parameters
+        ----------
+        joint_name : str
+            Name of the joint whose slider limits should be updated.
+        min_value : float
+            New minimum value for the slider (in radians).
+        max_value : float
+            New maximum value for the slider (in radians).
+        """
+        slider = self._joint_sliders.get(joint_name)
+        if slider is None:
+            return
+
+        self._updating_slider_limits = True
+        try:
+            slider.min = float(min_value)
+            slider.max = float(max_value)
+
+            current_value = slider.value
+            if current_value < min_value:
+                slider.value = float(min_value)
+            elif current_value > max_value:
+                slider.value = float(max_value)
+        finally:
+            self._updating_slider_limits = False
+
+    def _update_dynamic_joint_limits(self, robot_id: int):
+        """Update slider limits for joints with dynamic limit tables.
+
+        Parameters
+        ----------
+        robot_id : int
+            ID of the robot model to update.
+        """
+        robot_model = self._robot_models.get(robot_id)
+        if robot_model is None:
+            return
+
+        for joint in robot_model.joint_list:
+            if joint.name not in self._joint_sliders:
+                continue
+
+            if (hasattr(joint, 'joint_min_max_table')
+                    and joint.joint_min_max_table is not None):
+                new_min = float(joint.joint_min_max_table_min_angle)
+                new_max = float(joint.joint_min_max_table_max_angle)
+
+                self.update_joint_slider_limits(joint.name, new_min, new_max)
+
+                current_angle = joint.joint_angle()
+                if current_angle < new_min:
+                    joint.joint_angle(new_min)
+                elif current_angle > new_max:
+                    joint.joint_angle(new_max)
 
     def _render_ghost_robot(self, robot_model, joint_angles, ghost_id,
                              opacity=0.3, color=(100, 180, 255)):
@@ -1642,14 +1712,21 @@ class ViserViewer:
                             def callback(_):
                                 if self._updating_from_ik:
                                     return
+                                if self._updating_slider_limits:
+                                    return
                                 j.joint_angle(self._joint_sliders[j.name].value)
                                 self.redraw()
                                 self._sync_ik_targets(rid)
                                 self._update_all_manipulability_ellipses(rid)
+                                self._update_dynamic_joint_limits(rid)
                             return callback
 
                         slider.on_update(make_callback(joint, robot_id))
                         self._joint_sliders[joint.name] = slider
+                        self._original_joint_limits[joint.name] = (
+                            float(joint.min_angle),
+                            float(joint.max_angle),
+                        )
 
         # Add joint angle export feature
         self._add_joint_angle_export(robot_model)
