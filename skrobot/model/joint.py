@@ -704,8 +704,13 @@ def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
         jamm[2] = j.min_angle[kk]
     else:
         jamm[0] = j.joint_angle()
-        jamm[1] = j.max_angle
-        jamm[2] = j.min_angle
+        # Use dynamic limits from joint limit table if available
+        if j.joint_min_max_table is not None:
+            jamm[1] = float(j.joint_min_max_table_max_angle)
+            jamm[2] = float(j.joint_min_max_table_min_angle)
+        else:
+            jamm[1] = j.max_angle
+            jamm[2] = j.min_angle
     return jamm
 
 
@@ -766,10 +771,20 @@ def joint_angle_limit_weight(joint_list):
             if np.isinf(joint_min) or np.isinf(joint_max):
                 r = 0.0
             else:
-                r = abs(((joint_max - joint_min) ** 2)
-                        * (2.0 * joint_angle - joint_max - joint_min)
-                        / (4.0 * ((joint_max - joint_angle) ** 2)
-                        * ((joint_angle - joint_min) ** 2)))
+                # Check for degenerate range (can happen with dynamic limits)
+                range_sq = (joint_max - joint_min) ** 2
+                denom = 4.0 * ((joint_max - joint_angle) ** 2) \
+                    * ((joint_angle - joint_min) ** 2)
+                if range_sq < e * e or denom < e * e * e * e:
+                    # Degenerate case: range too small or at boundary
+                    r = float('inf')
+                else:
+                    r = abs(range_sq
+                            * (2.0 * joint_angle - joint_max - joint_min)
+                            / denom)
+                    # Handle NaN from numerical issues
+                    if np.isnan(r) or np.isinf(r):
+                        r = float('inf')
             res[i] = r
     return res
 
