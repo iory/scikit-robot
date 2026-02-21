@@ -41,11 +41,13 @@ def main():
 
     # Load robot model from ROS parameter or file
     if args.ros is not None:
-        robot_model = RobotModel.from_robot_description(args.ros)
+        robot_model = RobotModel.from_robot_description(args.ros,
+                                                        include_mimic_joints=False)
     else:
         if not osp.exists(args.input_urdfpath):
             parser.error(f"URDF file not found: {args.input_urdfpath}")
-        robot_model = RobotModel.from_urdf(osp.abspath(args.input_urdfpath))
+        robot_model = RobotModel.from_urdf(osp.abspath(args.input_urdfpath),
+                                           include_mimic_joints=False)
 
     viewer.add(robot_model)
     viewer.show()
