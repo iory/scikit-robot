@@ -20,5 +20,6 @@ https://github.com/iory/scikit-robot/tree/main/examples
    swept_sphere
    batch_ik
    reachability_map
+   joint_limit_table
    grasp_and_pull
    trajectory_interpolation

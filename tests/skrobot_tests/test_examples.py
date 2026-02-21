@@ -52,13 +52,18 @@ class TestExampleScripts(unittest.TestCase):
 
                     cmd = "{} {} --no-interactive".format(sys.executable, script)
                     print("Executing: {} (attempt {}/{})".format(cmd, attempt, max_attempts))
-                    result = subprocess.run(
-                        cmd,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                    )
+                    try:
+                        result = subprocess.run(
+                            cmd,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=env,
+                            timeout=300,  # 5 minutes timeout per example
+                        )
+                    except subprocess.TimeoutExpired:
+                        print("Timeout on attempt {}".format(attempt))
+                        continue
 
                     if result.returncode == 0:
                         success = True

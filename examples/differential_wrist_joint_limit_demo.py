@@ -12,13 +12,19 @@ The plots update in real-time as you move the robot's joints via sliders or IK.
 
 import base64
 import io
+import sys
 import time
 
-import matplotlib
 
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+except ImportError:
+    print("Error: matplotlib is required for this demo.")
+    print("Please install it with: pip install matplotlib")
+    sys.exit(1)
 
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
 
 from skrobot.models import DifferentialWristSample
@@ -185,6 +191,15 @@ def create_overlay_html(img1_base64, img2_base64, is_valid1, is_valid2):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Differential Wrist Joint Limit Table Visualization Demo')
+    parser.add_argument(
+        '--no-interactive',
+        action='store_true',
+        help='Run in non-interactive mode (exit immediately after setup)')
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Differential Wrist Joint Limit Table Visualization")
     print("=" * 60)
@@ -244,6 +259,11 @@ def main():
     print("  2. Move WRIST_JOINT_R slider → see WRIST_JOINT_Y limits change")
     print("  3. Drag the end-effector gizmo to test IK with constraints")
     print("\nPress Ctrl+C to exit.")
+
+    if args.no_interactive:
+        print("\nNon-interactive mode: exiting immediately.")
+        viewer.close()
+        return
 
     # Update loop
     last_y_angle = None
