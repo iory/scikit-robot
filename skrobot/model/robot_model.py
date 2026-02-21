@@ -669,14 +669,20 @@ class CascadedLink(CascadedCoords):
             current_joint_angle_limit_weight = avoid_weight_gain * \
                 joint_angle_limit_weight(joint_list)
             for i in range(n_joint_dimension):
-                if (current_joint_angle_limit_weight[i]
-                        - previous_joint_angle_limit_weight[i]) >= 0.0:
-                    new_weight[i] = 1.0 / \
-                        (1.0 + current_joint_angle_limit_weight[i])
+                curr_w = current_joint_angle_limit_weight[i]
+                prev_w = previous_joint_angle_limit_weight[i]
+                # Handle inf - inf case which produces NaN
+                if np.isinf(curr_w) and np.isinf(prev_w):
+                    # Both are inf, treat as no change (weight = small value)
+                    new_weight[i] = 0.0
+                elif np.isinf(curr_w):
+                    # Current is inf, use small weight
+                    new_weight[i] = 0.0
+                elif (curr_w - prev_w) >= 0.0:
+                    new_weight[i] = 1.0 / (1.0 + curr_w)
                 else:
                     new_weight[i] = 1.0
-                previous_joint_angle_limit_weight[i] = \
-                    current_joint_angle_limit_weight[i]
+                previous_joint_angle_limit_weight[i] = curr_w
         elif avoid_weight_gain == 0.0:
             for i in range(n_joint_dimension):
                 new_weight[i] = weight[i]
