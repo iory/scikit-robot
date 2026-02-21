@@ -250,6 +250,82 @@ class Joint(object):
                 self.default_coords).worldpos()
         return self.default_coords.worldpos()
 
+    @property
+    def joint_min_max_table_min_angle(self):
+        """Get minimum angle from joint limit table.
+
+        When the joint has a joint_min_max_table and joint_min_max_target,
+        this returns the minimum angle based on the target joint's current angle.
+
+        This property returns a callable float-like object that can be:
+        - Used as a float value (uses target joint's current angle)
+        - Called with a specific target angle: joint_min_max_table_min_angle(angle)
+
+        Returns
+        -------
+        _JointLimitValue
+            Callable float-like object representing the min angle.
+        """
+        if self.joint_min_max_table is None or self.joint_min_max_target is None:
+            return self.min_angle
+        return _JointLimitValue(
+            self.joint_min_max_table.min_angle_function,
+            self.joint_min_max_target.joint_angle()
+        )
+
+    @property
+    def joint_min_max_table_max_angle(self):
+        """Get maximum angle from joint limit table.
+
+        When the joint has a joint_min_max_table and joint_min_max_target,
+        this returns the maximum angle based on the target joint's current angle.
+
+        This property returns a callable float-like object that can be:
+        - Used as a float value (uses target joint's current angle)
+        - Called with a specific target angle: joint_min_max_table_max_angle(angle)
+
+        Returns
+        -------
+        _JointLimitValue
+            Callable float-like object representing the max angle.
+        """
+        if self.joint_min_max_table is None or self.joint_min_max_target is None:
+            return self.max_angle
+        return _JointLimitValue(
+            self.joint_min_max_table.max_angle_function,
+            self.joint_min_max_target.joint_angle()
+        )
+
+
+class _JointLimitValue(float):
+    """A float-like object that can also be called with a target angle.
+
+    This class is used to provide a value that acts as a float when used
+    directly, but can also be called with a specific target joint angle
+    to get the limit for that angle.
+    """
+
+    def __new__(cls, func, current_target_angle):
+        value = func(current_target_angle)
+        instance = super(_JointLimitValue, cls).__new__(cls, value)
+        instance._func = func
+        return instance
+
+    def __call__(self, target_angle):
+        """Get the limit value for a specific target angle.
+
+        Parameters
+        ----------
+        target_angle : float
+            The target joint angle to compute the limit for.
+
+        Returns
+        -------
+        float
+            The limit value at the specified target angle.
+        """
+        return self._func(target_angle)
+
 
 class RotationalJoint(Joint):
 
