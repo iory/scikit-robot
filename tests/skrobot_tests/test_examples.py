@@ -1,9 +1,9 @@
+import glob
 import os
 import os.path as osp
 import subprocess
 import sys
 import tempfile
-import unittest
 
 import pytest
 
@@ -16,71 +16,43 @@ run_examples = (
 pytestmark = pytest.mark.skipif(
     not run_examples,
     reason="Skipping example tests"
-           + "unless RUN_EXAMPLE_TESTS is set or running in GitHub Actions"
+           "unless RUN_EXAMPLE_TESTS is set or running in GitHub Actions"
 )
 
+examples_dir = osp.join(osp.dirname(__file__), "..", "..", "examples")
+example_scripts = sorted(glob.glob(osp.join(examples_dir, "*.py")))
 
-class TestExampleScripts(unittest.TestCase):
 
-    @pytest.mark.skipif(sys.version_info[0] == 2, reason="Skip in Python 2")
-    def test_all_examples(self):
-        examples_dir = osp.join(osp.dirname(__file__), "..", "..", "examples")
-        self.assertTrue(osp.exists(examples_dir),
-                        "Examples directory not found: {}"
-                        .format(examples_dir))
+@pytest.mark.parametrize(
+    "script", example_scripts,
+    ids=[osp.basename(s) for s in example_scripts],
+)
+def test_example(script):
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = os.environ.copy()
+            env["TMPDIR"] = tmp_dir
 
-        example_scripts = [
-            osp.join(examples_dir, f)
-            for f in os.listdir(examples_dir)
-            if f.endswith(".py")
-        ]
-        self.assertTrue(len(example_scripts) > 0,
-                        "No example scripts found in examples/ directory")
+            cmd = [sys.executable, script, "--no-interactive"]
+            print("Executing: {} (attempt {}/{})".format(
+                " ".join(cmd), attempt, max_attempts))
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
 
-        failures = []
+            if result.returncode == 0:
+                print("Success on attempt {}".format(attempt))
+                return
 
-        for script in example_scripts:
-            max_attempts = 3
-            attempt = 0
-            success = False
+            if attempt < max_attempts:
+                print("Failed on attempt {}, retrying...".format(attempt))
 
-            while attempt < max_attempts and not success:
-                attempt += 1
-                with tempfile.TemporaryDirectory() as tmp_dir:
-                    env = os.environ.copy()
-                    env["TMPDIR"] = tmp_dir
-
-                    cmd = "{} {} --no-interactive".format(sys.executable, script)
-                    print("Executing: {} (attempt {}/{})".format(cmd, attempt, max_attempts))
-                    result = subprocess.run(
-                        cmd,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                    )
-
-                    if result.returncode == 0:
-                        success = True
-                        print("Success on attempt {}".format(attempt))
-                    elif attempt < max_attempts:
-                        print("Failed on attempt {}, retrying...".format(attempt))
-                    else:
-                        failures.append(
-                            (
-                                script,
-                                result.returncode,
-                                result.stdout.decode(),
-                                result.stderr.decode(),
-                            )
-                        )
-
-        if failures:
-            messages = []
-            for script, code, stdout, stderr in failures:
-                messages.append(
-                    "Script {} failed with exit ".format(script)
-                    + "code {}\nstdout:\n{}\nstderr:\n{}".format(
-                        code, stdout, stderr)
-                )
-            self.fail("\n\n".join(messages))
+    pytest.fail(
+        "Script {} failed with exit code {}\nstdout:\n{}\nstderr:\n{}".format(
+            script, result.returncode,
+            result.stdout.decode(), result.stderr.decode())
+    )
