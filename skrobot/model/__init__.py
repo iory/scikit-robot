@@ -31,5 +31,8 @@ from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import joint_angle_limit_nspace
 from skrobot.model.joint import joint_angle_limit_weight
 
+from skrobot.model.joint_limit_table import create_joint_limit_table
+from skrobot.model.joint_limit_table import JointLimitTable
+
 from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel

@@ -229,6 +229,10 @@ jobs:
         else
           pip install scipy==${{ matrix.scipy-version }}
         fi
+    - name: Install matplotlib for examples
+      run: |
+        # Required for differential_wrist_joint_limit_demo.py
+        pip install matplotlib
     - name: Remove setuptools
       run: |
         # Simulate 3.12> + venv where setuptools is not pre-installed by default.

@@ -16,6 +16,7 @@ pycollada>=0.8,<=0.9;python_version>="3.2" and python_version<"3.9"
 pycollada>=0.8;python_version>="3.9"  # required for robot model using collada
 pyglet<2.0
 pysdfgen>=0.2.0
+pyyaml
 repoze.lru;python_version<"3.2"
 rtree # need rtree for simplify_quadric_decimation
 scikit-learn;python_version<"3.8"

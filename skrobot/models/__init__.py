@@ -1,5 +1,6 @@
 # flake8: noqa
 
+from skrobot.models.differential_wrist_sample import DifferentialWristSample
 from skrobot.models.fetch import Fetch
 from skrobot.models.kuka import Kuka
 from skrobot.models.nextage import Nextage

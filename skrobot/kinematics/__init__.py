@@ -13,6 +13,7 @@ different performance and autodiff requirements.
 
 # Differentiable kinematics (backend-agnostic)
 from skrobot.kinematics.differentiable import create_batch_ik_solver
+from skrobot.kinematics.differentiable import create_dynamic_limit_mask
 from skrobot.kinematics.differentiable import extract_fk_parameters
 from skrobot.kinematics.differentiable import forward_kinematics
 from skrobot.kinematics.differentiable import forward_kinematics_ee
@@ -26,5 +27,6 @@ __all__ = [
     'forward_kinematics',
     'forward_kinematics_ee',
     'create_batch_ik_solver',
+    'create_dynamic_limit_mask',
     'ReachabilityMap',
 ]
