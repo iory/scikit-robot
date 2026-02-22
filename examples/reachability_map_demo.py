@@ -207,7 +207,8 @@ def main():
     )
     parser.add_argument(
         '--robot', type=str, default='pr2',
-        choices=['pr2', 'panda', 'fetch', 'r8', 'nextage', 'tycoon'],
+        choices=['pr2', 'panda', 'fetch', 'r8', 'nextage', 'tycoon',
+                 'differential_wrist'],
         help='Robot model to use (ignored if --urdf is specified)'
     )
     parser.add_argument(
@@ -307,9 +308,12 @@ def main():
             robot = skrobot.models.Nextage()
         elif args.robot == 'tycoon':
             robot = skrobot.models.RoverArmedTycoon()
+        elif args.robot == 'differential_wrist':
+            robot = skrobot.models.DifferentialWristSample()
+            robot.reset_manip_pose()
 
-        # tycoon uses 'arm' instead of 'rarm'
-        if args.robot == 'tycoon':
+        # Some robots use 'arm' instead of 'rarm'
+        if args.robot in ['tycoon', 'differential_wrist']:
             link_list = robot.arm.link_list
             end_coords = robot.arm.end_coords
         else:

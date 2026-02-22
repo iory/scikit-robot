@@ -141,3 +141,35 @@ def rover_armed_tycoon_urdfpath():
         quiet=True,
     )
     return path
+
+
+def differential_wrist_sample_urdfpath():
+    path = osp.join(get_cache_dir(),
+                    'differential_wrist_sample', 'urdf',
+                    'differential_wrist.urdf')
+    if osp.exists(path):
+        return path
+    _download(
+        url='https://github.com/iory/scikit-robot-models/raw/main/differential_wrist_sample.tar.gz',  # NOQA
+        path=osp.join(get_cache_dir(), 'differential_wrist_sample.tar.gz'),
+        md5='d8b3c1b4fef700d6e772265fe68867b5',
+        postprocess='extractall',
+        quiet=True,
+    )
+    return path
+
+
+def differential_wrist_sample_joint_limit_table_path():
+    path = osp.join(get_cache_dir(),
+                    'differential_wrist_sample', 'config',
+                    'joint_limit_table.yaml')
+    if osp.exists(path):
+        return path
+    _download(
+        url='https://github.com/iory/scikit-robot-models/raw/main/differential_wrist_sample.tar.gz',  # NOQA
+        path=osp.join(get_cache_dir(), 'differential_wrist_sample.tar.gz'),
+        md5='d8b3c1b4fef700d6e772265fe68867b5',
+        postprocess='extractall',
+        quiet=True,
+    )
+    return path

@@ -29,6 +29,7 @@ example_scripts = sorted(glob.glob(osp.join(examples_dir, "*.py")))
 )
 def test_example(script):
     max_attempts = 3
+    last_error = None
     for attempt in range(1, max_attempts + 1):
         with tempfile.TemporaryDirectory() as tmp_dir:
             env = os.environ.copy()
@@ -37,12 +38,21 @@ def test_example(script):
             cmd = [sys.executable, script, "--no-interactive"]
             print("Executing: {} (attempt {}/{})".format(
                 " ".join(cmd), attempt, max_attempts))
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-            )
+            try:
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    timeout=120,  # 2 minutes timeout per example
+                )
+            except subprocess.TimeoutExpired:
+                print("Timeout on attempt {}".format(attempt))
+                last_error = "Timeout after 120 seconds"
+                if attempt < max_attempts:
+                    continue
+                pytest.fail(
+                    "Script {} failed: {}".format(script, last_error))
 
             if result.returncode == 0:
                 print("Success on attempt {}".format(attempt))
