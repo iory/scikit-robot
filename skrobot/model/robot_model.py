@@ -230,7 +230,7 @@ class CascadedLink(CascadedCoords):
             if av is not None:
                 av = np.array(av)
                 if not (j.joint_min_max_table is None
-                        or j.joint_mix_max_target is None):
+                        or j.joint_min_max_target is None):
                     av = self.calc_joint_angle_from_min_max_table(index, j, av)
                 else:
                     if j.joint_dof == 1:
@@ -317,8 +317,8 @@ class CascadedLink(CascadedCoords):
 
             if tmp_joint_min_angle <= tmp_joint_angle and \
                tmp_joint_min_angle <= tmp_joint_max_angle:
-                j.joint_angle = tmp_joint_angle
-                jj.joint_angle = tmp_target_joint_angle
+                j.joint_angle(tmp_joint_angle)
+                jj.joint_angle(tmp_target_joint_angle)
             else:
                 i = 0.0
                 while i > 1.0:
@@ -344,11 +344,69 @@ class CascadedLink(CascadedCoords):
                         tmp_target_joint_angle += \
                             (tmp_target_joint_max_angle
                              - tmp_target_joint_angle) * i
-                j.joint_angle = tmp_joint_angle
-                jj.joint_angle = tmp_target_joint_angle
+                j.joint_angle(tmp_joint_angle)
+                jj.joint_angle(tmp_target_joint_angle)
                 av[index] = tmp_joint_angle
                 av[ii] = tmp_target_joint_angle
         return av
+
+    def apply_joint_limit_table_constraints(self, max_iterations=5):
+        """Apply joint limit table constraints iteratively.
+
+        For joints with bidirectional joint limit tables (where joint A's
+        limits depend on joint B and vice versa), this method iteratively
+        clips joint angles until all constraints are satisfied.
+
+        Parameters
+        ----------
+        max_iterations : int
+            Maximum number of iterations for convergence.
+
+        Returns
+        -------
+        numpy.ndarray
+            The angle vector after applying constraints.
+        """
+        # Find joints with joint limit tables
+        table_joints = []
+        for j in self.joint_list:
+            if j.joint_min_max_table is not None \
+               and j.joint_min_max_target is not None:
+                table_joints.append(j)
+
+        if not table_joints:
+            return self.angle_vector()
+
+        for _ in range(max_iterations):
+            changed = False
+            for j in table_joints:
+                current_angle = j.joint_angle()
+                target_angle = j.joint_min_max_target.joint_angle()
+
+                # Get limits based on target joint's current angle
+                min_angle = j.joint_min_max_table.min_angle_function(
+                    target_angle)
+                max_angle = j.joint_min_max_table.max_angle_function(
+                    target_angle)
+
+                # Handle infeasible region (max < min)
+                if max_angle < min_angle:
+                    # Clip to midpoint of infeasible region
+                    midpoint = 0.5 * (min_angle + max_angle)
+                    if abs(current_angle - midpoint) > 1e-6:
+                        j.joint_angle(midpoint)
+                        changed = True
+                elif current_angle < min_angle:
+                    j.joint_angle(min_angle)
+                    changed = True
+                elif current_angle > max_angle:
+                    j.joint_angle(max_angle)
+                    changed = True
+
+            if not changed:
+                break
+
+        return self.angle_vector()
 
     def move_joints(self, union_vel,
                     union_link_list=None,
@@ -1295,7 +1353,9 @@ class CascadedLink(CascadedCoords):
 
         # TODO(add collision check)
         if success or not revert_if_fail:
-            return self.angle_vector()
+            # Apply joint limit table constraints to ensure
+            # bidirectional dependencies are satisfied
+            return self.apply_joint_limit_table_constraints()
 
         # reset angle vector
         for joint, angle in zip(joint_list, av0):

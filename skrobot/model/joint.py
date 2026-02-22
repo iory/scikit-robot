@@ -405,7 +405,12 @@ class RotationalJoint(Joint):
             self.max_angle = self.joint_min_max_table_max_angle
         if relative:
             v += self.joint_angle()
-        if v > self.max_angle:
+        # Handle infeasible region where max < min (can occur at extreme
+        # joint configurations in bidirectional joint limit tables)
+        if self.max_angle < self.min_angle:
+            midpoint = 0.5 * (float(self.min_angle) + float(self.max_angle))
+            v = midpoint
+        elif v > self.max_angle:
             if not relative:
                 logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, self.max_angle)
             v = self.max_angle
