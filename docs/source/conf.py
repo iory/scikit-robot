@@ -12,12 +12,10 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+from importlib.metadata import version as get_version
 import inspect
 import os
 import sys
-
-import pkg_resources
-import sphinx_rtd_theme
 
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -25,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 import _docstring_check
 
 
-__version__ = pkg_resources.get_distribution('scikit-robot').version
+__version__ = get_version('scikit-robot')
 on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
 tag = 'main'
 
