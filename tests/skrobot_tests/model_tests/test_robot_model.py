@@ -1611,3 +1611,43 @@ class TestRobotModel(unittest.TestCase):
         )
         self.assertEqual(len(solutions), 1)
         self.assertEqual(len(success_flags), 1)
+
+    def test_angle_vector_with_joint_limit_table(self):
+        """Test that angle_vector works correctly with joint limit tables.
+
+        This test verifies that:
+        1. The attribute name 'joint_min_max_target' is spelled correctly
+        2. joint_angle() method is called, not assigned as an attribute
+
+        Regression test for bugs where:
+        - 'joint_mix_max_target' typo caused AttributeError
+        - 'j.joint_angle = value' overwrote the method, causing TypeError
+        """
+        robot = skrobot.models.DifferentialWristSample(use_joint_limit_table=True)
+
+        # Verify joint limit tables are set up
+        wrist_y = robot.WRIST_JOINT_Y
+        wrist_r = robot.WRIST_JOINT_R
+        self.assertIsNotNone(wrist_y.joint_min_max_table)
+        self.assertIsNotNone(wrist_r.joint_min_max_table)
+
+        # Get initial angle vector
+        initial_av = robot.angle_vector()
+
+        # Modify angles slightly and set via angle_vector
+        new_av = initial_av.copy()
+        new_av[5] = 0.1  # WRIST_JOINT_Y
+        new_av[6] = 0.1  # WRIST_JOINT_R
+
+        # This should not raise an error
+        robot.angle_vector(new_av)
+
+        # Verify joint_angle is still callable (not overwritten with a float)
+        self.assertTrue(callable(wrist_y.joint_angle))
+        self.assertTrue(callable(wrist_r.joint_angle))
+
+        # Verify we can still call joint_angle() to get the value
+        y_angle = wrist_y.joint_angle()
+        r_angle = wrist_r.joint_angle()
+        self.assertIsInstance(y_angle, (float, np.floating))
+        self.assertIsInstance(r_angle, (float, np.floating))

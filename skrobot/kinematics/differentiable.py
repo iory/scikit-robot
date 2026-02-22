@@ -1254,6 +1254,25 @@ def _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices):
     if not limit_infos:
         return None
 
+    # Find the feasible boundary for target joint (where max >= min)
+    def find_feasible_target_range(sample_angles, min_angles, max_angles):
+        """Find range of target angles where dependent joint has valid limits."""
+        feasibility = max_angles >= min_angles
+        feasible_indices = np.where(feasibility)[0]
+        if len(feasible_indices) == 0:
+            # No feasible region at all - use center
+            return sample_angles[len(sample_angles) // 2], \
+                   sample_angles[len(sample_angles) // 2]
+        return sample_angles[feasible_indices[0]], \
+               sample_angles[feasible_indices[-1]]
+
+    # Precompute feasible ranges
+    feasible_ranges = []
+    for info in limit_infos:
+        target_min, target_max = find_feasible_target_range(
+            info['sample_angles'], info['min_angles'], info['max_angles'])
+        feasible_ranges.append((target_min, target_max))
+
     def apply_dynamic_limits(opt_angles):
         """Apply dynamic joint limits based on target joint angles.
 
@@ -1269,24 +1288,40 @@ def _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices):
         """
         result = opt_angles.copy()
 
-        for info in limit_infos:
-            dep_idx = info['dep_opt_idx']
-            tgt_idx = info['tgt_opt_idx']
-            sample_angles = info['sample_angles']
-            min_angles = info['min_angles']
-            max_angles = info['max_angles']
+        # Iterate until convergence for bidirectional dependencies
+        # (e.g., joint A depends on joint B AND joint B depends on joint A)
+        max_iterations = 10
+        tolerance = 1e-8
 
-            # Get target joint angles for all batch elements
-            target_angles = result[:, tgt_idx]
+        for _ in range(max_iterations):
+            prev_result = result.copy()
 
-            # Compute dynamic limits for each batch element using np.interp
-            # np.interp works on 1D arrays, so we need to vectorize
-            dynamic_min = np.interp(target_angles, sample_angles, min_angles)
-            dynamic_max = np.interp(target_angles, sample_angles, max_angles)
+            for i, info in enumerate(limit_infos):
+                dep_idx = info['dep_opt_idx']
+                tgt_idx = info['tgt_opt_idx']
+                sample_angles = info['sample_angles']
+                min_angles = info['min_angles']
+                max_angles = info['max_angles']
 
-            # Clip the dependent joint
-            result[:, dep_idx] = np.clip(
-                result[:, dep_idx], dynamic_min, dynamic_max)
+                # First, clip target joint to feasible range
+                target_min, target_max = feasible_ranges[i]
+                result[:, tgt_idx] = np.clip(
+                    result[:, tgt_idx], target_min, target_max)
+
+                # Get target joint angles for all batch elements
+                target_angles = result[:, tgt_idx]
+
+                # Compute dynamic limits for each batch element using np.interp
+                dynamic_min = np.interp(target_angles, sample_angles, min_angles)
+                dynamic_max = np.interp(target_angles, sample_angles, max_angles)
+
+                # Clip the dependent joint
+                result[:, dep_idx] = np.clip(
+                    result[:, dep_idx], dynamic_min, dynamic_max)
+
+            # Check convergence
+            if np.allclose(result, prev_result, atol=tolerance):
+                break
 
         return result
 
@@ -1574,6 +1609,10 @@ def _create_numpy_optimized_solver(fk_params):
                 # Need to also check rotation for final convergence
                 break
 
+        # Final clipping to ensure dynamic limits are satisfied
+        if dynamic_clipper is not None:
+            opt_angles = dynamic_clipper(opt_angles)
+
         # Final error computation
         full_angles = _expand_to_full_angles_batch(opt_angles)
         pos_final, rot_final = forward_kinematics_ee_batched_numpy(
@@ -1856,27 +1895,42 @@ def _create_dynamic_limit_clipper_jax(fk_params, non_mimic_indices):
     if not limit_infos:
         return None
 
-    def apply_dynamic_limits(opt_angles):
-        """Apply dynamic joint limits based on target joint angles (JAX version).
+    # Find the feasible boundary for target joint (where max >= min)
+    def find_feasible_target_range_jax(sample_angles, min_angles, max_angles):
+        """Find range of target angles where dependent joint has valid limits."""
+        feasibility = max_angles >= min_angles
+        # Find first and last feasible indices
+        indices = jnp.arange(len(sample_angles))
+        feasible_indices = jnp.where(feasibility, indices, jnp.inf)
+        first_feasible = jnp.min(feasible_indices)
+        feasible_indices_rev = jnp.where(feasibility, indices, -jnp.inf)
+        last_feasible = jnp.max(feasible_indices_rev)
 
-        Parameters
-        ----------
-        opt_angles : jax.Array
-            Optimization variables (batch, n_opt).
+        # Get corresponding angles
+        first_idx = jnp.clip(first_feasible, 0, len(sample_angles) - 1).astype(int)
+        last_idx = jnp.clip(last_feasible, 0, len(sample_angles) - 1).astype(int)
+        return sample_angles[first_idx], sample_angles[last_idx]
 
-        Returns
-        -------
-        jax.Array
-            Clipped optimization variables.
-        """
-        result = opt_angles
+    # Precompute feasible ranges
+    feasible_ranges = []
+    for info in limit_infos:
+        target_min, target_max = find_feasible_target_range_jax(
+            info['sample_angles'], info['min_angles'], info['max_angles'])
+        feasible_ranges.append((float(target_min), float(target_max)))
 
-        for info in limit_infos:
+    def apply_single_pass(result):
+        """Apply one pass of dynamic limit clipping."""
+        for i, info in enumerate(limit_infos):
             dep_idx = info['dep_opt_idx']
             tgt_idx = info['tgt_opt_idx']
             sample_angles = info['sample_angles']
             min_angles = info['min_angles']
             max_angles = info['max_angles']
+
+            # First, clip target joint to feasible range
+            target_min, target_max = feasible_ranges[i]
+            result = result.at[:, tgt_idx].set(
+                jnp.clip(result[:, tgt_idx], target_min, target_max))
 
             # Get target joint angles for all batch elements
             target_angles = result[:, tgt_idx]
@@ -1890,6 +1944,26 @@ def _create_dynamic_limit_clipper_jax(fk_params, non_mimic_indices):
             clipped = jnp.clip(dep_angles, dynamic_min, dynamic_max)
             result = result.at[:, dep_idx].set(clipped)
 
+        return result
+
+    def apply_dynamic_limits(opt_angles):
+        """Apply dynamic joint limits based on target joint angles (JAX version).
+
+        Parameters
+        ----------
+        opt_angles : jax.Array
+            Optimization variables (batch, n_opt).
+
+        Returns
+        -------
+        jax.Array
+            Clipped optimization variables.
+        """
+        # Iterate multiple passes for bidirectional dependencies
+        # (e.g., joint A depends on joint B AND joint B depends on joint A)
+        result = opt_angles
+        for _ in range(10):
+            result = apply_single_pass(result)
         return result
 
     return apply_dynamic_limits
@@ -2142,6 +2216,10 @@ def _create_jax_jacobian_solver(fk_params, backend):
             # Run fixed-iteration loop
             final_opt = lax.fori_loop(0, max_iterations, body_fn,
                                       init_opt_angles)
+
+            # Final clipping to ensure dynamic limits are satisfied
+            if dynamic_clipper is not None:
+                final_opt = dynamic_clipper(final_opt)
 
             # Compute final errors
             _, pos_final, rot_final, final_full = _compute_jac_fk(final_opt)
