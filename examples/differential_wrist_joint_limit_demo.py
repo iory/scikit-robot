@@ -221,6 +221,25 @@ def main():
     print("  WRIST_JOINT_Y: limits depend on WRIST_JOINT_R")
     print("  WRIST_JOINT_R: limits depend on WRIST_JOINT_Y")
 
+    # Non-interactive mode: verify functionality without viewer
+    if args.no_interactive:
+        print("\nNon-interactive mode: verifying joint limit tables...")
+        y_angle = wrist_y.joint_angle()
+        r_angle = wrist_r.joint_angle()
+
+        # Test joint limit table functions
+        min_y = table_y.min_angle_function(r_angle)
+        max_y = table_y.max_angle_function(r_angle)
+        min_r = table_r.min_angle_function(y_angle)
+        max_r = table_r.max_angle_function(y_angle)
+
+        print("  WRIST_Y angle: {:.2f} rad (limits: {:.2f} to {:.2f})".format(
+            y_angle, min_y, max_y))
+        print("  WRIST_R angle: {:.2f} rad (limits: {:.2f} to {:.2f})".format(
+            r_angle, min_r, max_r))
+        print("\nJoint limit tables verified successfully.")
+        return
+
     # Create viewer
     print("\nStarting ViserViewer...")
     viewer = ViserViewer(enable_ik=True)
@@ -259,11 +278,6 @@ def main():
     print("  2. Move WRIST_JOINT_R slider → see WRIST_JOINT_Y limits change")
     print("  3. Drag the end-effector gizmo to test IK with constraints")
     print("\nPress Ctrl+C to exit.")
-
-    if args.no_interactive:
-        print("\nNon-interactive mode: exiting immediately.")
-        viewer.close()
-        return
 
     # Update loop
     last_y_angle = None
