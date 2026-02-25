@@ -1201,6 +1201,14 @@ class Mesh(URDFType):
                         or not os.path.exists(fn):
                     meshes = trimesh.util.concatenate(meshes)
                     trimesh.exchange.export.export_mesh(meshes, fn)
+            elif fn.endswith('.glb') or fn.endswith('.gltf'):
+                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
+                        or not os.path.exists(fn):
+                    # Create a scene with all meshes to preserve structure
+                    scene = trimesh.Scene()
+                    for mesh in meshes:
+                        scene.add_geometry(mesh)
+                    scene.export(fn)
             else:
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):

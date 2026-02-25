@@ -27,11 +27,11 @@ def main():
                         help='Path to the input URDF file')
     parser.add_argument('--format', '-f',
                         default='dae',
-                        choices=['dae', 'stl'],
+                        choices=['dae', 'stl', 'glb'],
                         help='Mesh format for visual mesh export. Default is dae.')
     parser.add_argument('--collision-mesh-format',
                         default='stl',
-                        choices=['dae', 'stl'],
+                        choices=['dae', 'stl', 'glb'],
                         help='Mesh format for collision mesh export. Default is stl.')
     parser.add_argument('--output', '-o', help='Path for the output URDF file. If not specified, a filename is automatically generated based on the input URDF file.')  # NOQA
     parser.add_argument('--inplace', '-i', action='store_true',
