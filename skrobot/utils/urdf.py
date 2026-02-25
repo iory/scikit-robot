@@ -366,6 +366,12 @@ def _load_meshes(filename):
     trimesh = _lazy_trimesh()
     try:
         _, ext = os.path.splitext(filename)
+        # Import dracox if available to enable Draco decompression for GLB/GLTF
+        if ext.lower() in ('.glb', '.gltf'):
+            try:
+                import dracox  # NOQA
+            except ImportError:
+                pass
         # It seems that .3DXML files assume [mm] unit.
         # Convert the mesh unit from [mm] to [m].
         # To convert the mesh unit from millimeters to meters,
@@ -1059,7 +1065,7 @@ class Mesh(URDFType):
                 name, _ = os.path.splitext(fn)
                 fn = name + ext
                 self.filename = os.path.splitext(self.filename)[0] + ext
-                if os.path.exists(fn):
+                if os.path.exists(fn) and not _CONFIGURABLE_VALUES['overwrite_mesh']:
                     # skip mesh save process but still apply scaling
                     scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
                     original_scale = None
