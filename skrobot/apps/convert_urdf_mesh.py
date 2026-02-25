@@ -96,6 +96,11 @@ resulting in less simplification. Default is None."""
         help='Suffix to append to remeshed mesh filenames. '
         'Default is "_remeshed". Specify empty string "" to overwrite '
         'original files. Only used with --blender-remesh.')
+    parser.add_argument(
+        '--draco', action='store_true',
+        help='Enable Draco compression for GLB output. '
+        'When specified, output format is automatically set to GLB. '
+        'Requires trimesh >= 4.11 and dracox package.')
 
     args = parser.parse_args()
 
@@ -105,6 +110,26 @@ resulting in less simplification. Default is None."""
             '[WARNING] With `trimesh` < 4.0.10, the output dae is not '
             + 'colored. Please `pip install trimesh -U`')
         sys.exit(1)
+
+    # Handle Draco compression
+    if args.draco:
+        # Override format to glb when draco is enabled
+        args.format = 'glb'
+        args.collision_mesh_format = 'glb'
+        # Check trimesh version for Draco support
+        if Version(trimesh_version) < Version("4.11"):
+            print(
+                '[ERROR] Draco compression requires trimesh >= 4.11. '
+                + f'Current version: {trimesh_version}. '
+                + 'Please upgrade with `pip install trimesh -U`')
+            sys.exit(1)
+        # Check if dracox is installed
+        if not is_package_installed('dracox'):
+            print(
+                '[ERROR] Draco compression requires the dracox package. '
+                + 'Please install it with `pip install dracox`')
+            sys.exit(1)
+
     if args.decimation_area_ratio_threshold or args.target_triangles:
         disable_decimation = False
         if is_package_installed('open3d') is False:
@@ -176,7 +201,8 @@ resulting in less simplification. Default is None."""
             blender_remesh=args.blender_remesh,
             blender_voxel_size=args.blender_voxel_size,
             blender_executable=args.blender_executable,
-            remeshed_suffix=args.remeshed_suffix), apply_scale(args.scale):
+            remeshed_suffix=args.remeshed_suffix,
+            draco_compression=args.draco), apply_scale(args.scale):
         print(f"Saving new URDF to: {output_path}")
         # Ensure output directory exists
         output_dir = output_path.parent

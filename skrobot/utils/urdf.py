@@ -86,7 +86,8 @@ def export_mesh_format(
         blender_remesh=False,
         blender_voxel_size=0.002,
         blender_executable=None,
-        remeshed_suffix='_remeshed'):
+        remeshed_suffix='_remeshed',
+        draco_compression=False):
     global _REMESHED_FILES_CACHE
     _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
     _CONFIGURABLE_VALUES["collision_mesh_format"] = collision_mesh_format
@@ -100,6 +101,7 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["blender_voxel_size"] = blender_voxel_size
     _CONFIGURABLE_VALUES["blender_executable"] = blender_executable
     _CONFIGURABLE_VALUES["remeshed_suffix"] = remeshed_suffix
+    _CONFIGURABLE_VALUES["draco_compression"] = draco_compression
     # Clear the remeshed files cache at the start of each export
     _REMESHED_FILES_CACHE.clear()
     yield
@@ -113,6 +115,7 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["blender_voxel_size"] = 0.002
     _CONFIGURABLE_VALUES["blender_executable"] = None
     _CONFIGURABLE_VALUES["remeshed_suffix"] = '_remeshed'
+    _CONFIGURABLE_VALUES["draco_compression"] = False
     # Clear cache after export is complete
     _REMESHED_FILES_CACHE.clear()
 
@@ -1208,7 +1211,11 @@ class Mesh(URDFType):
                     scene = trimesh.Scene()
                     for mesh in meshes:
                         scene.add_geometry(mesh)
-                    scene.export(fn)
+                    draco = _CONFIGURABLE_VALUES.get('draco_compression', False)
+                    if draco:
+                        # Import dracox to register compression handlers
+                        import dracox  # NOQA
+                    scene.export(fn, extension_draco=draco)
             else:
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):
