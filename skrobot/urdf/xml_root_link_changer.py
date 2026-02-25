@@ -1,4 +1,5 @@
 import os
+import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -13,15 +14,32 @@ class URDFXMLRootLinkChanger:
     This class reads URDF XML files and modifies the kinematic tree structure
     to change the root link to any specified link, then writes the modified
     URDF back to a file.
+
+    .. warning::
+
+        This class assumes that all visual/collision elements have zero-offset
+        origins (xyz="0 0 0" rpy="0 0 0"). URDFs with non-zero visual/collision
+        offsets will not work correctly after root link change.
+
+        Use the ``convert-urdf-mesh`` command to preprocess URDFs with non-zero
+        offsets before using this class. See:
+        https://scikit-robot.readthedocs.io/en/latest/reference/how_to_create_urdf_from_cad.html#how-to-create-urdf-from-cad-software
+
+    .. todo::
+
+        Add support for URDFs with non-zero visual/collision offsets.
     """
 
-    def __init__(self, urdf_path):
+    def __init__(self, urdf_path, warn_non_zero_offsets=True):
         """Initialize the URDFXMLRootLinkChanger.
 
         Parameters
         ----------
         urdf_path : str
             Path to the input URDF file
+        warn_non_zero_offsets : bool
+            If True, emit a warning when URDF contains non-zero
+            visual/collision offsets. Default is True.
 
         Raises
         ------
@@ -42,6 +60,56 @@ class URDFXMLRootLinkChanger:
         self.links = self._parse_links()
         self.joints = self._parse_joints()
         self.joint_tree = self._build_joint_tree()
+
+        # Check for non-zero visual/collision offsets
+        if warn_non_zero_offsets:
+            self._warn_if_non_zero_offsets()
+
+    def _warn_if_non_zero_offsets(self):
+        """Check for non-zero visual/collision offsets and emit warning."""
+        non_zero_links = []
+        for link_name, link in self.links.items():
+            for elem_type in ['visual', 'collision']:
+                for elem in link.findall(elem_type):
+                    origin = elem.find('origin')
+                    if origin is not None:
+                        xyz_str = origin.get('xyz', '0 0 0')
+                        rpy_str = origin.get('rpy', '0 0 0')
+                        xyz = [float(x) for x in xyz_str.split()]
+                        rpy = [float(x) for x in rpy_str.split()]
+                        if any(abs(v) > 1e-6 for v in xyz + rpy):
+                            non_zero_links.append((link_name, elem_type))
+                            break
+
+        if non_zero_links:
+            # ANSI escape codes for orange/yellow color
+            orange = '\033[93m'
+            reset = '\033[0m'
+
+            link_list = '\n'.join(
+                '    - {} ({})'.format(name, typ)
+                for name, typ in non_zero_links[:5]
+            )
+            if len(non_zero_links) > 5:
+                link_list += '\n    ... and {} more'.format(
+                    len(non_zero_links) - 5
+                )
+
+            message = (
+                "\n{orange}"
+                "WARNING: URDF contains non-zero visual/collision offsets.\n"
+                "Root link change may produce incorrect results.\n"
+                "\n"
+                "Affected links:\n"
+                "{link_list}\n"
+                "\n"
+                "Solution: Use 'convert-urdf-mesh' command to preprocess the URDF.\n"
+                "See: https://scikit-robot.readthedocs.io/en/latest/reference/"
+                "how_to_create_urdf_from_cad.html#how-to-create-urdf-from-cad-software"
+                "{reset}"
+            ).format(orange=orange, link_list=link_list, reset=reset)
+
+            warnings.warn(message, UserWarning, stacklevel=3)
 
     def _parse_links(self):
         """Parse all links from the URDF.

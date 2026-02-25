@@ -184,7 +184,9 @@ Examples:
         if args.verbose:
             print("Verifying result...")
 
-        result_changer = URDFXMLRootLinkChanger(args.output_urdf)
+        result_changer = URDFXMLRootLinkChanger(
+            args.output_urdf, warn_non_zero_offsets=False
+        )
         actual_root = result_changer.get_current_root_link()
         actual_robot_name = result_changer.get_robot_name()
 
