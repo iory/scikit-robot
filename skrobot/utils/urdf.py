@@ -366,6 +366,12 @@ def _load_meshes(filename):
     trimesh = _lazy_trimesh()
     try:
         _, ext = os.path.splitext(filename)
+        # Import dracox if available to enable Draco decompression for GLB/GLTF
+        if ext.lower() in ('.glb', '.gltf'):
+            try:
+                import dracox  # NOQA
+            except ImportError:
+                pass
         # It seems that .3DXML files assume [mm] unit.
         # Convert the mesh unit from [mm] to [m].
         # To convert the mesh unit from millimeters to meters,
