@@ -1151,6 +1151,91 @@ class Coordinates(object):
         """
         return self._translation
 
+    def world_quaternion_wxyz(self):
+        """Return world quaternion in [w, x, y, z] format.
+
+        Returns
+        -------
+        q : numpy.ndarray
+            [w, x, y, z] quaternion representing world rotation.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.world_quaternion_wxyz()
+        array([1., 0., 0., 0.])
+        """
+        return matrix2quaternion(self.worldrot())
+
+    def world_quaternion_xyzw(self):
+        """Return world quaternion in [x, y, z, w] format.
+
+        Returns
+        -------
+        q : numpy.ndarray
+            [x, y, z, w] quaternion representing world rotation.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.world_quaternion_xyzw()
+        array([0., 0., 0., 1.])
+        """
+        return wxyz2xyzw(matrix2quaternion(self.worldrot()))
+
+    def world_position_quaternion_wxyz(self):
+        """Return world position and quaternion (wxyz).
+
+        This is a convenience method for getting both world position
+        and world quaternion.
+
+        Returns
+        -------
+        position : numpy.ndarray
+            [x, y, z] world position.
+        quaternion : numpy.ndarray
+            [w, x, y, z] world quaternion.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords(pos=[1, 2, 3])
+        >>> pos, quat = c.world_position_quaternion_wxyz()
+        >>> pos
+        array([1., 2., 3.])
+        >>> quat
+        array([1., 0., 0., 0.])
+        """
+        return self.worldpos(), self.world_quaternion_wxyz()
+
+    def world_position_quaternion_xyzw(self):
+        """Return world position and quaternion (xyzw).
+
+        This is a convenience method for getting both world position
+        and world quaternion in a format commonly used for 3D transforms
+        (e.g., Three.js, ROS geometry_msgs).
+
+        Returns
+        -------
+        position : numpy.ndarray
+            [x, y, z] world position.
+        quaternion : numpy.ndarray
+            [x, y, z, w] world quaternion.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords(pos=[1, 2, 3])
+        >>> pos, quat = c.world_position_quaternion_xyzw()
+        >>> pos
+        array([1., 2., 3.])
+        >>> quat
+        array([0., 0., 0., 1.])
+        """
+        return self.worldpos(), self.world_quaternion_xyzw()
+
     def newcoords(self, c, pos=None, check_validity=True,
                   relative_coords=None):
         """Update of coords is always done through newcoords.
