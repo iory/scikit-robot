@@ -1059,7 +1059,7 @@ class Mesh(URDFType):
                 name, _ = os.path.splitext(fn)
                 fn = name + ext
                 self.filename = os.path.splitext(self.filename)[0] + ext
-                if os.path.exists(fn):
+                if os.path.exists(fn) and not _CONFIGURABLE_VALUES['overwrite_mesh']:
                     # skip mesh save process but still apply scaling
                     scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
                     original_scale = None
