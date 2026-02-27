@@ -1197,6 +1197,12 @@ class Mesh(URDFType):
                 has_texture_visual = False
                 for mesh in meshes:
                     has_texture_visual |= mesh.visual.kind == 'texture'
+                    # Fix: STL files load with visual.defined=False even though
+                    # they have default face colors. Explicitly setting
+                    # face_colors makes visual.defined=True and visual.kind='face',
+                    # which allows trimesh's export_collada to use the colors.
+                    if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
+                        mesh.visual.face_colors = mesh.visual.face_colors
                     export_meshes.extend(split_mesh_by_face_color(mesh))
                 meshes = export_meshes
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] is True \
