@@ -366,10 +366,11 @@ def _load_meshes(filename):
     trimesh = _lazy_trimesh()
     try:
         _, ext = os.path.splitext(filename)
-        # Import dracox if available to enable Draco decompression for GLB/GLTF
+        # Register DracoPy handlers for Draco decompression of GLB/GLTF
         if ext.lower() in ('.glb', '.gltf'):
             try:
-                import dracox  # NOQA
+                from skrobot.utils.draco import register_dracopy_handlers
+                register_dracopy_handlers()
             except ImportError:
                 pass
         # It seems that .3DXML files assume [mm] unit.
@@ -1219,15 +1220,20 @@ class Mesh(URDFType):
             elif fn.endswith('.glb') or fn.endswith('.gltf'):
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):
-                    # Create a scene with all meshes to preserve structure
-                    scene = trimesh.Scene()
-                    for mesh in meshes:
-                        scene.add_geometry(mesh)
                     draco = _CONFIGURABLE_VALUES.get('draco_compression', False)
                     if draco:
-                        # Import dracox to register compression handlers
-                        import dracox  # NOQA
-                    scene.export(fn, extension_draco=draco)
+                        # Use DracoPy for Draco compression with color support
+                        from skrobot.utils.draco import export_glb_with_draco
+                        export_glb_with_draco(meshes, fn)
+                    else:
+                        # Create a scene with all meshes to preserve structure
+                        scene = trimesh.Scene()
+                        for mesh in meshes:
+                            # Fix: Ensure visual.defined=True so colors are exported
+                            if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
+                                mesh.visual.face_colors = mesh.visual.face_colors
+                            scene.add_geometry(mesh)
+                        scene.export(fn)
             else:
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):
