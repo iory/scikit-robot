@@ -100,7 +100,7 @@ resulting in less simplification. Default is None."""
         '--draco', action='store_true',
         help='Enable Draco compression for GLB output. '
         'When specified, output format is automatically set to GLB. '
-        'Requires trimesh >= 4.11 and dracox package.')
+        'Requires DracoPy package (pip install DracoPy).')
 
     args = parser.parse_args()
 
@@ -116,18 +116,11 @@ resulting in less simplification. Default is None."""
         # Override format to glb when draco is enabled
         args.format = 'glb'
         args.collision_mesh_format = 'glb'
-        # Check trimesh version for Draco support
-        if Version(trimesh_version) < Version("4.11"):
+        # Check if DracoPy is installed
+        if not is_package_installed('DracoPy'):
             print(
-                '[ERROR] Draco compression requires trimesh >= 4.11. '
-                + f'Current version: {trimesh_version}. '
-                + 'Please upgrade with `pip install trimesh -U`')
-            sys.exit(1)
-        # Check if dracox is installed
-        if not is_package_installed('dracox'):
-            print(
-                '[ERROR] Draco compression requires the dracox package. '
-                + 'Please install it with `pip install dracox`')
+                '[ERROR] Draco compression requires the DracoPy package. '
+                + 'Please install it with `pip install DracoPy`')
             sys.exit(1)
 
     if args.decimation_area_ratio_threshold or args.target_triangles:
