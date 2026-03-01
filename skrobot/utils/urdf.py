@@ -364,15 +364,20 @@ def _load_meshes(filename):
         The meshes loaded from the file.
     """
     trimesh = _lazy_trimesh()
+    _, ext = os.path.splitext(filename)
+    is_glb_or_gltf = ext.lower() in ('.glb', '.gltf')
+    dracopy_available = False
+
+    # Register DracoPy handlers for Draco decompression of GLB/GLTF
+    if is_glb_or_gltf:
+        from skrobot.utils.draco import is_dracopy_available
+        from skrobot.utils.draco import register_dracopy_handlers
+        dracopy_available = is_dracopy_available()
+        if dracopy_available:
+            register_dracopy_handlers()
+
+    load_error_reported = False
     try:
-        _, ext = os.path.splitext(filename)
-        # Register DracoPy handlers for Draco decompression of GLB/GLTF
-        if ext.lower() in ('.glb', '.gltf'):
-            try:
-                from skrobot.utils.draco import register_dracopy_handlers
-                register_dracopy_handlers()
-            except ImportError:
-                pass
         # It seems that .3DXML files assume [mm] unit.
         # Convert the mesh unit from [mm] to [m].
         # To convert the mesh unit from millimeters to meters,
@@ -381,7 +386,14 @@ def _load_meshes(filename):
         if meshes.units is not None and meshes.units != 'meter':
             meshes = meshes.convert_units('meter')
     except Exception as e:
-        logger.error("Failed to load meshes from %s. Error: %s", filename, e)
+        if is_glb_or_gltf and not dracopy_available:
+            logger.error(
+                "Failed to load mesh from %s: %s. "
+                "This file may use Draco compression. "
+                "Install DracoPy with: pip install DracoPy", filename, e)
+        else:
+            logger.error("Failed to load meshes from %s. Error: %s", filename, e)
+        load_error_reported = True
         meshes = []
 
     # If we got a scene, dump the meshes
@@ -392,8 +404,15 @@ def _load_meshes(filename):
     if isinstance(meshes, (list, tuple, set)):
         meshes = list(meshes)
         if len(meshes) == 0:
-            logger.error('At least one mesh must be present in file.'
-                         ' Please check %s file', filename)
+            if not load_error_reported:
+                if is_glb_or_gltf and not dracopy_available:
+                    logger.error(
+                        "Failed to load mesh from %s. "
+                        "This file may use Draco compression. "
+                        "Install DracoPy with: pip install DracoPy", filename)
+                else:
+                    logger.error('At least one mesh must be present in file.'
+                                 ' Please check %s file', filename)
             meshes = []
         for r in meshes:
             if not isinstance(r, trimesh.Trimesh):
