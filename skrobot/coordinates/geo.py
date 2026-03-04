@@ -1,15 +1,17 @@
+import warnings
+
 import numpy as np
 
-from skrobot.coordinates import make_coords
 from skrobot.coordinates.math import angle_between_vectors
-from skrobot.coordinates.math import convert_to_axis_vector
-from skrobot.coordinates.math import interpolate_rotation_matrices
-from skrobot.coordinates.math import midpoint
 from skrobot.coordinates.math import normalize_vector
 
 
 def midcoords(p, c1, c2):
     """Returns mid (or p) coordinates of given two coordinates c1 and c2.
+
+    .. deprecated::
+        Use :meth:`skrobot.coordinates.Coordinates.interpolate` instead.
+        ``midcoords(p, c1, c2)`` is equivalent to ``c1.interpolate(c2, p)``.
 
     Parameters
     ----------
@@ -35,12 +37,22 @@ def midcoords(p, c1, c2):
     >>> c.translation
     array([0.05, 0.  , 0.  ])
     """
-    return make_coords(pos=midpoint(p, c1.worldpos(), c2.worldpos()),
-                       rot=interpolate_rotation_matrices(p, c1.worldrot(), c2.worldrot()))
+    warnings.warn(
+        "midcoords(p, c1, c2) is deprecated. "
+        "Use c1.interpolate(c2, p) instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return c1.interpolate(c2, p)
 
 
 def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     """Orient axis to the direction
+
+    .. deprecated::
+        Use :meth:`skrobot.coordinates.Coordinates.align_axis_to_direction` instead.
+        ``orient_coords_to_axis(c, v, axis)`` is equivalent to
+        ``c.align_axis_to_direction(v, axis)``.
 
     Orient axis in target_coords to the direction specified by v.
 
@@ -87,25 +99,13 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
     (array([-5.15256299e-17,  1.04719755e+00, -1.57079633e+00]),
      array([3.14159265, 2.0943951 , 1.57079633]))
     """
-    v = np.array(v, 'f')
-    if np.linalg.norm(v) == 0.0:
-        v = np.array([0, 0, 1], 'f')
-    nv = normalize_vector(v)
-    axis = convert_to_axis_vector(axis)
-    ax = target_coords.rotate_vector(axis)
-    rot_axis = np.cross(ax, nv)
-    rot_angle_cos = np.clip(np.dot(nv, ax), -1.0, 1.0)
-    if np.isclose(rot_angle_cos, 1.0, atol=eps):
-        return target_coords
-    elif np.isclose(rot_angle_cos, -1.0, atol=eps):
-        for rot_axis2 in [np.array([1, 0, 0]), np.array([0, 1, 0])]:
-            rot_angle_cos2 = np.dot(ax, rot_axis2)
-            if not np.isclose(abs(rot_angle_cos2), 1.0, atol=eps):
-                rot_axis = rot_axis2 - rot_angle_cos2 * ax
-                break
-    target_coords.rotate(
-        np.arccos(rot_angle_cos), rot_axis, 'world')
-    return target_coords
+    warnings.warn(
+        "orient_coords_to_axis(c, v, axis) is deprecated. "
+        "Use c.align_axis_to_direction(v, axis) instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return target_coords.align_axis_to_direction(v, axis=axis, eps=eps)
 
 
 def rotate_points(points, a, b):

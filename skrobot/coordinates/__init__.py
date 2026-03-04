@@ -6,11 +6,12 @@ from skrobot.coordinates.base import Transform
 from skrobot.coordinates.base import make_coords
 from skrobot.coordinates.base import make_cascoords
 
-from skrobot.coordinates.geo import convert_to_axis_vector
 from skrobot.coordinates.geo import midcoords
-from skrobot.coordinates.geo import midpoint
 from skrobot.coordinates.geo import orient_coords_to_axis
 from skrobot.coordinates.geo import rotate_points
+
+from skrobot.coordinates.math import convert_to_axis_vector
+from skrobot.coordinates.math import midpoint
 
 from skrobot.coordinates.math import axis_angle_vector_to_rotation_matrix
 from skrobot.coordinates.math import convert_legacy_axis_to_mask
