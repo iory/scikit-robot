@@ -3003,14 +3003,14 @@ class ViserViewer:
             if is_obstacle:
                 self._obstacle_original_colors[link_id] = tuple(color)
             handle = self._server.scene.add_icosphere(
-                link.name,
+                link_id,
                 radius=link.radius,
                 position=link.worldpos(),
                 color=color,
                 opacity=alpha)
         elif isinstance(link, Axis):
             handle = self._server.scene.add_frame(
-                    link.name,
+                    link_id,
                     axes_length=link.axis_length,
                     axes_radius=link.axis_radius,
                     wxyz=matrix2quaternion(link.worldrot()),
@@ -3024,7 +3024,7 @@ class ViserViewer:
             else:
                 colors = np.zeros(3)
             self._server.scene.add_point_cloud(
-                    link.name,
+                    link_id,
                     points=mesh.vertices,
                     colors=colors,
                     point_size=0.002,  # TODO(HiroIshida): configurable
@@ -3049,7 +3049,7 @@ class ViserViewer:
                         self._obstacle_original_colors[link_id] = (
                             100, 100, 100)
                 handle = self._server.scene.add_mesh_trimesh(
-                        link.name,
+                        link_id,
                         mesh=mesh,
                         wxyz=matrix2quaternion(link.worldrot()),
                         position=link.worldpos(),
