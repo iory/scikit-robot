@@ -478,6 +478,154 @@ class TestCoordinates(unittest.TestCase):
         coords.translate([1.0, 2.0, 3.0])
         testing.assert_array_almost_equal(coords.translation, coords.translation_vector)
 
+    def test_align_axis_to_direction(self):
+        """Test align_axis_to_direction method."""
+        # Default: align z-axis to x direction
+        c = make_coords()
+        c.align_axis_to_direction([1, 0, 0])
+        testing.assert_almost_equal(c.z_axis, [1, 0, 0])
+
+        # Align z-axis to y direction
+        c = make_coords()
+        c.align_axis_to_direction([0, 1, 0])
+        testing.assert_almost_equal(c.z_axis, [0, 1, 0])
+
+        # Align x-axis to z direction
+        c = make_coords()
+        c.align_axis_to_direction([0, 0, 1], axis='x')
+        testing.assert_almost_equal(c.x_axis, [0, 0, 1])
+
+        # Align y-axis to negative x direction
+        c = make_coords()
+        c.align_axis_to_direction([-1, 0, 0], axis='y')
+        testing.assert_almost_equal(c.y_axis, [-1, 0, 0])
+
+        # Case: already aligned (rot_angle_cos == 1.0)
+        c = make_coords()
+        c.align_axis_to_direction([0, 0, 1])
+        testing.assert_almost_equal(c.z_axis, [0, 0, 1])
+        testing.assert_almost_equal(c.rotation, np.eye(3))
+
+        # Case: opposite direction (rot_angle_cos == -1.0)
+        c = make_coords()
+        c.align_axis_to_direction([0, 0, -1])
+        testing.assert_almost_equal(c.z_axis, [0, 0, -1])
+
+        # Test method chaining
+        c = make_coords()
+        result = c.align_axis_to_direction([1, 0, 0])
+        self.assertEqual(id(c), id(result))
+
+        # Test with non-unit vector (should normalize)
+        c = make_coords()
+        c.align_axis_to_direction([2, 0, 0])
+        testing.assert_almost_equal(c.z_axis, [1, 0, 0])
+
+        # Test wrt='local'
+        c = make_coords().rotate(pi / 2, 'z')
+        # Local x-axis is world y-axis after rotation
+        c.align_axis_to_direction([1, 0, 0], wrt='local')
+        # z-axis should now point to world y direction
+        testing.assert_almost_equal(c.z_axis, [0, 1, 0])
+
+        # Test wrt='world' (default)
+        c = make_coords().rotate(pi / 2, 'z')
+        c.align_axis_to_direction([1, 0, 0], wrt='world')
+        testing.assert_almost_equal(c.z_axis, [1, 0, 0])
+
+        # Test wrt with Coordinates
+        ref = make_coords().rotate(pi / 2, 'z')
+        c = make_coords()
+        # ref's x-axis is world's y-axis
+        c.align_axis_to_direction([1, 0, 0], wrt=ref)
+        testing.assert_almost_equal(c.z_axis, [0, 1, 0])
+
+    def test_slerp(self):
+        """Test slerp method."""
+        # Basic position interpolation
+        c1 = make_coords()
+        c2 = make_coords(pos=[1, 0, 0])
+        c_mid = c1.slerp(c2, 0.5)
+        testing.assert_almost_equal(c_mid.translation, [0.5, 0, 0])
+
+        # Rotation interpolation with SLERP
+        c1 = make_coords()
+        c2 = make_coords().rotate(pi / 2, 'z')
+        c_mid = c1.slerp(c2, 0.5)
+        expected_angle = pi / 4
+        testing.assert_almost_equal(
+            matrix2ypr(c_mid.rotation)[0], expected_angle)
+
+        # Test boundary values
+        c_start = c1.slerp(c2, 0.0)
+        testing.assert_almost_equal(c_start.rotation, c1.rotation)
+        c_end = c1.slerp(c2, 1.0)
+        testing.assert_almost_equal(c_end.rotation, c2.rotation)
+
+        # Test that original coords are not modified
+        c1 = make_coords(pos=[1, 2, 3])
+        c2 = make_coords(pos=[4, 5, 6])
+        c_mid = c1.slerp(c2, 0.5)
+        testing.assert_almost_equal(c1.translation, [1, 2, 3])
+        testing.assert_almost_equal(c2.translation, [4, 5, 6])
+
+    def test_lerp(self):
+        """Test lerp method."""
+        # Basic position interpolation
+        c1 = make_coords()
+        c2 = make_coords(pos=[2, 2, 2])
+        c_mid = c1.lerp(c2, 0.5)
+        testing.assert_almost_equal(c_mid.translation, [1, 1, 1])
+
+        # Quarter interpolation
+        c_quarter = c1.lerp(c2, 0.25)
+        testing.assert_almost_equal(c_quarter.translation, [0.5, 0.5, 0.5])
+
+        # Test boundary values
+        c_start = c1.lerp(c2, 0.0)
+        testing.assert_almost_equal(c_start.translation, [0, 0, 0])
+        c_end = c1.lerp(c2, 1.0)
+        testing.assert_almost_equal(c_end.translation, [2, 2, 2])
+
+        # Test that original coords are not modified
+        c1 = make_coords(pos=[1, 2, 3])
+        c2 = make_coords(pos=[4, 5, 6])
+        c_mid = c1.lerp(c2, 0.5)
+        testing.assert_almost_equal(c1.translation, [1, 2, 3])
+        testing.assert_almost_equal(c2.translation, [4, 5, 6])
+
+    def test_interpolate(self):
+        """Test interpolate method (alias for slerp)."""
+        # Basic interpolation of position
+        c1 = make_coords()
+        c2 = make_coords(pos=[1, 0, 0])
+        c_mid = c1.interpolate(c2, 0.5)
+        testing.assert_almost_equal(c_mid.translation, [0.5, 0, 0])
+
+        # Verify interpolate gives same result as slerp
+        c1 = make_coords()
+        c2 = make_coords(pos=[1, 1, 1]).rotate(pi / 3, 'y')
+        c_interp = c1.interpolate(c2, 0.5)
+        c_slerp = c1.slerp(c2, 0.5)
+        testing.assert_almost_equal(c_interp.translation, c_slerp.translation)
+        testing.assert_almost_equal(c_interp.rotation, c_slerp.rotation)
+
+        # Test rotation interpolation
+        c1 = make_coords()
+        c2 = make_coords().rotate(pi / 2, 'z')
+        c_mid = c1.interpolate(c2, 0.5)
+        expected_angle = pi / 4
+        testing.assert_almost_equal(
+            matrix2ypr(c_mid.rotation)[0], expected_angle)
+
+        # Test that original coords are not modified
+        c1 = make_coords(pos=[1, 2, 3])
+        c2 = make_coords(pos=[4, 5, 6])
+        c_mid = c1.interpolate(c2, 0.5)
+        testing.assert_almost_equal(c1.translation, [1, 2, 3])
+        testing.assert_almost_equal(c2.translation, [4, 5, 6])
+        testing.assert_almost_equal(c_mid.translation, [2.5, 3.5, 4.5])
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 

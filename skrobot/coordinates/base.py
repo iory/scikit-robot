@@ -1103,6 +1103,195 @@ class Coordinates(object):
         else:
             raise TypeError('wrt {} not supported'.format(wrt))
 
+    def align_axis_to_direction(self, direction, axis='z', wrt='world', eps=0.005):
+        """Align the specified axis of this coordinate to point in the given direction.
+
+        Rotates this coordinate system so that the specified axis
+        points in the direction of the given vector.
+
+        Parameters
+        ----------
+        direction : list or numpy.ndarray
+            Target direction vector [x, y, z]. The axis will be aligned
+            to point in this direction.
+        axis : str or list or numpy.ndarray, optional
+            The axis to align. Can be 'x', 'y', 'z', or a custom axis vector.
+            Default is 'z'.
+        wrt : str or skrobot.coordinates.Coordinates, optional
+            Reference frame for the direction vector.
+            'world': direction is in world frame (default)
+            'local': direction is in this coordinate's local frame
+            Coordinates: direction is in the given coordinate's frame
+        eps : float, optional
+            Tolerance for detecting parallel/anti-parallel cases.
+            Default is 0.005.
+
+        Returns
+        -------
+        self : skrobot.coordinates.Coordinates
+            Returns self for method chaining.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import Coordinates
+        >>> c = Coordinates()
+        >>> c.align_axis_to_direction([1, 0, 0])  # Align z-axis to x direction
+        >>> c.z_axis
+        array([1., 0., 0.], dtype=float32)
+
+        >>> c = Coordinates()
+        >>> c.align_axis_to_direction([0, 1, 0], axis='x')  # Align x-axis to y direction
+        >>> c.x_axis
+        array([0., 1., 0.], dtype=float32)
+
+        >>> c = Coordinates().rotate(np.pi / 2, 'z')
+        >>> c.align_axis_to_direction([1, 0, 0], wrt='local')  # Direction in local frame
+        """
+        direction = np.array(direction, dtype=np.float64)
+        if np.linalg.norm(direction) == 0.0:
+            direction = np.array([0, 0, 1], dtype=np.float64)
+
+        # Convert direction to world frame based on wrt
+        if wrt == 'local' or wrt == self:
+            direction = self.rotate_vector(direction)
+        elif wrt == 'world':
+            pass  # direction is already in world frame
+        elif isinstance(wrt, Coordinates):
+            direction = wrt.rotate_vector(direction)
+        else:
+            raise ValueError('wrt {} not supported'.format(wrt))
+
+        normalized_direction = normalize_vector(direction)
+        axis_vector = convert_to_axis_vector(axis)
+        current_axis = self.rotate_vector(axis_vector)
+        rot_axis = np.cross(current_axis, normalized_direction)
+        rot_angle_cos = np.clip(
+            np.dot(normalized_direction, current_axis), -1.0, 1.0)
+        if np.isclose(rot_angle_cos, 1.0, atol=eps):
+            return self
+        elif np.isclose(rot_angle_cos, -1.0, atol=eps):
+            for candidate_axis in [np.array([1, 0, 0]), np.array([0, 1, 0])]:
+                candidate_cos = np.dot(current_axis, candidate_axis)
+                if not np.isclose(abs(candidate_cos), 1.0, atol=eps):
+                    rot_axis = candidate_axis - candidate_cos * current_axis
+                    break
+        self.rotate(np.arccos(rot_angle_cos), rot_axis, 'world')
+        return self
+
+    def slerp(self, other, ratio):
+        """Spherical linear interpolation between this coordinate and another.
+
+        Performs spherical linear interpolation (SLERP) between this coordinate
+        and another coordinate. SLERP provides constant angular velocity
+        rotation interpolation.
+
+        Parameters
+        ----------
+        other : skrobot.coordinates.Coordinates
+            The target coordinate to interpolate towards.
+        ratio : float
+            Interpolation ratio in [0, 1]. 0.0 returns this coordinate,
+            1.0 returns the other coordinate, 0.5 returns the midpoint.
+
+        Returns
+        -------
+        interpolated : skrobot.coordinates.Coordinates
+            A new coordinate interpolated between self and other using SLERP.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> import numpy as np
+        >>> c1 = Coordinates()
+        >>> c2 = Coordinates(pos=[1, 0, 0]).rotate(np.pi / 2, 'z')
+        >>> c_mid = c1.slerp(c2, 0.5)
+        >>> c_mid.translation
+        array([0.5, 0. , 0. ])
+
+        See Also
+        --------
+        lerp : Linear interpolation (faster but non-constant angular velocity)
+        interpolate : Alias for slerp
+        """
+        return slerp_coordinates(self, other, ratio)
+
+    def lerp(self, other, ratio):
+        """Linear interpolation between this coordinate and another.
+
+        Performs linear interpolation (LERP) between this coordinate
+        and another coordinate. LERP is faster than SLERP but does not
+        provide constant angular velocity for rotation.
+
+        Parameters
+        ----------
+        other : skrobot.coordinates.Coordinates
+            The target coordinate to interpolate towards.
+        ratio : float
+            Interpolation ratio in [0, 1]. 0.0 returns this coordinate,
+            1.0 returns the other coordinate, 0.5 returns the midpoint.
+
+        Returns
+        -------
+        interpolated : skrobot.coordinates.Coordinates
+            A new coordinate interpolated between self and other using LERP.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> c1 = Coordinates()
+        >>> c2 = Coordinates(pos=[2, 2, 2])
+        >>> c_mid = c1.lerp(c2, 0.5)
+        >>> c_mid.translation
+        array([1., 1., 1.])
+
+        See Also
+        --------
+        slerp : Spherical linear interpolation (constant angular velocity)
+        interpolate : Alias for slerp
+        """
+        return lerp_coordinates(self, other, ratio)
+
+    def interpolate(self, other, ratio):
+        """Interpolate between this coordinate and another coordinate.
+
+        This is an alias for :meth:`slerp`. Returns a new coordinate that is
+        interpolated between this coordinate and the other coordinate using
+        spherical linear interpolation (SLERP).
+
+        Parameters
+        ----------
+        other : skrobot.coordinates.Coordinates
+            The target coordinate to interpolate towards.
+        ratio : float
+            Interpolation ratio in [0, 1]. 0.0 returns this coordinate,
+            1.0 returns the other coordinate, 0.5 returns the midpoint.
+
+        Returns
+        -------
+        interpolated : skrobot.coordinates.Coordinates
+            A new coordinate interpolated between self and other.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import Coordinates
+        >>> c1 = Coordinates()
+        >>> c2 = Coordinates(pos=[1, 0, 0])
+        >>> c_mid = c1.interpolate(c2, 0.5)
+        >>> c_mid.translation
+        array([0.5, 0. , 0. ])
+
+        >>> c_quarter = c1.interpolate(c2, 0.25)
+        >>> c_quarter.translation
+        array([0.25, 0.  , 0.  ])
+
+        See Also
+        --------
+        slerp : Spherical linear interpolation (same as interpolate)
+        lerp : Linear interpolation
+        """
+        return self.slerp(other, ratio)
+
     def copy(self):
         """Return a deep copy of the Coordinates."""
         return self.copy_coords()
