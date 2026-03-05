@@ -4,6 +4,7 @@ import collections
 import os
 from pathlib import Path
 import platform
+import sys
 import threading
 
 import numpy as np
@@ -30,6 +31,8 @@ if platform.system() == 'Linux':
     if needs_glx and 'PYOPENGL_PLATFORM' not in os.environ:
         os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
+import inspect
+
 import pyrender
 from pyrender.trackball import Trackball
 import trimesh
@@ -39,6 +42,35 @@ from trimesh.scene import cameras
 from skrobot import model as model_module
 from skrobot.coordinates import Coordinates
 from skrobot.model.skeleton import SkeletonModel
+
+
+# Check if pyrender supports always_on_top parameter
+_from_trimesh_params = inspect.signature(pyrender.Mesh.from_trimesh).parameters
+_PYRENDER_SUPPORTS_ALWAYS_ON_TOP = 'always_on_top' in _from_trimesh_params
+_always_on_top_warning_shown = False
+
+
+def _mesh_from_trimesh(mesh, smooth=False, always_on_top=False):
+    """Create pyrender Mesh from trimesh with always_on_top support check."""
+    global _always_on_top_warning_shown
+    if always_on_top and not _PYRENDER_SUPPORTS_ALWAYS_ON_TOP:
+        if not _always_on_top_warning_shown:
+            # Use ANSI escape codes for red text
+            red = "\033[91m"
+            reset = "\033[0m"
+            msg = (
+                f"{red}always_on_top parameter is not supported by your "
+                f"pyrender version.\n"
+                f"To enable this feature, install scikit-robot-pyrender:\n"
+                f"  pip install scikit-robot-pyrender>=0.1.50{reset}"
+            )
+            print(msg, file=sys.stderr)
+            _always_on_top_warning_shown = True
+        return pyrender.Mesh.from_trimesh(mesh, smooth=smooth)
+    if _PYRENDER_SUPPORTS_ALWAYS_ON_TOP:
+        return pyrender.Mesh.from_trimesh(
+            mesh, smooth=smooth, always_on_top=always_on_top)
+    return pyrender.Mesh.from_trimesh(mesh, smooth=smooth)
 
 
 def _redraw_all_windows():
@@ -256,9 +288,8 @@ class PyrenderViewer(pyrender.Viewer):
                 if link.visual_mesh_changed:
                     mesh = link.concatenated_visual_mesh
                     always_on_top = getattr(link, '_always_on_top', False)
-                    pyrender_mesh = pyrender.Mesh.from_trimesh(
-                        mesh, smooth=False,
-                        always_on_top=always_on_top)
+                    pyrender_mesh = _mesh_from_trimesh(
+                        mesh, smooth=False, always_on_top=always_on_top)
                     self.scene.remove_node(node)
                     node = self.scene.add(pyrender_mesh, pose=transform)
                     self._visual_mesh_map[link_id] = (node, link)
@@ -405,9 +436,8 @@ class PyrenderViewer(pyrender.Viewer):
                     node = self.scene.add(pyrender_mesh)
                 else:
                     always_on_top = getattr(link, '_always_on_top', False)
-                    pyrender_mesh = pyrender.Mesh.from_trimesh(
-                        mesh, smooth=False,
-                        always_on_top=always_on_top)
+                    pyrender_mesh = _mesh_from_trimesh(
+                        mesh, smooth=False, always_on_top=always_on_top)
                     # Check if the mesh has vertices
                     # before adding it to the scene
                     if len(mesh.vertices) != 0:
@@ -623,7 +653,7 @@ class PyrenderViewer(pyrender.Viewer):
                             if mesh is None or len(mesh.vertices) == 0:
                                 continue
                             transform = link.worldcoords().T()
-                            pyrender_mesh = pyrender.Mesh.from_trimesh(
+                            pyrender_mesh = _mesh_from_trimesh(
                                 mesh, smooth=False,
                                 always_on_top=self.joint_axes_always_on_top)
                             node = self.scene.add(pyrender_mesh, pose=transform)
@@ -888,7 +918,7 @@ class PyrenderViewer(pyrender.Viewer):
             if link.visual_mesh_changed:
                 mesh = link.concatenated_visual_mesh
                 always_on_top = getattr(link, '_always_on_top', False)
-                pyrender_mesh = pyrender.Mesh.from_trimesh(
+                pyrender_mesh = _mesh_from_trimesh(
                     mesh, smooth=False, always_on_top=always_on_top)
                 self.scene.remove_node(node)
                 node = self.scene.add(pyrender_mesh, pose=transform)

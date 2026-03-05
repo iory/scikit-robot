@@ -63,6 +63,7 @@ def render_to_image(robot, skeleton, resolution=(640, 480)):
         RGB image array.
     """
     import inspect
+
     import pyrender
 
     # Check if always_on_top is supported
@@ -168,6 +169,7 @@ def main():
     if args.save or args.no_interactive:
         # Save to image file (use temp file if --no-interactive without --save)
         import tempfile
+
         from PIL import Image
 
         if args.no_skeleton:
