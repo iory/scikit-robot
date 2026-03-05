@@ -74,12 +74,17 @@ Convert mesh files referenced in URDF to different formats or simplify them.
 
    # Convert meshes
    skr convert-urdf-mesh robot.urdf --output converted_robot.urdf
-   
+
    # Simplify meshes with voxel size
    skr convert-urdf-mesh robot.urdf --voxel-size 0.001
-   
+
    # Convert to STL format
    skr convert-urdf-mesh robot.urdf --output robot_stl.urdf -f stl
+
+   # Force visual mesh origins to zero (coincide with link origins)
+   skr convert-urdf-mesh robot.urdf --output converted.urdf --force-zero-origin
+
+The ``--force-zero-origin`` option forces the visual mesh origin to coincide with the link origin. For more details on URDF structure and visual origins, see :doc:`tutorials/urdf_manipulation`.
 
 change-urdf-root
 ~~~~~~~~~~~~~~~~
