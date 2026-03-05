@@ -3097,7 +3097,7 @@ class ViserViewer:
         if self._enable_motion_planning:
             self._setup_motion_planning_gui()
 
-    def add(self, geometry: Union[Link, CascadedLink]):
+    def add(self, geometry: Union[Link, CascadedLink], **kwargs):
         from skrobot.model.primitives import Box
         from skrobot.model.primitives import Cylinder
 

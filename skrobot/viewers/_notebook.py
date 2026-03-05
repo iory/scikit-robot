@@ -102,13 +102,15 @@ class JupyterNotebookViewer(object):
         for child_link in link._child_links:
             self._add_link(child_link)
 
-    def add(self, geometry):
+    def add(self, geometry, **kwargs):
         """Add geometry to the scene.
 
         Parameters
         ----------
         geometry : skrobot.model.Link or skrobot.model.CascadedLink
             Geometry to add to the scene.
+        **kwargs : dict
+            Additional viewer-specific options (ignored by this viewer).
         """
         if isinstance(geometry, model_module.Link):
             links = [geometry]

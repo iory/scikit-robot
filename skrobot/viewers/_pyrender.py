@@ -4,6 +4,7 @@ import collections
 import os
 from pathlib import Path
 import platform
+import sys
 import threading
 
 import numpy as np
@@ -30,6 +31,8 @@ if platform.system() == 'Linux':
     if needs_glx and 'PYOPENGL_PLATFORM' not in os.environ:
         os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
+import inspect
+
 import pyrender
 from pyrender.trackball import Trackball
 import trimesh
@@ -38,6 +41,36 @@ from trimesh.scene import cameras
 
 from skrobot import model as model_module
 from skrobot.coordinates import Coordinates
+from skrobot.model.skeleton import SkeletonModel
+
+
+# Check if pyrender supports always_on_top parameter
+_from_trimesh_params = inspect.signature(pyrender.Mesh.from_trimesh).parameters
+_PYRENDER_SUPPORTS_ALWAYS_ON_TOP = 'always_on_top' in _from_trimesh_params
+_always_on_top_warning_shown = False
+
+
+def _mesh_from_trimesh(mesh, smooth=False, always_on_top=False):
+    """Create pyrender Mesh from trimesh with always_on_top support check."""
+    global _always_on_top_warning_shown
+    if always_on_top and not _PYRENDER_SUPPORTS_ALWAYS_ON_TOP:
+        if not _always_on_top_warning_shown:
+            # Use ANSI escape codes for red text
+            red = "\033[91m"
+            reset = "\033[0m"
+            msg = (
+                f"{red}always_on_top parameter is not supported by your "
+                f"pyrender version.\n"
+                f"To enable this feature, install scikit-robot-pyrender:\n"
+                f"  pip install scikit-robot-pyrender>=0.1.50{reset}"
+            )
+            print(msg, file=sys.stderr)
+            _always_on_top_warning_shown = True
+        return pyrender.Mesh.from_trimesh(mesh, smooth=smooth)
+    if _PYRENDER_SUPPORTS_ALWAYS_ON_TOP:
+        return pyrender.Mesh.from_trimesh(
+            mesh, smooth=smooth, always_on_top=always_on_top)
+    return pyrender.Mesh.from_trimesh(mesh, smooth=smooth)
 
 
 def _redraw_all_windows():
@@ -104,6 +137,10 @@ class PyrenderViewer(pyrender.Viewer):
         # Joint axis toggle functionality
         self._stored_robots = []
         self.show_joint_axes = False
+        self.joint_axes_always_on_top = True
+
+        # Skeleton visualization
+        self._kinematics_models = collections.OrderedDict()
 
         # Collision toggle functionality
         self.enable_collision_toggle = enable_collision_toggle
@@ -250,8 +287,9 @@ class PyrenderViewer(pyrender.Viewer):
                 transform = link.worldcoords().T()
                 if link.visual_mesh_changed:
                     mesh = link.concatenated_visual_mesh
-                    pyrender_mesh = pyrender.Mesh.from_trimesh(
-                        mesh, smooth=False)
+                    always_on_top = getattr(link, '_always_on_top', False)
+                    pyrender_mesh = _mesh_from_trimesh(
+                        mesh, smooth=False, always_on_top=always_on_top)
                     self.scene.remove_node(node)
                     node = self.scene.add(pyrender_mesh, pose=transform)
                     self._visual_mesh_map[link_id] = (node, link)
@@ -397,8 +435,9 @@ class PyrenderViewer(pyrender.Viewer):
                             color_0=mesh.colors)])
                     node = self.scene.add(pyrender_mesh)
                 else:
-                    pyrender_mesh = pyrender.Mesh.from_trimesh(
-                        mesh, smooth=False)
+                    always_on_top = getattr(link, '_always_on_top', False)
+                    pyrender_mesh = _mesh_from_trimesh(
+                        mesh, smooth=False, always_on_top=always_on_top)
                     # Check if the mesh has vertices
                     # before adding it to the scene
                     if len(mesh.vertices) != 0:
@@ -411,7 +450,7 @@ class PyrenderViewer(pyrender.Viewer):
         for child_link in link._child_links:
             self._add_link(child_link)
 
-    def add(self, geometry):
+    def add(self, geometry, always_on_top=False):
         if isinstance(geometry, model_module.Link):
             links = [geometry]
         elif isinstance(geometry, model_module.CascadedLink):
@@ -421,6 +460,11 @@ class PyrenderViewer(pyrender.Viewer):
                 self._stored_robots.append(geometry)
         else:
             raise TypeError('geometry must be Link or CascadedLink')
+
+        # Set always_on_top attribute on links if requested
+        if always_on_top:
+            for link in links:
+                link._always_on_top = True
 
         # Store links for collision toggle if enabled
         if self.enable_collision_toggle:
@@ -526,7 +570,8 @@ class PyrenderViewer(pyrender.Viewer):
                     int(axis_color[2] * 255),
                     int(axis_color[3] * 255)
                 ]
-                pyrender_cylinder = pyrender.Mesh.from_trimesh(cylinder_mesh, smooth=False)
+                pyrender_cylinder = pyrender.Mesh.from_trimesh(
+                    cylinder_mesh, smooth=False)
 
                 # Calculate rotation matrix to align cylinder with axis
                 z_axis = np.array([0, 0, 1])
@@ -596,23 +641,34 @@ class PyrenderViewer(pyrender.Viewer):
     def _toggle_joint_axes(self):
         """Toggle joint axes display for all stored robots."""
         if self.show_joint_axes:
-            # Add joint axes for all robots
             for robot in self._stored_robots:
-                for joint in robot.joint_list:
-                    # Skip if already added
-                    if str(id(joint)) not in self._joint_axis_map:
-                        self.add_joint_axis(
-                            joint,
-                            sphere_radius=0.015,
-                            axis_length=0.2,
-                            axis_radius=0.005,
-                            axis_color=[1.0, 0.0, 0.0, 1.0]
-                        )
+                robot_id = str(id(robot))
+                if robot_id not in self._kinematics_models:
+                    skeleton = SkeletonModel(robot)
+                    # Add skeleton links directly to scene
+                    nodes = []
+                    with self._render_lock:
+                        for link in skeleton.link_list:
+                            mesh = link.concatenated_visual_mesh
+                            if mesh is None or len(mesh.vertices) == 0:
+                                continue
+                            transform = link.worldcoords().T()
+                            pyrender_mesh = _mesh_from_trimesh(
+                                mesh, smooth=False,
+                                always_on_top=self.joint_axes_always_on_top)
+                            node = self.scene.add(pyrender_mesh, pose=transform)
+                            nodes.append((node, link))
+                    self._kinematics_models[robot_id] = (skeleton, nodes)
         else:
-            # Remove all joint axes
-            joints_to_remove = list(self._joint_axis_map.values())
-            for sphere_node, axis_node, joint in joints_to_remove:
-                self.delete_joint_axis(joint)
+            for robot in self._stored_robots:
+                robot_id = str(id(robot))
+                if robot_id in self._kinematics_models:
+                    skeleton, nodes = self._kinematics_models.pop(robot_id)
+                    with self._render_lock:
+                        for node, link in nodes:
+                            self.scene.remove_node(node)
+                    skeleton.detach()
+        self._redraw = True
 
     def set_camera(self, angles=None, distance=None, center=None,
                    resolution=None, fov=None, coords_or_transform=None):
@@ -861,7 +917,9 @@ class PyrenderViewer(pyrender.Viewer):
             transform = link.worldcoords().T()
             if link.visual_mesh_changed:
                 mesh = link.concatenated_visual_mesh
-                pyrender_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=False)
+                always_on_top = getattr(link, '_always_on_top', False)
+                pyrender_mesh = _mesh_from_trimesh(
+                    mesh, smooth=False, always_on_top=always_on_top)
                 self.scene.remove_node(node)
                 node = self.scene.add(pyrender_mesh, pose=transform)
                 self._visual_mesh_map[link_id] = (node, link)

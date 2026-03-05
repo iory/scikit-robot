@@ -215,7 +215,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         for child_link in link._child_links:
             self._add_link(child_link)
 
-    def add(self, geometry):
+    def add(self, geometry, **kwargs):
         if isinstance(geometry, model_module.Link):
             links = [geometry]
         elif isinstance(geometry, model_module.CascadedLink):

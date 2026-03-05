@@ -24,6 +24,17 @@ def main():
         '--ros', type=str, nargs='?', const='/robot_description', default=None,
         help='Load URDF from ROS parameter server (specify parameter name, default: /robot_description)'
     )
+    parser.add_argument(
+        '--show-joints', '-j',
+        action='store_true',
+        help='Show joint axes visualization (pyrender viewer only, press j key to toggle)'
+    )
+    parser.add_argument(
+        '--no-joints-on-top',
+        dest='joints_always_on_top',
+        action='store_false',
+        help='Disable always-on-top rendering for joint markers'
+    )
     args = parser.parse_args()
 
     # Validate arguments
@@ -50,6 +61,14 @@ def main():
                                            include_mimic_joints=False)
 
     viewer.add(robot_model)
+
+    # Configure joint axes display for pyrender viewer
+    if args.viewer == 'pyrender':
+        viewer.joint_axes_always_on_top = args.joints_always_on_top
+        if args.show_joints:
+            viewer.show_joint_axes = True
+            viewer._toggle_joint_axes()
+
     viewer.show()
     if args.interactive:
         try:

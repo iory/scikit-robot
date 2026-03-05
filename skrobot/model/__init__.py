@@ -36,3 +36,5 @@ from skrobot.model.joint_limit_table import JointLimitTable
 
 from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
+
+from skrobot.model.skeleton import SkeletonModel
