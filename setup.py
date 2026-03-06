@@ -57,6 +57,7 @@ if (sys.version_info.major > 2):
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         extra_all_requires.append('open3d')
     extra_all_requires.append('fast-simplification')
+    extra_all_requires.append('DracoPy')
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
