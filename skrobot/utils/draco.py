@@ -81,12 +81,23 @@ def _draco_encode_with_colors(ctx):
                 )
 
     # Encode using DracoPy
+    # DracoPy.encode uses 'points' not 'vertices', and expects non-flattened arrays
+    # Use high quantization_bits (14) to preserve position precision
+    v_min = vertices.min(axis=0)
+    v_max = vertices.max(axis=0)
+    v_range = (v_max - v_min).max()
+    if v_range < 1e-6:
+        v_range = 1.0  # Avoid division by zero for degenerate meshes
+
     encode_kwargs = {
-        'vertices': vertices.flatten(),
+        'points': vertices,
         'faces': faces.flatten(),
+        'quantization_bits': 14,
+        'quantization_range': float(v_range),
+        'quantization_origin': v_min.tolist(),
     }
     if colors is not None:
-        encode_kwargs['colors'] = colors.flatten()
+        encode_kwargs['colors'] = colors
 
     result = DracoPy.encode(**encode_kwargs)
 
@@ -108,26 +119,67 @@ def _draco_encode_with_colors(ctx):
     })
     buffer_items.append(compressed)
 
-    # Build Draco extension data
-    draco_attributes = {"POSITION": 0}
-    attr_id = 1
+    # Add accessors for mesh data (required by glTF spec even with Draco)
+    # These accessors don't have bufferView since data is in Draco buffer
+    n_vertices = len(vertices)
+    n_faces = len(faces)
+
+    if "accessors" not in tree:
+        tree["accessors"] = []
+
+    # Position accessor
+    position_accessor_index = len(tree["accessors"])
+    tree["accessors"].append({
+        "componentType": 5126,  # FLOAT
+        "count": n_vertices,
+        "type": "VEC3",
+        "max": vertices.max(axis=0).tolist(),
+        "min": vertices.min(axis=0).tolist()
+    })
+
+    # Indices accessor
+    indices_accessor_index = len(tree["accessors"])
+    tree["accessors"].append({
+        "componentType": 5125,  # UNSIGNED_INT
+        "count": n_faces * 3,
+        "type": "SCALAR",
+        "max": [int(faces.max())],
+        "min": [int(faces.min())]
+    })
+
+    # Build primitive attributes and Draco extension
+    # Note: DracoPy assigns unique_id based on the order attributes are added:
+    # - colors (if present) gets unique_id=0
+    # - points (position) gets unique_id=1 when colors present, 0 when no colors
+    primitive_attributes = {"POSITION": position_accessor_index}
+
     if colors is not None:
-        draco_attributes["COLOR_0"] = attr_id
-        attr_id += 1
+        color_accessor_index = len(tree["accessors"])
+        tree["accessors"].append({
+            "componentType": 5121,  # UNSIGNED_BYTE
+            "count": n_vertices,
+            "type": "VEC3",
+            "normalized": True,
+            "max": [1.0, 1.0, 1.0],
+            "min": [0.0, 0.0, 0.0]
+        })
+        primitive_attributes["COLOR_0"] = color_accessor_index
+        # DracoPy puts colors at unique_id=0 and position at unique_id=1
+        draco_attributes = {"POSITION": 1, "COLOR_0": 0}
+    else:
+        draco_attributes = {"POSITION": 0}
 
     extension_data = {
         "bufferView": buffer_view_index,
         "attributes": draco_attributes
     }
 
-    # Update primitive with extension
+    # Update primitive with extension and attributes
     if "extensions" not in primitive:
         primitive["extensions"] = {}
     primitive["extensions"]["KHR_draco_mesh_compression"] = extension_data
-
-    # Clear the standard attributes since data is in Draco buffer
-    # Keep empty accessors for spec compliance
-    primitive["attributes"] = {}
+    primitive["attributes"] = primitive_attributes
+    primitive["indices"] = indices_accessor_index
 
     return {"draco_encoded": True}
 
@@ -226,11 +278,12 @@ def register_dracopy_handlers():
 
 
 def is_dracopy_available():
-    """Check if DracoPy is installed."""
+    """Check if DracoPy is installed and compatible."""
     try:
         import DracoPy  # NOQA
         return True
-    except ImportError:
+    except (ImportError, ValueError):
+        # ValueError can occur due to numpy ABI incompatibility
         return False
 
 
@@ -307,10 +360,21 @@ def export_glb_with_draco(meshes, filename):
         # Encode with DracoPy
         # DracoPy.encode uses 'points' not 'vertices'
         # Colors should be shape (N, K) not flattened
+        # Use high quantization_bits (14) to preserve position precision
+        # and set quantization_range based on actual mesh bounds
+        v_min = vertices.min(axis=0)
+        v_max = vertices.max(axis=0)
+        v_range = (v_max - v_min).max()
+        if v_range < 1e-6:
+            v_range = 1.0  # Avoid division by zero for degenerate meshes
+
         draco_buffer = DracoPy.encode(
             points=vertices,
             faces=faces.flatten(),
-            colors=colors if colors is not None else None
+            colors=colors if colors is not None else None,
+            quantization_bits=14,
+            quantization_range=float(v_range),
+            quantization_origin=v_min.tolist()
         )
 
         # Pad to 4-byte alignment
@@ -327,14 +391,60 @@ def export_glb_with_draco(meshes, filename):
         })
         buffer_data += draco_buffer
 
-        # Build Draco extension attributes
-        draco_attributes = {"POSITION": 0}
+        # Add accessors for mesh data (required by glTF spec even with Draco)
+        # These accessors don't have bufferView since data is in Draco buffer
+        n_vertices = len(vertices)
+        n_faces = len(faces)
+
+        # Position accessor
+        position_accessor_index = len(gltf["accessors"])
+        gltf["accessors"].append({
+            "componentType": 5126,  # FLOAT
+            "count": n_vertices,
+            "type": "VEC3",
+            "max": vertices.max(axis=0).tolist(),
+            "min": vertices.min(axis=0).tolist()
+        })
+
+        # Indices accessor
+        indices_accessor_index = len(gltf["accessors"])
+        gltf["accessors"].append({
+            "componentType": 5125,  # UNSIGNED_INT
+            "count": n_faces * 3,
+            "type": "SCALAR",
+            "max": [int(faces.max())],
+            "min": [int(faces.min())]
+        })
+
+        # Build primitive attributes and Draco extension
+        # Note: DracoPy assigns unique_id based on the order attributes are added:
+        # - colors (if present) gets unique_id=0
+        # - points (position) gets unique_id=1 when colors present, 0 when no colors
+        primitive_attributes = {"POSITION": position_accessor_index}
+
         if colors is not None:
-            draco_attributes["COLOR_0"] = 1
+            color_accessor_index = len(gltf["accessors"])
+            # Normalize colors to 0-1 range for accessor metadata
+            colors.astype(np.float32) / 255.0
+            gltf["accessors"].append({
+                "componentType": 5121,  # UNSIGNED_BYTE
+                "count": n_vertices,
+                "type": "VEC3",
+                "normalized": True,
+                "max": [1.0, 1.0, 1.0],
+                "min": [0.0, 0.0, 0.0]
+            })
+            primitive_attributes["COLOR_0"] = color_accessor_index
+            # DracoPy puts colors at unique_id=0 and position at unique_id=1
+            draco_attributes = {"POSITION": 1, "COLOR_0": 0}
+        else:
+            # Without colors, position is at unique_id=0
+            draco_attributes = {"POSITION": 0}
 
         # Create mesh primitive
         primitive = {
-            "attributes": {},
+            "attributes": primitive_attributes,
+            "indices": indices_accessor_index,
             "extensions": {
                 "KHR_draco_mesh_compression": {
                     "bufferView": buffer_view_index,
