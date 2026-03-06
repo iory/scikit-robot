@@ -23,8 +23,8 @@ from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
 
 def main():
     parser = argparse.ArgumentParser(description='Convert URDF Mesh.')
-    parser.add_argument('urdf',
-                        help='Path to the input URDF file')
+    parser.add_argument('urdf', nargs='+',
+                        help='Path to the input URDF file(s)')
     parser.add_argument('--format', '-f',
                         default='dae',
                         choices=['dae', 'stl', 'glb'],
@@ -137,10 +137,21 @@ resulting in less simplification. Default is None."""
         if disable_decimation:
             sys.exit(1)
 
-    urdf_path = Path(args.urdf)
+    # Validate output option with multiple files
+    if args.output is not None and len(args.urdf) > 1:
+        print("[ERROR] --output option cannot be used with multiple input files.")
+        sys.exit(1)
+
+    for urdf_file in args.urdf:
+        process_urdf(urdf_file, args)
+
+
+def process_urdf(urdf_file, args):
+    """Process a single URDF file."""
+    urdf_path = Path(urdf_file)
 
     if args.output is None:
-        fn, _ = osp.splitext(args.urdf)
+        fn, _ = osp.splitext(urdf_file)
         index = 0
         pattern = fn + "_%i.urdf"
         outfile = pattern % index
@@ -177,12 +188,12 @@ resulting in less simplification. Default is None."""
             r = RobotModel.from_urdf(str(urdf_path_abs))
         except Exception as e:
             print(f"[ERROR] Failed to load URDF: {e}")
-            sys.exit(1)
+            return
 
     # Verify that the robot model has valid links
     if r.urdf_robot_model is None or not hasattr(r.urdf_robot_model, 'links') or len(r.urdf_robot_model.links) == 0:
         print("[ERROR] URDF does not contain any valid links. Cannot proceed.")
-        sys.exit(1)
+        return
 
     with export_mesh_format(
             '.' + args.format,
