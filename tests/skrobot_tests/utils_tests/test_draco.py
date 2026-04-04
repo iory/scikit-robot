@@ -441,3 +441,88 @@ class TestDraco:
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+    def test_texture_visual_without_image_handler(self):
+        """Draco handler preserves colors from texture visual without image.
+
+        Some DAE files have no texture image but store per-material
+        diffuse colors.  trimesh reports these as kind='texture' with
+        image=None.  The handler should convert to vertex colors via
+        to_color() so they survive Draco encoding.
+        """
+        import trimesh
+        from trimesh.visual.material import PBRMaterial
+        from trimesh.visual.texture import TextureVisuals
+
+        from skrobot.utils.draco import register_dracopy_handlers
+        register_dracopy_handlers()
+
+        vertices = np.array([
+            [-0.1, -0.1, 0.0],
+            [0.1, -0.1, 0.0],
+            [0.0, 0.1, 0.0],
+        ])
+        faces = np.array([[0, 1, 2]])
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+
+        # Simulate a DAE-style texture visual: PBR material with
+        # baseColorFactor but no actual texture image.
+        mat = PBRMaterial(baseColorFactor=[200, 50, 50, 255])
+        uv = np.array([[0, 0], [1, 0], [0.5, 1]])
+        mesh.visual = TextureVisuals(uv=uv, material=mat)
+        assert mesh.visual.kind == 'texture'
+
+        scene = trimesh.Scene()
+        scene.add_geometry(mesh, node_name="dae_style")
+        glb_data = scene.export(file_type="glb", extension_draco=True)
+
+        json_len = struct.unpack('<I', glb_data[12:16])[0]
+        gltf = json.loads(glb_data[20:20 + json_len])
+        prim = gltf['meshes'][0]['primitives'][0]
+        assert 'COLOR_0' in prim['attributes'], \
+            "COLOR_0 missing for texture visual without image"
+        draco = prim['extensions']['KHR_draco_mesh_compression']
+        assert 'COLOR_0' in draco['attributes']
+
+    def test_texture_visual_without_image_standalone(self):
+        """export_glb_with_draco preserves colors from texture visual without image."""
+        import trimesh
+        from trimesh.visual.material import PBRMaterial
+        from trimesh.visual.texture import TextureVisuals
+
+        from skrobot.utils.draco import export_glb_with_draco
+
+        vertices = np.array([
+            [-0.1, -0.1, 0.0],
+            [0.1, -0.1, 0.0],
+            [0.0, 0.1, 0.0],
+        ])
+        faces = np.array([[0, 1, 2]])
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+
+        mat = PBRMaterial(baseColorFactor=[200, 50, 50, 255])
+        uv = np.array([[0, 0], [1, 0], [0.5, 1]])
+        mesh.visual = TextureVisuals(uv=uv, material=mat)
+        assert mesh.visual.kind == 'texture'
+
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as f:
+            temp_path = f.name
+
+        try:
+            export_glb_with_draco([mesh], temp_path)
+
+            with open(temp_path, 'rb') as f:
+                data = f.read()
+
+            json_len = struct.unpack('<I', data[12:16])[0]
+            json_data = json.loads(data[20:20 + json_len].decode('utf-8').rstrip())
+
+            primitive = json_data['meshes'][0]['primitives'][0]
+            assert 'COLOR_0' in primitive['attributes'], \
+                "COLOR_0 missing in standalone export for texture visual without image"
+
+            draco_attrs = primitive['extensions']['KHR_draco_mesh_compression']['attributes']
+            assert 'COLOR_0' in draco_attrs
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
