@@ -9,3 +9,5 @@
 /src/
 build
 /docs/source/**/reference/**/generated
+
+uv.lock
