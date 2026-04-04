@@ -49,21 +49,48 @@ def _draco_encode_with_colors(ctx):
     if hasattr(mesh, 'visual') and mesh.visual is not None:
         if mesh.visual.kind == 'vertex':
             vc = mesh.visual.vertex_colors
-            if vc is not None and len(vc) == len(vertices):
-                colors = np.asarray(vc)[:, :3].astype(np.uint8)
+            if vc is not None:
+                vc = np.atleast_2d(np.asarray(vc))
+                if vc.shape == (1, 4) or (vc.ndim == 1 and len(vc) <= 4):
+                    c = vc.flatten()[:3].astype(np.uint8)
+                    colors = np.tile(c, (len(vertices), 1))
+                elif len(vc) == len(vertices):
+                    colors = vc[:, :3].astype(np.uint8)
         elif mesh.visual.kind == 'face':
             face_colors = np.asarray(mesh.visual.face_colors)[:, :3]
             vertices = vertices[faces].reshape(-1, 3).astype(np.float32)
             colors = np.repeat(face_colors, 3, axis=0).astype(np.uint8)
             faces = np.arange(len(vertices), dtype=np.uint32).reshape(-1, 3)
+        elif mesh.visual.kind == 'texture':
+            # Texture visual without an actual image (e.g. DAE with
+            # per-vertex colors stored as material diffuse).
+            mat = getattr(mesh.visual, 'material', None)
+            has_image = (
+                mat is not None
+                and hasattr(mat, 'image')
+                and mat.image is not None
+            )
+            if not has_image:
+                try:
+                    color_visual = mesh.visual.to_color()
+                    if hasattr(color_visual, 'vertex_colors'):
+                        vc = np.atleast_2d(
+                            np.asarray(color_visual.vertex_colors))
+                        if vc.shape == (1, 4) or vc.ndim == 1:
+                            c = vc.flatten()[:3].astype(np.uint8)
+                            colors = np.tile(c, (len(vertices), 1))
+                        elif len(vc) == len(vertices):
+                            colors = vc[:, :3].astype(np.uint8)
+                except Exception:
+                    pass
 
         if colors is None and hasattr(mesh.visual, 'main_color'):
             main_color = mesh.visual.main_color
             if main_color is not None:
-                colors = np.tile(
-                    np.asarray(main_color[:3], dtype=np.uint8),
-                    (len(vertices), 1)
-                )
+                mc = np.atleast_1d(
+                    np.asarray(main_color, dtype=np.uint8))
+                if len(mc) >= 3:
+                    colors = np.tile(mc[:3], (len(vertices), 1))
 
     # Encode with DracoPy
     v_min = vertices.min(axis=0)
@@ -94,10 +121,37 @@ def _draco_encode_with_colors(ctx):
 
     # Build Draco attribute mapping
     # DracoPy assigns unique_id: colors=0, position=1 (when colors present)
+    tree = ctx["tree"]
+    n_vertices = len(vertices)
+
     draco_attributes = {}
     if "POSITION" in primitive.get("attributes", {}):
         draco_attributes["POSITION"] = 1 if colors is not None else 0
-    if colors is not None and "COLOR_0" in primitive.get("attributes", {}):
+
+    # If we encoded colors but trimesh didn't create a COLOR_0 accessor,
+    # add one so the glTF references the Draco color data.
+    if colors is not None:
+        if "COLOR_0" not in primitive.get("attributes", {}):
+            accessors = tree.get("accessors")
+            if accessors is None:
+                from collections import OrderedDict
+                accessors = OrderedDict()
+                tree["accessors"] = accessors
+
+            color_accessor = {
+                "componentType": 5121,  # UNSIGNED_BYTE
+                "count": n_vertices,
+                "type": "VEC3",
+                "normalized": True,
+                "max": [1.0, 1.0, 1.0],
+                "min": [0.0, 0.0, 0.0],
+            }
+            color_accessor_index = len(accessors)
+            if isinstance(accessors, dict):
+                accessors[f"color_0_{color_accessor_index}"] = color_accessor
+            else:
+                accessors.append(color_accessor)
+            primitive["attributes"]["COLOR_0"] = color_accessor_index
         draco_attributes["COLOR_0"] = 0
 
     # Add the extension to the primitive
@@ -266,23 +320,47 @@ def export_glb_with_draco(meshes, filename):
                 faces = np.arange(len(vertices), dtype=np.uint32).reshape(-1, 3)
             elif mesh.visual.kind == 'vertex':
                 vc = mesh.visual.vertex_colors
-                if vc is not None and len(vc) == len(vertices):
-                    colors = np.asarray(vc)[:, :3].astype(np.uint8)
-            elif hasattr(mesh.visual, 'vertex_colors'):
-                vc = mesh.visual.vertex_colors
-                if vc is not None and len(vc) == len(vertices):
-                    colors = np.asarray(vc)[:, :3].astype(np.uint8)
+                if vc is not None:
+                    vc = np.atleast_2d(np.asarray(vc))
+                    if vc.shape == (1, 4) or (vc.ndim == 1 and len(vc) <= 4):
+                        # Uniform color, tile to all vertices
+                        c = vc.flatten()[:3].astype(np.uint8)
+                        colors = np.tile(c, (len(vertices), 1))
+                    elif len(vc) == len(vertices):
+                        colors = vc[:, :3].astype(np.uint8)
+            elif mesh.visual.kind == 'texture':
+                # Some DAE files have no texture image but store
+                # per-material diffuse colors.  trimesh reports these
+                # as kind='texture' with image=None.  Converting to
+                # vertex colors via to_color() recovers the colors.
+                mat = getattr(mesh.visual, 'material', None)
+                has_image = (
+                    mat is not None
+                    and hasattr(mat, 'image')
+                    and mat.image is not None
+                )
+                if not has_image:
+                    try:
+                        color_visual = mesh.visual.to_color()
+                        if hasattr(color_visual, 'vertex_colors'):
+                            vc = np.atleast_2d(
+                                np.asarray(color_visual.vertex_colors))
+                            if vc.shape == (1, 4) or vc.ndim == 1:
+                                # Uniform color, tile to all vertices
+                                c = vc.flatten()[:3].astype(np.uint8)
+                                colors = np.tile(c, (len(vertices), 1))
+                            elif len(vc) == len(vertices):
+                                colors = vc[:, :3].astype(np.uint8)
+                    except Exception:
+                        pass
 
-            # Handle case where visual.defined is False but main_color exists
-            # This is common for STL files
             if colors is None and hasattr(mesh.visual, 'main_color'):
                 main_color = mesh.visual.main_color
                 if main_color is not None:
-                    # Create uniform vertex colors from main_color
-                    colors = np.tile(
-                        np.asarray(main_color[:3], dtype=np.uint8),
-                        (len(vertices), 1)
-                    )
+                    mc = np.atleast_1d(
+                        np.asarray(main_color, dtype=np.uint8))
+                    if len(mc) >= 3:
+                        colors = np.tile(mc[:3], (len(vertices), 1))
 
         # Encode with DracoPy
         # DracoPy.encode uses 'points' not 'vertices'

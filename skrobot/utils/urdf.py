@@ -1242,19 +1242,45 @@ class Mesh(URDFType):
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):
                     draco = _CONFIGURABLE_VALUES.get('draco_compression', False)
+
+                    # Convert texture visuals without actual image to
+                    # vertex colors.  Many DAE files store per-material
+                    # diffuse colors this way; without conversion the
+                    # colors are lost in GLB export.
+                    for mesh in meshes:
+                        if mesh.visual.kind == 'texture':
+                            mat = getattr(mesh.visual, 'material', None)
+                            has_image = (
+                                mat is not None
+                                and (
+                                    (hasattr(mat, 'image')
+                                     and mat.image is not None)
+                                    or (hasattr(mat, 'baseColorTexture')
+                                        and mat.baseColorTexture
+                                        is not None)
+                                )
+                            )
+                            if not has_image:
+                                try:
+                                    mesh.visual = mesh.visual.to_color()
+                                except Exception:
+                                    pass
+
                     if draco:
-                        # Use DracoPy for Draco compression with color support
                         from skrobot.utils.draco import export_glb_with_draco
-                        export_glb_with_draco(meshes, fn)
+                        # Skip if collision would overwrite a visual GLB
+                        if is_collision and os.path.exists(fn):
+                            pass
+                        else:
+                            export_glb_with_draco(meshes, fn)
                     else:
-                        # Create a scene with all meshes to preserve structure
-                        scene = trimesh.Scene()
-                        for mesh in meshes:
-                            # Fix: Ensure visual.defined=True so colors are exported
-                            if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
-                                mesh.visual.face_colors = mesh.visual.face_colors
-                            scene.add_geometry(mesh)
-                        scene.export(fn)
+                        if is_collision and os.path.exists(fn):
+                            pass
+                        else:
+                            scene = trimesh.Scene()
+                            for mesh in meshes:
+                                scene.add_geometry(mesh)
+                            scene.export(fn)
             else:
                 if _CONFIGURABLE_VALUES['overwrite_mesh'] \
                         or not os.path.exists(fn):
