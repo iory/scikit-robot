@@ -147,6 +147,30 @@ class Link(CascadedCoords):
         self._visual_mesh_changed = True
 
     @property
+    def visual_mesh_file_paths(self):
+        """Return file paths of visual meshes.
+
+        Returns a list of file paths extracted from trimesh metadata.
+        Only available when meshes were loaded from URDF files.
+
+        Returns
+        -------
+        file_paths : list of str
+            File paths of the visual meshes.
+        """
+        if self._visual_mesh is None:
+            return []
+        meshes = self._visual_mesh
+        if not isinstance(meshes, Sequence):
+            meshes = [meshes]
+        paths = []
+        for m in meshes:
+            path = getattr(m, 'metadata', {}).get('file_path')
+            if path is not None:
+                paths.append(path)
+        return paths
+
+    @property
     def concatenated_visual_mesh(self):
         """Concatenated visual mesh for visualization.
 
