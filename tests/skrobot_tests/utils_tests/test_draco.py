@@ -257,6 +257,141 @@ class TestDraco:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
+    def test_handler_glb_valid_gltf_structure(self):
+        """Test that Draco GLB exported via trimesh handler has valid glTF.
+
+        The trimesh primitive_export handler must produce a GLB where:
+        - Draco primitives reference valid accessor indices
+        - Accessors have required componentType/type/count fields
+        - bufferView index in Draco extension is valid
+        - extensionsUsed includes KHR_draco_mesh_compression
+
+        This validates the fix for ctx["accessors"] -> ctx["tree"] and
+        the OrderedDict buffer_items handling.
+        """
+        import trimesh
+
+        from skrobot.utils.draco import register_dracopy_handlers
+
+        register_dracopy_handlers()
+
+        mesh = trimesh.Trimesh(
+            vertices=np.array([
+                [-0.1, -0.1, 0.0],
+                [0.1, -0.1, 0.0],
+                [0.0, 0.1, 0.0],
+                [0.0, -0.1, 0.1],
+            ]),
+            faces=np.array([[0, 1, 2], [0, 2, 3]]),
+        )
+        mesh.visual.vertex_colors = np.array([
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ], dtype=np.uint8)
+
+        scene = trimesh.Scene()
+        scene.add_geometry(mesh, node_name="test_mesh")
+        glb_data = scene.export(file_type="glb", extension_draco=True)
+
+        # Parse GLB
+        magic = glb_data[:4]
+        assert magic == b'glTF'
+
+        json_len = struct.unpack('<I', glb_data[12:16])[0]
+        gltf = json.loads(glb_data[20:20 + json_len])
+
+        # Must declare the extension
+        assert 'KHR_draco_mesh_compression' in gltf.get('extensionsUsed', [])
+
+        # Validate each mesh primitive
+        accessors = gltf.get('accessors', [])
+        buffer_views = gltf.get('bufferViews', [])
+
+        for mesh_data in gltf['meshes']:
+            for prim in mesh_data['primitives']:
+                draco = prim.get('extensions', {}).get(
+                    'KHR_draco_mesh_compression')
+                assert draco is not None, \
+                    "Primitive missing KHR_draco_mesh_compression extension"
+
+                # bufferView index must be valid
+                assert draco['bufferView'] < len(buffer_views), \
+                    f"Draco bufferView {draco['bufferView']} out of range"
+
+                # Draco attributes must be a non-empty dict
+                assert len(draco['attributes']) > 0
+
+                # Primitive attributes must reference valid accessors
+                for attr_name, acc_idx in prim['attributes'].items():
+                    assert acc_idx < len(accessors), \
+                        f"Attribute {attr_name} accessor {acc_idx} out of range"
+                    acc = accessors[acc_idx]
+                    assert 'componentType' in acc, \
+                        f"Accessor {acc_idx} missing componentType"
+                    assert 'type' in acc, \
+                        f"Accessor {acc_idx} missing type"
+                    assert 'count' in acc, \
+                        f"Accessor {acc_idx} missing count"
+
+                # indices accessor must be valid
+                if 'indices' in prim:
+                    idx = prim['indices']
+                    assert idx < len(accessors), \
+                        f"Indices accessor {idx} out of range"
+
+    def test_handler_roundtrip(self):
+        """Test encode via handler then decode back produces same geometry."""
+        import trimesh
+
+        from skrobot.utils.draco import register_dracopy_handlers
+
+        register_dracopy_handlers()
+
+        vertices = np.array([
+            [-0.05, -0.05, 0.0],
+            [0.05, -0.05, 0.0],
+            [0.0, 0.05, 0.0],
+        ])
+        faces = np.array([[0, 1, 2]])
+        colors = np.array([
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+        ], dtype=np.uint8)
+
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+        mesh.visual.vertex_colors = colors
+
+        # Export via handler
+        scene = trimesh.Scene()
+        scene.add_geometry(mesh, node_name="test")
+        glb_data = scene.export(file_type="glb", extension_draco=True)
+
+        # Re-import
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as f:
+            f.write(glb_data)
+            temp_path = f.name
+
+        try:
+            loaded = trimesh.load(temp_path)
+            if isinstance(loaded, trimesh.Scene):
+                loaded_meshes = list(loaded.geometry.values())
+            else:
+                loaded_meshes = [loaded]
+
+            assert len(loaded_meshes) >= 1
+            loaded_mesh = loaded_meshes[0]
+
+            # Geometry should survive the roundtrip
+            assert len(loaded_mesh.vertices) == len(vertices)
+            assert len(loaded_mesh.faces) == len(faces)
+            np.testing.assert_allclose(
+                loaded_mesh.vertices, vertices, atol=1e-3)
+        finally:
+            os.unlink(temp_path)
+
     def test_export_glb_with_default_colors(self):
         """Test exporting a mesh with trimesh's default colors.
 
