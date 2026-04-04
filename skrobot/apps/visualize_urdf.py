@@ -57,8 +57,24 @@ def main():
     else:
         if not osp.exists(args.input_urdfpath):
             parser.error(f"URDF file not found: {args.input_urdfpath}")
-        robot_model = RobotModel.from_urdf(osp.abspath(args.input_urdfpath),
-                                           include_mimic_joints=False)
+        urdf_path = osp.abspath(args.input_urdfpath)
+        ext = osp.splitext(urdf_path)[1].lower()
+        if ext not in ('.urdf', '.xacro', '.xml', ''):
+            print(
+                "\033[91mError: '{}' does not appear to be a URDF file "
+                "(got '{}' extension). Please specify a valid URDF file."
+                "\033[0m".format(args.input_urdfpath, ext),
+            )
+            return
+        try:
+            robot_model = RobotModel.from_urdf(urdf_path,
+                                               include_mimic_joints=False)
+        except Exception as e:
+            print(
+                "\033[91mError: Failed to load '{}' as URDF.\n{}\033[0m"
+                .format(args.input_urdfpath, e),
+            )
+            return
 
     viewer.add(robot_model)
 
