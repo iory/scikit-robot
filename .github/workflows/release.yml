@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   workflow_run:
     workflows: ["Run Tests"]
     types:
@@ -8,7 +9,7 @@ on:
 
 jobs:
   auto-merge:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       mergeResult: ${{ steps.merge.outputs.mergeResult }}
@@ -60,7 +61,7 @@ jobs:
   tag-release:
     runs-on: ubuntu-latest
     needs: auto-merge
-    if: ${{ needs.auto-merge.outputs.mergeResult == 'merged' && contains(fromJson(needs.auto-merge.outputs.prLabels || '[]'), 'release') }}
+    if: github.event_name == 'workflow_run' && needs.auto-merge.outputs.mergeResult == 'merged' && contains(fromJson(needs.auto-merge.outputs.prLabels || '[]'), 'release')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -106,6 +107,7 @@ jobs:
   pypi:
     name: Release To PyPi
     needs: tag-release
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.tag-release.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
