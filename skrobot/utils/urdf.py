@@ -1520,12 +1520,10 @@ class Texture(URDFType):
     _TAG = 'texture'
 
     def __init__(self, filename, image=None):
+        self.filename = filename
         if image is None:
             if filename and os.path.exists(filename):
-                image = PIL.image.open(filename)
-            else:
-                return
-        self.filename = filename
+                image = PIL.Image.open(filename)
         self.image = image
 
     @property
@@ -1548,6 +1546,9 @@ class Texture(URDFType):
 
     @image.setter
     def image(self, value):
+        if value is None:
+            self._image = None
+            return
         if isinstance(value, str):
             value = PIL.Image.open(value)
         if isinstance(value, np.ndarray):
@@ -1569,12 +1570,14 @@ class Texture(URDFType):
         return Texture(**kwargs)
 
     def _to_xml(self, parent, path):
-        # Save the image
-        filepath = get_filename(path, self.filename, makedirs=True)
-        try:
-            self.image.save(filepath)
-        except OSError as e:
-            logger.error('Could not save texture image %s: %s', filepath, e)
+        # Save the image if available
+        if self._image is not None:
+            filepath = get_filename(path, self.filename, makedirs=True)
+            try:
+                self._image.save(filepath)
+            except OSError as e:
+                logger.error('Could not save texture image %s: %s',
+                             filepath, e)
         return self._unparse(path)
 
 
