@@ -446,6 +446,45 @@ def export_glb_with_draco(meshes, filename):
             # Without colors, position is at unique_id=0
             draco_attributes = {"POSITION": 0}
 
+        # Add PBR material so renderers that don't support vertex colors
+        # (like Genesis) still show correct colors via baseColorFactor.
+        material_index = None
+        if colors is not None:
+            mean_color = colors.mean(axis=0).astype(float) / 255.0
+            if "materials" not in gltf:
+                gltf["materials"] = []
+            material_index = len(gltf["materials"])
+            gltf["materials"].append({
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [
+                        float(mean_color[0]),
+                        float(mean_color[1]),
+                        float(mean_color[2]),
+                        1.0,
+                    ],
+                    "roughnessFactor": 0.9,
+                    "metallicFactor": 0.0,
+                },
+            })
+        elif hasattr(mesh, 'visual') and mesh.visual is not None:
+            mat = getattr(mesh.visual, 'material', None)
+            if mat is not None:
+                bcf = getattr(mat, 'baseColorFactor', None)
+                if bcf is not None:
+                    bcf = np.asarray(bcf, dtype=float)
+                    if bcf.max() > 1.0:
+                        bcf = bcf / 255.0
+                    if "materials" not in gltf:
+                        gltf["materials"] = []
+                    material_index = len(gltf["materials"])
+                    gltf["materials"].append({
+                        "pbrMetallicRoughness": {
+                            "baseColorFactor": bcf[:4].tolist(),
+                            "roughnessFactor": 0.9,
+                            "metallicFactor": 0.0,
+                        },
+                    })
+
         # Create mesh primitive
         primitive = {
             "attributes": primitive_attributes,
@@ -457,6 +496,8 @@ def export_glb_with_draco(meshes, filename):
                 }
             }
         }
+        if material_index is not None:
+            primitive["material"] = material_index
 
         # Add mesh to glTF
         gltf["meshes"].append({
