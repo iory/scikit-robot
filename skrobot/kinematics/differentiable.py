@@ -1818,6 +1818,27 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
     for t, fk_params in enumerate(fk_params_list):
         (m_parent, m_mult, m_off, non_mimic, n_opt) = _get_mimic_joint_info(
             fk_params)
+        # Precompute vectorized-expansion indices. URDF disallows
+        # mimic-of-mimic, which matches the assumption that every mimic
+        # joint's parent is a non-mimic joint; verify and surface a clear
+        # error otherwise so downstream gather/scatter remains safe.
+        m_parent_int = np.asarray(m_parent, dtype=np.int64)
+        mimic_mask = m_parent_int >= 0
+        mimic_child_idx = np.where(mimic_mask)[0]
+        if mimic_child_idx.size > 0:
+            parent_of_mimic = m_parent_int[mimic_child_idx]
+            if np.any(mimic_mask[parent_of_mimic]):
+                bad = mimic_child_idx[mimic_mask[parent_of_mimic]]
+                raise ValueError(
+                    "Multi-EE batch IK does not support mimic-of-mimic "
+                    "chains (task {}, child indices {}).".format(
+                        t, bad.tolist()))
+            mimic_mult_for_children = np.asarray(m_mult)[mimic_child_idx]
+            mimic_off_for_children = np.asarray(m_off)[mimic_child_idx]
+        else:
+            parent_of_mimic = np.empty(0, dtype=np.int64)
+            mimic_mult_for_children = np.empty(0, dtype=np.float64)
+            mimic_off_for_children = np.empty(0, dtype=np.float64)
         task_info.append({
             'fk_params': fk_params,
             'mimic_parent_indices': m_parent,
@@ -1827,22 +1848,29 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
             'n_opt': n_opt,
             'n_joints': fk_params['n_joints'],
             'union_mapping': task_mappings[t],
+            'mimic_child_idx': mimic_child_idx,
+            'mimic_parent_idx_flat': parent_of_mimic,
+            'mimic_mult_flat': mimic_mult_for_children,
+            'mimic_off_flat': mimic_off_for_children,
         })
 
     def _expand_task_full_angles(task_opt_angles, info):
-        """Expand task's opt angles to full angles for that task's link_list."""
+        """Expand task's opt angles to full angles for that task's link_list.
+
+        Mimic joints are resolved in one vectorized pass; their parents are
+        guaranteed non-mimic by the solver-setup check above, so reading
+        parent slots after the non-mimic fill is safe.
+        """
         batch_size = task_opt_angles.shape[0]
         n_joints = info['n_joints']
         full_angles = np.zeros((batch_size, n_joints))
         full_angles[:, info['non_mimic_indices']] = task_opt_angles
-        m_parent = info['mimic_parent_indices']
-        m_mult = info['mimic_multipliers']
-        m_off = info['mimic_offsets']
-        for i in range(n_joints):
-            p = int(m_parent[i])
-            if p >= 0:
-                full_angles[:, i] = (
-                    full_angles[:, p] * m_mult[i] + m_off[i])
+        child_idx = info['mimic_child_idx']
+        if child_idx.size > 0:
+            parent_vals = full_angles[:, info['mimic_parent_idx_flat']]
+            full_angles[:, child_idx] = (
+                parent_vals * info['mimic_mult_flat']
+                + info['mimic_off_flat'])
         return full_angles
 
     def _compute_task_jacobian_local(union_opt_angles, info):
