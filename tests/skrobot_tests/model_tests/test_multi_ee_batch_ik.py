@@ -330,8 +330,68 @@ def test_multi_ee_per_task_bool_masks_internal():
     assert sol.shape == (N, solver.union_n_opt)
 
 
-def test_multi_ee_jax_raises_until_ported():
-    """Multi-EE on JAX backend currently falls back to NumPy with a warning."""
+_HAS_JAX = False
+try:
+    import jax  # noqa: F401
+    _HAS_JAX = True
+except ImportError:  # pragma: no cover - depends on environment
+    pass
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="JAX not installed")
+def test_multi_ee_jax_parity_with_numpy():
+    """JAX multi-EE solver converges to the same solution as NumPy."""
+    from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+    robot = _build_pr2()
+    rarm_mt = robot.rarm.end_coords
+    larm_mt = robot.larm.end_coords
+    rarm_ll = robot.link_lists(rarm_mt.parent)
+    larm_ll = robot.link_lists(larm_mt.parent)
+
+    r_pos0 = rarm_mt.worldpos()
+    r_rot0 = rarm_mt.worldrot()
+    l_pos0 = larm_mt.worldpos()
+    l_rot0 = larm_mt.worldrot()
+
+    N = 3
+    r_pos_t = np.tile(r_pos0, (N, 1)) + np.array(
+        [[0.01 * (i + 1), 0.0, 0.0] for i in range(N)])
+    r_rot_t = np.tile(r_rot0, (N, 1, 1))
+    l_pos_t = np.tile(l_pos0, (N, 1)) + np.array(
+        [[-0.01 * (i + 1), 0.0, 0.0] for i in range(N)])
+    l_rot_t = np.tile(l_rot0, (N, 1, 1))
+
+    np_solver = create_batch_ik_solver(
+        robot, [rarm_ll, larm_ll], [rarm_mt, larm_mt],
+        backend_name='numpy')
+    union_refs = np_solver.union_info['union_joint_refs']
+    init = np.tile(
+        np.array([j.joint_angle() for j in union_refs]), (N, 1))
+
+    common = dict(
+        initial_angles=init, max_iterations=80,
+        pos_threshold=0.003, rot_threshold=0.05)
+
+    sol_np, _, err_np = np_solver(
+        [r_pos_t, l_pos_t], [r_rot_t, l_rot_t], **common)
+    jx_solver = create_batch_ik_solver(
+        robot, [rarm_ll, larm_ll], [rarm_mt, larm_mt],
+        backend_name='jax')
+    sol_jx, _, err_jx = jx_solver(
+        [r_pos_t, l_pos_t], [r_rot_t, l_rot_t], **common)
+
+    # Default JAX is float32; NumPy is float64. Tolerance allows for both
+    # the floating-type mismatch and the JIT accumulation order.
+    np.testing.assert_allclose(
+        np.asarray(sol_jx), np.asarray(sol_np), atol=1e-4)
+    np.testing.assert_allclose(
+        np.asarray(err_jx), np.asarray(err_np), atol=1e-4)
+
+
+@pytest.mark.skipif(not _HAS_JAX, reason="JAX not installed")
+def test_multi_ee_jax_public_api():
+    """batch_inverse_kinematics with backend='jax' routes through the JAX solver."""
     robot = _build_pr2()
     rarm_mt = robot.rarm.end_coords
     larm_mt = robot.larm.end_coords
@@ -343,11 +403,11 @@ def test_multi_ee_jax_raises_until_ported():
     lt = [Coordinates(pos=larm_mt.worldpos() - np.array([0.005, 0, 0]),
                       rot=larm_mt.worldrot())]
 
-    with pytest.warns(RuntimeWarning, match="Multi-EE batch IK"):
-        solutions, success, _ = robot.batch_inverse_kinematics(
-            target_coords=[rt, lt],
-            move_target=[rarm_mt, larm_mt], link_list=[rarm_ll, larm_ll],
-            stop=100, thre=0.005, rthre=np.deg2rad(3.0),
-            backend='jax', initial_angles='current',
-        )
+    solutions, success, _ = robot.batch_inverse_kinematics(
+        target_coords=[rt, lt],
+        move_target=[rarm_mt, larm_mt], link_list=[rarm_ll, larm_ll],
+        stop=100, thre=0.005, rthre=np.deg2rad(3.0),
+        backend='jax', initial_angles='current',
+    )
     assert len(solutions) == 1
+    assert success[0]

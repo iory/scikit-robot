@@ -3067,11 +3067,13 @@ class RobotModel(CascadedLink):
         from skrobot.kinematics.differentiable import create_batch_ik_solver
 
         if backend is None:
-            backend = 'numpy'
-        elif backend != 'numpy':
+            from skrobot.pycompat import HAS_JAX
+            backend = 'jax' if HAS_JAX else 'numpy'
+        elif backend not in ('numpy', 'jax'):
             warnings.warn(
-                "Multi-EE batch IK currently supports only backend='numpy'; "
-                "falling back from {!r}.".format(backend), RuntimeWarning)
+                "Multi-EE batch IK supports backend='numpy' or 'jax'; "
+                "falling back to 'numpy' from {!r}.".format(backend),
+                RuntimeWarning)
             backend = 'numpy'
 
         n_tasks = len(link_list)

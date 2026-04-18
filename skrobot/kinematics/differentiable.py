@@ -2252,6 +2252,567 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
     return solve
 
 
+def _create_jax_multi_ee_solver(fk_params_list, union_info):
+    """Create a JAX multi-end-effector batch IK solver.
+
+    Structural twin of :func:`_create_numpy_multi_ee_solver` that performs
+    the per-iteration damped least-squares update under JIT compilation
+    with ``jax.lax.fori_loop``. Task count, per-task kinematic chains, and
+    per-task masks are static at trace time, so the per-task work unrolls
+    into the JIT graph the same way the single-EE JAX solver unrolls its
+    per-joint loops.
+
+    Parameters
+    ----------
+    fk_params_list : list of dict
+        One FK parameter dict per task (from :func:`extract_fk_parameters`).
+    union_info : dict
+        Output of :func:`_build_union_joint_mapping`.
+
+    Returns
+    -------
+    callable
+        ``solve(target_positions_list, target_rotations_list, ...)`` with
+        the same signature and return shapes as the NumPy multi-EE solver.
+    """
+    import jax
+    from jax import lax
+    import jax.numpy as jnp
+
+    n_tasks = len(fk_params_list)
+    task_mappings = union_info['task_mappings']
+    union_n_opt = union_info['union_n_opt']
+    joint_limits_lower = jnp.array(union_info['union_joint_limits_lower'])
+    joint_limits_upper = jnp.array(union_info['union_joint_limits_upper'])
+
+    # Per-task precomputed structural constants. Everything below depends
+    # only on the kinematic chain (link_list, move_target) and is safe to
+    # capture in JIT closures.
+    task_static = []
+    for t, fk_params in enumerate(fk_params_list):
+        n_joints = fk_params['n_joints']
+        (m_parent, m_mult, m_off, non_mimic, n_opt) = _get_mimic_joint_info(
+            fk_params)
+        # Precompute vectorized mimic expansion indices; disallow
+        # mimic-of-mimic chains (URDF does not permit them).
+        m_parent_int = np.asarray(m_parent, dtype=np.int64)
+        mimic_mask = m_parent_int >= 0
+        mimic_child_idx = np.where(mimic_mask)[0]
+        if mimic_child_idx.size > 0:
+            parent_of_mimic = m_parent_int[mimic_child_idx]
+            if np.any(mimic_mask[parent_of_mimic]):
+                bad = mimic_child_idx[mimic_mask[parent_of_mimic]]
+                raise ValueError(
+                    "Multi-EE batch IK (JAX) does not support mimic-of-"
+                    "mimic chains (task {}, child indices {}).".format(
+                        t, bad.tolist()))
+
+        # JAX arrays of per-joint FK constants
+        translations = [jnp.array(fk_params['link_translations'][i])
+                        for i in range(n_joints)]
+        local_rotations = [jnp.array(fk_params['link_rotations'][i])
+                           for i in range(n_joints)]
+        axes = [jnp.array(fk_params['joint_axes'][i])
+                for i in range(n_joints)]
+        base_pos = jnp.array(fk_params['base_position'])
+        base_rot = jnp.array(fk_params['base_rotation'])
+        ref_angles = fk_params['ref_angles']
+        joint_types = fk_params['joint_types']
+        ee_offset_pos = jnp.array(fk_params['ee_offset_position'])
+        ee_offset_rot = jnp.array(fk_params['ee_offset_rotation'])
+
+        # Precompute Rodrigues rotation-axis basis matrices per joint
+        joint_K = []
+        joint_K2 = []
+        for i in range(n_joints):
+            axis = np.array(fk_params['joint_axes'][i])
+            axis_norm = axis / (np.linalg.norm(axis) + 1e-10)
+            K = np.array([
+                [0, -axis_norm[2], axis_norm[1]],
+                [axis_norm[2], 0, -axis_norm[0]],
+                [-axis_norm[1], axis_norm[0], 0]
+            ])
+            joint_K.append(jnp.array(K))
+            joint_K2.append(jnp.array(K @ K))
+
+        # Static Python copies for trace-time conditionals
+        mimic_parents_py = [int(m_parent[i]) for i in range(n_joints)]
+        mimic_mults_py = [float(m_mult[i]) for i in range(n_joints)]
+        mimic_offs_py = [float(m_off[i]) for i in range(n_joints)]
+        full_to_opt = {}
+        for opt_idx, full_idx in enumerate(non_mimic):
+            full_to_opt[int(full_idx)] = opt_idx
+
+        non_mimic_jax = jnp.array(non_mimic.astype(np.int32))
+        mapping_jax = jnp.array(task_mappings[t].astype(np.int32))
+
+        task_static.append({
+            'n_joints': n_joints,
+            'n_opt': n_opt,
+            'translations': translations,
+            'local_rotations': local_rotations,
+            'axes': axes,
+            'base_pos': base_pos,
+            'base_rot': base_rot,
+            'ref_angles': ref_angles,
+            'joint_types': joint_types,
+            'ee_offset_pos': ee_offset_pos,
+            'ee_offset_rot': ee_offset_rot,
+            'joint_K': joint_K,
+            'joint_K2': joint_K2,
+            'mimic_parents_py': mimic_parents_py,
+            'mimic_mults_py': mimic_mults_py,
+            'mimic_offs_py': mimic_offs_py,
+            'full_to_opt': full_to_opt,
+            'non_mimic_jax': non_mimic_jax,
+            'mapping_jax': mapping_jax,
+        })
+
+    _jit_cache = {}
+
+    def _create_solver_fn(max_iterations, damping, pos_threshold,
+                          rot_threshold, pos_mask_arrs, rot_mask_arrs,
+                          rotation_mirrors, task_weights_tuple):
+        """Create a JIT-compiled multi-EE solver for a given configuration."""
+        # Per-task mask arrays as JAX (static at graph build)
+        pos_masks = [jnp.array(m) for m in pos_mask_arrs]
+        rot_masks = [jnp.array(m) for m in rot_mask_arrs]
+
+        # Per-task mirror rotations (may be None)
+        mirror_rots = []
+        for m in rotation_mirrors:
+            mr_np = _create_mirror_rotation_matrix(m)
+            mirror_rots.append(jnp.array(mr_np) if mr_np is not None else None)
+
+        # Derive per-task active Jacobian rows (static at graph build)
+        active_rows_per_task = []
+        has_pos_per_task = []
+        has_rot_per_task = []
+        for t in range(n_tasks):
+            pm = pos_mask_arrs[t]
+            rm = rot_mask_arrs[t]
+            has_pos = float(np.sum(pm)) > 0
+            has_rot = float(np.sum(rm)) > 0
+            rows = []
+            if has_pos:
+                for i in range(3):
+                    if pm[i] > 0:
+                        rows.append(i)
+            if has_rot:
+                rows.extend([3, 4, 5])
+            active_rows_per_task.append(rows)
+            has_pos_per_task.append(has_pos)
+            has_rot_per_task.append(has_rot)
+
+        weights = np.asarray(task_weights_tuple, dtype=np.float64)
+        sqrt_weights = [float(np.sqrt(w)) for w in weights]
+
+        # A task contributes only if it has both active rows and weight > 0.
+        contrib_tasks = [
+            t for t in range(n_tasks)
+            if len(active_rows_per_task[t]) > 0 and weights[t] > 0]
+        total_active = sum(
+            len(active_rows_per_task[t]) for t in contrib_tasks)
+        if total_active == 0:
+            raise ValueError(
+                "Multi-EE batch IK (JAX) has no active, non-zero-weight "
+                "tasks to solve: every task is either fully masked out or "
+                "has task_weight == 0.")
+
+        # Per-contributing-task row slice in the stacked system
+        row_ranges = {}
+        cursor = 0
+        for t in contrib_tasks:
+            nrows = len(active_rows_per_task[t])
+            row_ranges[t] = (cursor, cursor + nrows)
+            cursor += nrows
+
+        active_rows_jax = {
+            t: jnp.array(active_rows_per_task[t], dtype=jnp.int32)
+            for t in contrib_tasks
+        }
+
+        damping_eye = damping * jnp.eye(total_active)
+
+        def _compute_task_jac_local(opt_angles_batch, ts):
+            """Task-local Jacobian + pose from union opt angles."""
+            batch_size = opt_angles_batch.shape[0]
+            n_joints = ts['n_joints']
+            n_opt = ts['n_opt']
+
+            # Expand union opt -> task full angles.
+            task_opt = opt_angles_batch[:, ts['mapping_jax']]
+            full_angles = jnp.zeros((batch_size, n_joints))
+            full_angles = full_angles.at[:, ts['non_mimic_jax']].set(task_opt)
+            for i in range(n_joints):
+                if ts['mimic_parents_py'][i] >= 0:
+                    full_angles = full_angles.at[:, i].set(
+                        full_angles[:, ts['mimic_parents_py'][i]]
+                        * ts['mimic_mults_py'][i]
+                        + ts['mimic_offs_py'][i])
+
+            current_pos = jnp.tile(ts['base_pos'], (batch_size, 1))
+            current_rot = jnp.tile(ts['base_rot'], (batch_size, 1, 1))
+            joint_positions = []
+            joint_axes_world = []
+            for i in range(n_joints):
+                current_pos = current_pos + jnp.einsum(
+                    'bij,j->bi', current_rot, ts['translations'][i])
+                current_rot = jnp.einsum(
+                    'bij,jk->bik', current_rot, ts['local_rotations'][i])
+                joint_positions.append(current_pos)
+                joint_axes_world.append(jnp.einsum(
+                    'bij,j->bi', current_rot, ts['axes'][i]))
+                delta = full_angles[:, i] - ts['ref_angles'][i]
+                if ts['joint_types'][i] == 'prismatic':
+                    current_pos = current_pos + jnp.einsum(
+                        'bij,j,b->bi', current_rot, ts['axes'][i], delta)
+                else:
+                    c = jnp.cos(delta)[:, None, None]
+                    s = jnp.sin(delta)[:, None, None]
+                    joint_rots = (jnp.eye(3) + s * ts['joint_K'][i]
+                                  + (1 - c) * ts['joint_K2'][i])
+                    current_rot = jnp.einsum(
+                        'bij,bjk->bik', current_rot, joint_rots)
+
+            ee_pos = current_pos + jnp.einsum(
+                'bij,j->bi', current_rot, ts['ee_offset_pos'])
+            ee_rot = jnp.einsum(
+                'bij,jk->bik', current_rot, ts['ee_offset_rot'])
+
+            J_v = jnp.zeros((batch_size, 3, n_joints))
+            J_w = jnp.zeros((batch_size, 3, n_joints))
+            for i in range(n_joints):
+                z_i = joint_axes_world[i]
+                p_i = joint_positions[i]
+                if ts['joint_types'][i] in ('revolute', 'continuous'):
+                    jv = jnp.cross(z_i, ee_pos - p_i)
+                    jw = z_i
+                else:
+                    jv = z_i
+                    jw = jnp.zeros_like(z_i)
+                J_v = J_v.at[:, :, i].set(jv)
+                J_w = J_w.at[:, :, i].set(jw)
+            J_full = jnp.concatenate([J_v, J_w], axis=1)
+
+            # Fold mimic contributions into opt columns
+            J_opt = jnp.zeros((batch_size, 6, n_opt))
+            for i in range(n_joints):
+                if ts['mimic_parents_py'][i] < 0:
+                    opt_idx = ts['full_to_opt'][i]
+                    J_opt = J_opt.at[:, :, opt_idx].add(J_full[:, :, i])
+                else:
+                    parent = ts['mimic_parents_py'][i]
+                    if parent in ts['full_to_opt']:
+                        opt_idx = ts['full_to_opt'][parent]
+                        J_opt = J_opt.at[:, :, opt_idx].add(
+                            ts['mimic_mults_py'][i] * J_full[:, :, i])
+            return J_opt, ee_pos, ee_rot
+
+        def _task_world_err(pos, rot, target_pos, target_rot,
+                            pos_mask, rot_mask, mirror_rot, has_rot):
+            """6D world-frame residual (batch, 6) for one task."""
+            pos_err = (target_pos - pos) * pos_mask
+            if has_rot:
+                rot_err_local = rotation_error_so3_log_batch(rot, target_rot)
+                if mirror_rot is not None:
+                    target_rot_m = target_rot @ mirror_rot
+                    rot_err_local_m = rotation_error_so3_log_batch(
+                        rot, target_rot_m)
+                    frob_direct = jnp.sum((target_rot - rot) ** 2, axis=(1, 2))
+                    frob_mirror = jnp.sum(
+                        (target_rot_m - rot) ** 2, axis=(1, 2))
+                    use_mirror = (frob_mirror < 0.8 * frob_direct)[:, None]
+                    rot_err_local = jnp.where(
+                        use_mirror, rot_err_local_m, rot_err_local)
+                rot_err_local_masked = rot_err_local * rot_mask
+                rot_err_world = jnp.einsum(
+                    'bij,bj->bi', rot, rot_err_local_masked)
+            else:
+                rot_err_world = jnp.zeros_like(pos_err)
+            return jnp.concatenate([pos_err, rot_err_world], axis=1)
+
+        def solve_batched(init_opt_angles, target_positions_stack,
+                          target_rotations_stack):
+            """Run the DLS loop.
+
+            target_positions_stack: (n_tasks, batch, 3)
+            target_rotations_stack: (n_tasks, batch, 3, 3)
+            """
+
+            def body_fn(_, opt_angles):
+                J_rows = []
+                err_rows = []
+                for t in contrib_tasks:
+                    ts = task_static[t]
+                    J_opt_t, pos_t, rot_t = _compute_task_jac_local(
+                        opt_angles, ts)
+                    target_pos_t = target_positions_stack[t]
+                    target_rot_t = target_rotations_stack[t]
+                    full_err_t = _task_world_err(
+                        pos_t, rot_t, target_pos_t, target_rot_t,
+                        pos_masks[t], rot_masks[t], mirror_rots[t],
+                        has_rot_per_task[t])
+                    rows_idx = active_rows_jax[t]
+                    J_sel = J_opt_t[:, rows_idx, :]
+                    e_sel = full_err_t[:, rows_idx]
+                    w = sqrt_weights[t]
+                    # Scatter task-local Jacobian columns into the union
+                    # column positions.
+                    batch = J_sel.shape[0]
+                    n_rows = J_sel.shape[1]
+                    J_slice_union = jnp.zeros((batch, n_rows, union_n_opt))
+                    J_slice_union = J_slice_union.at[:, :, ts['mapping_jax']].set(
+                        w * J_sel)
+                    J_rows.append(J_slice_union)
+                    err_rows.append(w * e_sel)
+
+                J_stack = jnp.concatenate(J_rows, axis=1)
+                err_stack = jnp.concatenate(err_rows, axis=1)
+
+                JJT = jnp.matmul(
+                    J_stack, jnp.transpose(J_stack, (0, 2, 1))) + damping_eye
+                solved = jnp.linalg.solve(
+                    JJT, err_stack[..., jnp.newaxis]).squeeze(-1)
+                delta_q = jnp.einsum('bji,bj->bi', J_stack, solved)
+                new_opt = opt_angles + delta_q
+                new_opt = jnp.clip(
+                    new_opt, joint_limits_lower, joint_limits_upper)
+                return new_opt
+
+            final_opt = lax.fori_loop(
+                0, max_iterations, body_fn, init_opt_angles)
+
+            # Per-task final error for success/error reporting.
+            batch = init_opt_angles.shape[0]
+            combined_weighted = jnp.zeros(batch)
+            per_task_success_stack = []
+            for t in range(n_tasks):
+                ts = task_static[t]
+                _, pos_f, rot_f = _compute_task_jac_local(final_opt, ts)
+                target_pos_t = target_positions_stack[t]
+                target_rot_t = target_rotations_stack[t]
+                has_pos = has_pos_per_task[t]
+                has_rot = has_rot_per_task[t]
+                if has_pos:
+                    pe = jnp.sqrt(jnp.sum(
+                        ((target_pos_t - pos_f) * pos_masks[t]) ** 2, axis=1))
+                else:
+                    pe = jnp.zeros(batch)
+                if has_rot:
+                    rel = rotation_error_so3_log_batch(rot_f, target_rot_t)
+                    rel_masked = rel * rot_masks[t]
+                    re = jnp.sqrt(jnp.sum(rel_masked ** 2, axis=1))
+                    if mirror_rots[t] is not None:
+                        target_rot_m = target_rot_t @ mirror_rots[t]
+                        rel_m = rotation_error_so3_log_batch(
+                            rot_f, target_rot_m)
+                        re_m = jnp.sqrt(jnp.sum(
+                            (rel_m * rot_masks[t]) ** 2, axis=1))
+                        re = jnp.minimum(re, re_m)
+                else:
+                    re = jnp.zeros(batch)
+                combined_weighted = combined_weighted + float(weights[t]) * (pe + re)
+                if weights[t] == 0:
+                    per_task_success_stack.append(
+                        jnp.ones(batch, dtype=bool))
+                    continue
+                if has_pos and has_rot:
+                    ok = (pe < pos_threshold) & (re < rot_threshold)
+                elif has_pos:
+                    ok = pe < pos_threshold
+                elif has_rot:
+                    ok = re < rot_threshold
+                else:
+                    ok = jnp.ones(batch, dtype=bool)
+                per_task_success_stack.append(ok)
+
+            success = jnp.all(
+                jnp.stack(per_task_success_stack, axis=0), axis=0)
+            return final_opt, success, combined_weighted
+
+        return jax.jit(solve_batched)
+
+    def solve(target_positions_list, target_rotations_list,
+              initial_angles=None,
+              max_iterations=30,
+              damping=0.01,
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_masks=True,
+              rotation_masks=True,
+              rotation_mirrors=None,
+              task_weights=None,
+              attempts_per_pose=1,
+              use_current_angles=True,
+              select_closest_to_initial=False,
+              **kwargs):
+        """Solve multi-EE batch IK on JAX.
+
+        Signature mirrors :func:`_create_numpy_multi_ee_solver`'s ``solve``.
+        """
+        # Normalize inputs.
+        target_pos_arrays = [
+            np.asarray(tp, dtype=np.float64) for tp in target_positions_list]
+        target_rot_arrays = [
+            np.asarray(tr, dtype=np.float64) for tr in target_rotations_list]
+        if len(target_pos_arrays) != n_tasks:
+            raise ValueError(
+                "target_positions_list length {} does not match n_tasks={}"
+                .format(len(target_pos_arrays), n_tasks))
+        n_targets = target_pos_arrays[0].shape[0]
+        for t in range(n_tasks):
+            if target_pos_arrays[t].shape != (n_targets, 3):
+                raise ValueError(
+                    "target_positions_list[{}] must be shape (N, 3), got {}"
+                    .format(t, target_pos_arrays[t].shape))
+            if target_rot_arrays[t].shape != (n_targets, 3, 3):
+                raise ValueError(
+                    "target_rotations_list[{}] must be shape (N, 3, 3), got {}"
+                    .format(t, target_rot_arrays[t].shape))
+
+        # Per-task masks / mirrors (same rule as NumPy path).
+        _scalar_types = (
+            bool, int, float, np.integer, np.floating, np.bool_)
+
+        def _to_per_task(val, default):
+            if val is None:
+                return [default] * n_tasks
+            if isinstance(val, list) and len(val) == n_tasks:
+                if n_tasks == 3 and all(
+                        isinstance(v, _scalar_types) for v in val):
+                    return [val] * n_tasks
+                return list(val)
+            return [val] * n_tasks
+
+        pos_masks_per_task = _to_per_task(position_masks, True)
+        rot_masks_per_task = _to_per_task(rotation_masks, True)
+        if rotation_mirrors is None:
+            rot_mirrors_per_task = [None] * n_tasks
+        elif (isinstance(rotation_mirrors, list)
+              and len(rotation_mirrors) == n_tasks):
+            rot_mirrors_per_task = list(rotation_mirrors)
+        else:
+            rot_mirrors_per_task = [rotation_mirrors] * n_tasks
+
+        pos_mask_arrs = [normalize_axis_mask(m) for m in pos_masks_per_task]
+        rot_mask_arrs = [normalize_axis_mask(m) for m in rot_masks_per_task]
+
+        if task_weights is None:
+            weights = np.ones(n_tasks, dtype=np.float64)
+        else:
+            weights = np.asarray(task_weights, dtype=np.float64)
+            if weights.shape != (n_tasks,):
+                raise ValueError(
+                    "task_weights must have shape ({},), got {}"
+                    .format(n_tasks, weights.shape))
+            if np.any(weights < 0):
+                raise ValueError("task_weights must be non-negative")
+
+        # Resolve initial angles in union opt space.
+        lower_np = np.asarray(union_info['union_joint_limits_lower'])
+        upper_np = np.asarray(union_info['union_joint_limits_upper'])
+
+        if attempts_per_pose > 1:
+            target_pos_expanded = [
+                np.repeat(tp, attempts_per_pose, axis=0)
+                for tp in target_pos_arrays]
+            target_rot_expanded = [
+                np.repeat(tr, attempts_per_pose, axis=0)
+                for tr in target_rot_arrays]
+            n_expanded = n_targets * attempts_per_pose
+            if initial_angles is not None and use_current_angles:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                init_opt = np.zeros((n_expanded, union_n_opt))
+                for it in range(n_targets):
+                    init_opt[it * attempts_per_pose] = init_angles[it]
+                    for a in range(1, attempts_per_pose):
+                        idx = it * attempts_per_pose + a
+                        init_opt[idx] = np.random.uniform(lower_np, upper_np)
+            else:
+                init_opt = np.random.uniform(
+                    lower_np, upper_np, (n_expanded, union_n_opt))
+        else:
+            target_pos_expanded = target_pos_arrays
+            target_rot_expanded = target_rot_arrays
+            n_expanded = n_targets
+            if initial_angles is not None:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                if init_angles.shape != (n_targets, union_n_opt):
+                    raise ValueError(
+                        "initial_angles must have shape ({}, {}), got {}"
+                        .format(n_targets, union_n_opt, init_angles.shape))
+                init_opt = init_angles.copy()
+            else:
+                init_opt = np.random.uniform(
+                    lower_np, upper_np, (n_expanded, union_n_opt))
+
+        # Stack targets for JAX: (n_tasks, batch, 3) and (n_tasks, batch, 3, 3)
+        target_pos_stack = jnp.stack(
+            [jnp.array(p.astype(np.float64)) for p in target_pos_expanded],
+            axis=0)
+        target_rot_stack = jnp.stack(
+            [jnp.array(r.astype(np.float64)) for r in target_rot_expanded],
+            axis=0)
+        init_opt_jax = jnp.array(init_opt.astype(np.float64))
+
+        cache_key = (
+            max_iterations, damping, pos_threshold, rot_threshold,
+            tuple(tuple(pm) for pm in pos_mask_arrs),
+            tuple(tuple(rm) for rm in rot_mask_arrs),
+            tuple(rot_mirrors_per_task),
+            tuple(float(w) for w in weights),
+        )
+        if cache_key not in _jit_cache:
+            _jit_cache[cache_key] = _create_solver_fn(
+                max_iterations, damping, pos_threshold, rot_threshold,
+                pos_mask_arrs, rot_mask_arrs, rot_mirrors_per_task,
+                tuple(weights.tolist()))
+        solver_fn = _jit_cache[cache_key]
+
+        final_opt, success, combined_err = solver_fn(
+            init_opt_jax, target_pos_stack, target_rot_stack)
+
+        # Attempts-per-pose selection back on host.
+        if attempts_per_pose > 1:
+            opt_np = np.asarray(final_opt)
+            success_np = np.asarray(success)
+            err_np = np.asarray(combined_err)
+            opt_rs = opt_np.reshape(n_targets, attempts_per_pose, union_n_opt)
+            success_rs = success_np.reshape(n_targets, attempts_per_pose)
+            err_rs = err_np.reshape(n_targets, attempts_per_pose)
+            best_idx = np.zeros(n_targets, dtype=np.int32)
+            for i in range(n_targets):
+                if np.any(success_rs[i]):
+                    cands = np.where(success_rs[i])[0]
+                    best_idx[i] = cands[np.argmin(err_rs[i, cands])]
+                else:
+                    best_idx[i] = np.argmin(err_rs[i])
+            sols = opt_rs[np.arange(n_targets), best_idx]
+            succ = success_rs[np.arange(n_targets), best_idx]
+            errs = err_rs[np.arange(n_targets), best_idx]
+            return sols, succ, errs
+
+        return (np.asarray(final_opt), np.asarray(success),
+                np.asarray(combined_err))
+
+    solve.union_n_opt = union_n_opt
+    solve.joint_limits_lower = np.asarray(
+        union_info['union_joint_limits_lower'])
+    solve.joint_limits_upper = np.asarray(
+        union_info['union_joint_limits_upper'])
+    solve.fk_params_list = fk_params_list
+    solve.union_info = union_info
+    solve.n_tasks = n_tasks
+    solve.backend_name = 'jax'
+    solve.multi_ee = True
+    return solve
+
+
 def compute_geometric_jacobian_jax(joint_angles, fk_params, return_non_mimic=True):
     """Compute the geometric Jacobian using JAX.
 
@@ -3034,9 +3595,11 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
         union_info = _build_union_joint_mapping(link_list, fk_params_list)
         if backend_name == 'numpy':
             return _create_numpy_multi_ee_solver(fk_params_list, union_info)
+        if backend_name == 'jax':
+            return _create_jax_multi_ee_solver(fk_params_list, union_info)
         raise NotImplementedError(
             "Multi-EE batch IK on backend {!r} is not yet implemented; "
-            "use backend_name='numpy'.".format(backend_name))
+            "use backend_name='numpy' or 'jax'.".format(backend_name))
 
     # Extract FK parameters
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)
