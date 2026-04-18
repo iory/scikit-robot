@@ -3163,20 +3163,28 @@ class RobotModel(CascadedLink):
         solutions_np = np.asarray(solutions_array)
         success_np = np.asarray(success_array)
 
-        # Map union opt solutions to robot's full angle vector.
-        robot_joint_list = self.joint_list
-        union_to_robot = []  # list of (union_idx, robot_idx)
+        # Map union opt solutions to robot's full angle vector. An id-keyed
+        # dict turns the O(n_union * n_robot_joints) membership test into
+        # O(n_union), and the double loop over poses and joints collapses
+        # into a single fancy-indexed assignment.
+        robot_joint_to_idx = {
+            id(j): k for k, j in enumerate(self.joint_list)}
+        union_idx_list = []
+        robot_idx_list = []
         for uidx, joint in enumerate(union_refs):
-            if joint in robot_joint_list:
-                union_to_robot.append((uidx, robot_joint_list.index(joint)))
+            ridx = robot_joint_to_idx.get(id(joint))
+            if ridx is not None:
+                union_idx_list.append(uidx)
+                robot_idx_list.append(ridx)
+        union_idx_arr = np.asarray(union_idx_list, dtype=np.int64)
+        robot_idx_arr = np.asarray(robot_idx_list, dtype=np.int64)
 
-        full_solutions = []
         full_av_org = self.angle_vector()
-        for i in range(n_poses):
-            full_av = full_av_org.copy()
-            for uidx, ridx in union_to_robot:
-                full_av[ridx] = solutions_np[i, uidx]
-            full_solutions.append(full_av)
+        full_solutions_arr = np.tile(full_av_org, (n_poses, 1))
+        if len(union_idx_arr) > 0:
+            full_solutions_arr[:, robot_idx_arr] = \
+                solutions_np[:, union_idx_arr]
+        full_solutions = list(full_solutions_arr)
 
         success_flags = [bool(s) for s in success_np]
         attempt_counts = [attempts_per_pose] * n_poses
