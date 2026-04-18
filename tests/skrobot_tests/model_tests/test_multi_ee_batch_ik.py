@@ -334,11 +334,17 @@ _HAS_JAX = False
 try:
     import jax  # noqa: F401
     _HAS_JAX = True
-except ImportError:  # pragma: no cover - depends on environment
+except Exception:  # pragma: no cover - import may fail against old numpy
+    # A plain ImportError covers "jax not installed", but JAX also raises
+    # AttributeError (e.g. ``module 'numpy' has no attribute 'dtypes'``)
+    # when the installed numpy is older than what the current jax wheel
+    # expects, which is common on CI matrices that pin numpy <1.25.
+    # Treat any import-time failure as "JAX unavailable" for the tests.
     pass
 
 
-@pytest.mark.skipif(not _HAS_JAX, reason="JAX not installed")
+@pytest.mark.skipif(
+    not _HAS_JAX, reason="JAX not installed or incompatible with numpy")
 def test_multi_ee_jax_parity_with_numpy():
     """JAX multi-EE solver converges to the same solution as NumPy."""
     from skrobot.kinematics.differentiable import create_batch_ik_solver
@@ -389,7 +395,8 @@ def test_multi_ee_jax_parity_with_numpy():
         np.asarray(err_jx), np.asarray(err_np), atol=1e-4)
 
 
-@pytest.mark.skipif(not _HAS_JAX, reason="JAX not installed")
+@pytest.mark.skipif(
+    not _HAS_JAX, reason="JAX not installed or incompatible with numpy")
 def test_multi_ee_jax_public_api():
     """batch_inverse_kinematics with backend='jax' routes through the JAX solver."""
     robot = _build_pr2()

@@ -295,8 +295,12 @@ def test_batch_base_weight_jax_parity_with_numpy():
     """JAX backend produces equivalent base_weight behavior to NumPy."""
     try:
         import jax  # noqa: F401
-    except ImportError:  # pragma: no cover
-        pytest.skip("JAX not installed")
+    except Exception:  # pragma: no cover - depends on environment
+        # A plain ImportError covers "jax not installed", but JAX also
+        # raises AttributeError (e.g. ``module 'numpy' has no attribute
+        # 'dtypes'``) when the installed numpy is older than what the
+        # current jax wheel expects.  Skip in either case.
+        pytest.skip("JAX not installed or incompatible with numpy")
 
     def _run(backend):
         robot = skrobot.models.PR2()
