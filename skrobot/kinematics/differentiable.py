@@ -1382,6 +1382,105 @@ def create_dynamic_limit_mask(fk_params, angles):
     return mask
 
 
+def _build_union_joint_mapping(link_lists, fk_params_list):
+    """Build a union joint space across multiple IK tasks.
+
+    For multi-end-effector batch IK, each task has its own kinematic chain
+    (``link_list``) with its own non-mimic joints. The optimization variables
+    are the union (in joint-object identity) of all non-mimic joints across
+    tasks. This helper builds that union and the per-task index mappings.
+
+    Parameters
+    ----------
+    link_lists : list of list
+        ``link_lists[t]`` is the link list for task ``t``. Each link has a
+        ``.joint`` attribute whose object identity is used for deduplication.
+    fk_params_list : list of dict
+        ``fk_params_list[t]`` is the FK parameter dict for task ``t``.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+
+        - ``'task_mappings'``: list of ``np.ndarray[n_opt_task]``. For task t,
+          ``task_mappings[t][k]`` is the union opt index corresponding to the
+          task's k-th non-mimic joint.
+        - ``'task_non_mimic_indices'``: list of ``np.ndarray[n_opt_task]``.
+          Indices into the task's own link_list (i.e. into fk_params['n_joints']).
+        - ``'union_n_opt'``: int, size of the union optimization space.
+        - ``'union_joint_limits_lower'``: ``np.ndarray[union_n_opt]``.
+        - ``'union_joint_limits_upper'``: ``np.ndarray[union_n_opt]``.
+        - ``'union_joint_refs'``: list of joint objects (length union_n_opt).
+          Exposed for callers that need to map back to the robot's joint list.
+    """
+    union_joint_refs = []
+    union_joint_limits_lower = []
+    union_joint_limits_upper = []
+    seen = {}  # id(joint_obj) -> union index
+    task_mappings = []
+    task_non_mimic_indices = []
+    for link_list, fk_params in zip(link_lists, fk_params_list):
+        n_joints = fk_params['n_joints']
+        mimic_parent_indices = fk_params.get(
+            'mimic_parent_indices',
+            np.array([-1] * n_joints, dtype=np.int32))
+        non_mimic = np.array(
+            [i for i in range(n_joints) if mimic_parent_indices[i] < 0],
+            dtype=np.int32)
+        mapping = np.zeros(len(non_mimic), dtype=np.int32)
+        for k, full_idx in enumerate(non_mimic):
+            joint = link_list[int(full_idx)].joint
+            key = id(joint)
+            if key in seen:
+                mapping[k] = seen[key]
+                # Limits: take the tighter bound if multiple tasks reference
+                # the same joint and disagree (shouldn't happen unless the
+                # model is inconsistent, but be defensive).
+                uidx = seen[key]
+                lo = fk_params['joint_limits_lower'][int(full_idx)]
+                hi = fk_params['joint_limits_upper'][int(full_idx)]
+                if lo > union_joint_limits_lower[uidx]:
+                    union_joint_limits_lower[uidx] = lo
+                if hi < union_joint_limits_upper[uidx]:
+                    union_joint_limits_upper[uidx] = hi
+            else:
+                uidx = len(union_joint_refs)
+                seen[key] = uidx
+                union_joint_refs.append(joint)
+                union_joint_limits_lower.append(
+                    fk_params['joint_limits_lower'][int(full_idx)])
+                union_joint_limits_upper.append(
+                    fk_params['joint_limits_upper'][int(full_idx)])
+                mapping[k] = uidx
+        task_mappings.append(mapping)
+        task_non_mimic_indices.append(non_mimic)
+    lower = np.asarray(union_joint_limits_lower, dtype=np.float64)
+    upper = np.asarray(union_joint_limits_upper, dtype=np.float64)
+    # After tightening, detect cross-task limit disagreement that inverts
+    # a joint's range. If lo > hi, the joint is infeasible under the shared
+    # constraint and np.clip would silently collapse all iterates onto a
+    # corner — report it instead.
+    inverted = lower > upper
+    if np.any(inverted):
+        bad = [
+            "{} ([{:.4f}, {:.4f}])".format(
+                union_joint_refs[i].name, lower[i], upper[i])
+            for i in np.where(inverted)[0]
+        ]
+        raise ValueError(
+            "Inconsistent joint limits across tasks for shared joint(s): "
+            + ", ".join(bad))
+    return {
+        'task_mappings': task_mappings,
+        'task_non_mimic_indices': task_non_mimic_indices,
+        'union_n_opt': len(union_joint_refs),
+        'union_joint_limits_lower': lower,
+        'union_joint_limits_upper': upper,
+        'union_joint_refs': union_joint_refs,
+    }
+
+
 def _create_numpy_optimized_solver(fk_params):
     """Create an optimized batch IK solver using pure NumPy with Jacobian method.
 
@@ -1680,6 +1779,442 @@ def _create_numpy_optimized_solver(fk_params):
     solve.joint_limits_upper = fk_params['joint_limits_upper']
     solve.fk_params = fk_params
     solve.backend_name = 'numpy'
+
+    return solve
+
+
+def _create_numpy_multi_ee_solver(fk_params_list, union_info):
+    """Create a NumPy batch IK solver for multiple end-effectors.
+
+    Each task has its own ``fk_params`` (extracted from its own link_list and
+    move_target). Optimization variables live in a shared union joint space
+    so that overlapping joints (e.g. a shared torso) are solved jointly.
+
+    The per-iteration update is a weighted damped-least-squares on the stacked
+    system ``[J_1; J_2; ...] dq = [e_1; e_2; ...]`` where per-task rows are
+    scaled by ``sqrt(task_weights[t])``.
+
+    Parameters
+    ----------
+    fk_params_list : list of dict
+        One entry per task.
+    union_info : dict
+        Output of :func:`_build_union_joint_mapping`.
+
+    Returns
+    -------
+    callable
+        ``solve(target_positions_list, target_rotations_list, ...) ->
+        (solutions_full_union, success, errors)``.
+    """
+    n_tasks = len(fk_params_list)
+    task_mappings = union_info['task_mappings']
+    union_n_opt = union_info['union_n_opt']
+    joint_limits_lower = union_info['union_joint_limits_lower']
+    joint_limits_upper = union_info['union_joint_limits_upper']
+
+    # Per-task mimic info and expansion helpers
+    task_info = []
+    for t, fk_params in enumerate(fk_params_list):
+        (m_parent, m_mult, m_off, non_mimic, n_opt) = _get_mimic_joint_info(
+            fk_params)
+        task_info.append({
+            'fk_params': fk_params,
+            'mimic_parent_indices': m_parent,
+            'mimic_multipliers': m_mult,
+            'mimic_offsets': m_off,
+            'non_mimic_indices': non_mimic,
+            'n_opt': n_opt,
+            'n_joints': fk_params['n_joints'],
+            'union_mapping': task_mappings[t],
+        })
+
+    def _expand_task_full_angles(task_opt_angles, info):
+        """Expand task's opt angles to full angles for that task's link_list."""
+        batch_size = task_opt_angles.shape[0]
+        n_joints = info['n_joints']
+        full_angles = np.zeros((batch_size, n_joints))
+        full_angles[:, info['non_mimic_indices']] = task_opt_angles
+        m_parent = info['mimic_parent_indices']
+        m_mult = info['mimic_multipliers']
+        m_off = info['mimic_offsets']
+        for i in range(n_joints):
+            p = int(m_parent[i])
+            if p >= 0:
+                full_angles[:, i] = (
+                    full_angles[:, p] * m_mult[i] + m_off[i])
+        return full_angles
+
+    def _compute_task_jacobian_and_pose(union_opt_angles, info):
+        """Compute (J_union, pos, rot) for a task given union-level opt angles.
+
+        Returns
+        -------
+        J_union : np.ndarray
+            Shape (batch, 6, union_n_opt) with columns for this task's joints
+            scattered into their union positions; other columns are zero.
+        pos : np.ndarray
+            End-effector positions (batch, 3).
+        rot : np.ndarray
+            End-effector rotations (batch, 3, 3).
+        """
+        mapping = info['union_mapping']
+        task_opt = union_opt_angles[:, mapping]
+        task_full = _expand_task_full_angles(task_opt, info)
+        J_opt, pos, rot = compute_geometric_jacobian_batched_numpy(
+            task_full, info['fk_params'],
+            non_mimic_indices=info['non_mimic_indices'],
+            mimic_parent_indices=info['mimic_parent_indices'],
+            mimic_multipliers=info['mimic_multipliers'])
+        batch = pos.shape[0]
+        J_union = np.zeros((batch, 6, union_n_opt))
+        J_union[:, :, mapping] = J_opt
+        return J_union, pos, rot
+
+    def solve(target_positions_list, target_rotations_list,
+              initial_angles=None,
+              max_iterations=30,
+              damping=0.01,
+              pos_threshold=0.001,
+              rot_threshold=0.1,
+              position_masks=True,
+              rotation_masks=True,
+              rotation_mirrors=None,
+              task_weights=None,
+              attempts_per_pose=1,
+              use_current_angles=True,
+              select_closest_to_initial=False,
+              **kwargs):
+        """Solve multi-EE batch IK.
+
+        Parameters
+        ----------
+        target_positions_list : list of array-like
+            ``target_positions_list[t]`` has shape ``(N, 3)`` for task t.
+        target_rotations_list : list of array-like
+            ``target_rotations_list[t]`` has shape ``(N, 3, 3)``.
+        initial_angles : np.ndarray, optional
+            Either ``(n_targets, union_n_opt)`` or ``(union_n_opt,)``. If
+            None, random within union joint limits.
+        max_iterations : int
+        damping : float
+        pos_threshold, rot_threshold : float
+            Per-task thresholds used for success determination. A solve is
+            successful when **all** tasks meet their thresholds.
+        position_masks, rotation_masks : bool | str | list | per-task list
+            If a single mask, applied to all tasks. If list with length
+            n_tasks, per-task masks.
+        rotation_mirrors : None | str | list
+        task_weights : None | array-like of length n_tasks
+            Per-task weights. Default uniform 1.0.
+        attempts_per_pose, use_current_angles, select_closest_to_initial :
+            As in single-EE solvers.
+
+        Returns
+        -------
+        solutions : np.ndarray
+            Shape ``(n_targets, union_n_opt)``. Maps back to the robot's full
+            angle vector via ``union_joint_refs``.
+        success : np.ndarray of bool
+            Shape ``(n_targets,)``.
+        errors : np.ndarray
+            Shape ``(n_targets,)`` - weighted combined error across tasks.
+        """
+        # Normalize inputs to arrays.
+        target_pos_arrays = [
+            np.asarray(tp, dtype=np.float64) for tp in target_positions_list]
+        target_rot_arrays = [
+            np.asarray(tr, dtype=np.float64) for tr in target_rotations_list]
+        if len(target_pos_arrays) != n_tasks:
+            raise ValueError(
+                "target_positions_list length {} does not match n_tasks={}"
+                .format(len(target_pos_arrays), n_tasks))
+        n_targets = target_pos_arrays[0].shape[0]
+        for t in range(n_tasks):
+            if target_pos_arrays[t].shape != (n_targets, 3):
+                raise ValueError(
+                    "target_positions_list[{}] must be shape (N, 3), got {}"
+                    .format(t, target_pos_arrays[t].shape))
+            if target_rot_arrays[t].shape != (n_targets, 3, 3):
+                raise ValueError(
+                    "target_rotations_list[{}] must be shape (N, 3, 3), got {}"
+                    .format(t, target_rot_arrays[t].shape))
+
+        # Per-task masks. Treat as per-task when ``val`` is a list of length
+        # n_tasks AND is not interpretable as a single 3-axis mask. A flat
+        # list of 3 scalar bools/ints when n_tasks == 3 is ambiguous; we
+        # favor the single-mask interpretation for back-compat and require
+        # callers to wrap per-task masks in a nested list in that case.
+        _scalar_types = (
+            bool, int, float, np.integer, np.floating, np.bool_)
+
+        def _to_per_task(val, default):
+            if val is None:
+                return [default] * n_tasks
+            if isinstance(val, list) and len(val) == n_tasks:
+                if n_tasks == 3 and all(
+                        isinstance(v, _scalar_types) for v in val):
+                    # Looks like a single 3-axis mask; broadcast to tasks.
+                    return [val] * n_tasks
+                return list(val)
+            return [val] * n_tasks
+        pos_masks_per_task = _to_per_task(position_masks, True)
+        rot_masks_per_task = _to_per_task(rotation_masks, True)
+        if rotation_mirrors is None:
+            rot_mirrors_per_task = [None] * n_tasks
+        elif (isinstance(rotation_mirrors, list)
+              and len(rotation_mirrors) == n_tasks):
+            rot_mirrors_per_task = list(rotation_mirrors)
+        else:
+            rot_mirrors_per_task = [rotation_mirrors] * n_tasks
+
+        pos_mask_arrs = [normalize_axis_mask(m) for m in pos_masks_per_task]
+        rot_mask_arrs = [normalize_axis_mask(m) for m in rot_masks_per_task]
+        mirror_rots = [
+            _create_mirror_rotation_matrix(m) for m in rot_mirrors_per_task]
+
+        # Task weights
+        if task_weights is None:
+            weights = np.ones(n_tasks, dtype=np.float64)
+        else:
+            weights = np.asarray(task_weights, dtype=np.float64)
+            if weights.shape != (n_tasks,):
+                raise ValueError(
+                    "task_weights must have shape ({},), got {}"
+                    .format(n_tasks, weights.shape))
+            if np.any(weights < 0):
+                raise ValueError("task_weights must be non-negative")
+        sqrt_weights = np.sqrt(weights)
+
+        # Per-task active rows
+        active_rows_per_task = []
+        for t in range(n_tasks):
+            rows = []
+            pm = pos_mask_arrs[t]
+            rm = rot_mask_arrs[t]
+            if np.sum(pm) > 0:
+                for i in range(3):
+                    if pm[i] > 0:
+                        rows.append(i)
+            if np.sum(rm) > 0:
+                rows.extend([3, 4, 5])
+            active_rows_per_task.append(np.array(rows, dtype=np.int32))
+
+        # A task contributes to the DLS update only when it has both active
+        # rows and a non-zero weight. Zero-weight tasks are retained for
+        # success bookkeeping but skipped during optimization.
+        contributes = np.array(
+            [len(active_rows_per_task[t]) > 0 and weights[t] > 0
+             for t in range(n_tasks)], dtype=bool)
+        total_active = int(sum(
+            len(active_rows_per_task[t])
+            for t in range(n_tasks) if contributes[t]))
+        if total_active == 0:
+            raise ValueError(
+                "Multi-EE batch IK has no active, non-zero-weight tasks "
+                "to solve: every task is either fully masked out or has "
+                "task_weight == 0.")
+
+        damping_eye = damping * np.eye(total_active)
+
+        # Handle attempts_per_pose
+        if attempts_per_pose > 1:
+            target_pos_expanded = [
+                np.repeat(tp, attempts_per_pose, axis=0)
+                for tp in target_pos_arrays]
+            target_rot_expanded = [
+                np.repeat(tr, attempts_per_pose, axis=0)
+                for tr in target_rot_arrays]
+            n_expanded = n_targets * attempts_per_pose
+            if initial_angles is not None and use_current_angles:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                init_opt = np.zeros((n_expanded, union_n_opt))
+                for it in range(n_targets):
+                    init_opt[it * attempts_per_pose] = init_angles[it]
+                    for a in range(1, attempts_per_pose):
+                        idx = it * attempts_per_pose + a
+                        init_opt[idx] = np.random.uniform(
+                            joint_limits_lower, joint_limits_upper)
+            else:
+                init_opt = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper,
+                    (n_expanded, union_n_opt))
+        else:
+            target_pos_expanded = target_pos_arrays
+            target_rot_expanded = target_rot_arrays
+            n_expanded = n_targets
+            if initial_angles is not None:
+                init_angles = np.asarray(initial_angles)
+                if init_angles.ndim == 1:
+                    init_angles = np.tile(init_angles, (n_targets, 1))
+                if init_angles.shape != (n_targets, union_n_opt):
+                    raise ValueError(
+                        "initial_angles must have shape ({}, {}), got {}"
+                        .format(n_targets, union_n_opt, init_angles.shape))
+                init_opt = init_angles.copy()
+            else:
+                init_opt = np.random.uniform(
+                    joint_limits_lower, joint_limits_upper,
+                    (n_expanded, union_n_opt))
+
+        opt_angles = init_opt.copy()
+
+        def _compute_task_err(rot, pos, target_pos, target_rot, pos_mask,
+                              rot_mask, mirror_rot):
+            """Compute 6D error (batch, 6) for one task at world frame."""
+            pos_err = (target_pos - pos) * pos_mask
+            has_rot = np.sum(rot_mask) > 0
+            if has_rot:
+                rot_T = np.transpose(rot, axes=(0, 2, 1))
+                r_diff = np.matmul(rot_T, target_rot)
+                rot_err_local = 0.5 * np.stack([
+                    r_diff[:, 2, 1] - r_diff[:, 1, 2],
+                    r_diff[:, 0, 2] - r_diff[:, 2, 0],
+                    r_diff[:, 1, 0] - r_diff[:, 0, 1]
+                ], axis=1)
+                if mirror_rot is not None:
+                    target_rot_m = target_rot @ mirror_rot
+                    r_diff_m = np.matmul(rot_T, target_rot_m)
+                    rot_err_local_m = 0.5 * np.stack([
+                        r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
+                        r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
+                        r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
+                    ], axis=1)
+                    frob_direct = np.sum((target_rot - rot) ** 2, axis=(1, 2))
+                    frob_mirror = np.sum(
+                        (target_rot_m - rot) ** 2, axis=(1, 2))
+                    use_mirror = (frob_mirror < 0.8 * frob_direct)[:, None]
+                    rot_err_local = np.where(
+                        use_mirror, rot_err_local_m, rot_err_local)
+                rot_err_local *= rot_mask
+                rot_err_world = np.einsum('bij,bj->bi', rot, rot_err_local)
+            else:
+                rot_err_world = np.zeros_like(pos_err)
+            return np.concatenate([pos_err, rot_err_world], axis=1)
+
+        # Main DLS iteration
+        for _iter in range(max_iterations):
+            J_rows = []
+            err_rows = []
+            for t in range(n_tasks):
+                if not contributes[t]:
+                    continue
+                J_union_t, pos_t, rot_t = _compute_task_jacobian_and_pose(
+                    opt_angles, task_info[t])
+                full_err_t = _compute_task_err(
+                    rot_t, pos_t,
+                    target_pos_expanded[t], target_rot_expanded[t],
+                    pos_mask_arrs[t], rot_mask_arrs[t], mirror_rots[t])
+                rows_t = active_rows_per_task[t]
+                J_sel = J_union_t[:, rows_t, :]  # (batch, len(rows), union)
+                e_sel = full_err_t[:, rows_t]    # (batch, len(rows))
+                w = sqrt_weights[t]
+                J_rows.append(w * J_sel)
+                err_rows.append(w * e_sel)
+
+            J_stack = np.concatenate(J_rows, axis=1)
+            err_stack = np.concatenate(err_rows, axis=1)
+
+            JJT = np.matmul(
+                J_stack, np.transpose(J_stack, (0, 2, 1))) + damping_eye
+            solved = np.linalg.solve(
+                JJT, err_stack[..., np.newaxis]).squeeze(-1)
+            delta_q = np.einsum('bji,bj->bi', J_stack, solved)
+
+            opt_angles = opt_angles + delta_q
+            opt_angles = np.clip(
+                opt_angles, joint_limits_lower, joint_limits_upper)
+
+        # Final error evaluation per task (unweighted) for success determination
+        pos_errs = np.zeros((n_expanded, n_tasks))
+        rot_errs = np.zeros((n_expanded, n_tasks))
+        combined_weighted = np.zeros(n_expanded)
+        per_task_success = np.ones((n_expanded, n_tasks), dtype=bool)
+        for t in range(n_tasks):
+            info = task_info[t]
+            mapping = info['union_mapping']
+            task_opt = opt_angles[:, mapping]
+            task_full = _expand_task_full_angles(task_opt, info)
+            pos_f, rot_f = forward_kinematics_ee_batched_numpy(
+                task_full, info['fk_params'])
+            pm = pos_mask_arrs[t]
+            rm = rot_mask_arrs[t]
+            mirror_rot = mirror_rots[t]
+            has_pos = np.sum(pm) > 0
+            has_rot = np.sum(rm) > 0
+            if has_pos:
+                pe = np.sqrt(np.sum(
+                    ((target_pos_expanded[t] - pos_f) * pm) ** 2, axis=1))
+            else:
+                pe = np.zeros(n_expanded)
+            if has_rot:
+                rot_T = np.transpose(rot_f, axes=(0, 2, 1))
+                r_diff = np.matmul(rot_T, target_rot_expanded[t])
+                rel = 0.5 * np.stack([
+                    r_diff[:, 2, 1] - r_diff[:, 1, 2],
+                    r_diff[:, 0, 2] - r_diff[:, 2, 0],
+                    r_diff[:, 1, 0] - r_diff[:, 0, 1]
+                ], axis=1) * rm
+                re = np.sqrt(np.sum(rel ** 2, axis=1))
+                if mirror_rot is not None:
+                    target_rot_m = target_rot_expanded[t] @ mirror_rot
+                    r_diff_m = np.matmul(rot_T, target_rot_m)
+                    rel_m = 0.5 * np.stack([
+                        r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
+                        r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
+                        r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
+                    ], axis=1) * rm
+                    re_m = np.sqrt(np.sum(rel_m ** 2, axis=1))
+                    re = np.minimum(re, re_m)
+            else:
+                re = np.zeros(n_expanded)
+            pos_errs[:, t] = pe
+            rot_errs[:, t] = re
+            combined_weighted += weights[t] * (pe + re)
+            if weights[t] == 0:
+                # Zero-weighted tasks do not participate in optimization and
+                # should not gate success either.
+                continue
+            if has_pos and has_rot:
+                per_task_success[:, t] = (
+                    (pe < pos_threshold) & (re < rot_threshold))
+            elif has_pos:
+                per_task_success[:, t] = pe < pos_threshold
+            elif has_rot:
+                per_task_success[:, t] = re < rot_threshold
+            # else: stays True
+
+        success = np.all(per_task_success, axis=1)
+
+        # Attempts-per-pose selection
+        if attempts_per_pose > 1:
+            opt_rs = opt_angles.reshape(n_targets, attempts_per_pose, union_n_opt)
+            success_rs = success.reshape(n_targets, attempts_per_pose)
+            err_rs = combined_weighted.reshape(n_targets, attempts_per_pose)
+            best_idx = np.zeros(n_targets, dtype=np.int32)
+            for i in range(n_targets):
+                if np.any(success_rs[i]):
+                    cands = np.where(success_rs[i])[0]
+                    best_idx[i] = cands[np.argmin(err_rs[i, cands])]
+                else:
+                    best_idx[i] = np.argmin(err_rs[i])
+            solutions_out = opt_rs[np.arange(n_targets), best_idx]
+            success_out = success_rs[np.arange(n_targets), best_idx]
+            errors_out = err_rs[np.arange(n_targets), best_idx]
+            return solutions_out, success_out, errors_out
+
+        return opt_angles, success, combined_weighted
+
+    solve.union_n_opt = union_n_opt
+    solve.joint_limits_lower = joint_limits_lower
+    solve.joint_limits_upper = joint_limits_upper
+    solve.fk_params_list = fk_params_list
+    solve.union_info = union_info
+    solve.n_tasks = n_tasks
+    solve.backend_name = 'numpy'
+    solve.multi_ee = True
 
     return solve
 
@@ -2446,6 +2981,29 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
     import numpy as np
 
     from skrobot.backend import get_backend
+
+    # Detect multi-EE mode: link_list is a list of link_lists and
+    # move_target is a list of end-effector coords (same length).
+    is_multi_ee = (isinstance(link_list, list) and len(link_list) > 0
+                   and isinstance(link_list[0], list))
+    if is_multi_ee:
+        if not (isinstance(move_target, list)
+                and len(move_target) == len(link_list)):
+            raise ValueError(
+                "For multi-EE batch IK, move_target must be a list of the "
+                "same length as link_list (got move_target type "
+                "{} with length {}, link_list length {})"
+                .format(type(move_target).__name__,
+                        len(move_target) if hasattr(move_target, '__len__') else 'N/A',
+                        len(link_list)))
+        fk_params_list = [extract_fk_parameters(robot_model, ll, mt)
+                          for ll, mt in zip(link_list, move_target)]
+        union_info = _build_union_joint_mapping(link_list, fk_params_list)
+        if backend_name == 'numpy':
+            return _create_numpy_multi_ee_solver(fk_params_list, union_info)
+        raise NotImplementedError(
+            "Multi-EE batch IK on backend {!r} is not yet implemented; "
+            "use backend_name='numpy'.".format(backend_name))
 
     # Extract FK parameters
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)

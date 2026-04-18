@@ -2834,17 +2834,39 @@ class RobotModel(CascadedLink):
             else:
                 link_list = list(map(lambda mt: self.link_lists(mt.parent), move_target))
 
-        # Handle single link list (not list of lists) for now
-        if isinstance(link_list, list) and len(link_list) > 0 and isinstance(link_list[0], list):
-            single_link_list = link_list[0]  # Use first link list for batch processing
-        else:
-            single_link_list = link_list
+        # Detect multi-EE. Require BOTH inputs to be matching lists so that
+        # legacy callers passing a single-element list-of-lists with a scalar
+        # move_target still land on the single-EE path. Mismatched lists are
+        # ambiguous and raise an explicit error instead of guessing.
+        link_list_is_nested = (isinstance(link_list, list)
+                               and len(link_list) > 0
+                               and isinstance(link_list[0], list))
+        move_target_is_list = isinstance(move_target, list)
+        if link_list_is_nested and move_target_is_list \
+                and len(move_target) == len(link_list):
+            return self._batch_inverse_kinematics_multi_ee_impl(
+                target_coords, move_target, link_list,
+                rotation_mask, position_mask, rotation_mirror, stop, thre,
+                rthre, initial_angles, alpha, attempts_per_pose,
+                random_initial_range, translation_tolerance,
+                rotation_tolerance, backend=backend, **kwargs)
+        if link_list_is_nested and len(link_list) > 1:
+            raise ValueError(
+                "Ambiguous batch_inverse_kinematics inputs: link_list has {} "
+                "sub-lists but move_target is not a matching list of that "
+                "length. For multi-EE batch IK, pass move_target as a list "
+                "of the same length as link_list.".format(len(link_list)))
+        if link_list_is_nested:
+            # Legacy shorthand: link_list=[[...]] with a scalar or 1-element
+            # move_target means single-EE.
+            link_list = link_list[0]
+        if isinstance(move_target, list) and len(move_target) == 1:
+            move_target = move_target[0]
 
-        # Handle single move_target (not list)
-        if isinstance(move_target, list):
-            single_move_target = move_target[0]
-        else:
-            single_move_target = move_target
+        single_link_list = link_list
+
+        # Single move_target (multi-EE already handled above).
+        single_move_target = move_target
 
         # Convert target_coords to positions (N, 3) and rotation matrices (N, 3, 3)
         if isinstance(target_coords, list) and all(isinstance(coord, Coordinates) for coord in target_coords):
@@ -2988,6 +3010,176 @@ class RobotModel(CascadedLink):
         # Compute attempt counts (backend always uses all attempts, return attempts_per_pose)
         attempt_counts = [attempts_per_pose] * n_poses
 
+        return full_solutions, success_flags, attempt_counts
+
+    @staticmethod
+    def _multi_ee_targets_to_pos_rot(target_coords_for_task):
+        """Convert one task's batch of targets to (pos, rot) arrays.
+
+        Mirrors the conversion used for single-EE batch IK. Accepts:
+        - list of Coordinates objects,
+        - ``np.ndarray`` of shape ``(N, 6)`` (x, y, z, roll, pitch, yaw), or
+        - ``np.ndarray`` of shape ``(N, 7)`` (x, y, z, qw, qx, qy, qz).
+        """
+        tc = target_coords_for_task
+        if isinstance(tc, list) and all(isinstance(c, Coordinates) for c in tc):
+            positions = np.array([c.worldpos() for c in tc])
+            rotations = np.array([c.worldrot() for c in tc])
+            return positions, rotations
+        if isinstance(tc, np.ndarray):
+            if tc.ndim != 2:
+                raise ValueError(
+                    "per-task target_coords must be 2D, got shape {}".format(
+                        tc.shape))
+            if tc.shape[1] == 6:
+                positions = tc[:, :3]
+                quats = np.array([rpy2quaternion(r) for r in tc[:, 3:]])
+                rotations = np.array([quaternion2matrix(q) for q in quats])
+                return positions, rotations
+            if tc.shape[1] == 7:
+                positions = tc[:, :3]
+                rotations = np.array(
+                    [quaternion2matrix(q) for q in tc[:, 3:]])
+                return positions, rotations
+            raise ValueError(
+                "per-task target_coords must have shape (batch, 6) or "
+                "(batch, 7), got {}".format(tc.shape))
+        raise ValueError(
+            "per-task target_coords must be numpy array or list of "
+            "Coordinates objects")
+
+    def _batch_inverse_kinematics_multi_ee_impl(
+            self, target_coords, move_target, link_list,
+            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
+            initial_angles, alpha, attempts_per_pose, random_initial_range,
+            translation_tolerance, rotation_tolerance, backend=None, **kwargs):
+        """Multi-end-effector batch IK.
+
+        ``link_list`` is ``list[list[Link]]`` (one chain per task) and
+        ``move_target`` is ``list[CascadedCoords]`` of the same length.
+        ``target_coords`` must be a list of per-task batches (ndarray or list
+        of Coordinates). All tasks must share the same batch size ``N``.
+
+        Additional kwargs:
+        - ``task_weights``: ``(n_tasks,)`` array-like of per-task weights
+          applied to the stacked DLS residuals. Default: uniform 1.0.
+        """
+        from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        if backend is None:
+            backend = 'numpy'
+        elif backend != 'numpy':
+            warnings.warn(
+                "Multi-EE batch IK currently supports only backend='numpy'; "
+                "falling back from {!r}.".format(backend), RuntimeWarning)
+            backend = 'numpy'
+
+        n_tasks = len(link_list)
+        if not isinstance(move_target, list) or len(move_target) != n_tasks:
+            raise ValueError(
+                "For multi-EE batch IK, move_target must be a list of length "
+                "{}, got {}".format(
+                    n_tasks,
+                    type(move_target).__name__ + (
+                        "(len={})".format(len(move_target))
+                        if isinstance(move_target, list) else "")))
+        if not isinstance(target_coords, list) or len(target_coords) != n_tasks:
+            raise ValueError(
+                "For multi-EE batch IK, target_coords must be a list of "
+                "length {} (one batch per task)".format(n_tasks))
+
+        target_positions_list = []
+        target_rotations_list = []
+        n_poses = None
+        for t, tc in enumerate(target_coords):
+            pos, rot = self._multi_ee_targets_to_pos_rot(tc)
+            if n_poses is None:
+                n_poses = pos.shape[0]
+            elif pos.shape[0] != n_poses:
+                raise ValueError(
+                    "Inconsistent batch sizes across tasks: task 0 has {} "
+                    "poses, task {} has {}".format(
+                        n_poses, t, pos.shape[0]))
+            target_positions_list.append(pos)
+            target_rotations_list.append(rot)
+
+        task_weights = kwargs.pop('task_weights', None)
+
+        # Cached solver keyed by per-task link/move-target identities.
+        cache_key = (
+            tuple(tuple(id(link) for link in ll) for ll in link_list),
+            tuple(id(mt) for mt in move_target),
+            backend,
+        )
+        if not hasattr(self, '_batch_ik_multi_ee_solver_cache'):
+            self._batch_ik_multi_ee_solver_cache = {}
+        if cache_key not in self._batch_ik_multi_ee_solver_cache:
+            self._batch_ik_multi_ee_solver_cache[cache_key] = \
+                create_batch_ik_solver(
+                    self, link_list, move_target, backend_name=backend)
+        solver = self._batch_ik_multi_ee_solver_cache[cache_key]
+
+        union_refs = solver.union_info['union_joint_refs']
+        union_n_opt = solver.union_n_opt
+
+        # Initial angles (in union opt space, not full robot angle vector).
+        use_current_angles = True
+        if initial_angles is None or (
+                isinstance(initial_angles, str) and initial_angles == "random"):
+            initial_angles_for_solver = None
+            use_current_angles = False
+        elif isinstance(initial_angles, str) and initial_angles == "current":
+            current = np.array(
+                [j.joint_angle() for j in union_refs], dtype=np.float64)
+            initial_angles_for_solver = np.tile(current, (n_poses, 1))
+        elif isinstance(initial_angles, np.ndarray):
+            if initial_angles.shape == (n_poses, union_n_opt):
+                initial_angles_for_solver = initial_angles.copy()
+            else:
+                raise ValueError(
+                    "initial_angles for multi-EE must have shape ({}, {}), "
+                    "got {}".format(n_poses, union_n_opt, initial_angles.shape))
+        else:
+            raise ValueError(
+                "initial_angles must be None, 'random', 'current', or "
+                "np.ndarray, got {}".format(type(initial_angles)))
+
+        solver_kwargs = dict(
+            initial_angles=initial_angles_for_solver,
+            max_iterations=stop,
+            damping=0.01,
+            pos_threshold=thre,
+            rot_threshold=rthre,
+            position_masks=position_mask,
+            rotation_masks=rotation_mask,
+            rotation_mirrors=rotation_mirror,
+            task_weights=task_weights,
+            attempts_per_pose=attempts_per_pose,
+            use_current_angles=use_current_angles,
+        )
+
+        solutions_array, success_array, errors_array = solver(
+            target_positions_list, target_rotations_list, **solver_kwargs)
+        solutions_np = np.asarray(solutions_array)
+        success_np = np.asarray(success_array)
+
+        # Map union opt solutions to robot's full angle vector.
+        robot_joint_list = self.joint_list
+        union_to_robot = []  # list of (union_idx, robot_idx)
+        for uidx, joint in enumerate(union_refs):
+            if joint in robot_joint_list:
+                union_to_robot.append((uidx, robot_joint_list.index(joint)))
+
+        full_solutions = []
+        full_av_org = self.angle_vector()
+        for i in range(n_poses):
+            full_av = full_av_org.copy()
+            for uidx, ridx in union_to_robot:
+                full_av[ridx] = solutions_np[i, uidx]
+            full_solutions.append(full_av)
+
+        success_flags = [bool(s) for s in success_np]
+        attempt_counts = [attempts_per_pose] * n_poses
         return full_solutions, success_flags, attempt_counts
 
     def inverse_kinematics_loop(self,
