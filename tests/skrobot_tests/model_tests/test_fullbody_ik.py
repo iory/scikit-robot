@@ -208,3 +208,27 @@ def test_multi_ee_link_list_auto_reorders_to_match_move_target():
     assert l_err_correct < 5e-3
     assert l_err_swapped < 5e-3
     testing.assert_allclose(av_correct, av_swapped, atol=1e-6)
+
+
+def test_multi_ee_reorder_helper_ignores_shared_root_link():
+    """When use_base is active, the virtual-base injection prepends the
+    shared root_link to every sub-chain.  The reorder helper must still
+    produce a unique per-move_target match by ignoring links that appear
+    in more than one chain.
+    """
+    robot = skrobot.models.PR2()
+    base_link = robot.root_link
+    # Simulate what _attach_virtual_base_joint does: prepend root_link
+    # to every arm chain so both sub-lists share the first element.
+    rarm_with_root = [base_link] + robot.rarm.link_list
+    larm_with_root = [base_link] + robot.larm.link_list
+
+    # Pass them in swapped order; helper must still pair rarm->rarm_with_root.
+    reordered = robot._reorder_link_lists_for_move_targets(
+        [larm_with_root, rarm_with_root],
+        [robot.rarm_end_coords, robot.larm_end_coords])
+
+    assert reordered[0] is rarm_with_root, (
+        'rarm_end_coords must pair with the chain containing r_shoulder_pan '
+        'even though both chains share root_link')
+    assert reordered[1] is larm_with_root

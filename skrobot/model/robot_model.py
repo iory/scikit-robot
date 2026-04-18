@@ -167,11 +167,24 @@ class CascadedLink(CascadedCoords):
             return ids
 
         n = len(link_lists)
+        # A link shared across multiple chains (e.g. a virtual base joint
+        # injected by use_base, which prepends root_link to every sub-chain)
+        # cannot discriminate move_targets, so filter those out before
+        # matching.
+        occurrences = {}
+        for ll in link_lists:
+            for link in ll:
+                occurrences[id(link)] = occurrences.get(id(link), 0) + 1
+        unique_link_ids = [
+            {id(link) for link in ll if occurrences[id(link)] == 1}
+            for ll in link_lists
+        ]
+
         matches = []
         for mt in move_targets:
-            anc = ancestor_id_set(mt)
-            candidates = [j for j, ll in enumerate(link_lists)
-                          if any(id(link) in anc for link in ll)]
+            ancestor_ids = ancestor_id_set(mt)
+            candidates = [j for j, ids in enumerate(unique_link_ids)
+                          if ancestor_ids & ids]
             if len(candidates) != 1:
                 return link_lists
             matches.append(candidates[0])
