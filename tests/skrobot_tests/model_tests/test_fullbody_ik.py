@@ -150,3 +150,61 @@ def test_inverse_kinematics_use_base_invalid_raises():
     # Detach must still have run via finally.
     assert robot.root_link.joint is None
     assert robot.root_link.parent_link is None
+
+
+def _run_multi_ee_dual_arm(robot, link_list_order):
+    """Solve the same 2-EE IK with a user-specified ``link_list_order``.
+
+    ``link_list_order`` controls which arm chain is passed as
+    ``link_list[0]`` vs ``link_list[1]``.  ``move_target`` and
+    ``target_coords`` are always in (rarm, larm) order, so the two
+    arguments agree when ``link_list_order == ('rarm', 'larm')`` and
+    disagree when ``('larm', 'rarm')`` — the reorder helper has to fix
+    the latter silently.
+    """
+    robot.reset_manip_pose()  # start from a valid, within-limits pose
+    chains = {'rarm': robot.rarm.link_list, 'larm': robot.larm.link_list}
+    r_goal = Coordinates(
+        pos=robot.rarm_end_coords.worldpos() + np.array([0.02, 0.0, 0.01]))
+    l_goal = Coordinates(
+        pos=robot.larm_end_coords.worldpos() + np.array([0.02, 0.0, 0.01]))
+    mask_pair = [np.array([1, 1, 1]), np.array([1, 1, 1])]
+    zero_mask = [np.array([0, 0, 0]), np.array([0, 0, 0])]
+    robot.inverse_kinematics(
+        target_coords=[r_goal, l_goal],
+        move_target=[robot.rarm_end_coords, robot.larm_end_coords],
+        link_list=[chains[link_list_order[0]], chains[link_list_order[1]]],
+        position_mask=mask_pair,
+        rotation_mask=zero_mask,
+        stop=200, thre=[0.001, 0.001])
+    return robot.angle_vector().copy(), r_goal, l_goal
+
+
+def test_multi_ee_link_list_auto_reorders_to_match_move_target():
+    """Swapping the order of link_list vs move_target must still converge
+    to the same joint configuration — the solver auto-pairs each
+    move_target with its kinematic-chain link_list.
+    """
+    robot_correct = skrobot.models.PR2()
+    av_correct, r_goal, l_goal = _run_multi_ee_dual_arm(
+        robot_correct, ('rarm', 'larm'))
+    r_err_correct = np.linalg.norm(
+        robot_correct.rarm_end_coords.worldpos() - r_goal.worldpos())
+    l_err_correct = np.linalg.norm(
+        robot_correct.larm_end_coords.worldpos() - l_goal.worldpos())
+
+    robot_swapped = skrobot.models.PR2()
+    av_swapped, r_goal_s, l_goal_s = _run_multi_ee_dual_arm(
+        robot_swapped, ('larm', 'rarm'))
+    r_err_swapped = np.linalg.norm(
+        robot_swapped.rarm_end_coords.worldpos() - r_goal_s.worldpos())
+    l_err_swapped = np.linalg.norm(
+        robot_swapped.larm_end_coords.worldpos() - l_goal_s.worldpos())
+
+    assert r_err_correct < 5e-3, (
+        'rarm err with correct order: {}'.format(r_err_correct))
+    assert r_err_swapped < 5e-3, (
+        'rarm err with swapped order: {}'.format(r_err_swapped))
+    assert l_err_correct < 5e-3
+    assert l_err_swapped < 5e-3
+    testing.assert_allclose(av_correct, av_swapped, atol=1e-6)

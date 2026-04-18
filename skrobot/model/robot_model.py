@@ -125,6 +125,73 @@ class CascadedLink(CascadedCoords):
             return self._relevance_predicate_table[key]
         return False
 
+    @staticmethod
+    def _reorder_link_lists_for_move_targets(link_lists, move_targets):
+        """Reorder ``link_lists`` so entry ``i`` is the chain whose kinematic
+        descendants include ``move_targets[i]``.
+
+        Multi-end-effector IK requires ``link_lists[i]`` to correspond to
+        ``move_targets[i]`` because the per-task Jacobian is computed along
+        ``link_lists[i]`` but the position/orientation error is measured on
+        ``move_targets[i]``.  If a caller passes them in different orders
+        the solver silently converges to a wrong joint configuration (the
+        errors get projected through mismatched Jacobians).  Detect this
+        case and fix it automatically, so the caller only has to supply
+        the right *set* of chains and the right *set* of end-effectors.
+
+        A chain matches a move_target when at least one link in the chain
+        appears on the parent path from the move_target back to the root.
+        If the match is ambiguous (more than one candidate chain per
+        move_target, or two move_targets mapping to the same chain) the
+        original ``link_lists`` is returned unchanged so existing
+        validation paths can emit their usual error.
+        """
+        if not isinstance(link_lists, list) or len(link_lists) < 2:
+            return link_lists
+        if (not isinstance(move_targets, list)
+                or len(move_targets) != len(link_lists)):
+            return link_lists
+        if not all(isinstance(ll, list) for ll in link_lists):
+            return link_lists
+
+        def ancestor_id_set(mt):
+            ids = set()
+            cur = mt
+            # Guard against circular parent links (shouldn't happen but we
+            # don't want the helper to hang if the graph is malformed).
+            for _ in range(4096):
+                if cur is None:
+                    break
+                ids.add(id(cur))
+                cur = getattr(cur, 'parent', None)
+            return ids
+
+        n = len(link_lists)
+        matches = []
+        for mt in move_targets:
+            anc = ancestor_id_set(mt)
+            candidates = [j for j, ll in enumerate(link_lists)
+                          if any(id(link) in anc for link in ll)]
+            if len(candidates) != 1:
+                return link_lists
+            matches.append(candidates[0])
+
+        if sorted(matches) != list(range(n)):
+            return link_lists
+        if matches == list(range(n)):
+            return link_lists
+
+        # Debug-level because the reorder is an intentional transparency
+        # feature: callers often pass a fixed link_list while move_target
+        # cycles (e.g. alternating stance/swing), and they should not see a
+        # warning on every step for that legitimate usage.
+        logger.debug(
+            'inverse_kinematics: reordered link_list via kinematic-chain '
+            'membership to match move_target order '
+            '(move_target[i] -> link_list[%s]).',
+            matches)
+        return [link_lists[matches[i]] for i in range(n)]
+
     def _resolve_mask_params(self, position_mask, rotation_mask, rotation_mirror):
         """Resolve mask parameters to normalized format.
 
@@ -891,6 +958,8 @@ class CascadedLink(CascadedCoords):
         if link_list is None or not isinstance(link_list[0], list):
             link_list = [link_list]
         move_target = listify(move_target)
+        link_list = self._reorder_link_lists_for_move_targets(
+            link_list, move_target)
         target_coords = listify(target_coords)
         dif_pos = listify(dif_pos)
         dif_rot = listify(dif_rot)
@@ -1464,6 +1533,14 @@ class CascadedLink(CascadedCoords):
             additional_jacobi = additional_jacobi or []
             additional_vel = additional_vel or []
             target_coords = listify(target_coords)
+            # Re-pair each link_list chain with its corresponding move_target
+            # before deriving anything else (union_link_list, joint_list, etc.)
+            # so the fix takes effect for every downstream path, not just the
+            # per-task Jacobian in inverse_kinematics_loop.
+            if (isinstance(link_list, list) and len(link_list) > 0
+                    and isinstance(link_list[0], list)):
+                link_list = self._reorder_link_lists_for_move_targets(
+                    link_list, listify(move_target))
             if callable(union_link_list):
                 union_link_list = union_link_list(link_list)
             else:
