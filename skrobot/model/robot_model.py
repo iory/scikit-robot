@@ -3120,20 +3120,28 @@ class RobotModel(CascadedLink):
             raise ValueError(
                 f"initial_angles must be None, 'random', 'current', or np.ndarray, got {type(initial_angles)}")
 
-        # Create or retrieve cached backend solver
-        # Cache key: (link_list ids, move_target id, backend)
-        cache_key = (
-            tuple(id(link) for link in single_link_list),
-            id(single_move_target),
-            backend,
-        )
-        if not hasattr(self, '_batch_ik_solver_cache'):
-            self._batch_ik_solver_cache = {}
-        if cache_key not in self._batch_ik_solver_cache:
-            self._batch_ik_solver_cache[cache_key] = create_batch_ik_solver(
+        # Create or retrieve cached backend solver. When use_base attaches
+        # a virtual chain, the fresh Link/Joint objects give unique id()s
+        # every call, so caching would accumulate stale entries without
+        # ever hitting. Bypass the cache in that case.
+        if _base_state is None:
+            cache_key = (
+                tuple(id(link) for link in single_link_list),
+                id(single_move_target),
+                backend,
+            )
+            if not hasattr(self, '_batch_ik_solver_cache'):
+                self._batch_ik_solver_cache = {}
+            if cache_key not in self._batch_ik_solver_cache:
+                self._batch_ik_solver_cache[cache_key] = \
+                    create_batch_ik_solver(
+                        self, single_link_list, single_move_target,
+                        backend_name=backend)
+            solver = self._batch_ik_solver_cache[cache_key]
+        else:
+            solver = create_batch_ik_solver(
                 self, single_link_list, single_move_target,
                 backend_name=backend)
-        solver = self._batch_ik_solver_cache[cache_key]
 
         # Build solver kwargs based on backend
         solver_kwargs = dict(
@@ -3338,18 +3346,25 @@ class RobotModel(CascadedLink):
         task_weights = kwargs.pop('task_weights', None)
 
         # Cached solver keyed by per-task link/move-target identities.
-        cache_key = (
-            tuple(tuple(id(link) for link in ll) for ll in link_list),
-            tuple(id(mt) for mt in move_target),
-            backend,
-        )
-        if not hasattr(self, '_batch_ik_multi_ee_solver_cache'):
-            self._batch_ik_multi_ee_solver_cache = {}
-        if cache_key not in self._batch_ik_multi_ee_solver_cache:
-            self._batch_ik_multi_ee_solver_cache[cache_key] = \
-                create_batch_ik_solver(
-                    self, link_list, move_target, backend_name=backend)
-        solver = self._batch_ik_multi_ee_solver_cache[cache_key]
+        # Bypass the cache when a virtual base chain is attached: its
+        # fresh Link/Joint objects would poison the cache with one-shot
+        # entries (id()s never match again).
+        if _base_state is None:
+            cache_key = (
+                tuple(tuple(id(link) for link in ll) for ll in link_list),
+                tuple(id(mt) for mt in move_target),
+                backend,
+            )
+            if not hasattr(self, '_batch_ik_multi_ee_solver_cache'):
+                self._batch_ik_multi_ee_solver_cache = {}
+            if cache_key not in self._batch_ik_multi_ee_solver_cache:
+                self._batch_ik_multi_ee_solver_cache[cache_key] = \
+                    create_batch_ik_solver(
+                        self, link_list, move_target, backend_name=backend)
+            solver = self._batch_ik_multi_ee_solver_cache[cache_key]
+        else:
+            solver = create_batch_ik_solver(
+                self, link_list, move_target, backend_name=backend)
 
         union_refs = solver.union_info['union_joint_refs']
         union_n_opt = solver.union_n_opt

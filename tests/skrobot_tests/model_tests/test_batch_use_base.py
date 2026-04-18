@@ -160,6 +160,38 @@ def test_batch_use_base_detaches_on_exception():
     assert root_link.joint is orig_joint
 
 
+def test_batch_use_base_does_not_grow_solver_cache():
+    """Repeated use_base calls must not leave stale entries in the solver
+    caches; every call attaches fresh virtual Link/Joint objects whose
+    id()s are unique and would otherwise accumulate forever."""
+    robot = _build_fetch()
+    ee = robot.rarm_end_coords.worldpos()
+    targets = [Coordinates(pos=ee + np.array([0.3, 0.0, 0.0]))]
+
+    def _cache_sizes():
+        return (
+            len(getattr(robot, '_batch_ik_solver_cache', {}) or {}),
+            len(getattr(
+                robot, '_batch_ik_multi_ee_solver_cache', {}) or {}),
+        )
+
+    before = _cache_sizes()
+    for _ in range(3):
+        robot.batch_inverse_kinematics(
+            target_coords=targets,
+            move_target=robot.rarm_end_coords,
+            link_list=robot.rarm.link_list,
+            rotation_mask=False,
+            stop=30, thre=0.02,
+            backend='numpy', initial_angles='current',
+            use_base='planar',
+        )
+    after = _cache_sizes()
+    assert after == before, (
+        "use_base batch IK leaked solver cache entries: {} -> {}".format(
+            before, after))
+
+
 def test_batch_use_base_base_weight_warns():
     """base_weight is accepted but ignored with a RuntimeWarning in 3B."""
     robot = _build_fetch()
