@@ -252,6 +252,36 @@ def test_batch_base_weight_per_axis_discourages_yaw():
             yaw))
 
 
+def test_batch_base_weight_jax_parity_with_numpy():
+    """JAX backend produces equivalent base_weight behavior to NumPy."""
+    try:
+        import jax  # noqa: F401
+    except ImportError:  # pragma: no cover
+        pytest.skip("JAX not installed")
+
+    def _run(backend):
+        robot = skrobot.models.PR2()
+        robot.reset_pose()
+        ee = robot.rarm.end_coords.worldpos()
+        targets = [Coordinates(pos=ee + np.array([0.3, 0.0, 0.0]))]
+        _, base_poses, success, _ = robot.batch_inverse_kinematics(
+            target_coords=targets,
+            move_target=robot.rarm.end_coords,
+            link_list=robot.link_lists(robot.rarm.end_coords.parent),
+            rotation_mask=False,
+            stop=500, thre=0.005,
+            backend=backend, initial_angles='current',
+            use_base='planar', base_weight=0.1,
+        )
+        return base_poses[0].worldpos(), bool(success[0])
+
+    pos_np, ok_np = _run('numpy')
+    pos_jx, ok_jx = _run('jax')
+    assert ok_np and ok_jx
+    # JAX defaults to float32 so expect mm-scale drift at most.
+    np.testing.assert_allclose(pos_jx, pos_np, atol=0.01)
+
+
 def test_batch_base_weight_rejects_nonpositive():
     """base_weight <= 0 raises a clear ValueError."""
     robot = _build_fetch()

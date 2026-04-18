@@ -2430,8 +2430,14 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
 
     def _create_solver_fn(max_iterations, damping, pos_threshold,
                           rot_threshold, pos_mask_arrs, rot_mask_arrs,
-                          rotation_mirrors, task_weights_tuple):
-        """Create a JIT-compiled multi-EE solver for a given configuration."""
+                          rotation_mirrors, task_weights_tuple,
+                          weight_diag_tuple=None):
+        """Create a JIT-compiled multi-EE solver for a given configuration.
+
+        ``weight_diag_tuple`` is either None or a tuple of floats of length
+        ``union_n_opt`` specifying per-opt-variable weights for a weighted
+        DLS ``Δq = W J^T (J W J^T + λI)^-1 e``.
+        """
         # Per-task mask arrays as JAX (static at graph build)
         pos_masks = [jnp.array(m) for m in pos_mask_arrs]
         rot_masks = [jnp.array(m) for m in rot_mask_arrs]
@@ -2491,6 +2497,12 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
         }
 
         damping_eye = damping * jnp.eye(total_active)
+
+        if weight_diag_tuple is None:
+            weight_diag_jax = None
+        else:
+            weight_diag_jax = jnp.array(
+                np.asarray(weight_diag_tuple, dtype=np.float64))
 
         def _compute_task_jac_local(opt_angles_batch, ts):
             """Task-local Jacobian + pose from union opt angles."""
@@ -2628,11 +2640,20 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
                 J_stack = jnp.concatenate(J_rows, axis=1)
                 err_stack = jnp.concatenate(err_rows, axis=1)
 
-                JJT = jnp.matmul(
-                    J_stack, jnp.transpose(J_stack, (0, 2, 1))) + damping_eye
-                solved = jnp.linalg.solve(
-                    JJT, err_stack[..., jnp.newaxis]).squeeze(-1)
-                delta_q = jnp.einsum('bji,bj->bi', J_stack, solved)
+                if weight_diag_jax is None:
+                    JJT = jnp.matmul(
+                        J_stack, jnp.transpose(J_stack, (0, 2, 1))
+                    ) + damping_eye
+                    solved = jnp.linalg.solve(
+                        JJT, err_stack[..., jnp.newaxis]).squeeze(-1)
+                    delta_q = jnp.einsum('bji,bj->bi', J_stack, solved)
+                else:
+                    JW = J_stack * weight_diag_jax
+                    JWJT = jnp.matmul(
+                        JW, jnp.transpose(J_stack, (0, 2, 1))) + damping_eye
+                    solved = jnp.linalg.solve(
+                        JWJT, err_stack[..., jnp.newaxis]).squeeze(-1)
+                    delta_q = jnp.einsum('bji,bj->bi', JW, solved)
                 new_opt = opt_angles + delta_q
                 new_opt = jnp.clip(
                     new_opt, joint_limits_lower, joint_limits_upper)
@@ -2701,6 +2722,7 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
               rotation_masks=True,
               rotation_mirrors=None,
               task_weights=None,
+              joint_weights=None,
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
@@ -2818,18 +2840,35 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
             axis=0)
         init_opt_jax = jnp.array(init_opt.astype(np.float64))
 
+        if joint_weights is None:
+            weight_diag_tuple = None
+        else:
+            weight_diag_arr = np.asarray(joint_weights, dtype=np.float64)
+            if weight_diag_arr.shape != (union_n_opt,):
+                raise ValueError(
+                    "joint_weights must have shape ({},), got {}".format(
+                        union_n_opt, weight_diag_arr.shape))
+            if np.any(weight_diag_arr <= 0):
+                raise ValueError("joint_weights must be strictly positive")
+            if np.allclose(weight_diag_arr, 1.0):
+                weight_diag_tuple = None
+            else:
+                weight_diag_tuple = tuple(float(w) for w in weight_diag_arr)
+
         cache_key = (
             max_iterations, damping, pos_threshold, rot_threshold,
             tuple(tuple(pm) for pm in pos_mask_arrs),
             tuple(tuple(rm) for rm in rot_mask_arrs),
             tuple(rot_mirrors_per_task),
             tuple(float(w) for w in weights),
+            weight_diag_tuple,
         )
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_solver_fn(
                 max_iterations, damping, pos_threshold, rot_threshold,
                 pos_mask_arrs, rot_mask_arrs, rot_mirrors_per_task,
-                tuple(weights.tolist()))
+                tuple(weights.tolist()),
+                weight_diag_tuple=weight_diag_tuple)
         solver_fn = _jit_cache[cache_key]
 
         final_opt, success, combined_err = solver_fn(
@@ -3197,9 +3236,15 @@ def _create_jax_jacobian_solver(fk_params, backend):
     # JIT cache for different parameters
     _jit_cache = {}
 
-    def _create_batched_solver_fn(max_iterations, damping, pos_threshold, rot_threshold,
-                                  pos_mask_arr, rot_mask_arr, rotation_mirror):
-        """Create JIT-compiled batched Jacobian solver using fori_loop."""
+    def _create_batched_solver_fn(max_iterations, damping, pos_threshold,
+                                  rot_threshold, pos_mask_arr, rot_mask_arr,
+                                  rotation_mirror, weight_diag_tuple=None):
+        """Create JIT-compiled batched Jacobian solver using fori_loop.
+
+        ``weight_diag_tuple`` is either None (unweighted DLS) or a tuple
+        of floats of length ``n_opt`` specifying the per-opt-variable
+        weights for a weighted DLS update ``Δq = W J^T (J W J^T + λI)^-1 e``.
+        """
         pos_mask = jnp.array(pos_mask_arr)
         rot_mask = jnp.array(rot_mask_arr)
 
@@ -3224,6 +3269,13 @@ def _create_jax_jacobian_solver(fk_params, backend):
         n_active = len(active_rows)
 
         damping_eye = damping * jnp.eye(n_active)
+
+        # Per-opt-variable weight vector for weighted DLS (None = uniform).
+        if weight_diag_tuple is None:
+            weight_diag_jax = None
+        else:
+            weight_diag_jax = jnp.array(np.asarray(
+                weight_diag_tuple, dtype=np.float64))
 
         # Precompute FK constants as JAX arrays for use inside JIT
         _translations = [jnp.array(fk_params['link_translations'][i])
@@ -3383,12 +3435,21 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 err = full_err[:, active_rows_jax]
                 J = J_opt[:, active_rows_jax, :]
 
-                # Damped least squares: (batch, n_opt)
-                JJT = jnp.matmul(
-                    J, jnp.transpose(J, (0, 2, 1))) + damping_eye
-                solved = jnp.linalg.solve(
-                    JJT, err[..., jnp.newaxis]).squeeze(-1)
-                delta_q = jnp.einsum('bji,bj->bi', J, solved)
+                if weight_diag_jax is None:
+                    # Damped least squares: (batch, n_opt)
+                    JJT = jnp.matmul(
+                        J, jnp.transpose(J, (0, 2, 1))) + damping_eye
+                    solved = jnp.linalg.solve(
+                        JJT, err[..., jnp.newaxis]).squeeze(-1)
+                    delta_q = jnp.einsum('bji,bj->bi', J, solved)
+                else:
+                    # Weighted DLS: Δq = W J^T (J W J^T + λI)^{-1} e.
+                    JW = J * weight_diag_jax
+                    JWJT = jnp.matmul(
+                        JW, jnp.transpose(J, (0, 2, 1))) + damping_eye
+                    solved = jnp.linalg.solve(
+                        JWJT, err[..., jnp.newaxis]).squeeze(-1)
+                    delta_q = jnp.einsum('bji,bj->bi', JW, solved)
 
                 new_opt = opt_angles + delta_q
                 new_opt = jnp.clip(
@@ -3460,6 +3521,7 @@ def _create_jax_jacobian_solver(fk_params, backend):
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
+              joint_weights=None,
               **kwargs):
         """Solve batch IK using Jacobian-based method.
 
@@ -3539,13 +3601,32 @@ def _create_jax_jacobian_solver(fk_params, backend):
         pos_mask_arr = normalize_axis_mask(position_mask)
         rot_mask_arr = normalize_axis_mask(rotation_mask)
 
+        # Resolve optional joint_weights into a hashable tuple; None or
+        # uniform-1 collapses to the unweighted fast path.
+        if joint_weights is None:
+            weight_diag_tuple = None
+        else:
+            weight_diag_arr = np.asarray(joint_weights, dtype=np.float64)
+            if weight_diag_arr.shape != (n_opt,):
+                raise ValueError(
+                    "joint_weights must have shape ({},), got {}".format(
+                        n_opt, weight_diag_arr.shape))
+            if np.any(weight_diag_arr <= 0):
+                raise ValueError("joint_weights must be strictly positive")
+            if np.allclose(weight_diag_arr, 1.0):
+                weight_diag_tuple = None
+            else:
+                weight_diag_tuple = tuple(float(w) for w in weight_diag_arr)
+
         # Get or create JIT-compiled solver
         cache_key = (max_iterations, damping, pos_threshold, rot_threshold,
-                     tuple(pos_mask_arr), tuple(rot_mask_arr), rotation_mirror)
+                     tuple(pos_mask_arr), tuple(rot_mask_arr),
+                     rotation_mirror, weight_diag_tuple)
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_batched_solver_fn(
                 max_iterations, damping, pos_threshold, rot_threshold,
-                pos_mask_arr, rot_mask_arr, rotation_mirror)
+                pos_mask_arr, rot_mask_arr, rotation_mirror,
+                weight_diag_tuple=weight_diag_tuple)
 
         solver_fn = _jit_cache[cache_key]
 
