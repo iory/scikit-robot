@@ -139,6 +139,45 @@ def test_batch_use_base_invalid_raises():
         )
 
 
+def test_batch_virtual_base_chain_graph_consistency():
+    """Attach then detach keeps the kinematic graph consistent even when
+    root_link has a non-None original parent; root_link must not appear
+    in two parents' _child_links simultaneously during the solve."""
+    from skrobot.model.link import Link
+
+    robot = _build_fetch()
+    root_link = robot._find_fullbody_root_link()
+
+    # Give root_link a synthetic original parent with root_link as child
+    # so we can verify the attach helper cleans up that edge and the
+    # detach helper restores it.
+    synthetic_parent = Link(name='_test_synthetic_root_parent')
+    orig_parent = root_link._parent_link
+    root_link._parent_link = synthetic_parent
+    synthetic_parent.add_child_link(root_link)
+
+    try:
+        assert root_link in synthetic_parent._child_links
+        state = robot._attach_batch_virtual_base_chain(
+            'planar', robot.rarm.link_list)
+        # While attached, root_link must not be listed under the original
+        # parent; exactly the new virtual-chain tail should own it.
+        assert root_link not in synthetic_parent._child_links, (
+            "original parent still lists root_link after attach")
+        virtual_tail = state['chain_joints'][-1].parent_link
+        assert root_link in virtual_tail._child_links
+        robot._detach_batch_virtual_base_chain(state)
+        # After detach the original edge is restored and the virtual
+        # chain no longer owns root_link.
+        assert root_link in synthetic_parent._child_links, (
+            "original parent edge not restored after detach")
+        assert root_link._parent_link is synthetic_parent
+    finally:
+        if root_link in synthetic_parent._child_links:
+            synthetic_parent.del_child_link(root_link)
+        root_link._parent_link = orig_parent
+
+
 def test_batch_use_base_detaches_on_exception():
     """An exception inside the solver still detaches the virtual chain."""
     robot = _build_fetch()

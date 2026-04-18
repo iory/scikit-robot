@@ -1133,6 +1133,14 @@ class CascadedLink(CascadedCoords):
             child_link=root_link,
             name='_fullbody_ik_base_joint',
         )
+        # Detach root_link from its original parent's _child_links before
+        # reparenting so the kinematic graph stays consistent (a link must
+        # appear in at most one parent's child list at a time).
+        state['orig_parent_had_child'] = False
+        if state['orig_parent_link'] is not None and root_link in \
+                state['orig_parent_link']._child_links:
+            state['orig_parent_link'].del_child_link(root_link)
+            state['orig_parent_had_child'] = True
         root_link._parent_link = virtual_link
         virtual_link.add_child_link(root_link)
         root_link.joint = virtual_joint
@@ -1168,6 +1176,11 @@ class CascadedLink(CascadedCoords):
         root_link._parent_link = state['orig_parent_link']
         if root_link in virtual_link._child_links:
             virtual_link.del_child_link(root_link)
+        # Restore the original parent -> root_link child edge we removed
+        # during attach, if it existed before.
+        if state.get('orig_parent_had_child') \
+                and state['orig_parent_link'] is not None:
+            state['orig_parent_link'].add_child_link(root_link)
         if self._relevance_predicate_table is not None:
             for key in state['rel_entries']:
                 self._relevance_predicate_table.pop(key, None)
@@ -1264,7 +1277,15 @@ class CascadedLink(CascadedCoords):
             'use_base': use_base,
             'orig_parent_link': root_link._parent_link,
             'orig_joint': root_link.joint,
+            'orig_parent_had_child': False,
         }
+        # Detach root_link from its original parent's child list before
+        # reparenting so the graph stays consistent (a link must appear in
+        # at most one parent's child list at a time).
+        if state['orig_parent_link'] is not None and root_link in \
+                state['orig_parent_link']._child_links:
+            state['orig_parent_link'].del_child_link(root_link)
+            state['orig_parent_had_child'] = True
         root_link._parent_link = chain_joints[-1].parent_link
         root_link.joint = chain_joints[-1]
 
@@ -1304,6 +1325,12 @@ class CascadedLink(CascadedCoords):
             cl = j.child_link
             if cl in pl._child_links:
                 pl.del_child_link(cl)
+        # Restore the original parent -> root_link edge we removed in
+        # attach, if one existed. Placed after chain-teardown so root_link
+        # is only re-added once its virtual-chain parent edge is gone.
+        if state.get('orig_parent_had_child') \
+                and state['orig_parent_link'] is not None:
+            state['orig_parent_link'].add_child_link(root_link)
 
     def inverse_kinematics(
             self,
