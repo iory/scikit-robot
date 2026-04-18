@@ -1172,6 +1172,139 @@ class CascadedLink(CascadedCoords):
             for key in state['rel_entries']:
                 self._relevance_predicate_table.pop(key, None)
 
+    def _attach_batch_virtual_base_chain(self, use_base, link_list):
+        """Inject a chain of single-DoF virtual joints above ``root_link``.
+
+        Unlike :meth:`_attach_virtual_base_joint`, which uses the multi-DoF
+        :class:`PlanarJoint` / :class:`FloatingJoint`, the batch IK solver
+        only supports single-DoF joints. We decompose the virtual base into
+        an equivalent chain of :class:`LinearJoint` and
+        :class:`RotationalJoint` links so ``extract_fk_parameters`` and
+        ``compute_geometric_jacobian_batched_*`` accept it unchanged.
+
+        Chain layouts:
+
+        - ``'planar'``: ``world -> px -> py -> rz -> root`` (3 DoF).
+        - ``'6dof'``:   ``world -> px -> py -> pz -> rx -> ry -> rz ->
+          root`` (6 DoF, body-fixed XYZ-Euler).
+
+        The chain is kinematically equivalent to the corresponding
+        multi-DoF :class:`PlanarJoint` / :class:`FloatingJoint` because
+        subsequent joints in a serial chain operate in the preceding
+        joint's body frame, which reproduces intrinsic-Euler composition.
+        """
+        if use_base == 'planar':
+            specs = [
+                ('lin', 'x'),
+                ('lin', 'y'),
+                ('rot', 'z'),
+            ]
+            n_dof = 3
+        elif use_base == '6dof':
+            specs = [
+                ('lin', 'x'),
+                ('lin', 'y'),
+                ('lin', 'z'),
+                ('rot', 'x'),
+                ('rot', 'y'),
+                ('rot', 'z'),
+            ]
+            n_dof = 6
+        else:
+            raise ValueError(
+                "use_base must be False, 'planar', or '6dof', got %r"
+                % (use_base,))
+
+        root_link = self._find_fullbody_root_link()
+        virtual_world = Link(name='_batch_ik_virtual_world')
+
+        chain_links = []
+        chain_joints = []
+        parent = virtual_world
+        for i, (kind, axis) in enumerate(specs):
+            # The final joint in the chain attaches to the real root_link.
+            if i == len(specs) - 1:
+                child = root_link
+            else:
+                child = Link(name='_batch_ik_virtual_{}_{}'.format(
+                    i, axis))
+                chain_links.append(child)
+            if kind == 'lin':
+                j = LinearJoint(
+                    axis=axis,
+                    parent_link=parent, child_link=child,
+                    name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
+                    min_angle=-np.inf, max_angle=np.inf,
+                )
+            else:
+                j = RotationalJoint(
+                    axis=axis,
+                    parent_link=parent, child_link=child,
+                    name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
+                    min_angle=-np.inf, max_angle=np.inf,
+                )
+            chain_joints.append(j)
+            parent.add_child_link(child)
+            # Wire child -> its joint + parent link (Joint.__init__ records
+            # parent_link/child_link but does not mutate the child's
+            # .joint or ._parent_link fields).
+            if child is not root_link:
+                child.joint = j
+                child._parent_link = parent
+            parent = child
+
+        # The final chain link IS root_link. Its original parent/joint are
+        # snapshotted so we can restore them in detach.
+        state = {
+            'root_link': root_link,
+            'virtual_world': virtual_world,
+            'chain_links': chain_links,
+            'chain_joints': chain_joints,
+            'n_dof': n_dof,
+            'use_base': use_base,
+            'orig_parent_link': root_link._parent_link,
+            'orig_joint': root_link.joint,
+        }
+        root_link._parent_link = chain_joints[-1].parent_link
+        root_link.joint = chain_joints[-1]
+
+        # Prepend the full virtual chain (in kinematic order, excluding
+        # virtual_world which has no joint) to every sub link_list, so the
+        # batch solver's union_link_list sees the virtual joints.
+        virtual_chain_links = chain_links + [root_link]
+        if link_list is None:
+            new_link_list = None
+        else:
+            was_nested = (
+                len(link_list) > 0 and isinstance(link_list[0], list))
+            if was_nested:
+                sub_lists = [list(ll) for ll in link_list]
+            else:
+                sub_lists = [list(link_list)]
+            rewritten = [
+                list(virtual_chain_links)
+                + [lk for lk in ll if lk is not root_link]
+                for ll in sub_lists
+            ]
+            new_link_list = rewritten if was_nested else rewritten[0]
+        state['link_list'] = new_link_list
+        state['virtual_chain_links'] = virtual_chain_links
+        state['was_nested'] = was_nested if link_list is not None else False
+        return state
+
+    def _detach_batch_virtual_base_chain(self, state):
+        """Undo a previous ``_attach_batch_virtual_base_chain`` call."""
+        root_link = state['root_link']
+        root_link._parent_link = state['orig_parent_link']
+        root_link.joint = state['orig_joint']
+        # Break parent/child links within the virtual chain so GC can
+        # reclaim them; joints hold strong refs both ways.
+        for j in state['chain_joints']:
+            pl = j.parent_link
+            cl = j.child_link
+            if cl in pl._child_links:
+                pl.del_child_link(cl)
+
     def inverse_kinematics(
             self,
             target_coords,
@@ -2692,6 +2825,8 @@ class RobotModel(CascadedLink):
             translation_tolerance=None,
             rotation_tolerance=None,
             backend=None,
+            use_base=False,
+            base_weight=None,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -2800,11 +2935,41 @@ class RobotModel(CascadedLink):
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
 
-        return self._batch_inverse_kinematics_impl(
-            target_coords, move_target, link_list,
-            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
-            initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, backend=backend, **kwargs)
+        # Fullbody IK via a virtual base joint chain. When set, returns a
+        # 4-tuple (angle_vectors, base_poses, success_flags, attempts).
+        _base_state = None
+        if use_base:
+            if link_list is None:
+                # Need move_target to derive the default link_list; fall
+                # through to impl which handles that case.
+                resolved_mt = (self.end_coords if move_target is None
+                               else move_target)
+                if isinstance(resolved_mt, list):
+                    link_list = [self.link_lists(mt.parent)
+                                 for mt in resolved_mt]
+                else:
+                    link_list = self.link_lists(resolved_mt.parent)
+            _base_state = self._attach_batch_virtual_base_chain(
+                use_base, link_list)
+            link_list = _base_state['link_list']
+        elif base_weight is not None:
+            warnings.warn(
+                'base_weight is ignored when use_base is False',
+                RuntimeWarning)
+        try:
+            result = self._batch_inverse_kinematics_impl(
+                target_coords, move_target, link_list,
+                rotation_mask, position_mask, rotation_mirror, stop, thre,
+                rthre, initial_angles, alpha, attempts_per_pose,
+                random_initial_range, translation_tolerance,
+                rotation_tolerance, backend=backend,
+                _base_state=_base_state,
+                base_weight=base_weight,
+                **kwargs)
+        finally:
+            if _base_state is not None:
+                self._detach_batch_virtual_base_chain(_base_state)
+        return result
 
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
@@ -2813,6 +2978,15 @@ class RobotModel(CascadedLink):
             translation_tolerance, rotation_tolerance, backend=None, **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        # Fullbody IK state threaded from the public wrapper.
+        _base_state = kwargs.pop('_base_state', None)
+        _base_weight = kwargs.pop('base_weight', None)
+        if _base_state is not None and _base_weight is not None:
+            warnings.warn(
+                'base_weight is not yet wired into batch inverse_kinematics '
+                '(Phase 3C); falling back to uniform base weighting.',
+                RuntimeWarning)
 
         # Auto-select backend: prefer JAX if available, fallback to NumPy
         if backend is None:
@@ -2849,7 +3023,8 @@ class RobotModel(CascadedLink):
                 rotation_mask, position_mask, rotation_mirror, stop, thre,
                 rthre, initial_angles, alpha, attempts_per_pose,
                 random_initial_range, translation_tolerance,
-                rotation_tolerance, backend=backend, **kwargs)
+                rotation_tolerance, backend=backend,
+                _base_state=_base_state, **kwargs)
         if link_list_is_nested and len(link_list) > 1:
             raise ValueError(
                 "Ambiguous batch_inverse_kinematics inputs: link_list has {} "
@@ -3010,7 +3185,54 @@ class RobotModel(CascadedLink):
         # Compute attempt counts (backend always uses all attempts, return attempts_per_pose)
         attempt_counts = [attempts_per_pose] * n_poses
 
+        if _base_state is not None:
+            # Virtual chain joints occupy the first n_dof positions of
+            # single_link_list; their angles in the fk solution vector are
+            # interpreted per use_base to synthesize the per-pose base pose.
+            n_dof = _base_state['n_dof']
+            base_poses = [
+                self._virtual_chain_angles_to_base_pose(
+                    solutions_np[i, :n_dof], _base_state['use_base'])
+                for i in range(n_poses)
+            ]
+            return full_solutions, base_poses, success_flags, attempt_counts
+
         return full_solutions, success_flags, attempt_counts
+
+    @staticmethod
+    def _virtual_chain_angles_to_base_pose(joint_angles, use_base):
+        """Convert virtual-chain joint angles to a world-frame base pose.
+
+        The decomposition in :meth:`_attach_batch_virtual_base_chain` means
+        the per-DoF angles compose exactly like the corresponding
+        :class:`PlanarJoint` / :class:`FloatingJoint` applied to
+        ``default_coords = identity``.
+        """
+        if use_base == 'planar':
+            x, y, yaw = float(joint_angles[0]), float(joint_angles[1]), float(
+                joint_angles[2])
+            cz, sz = np.cos(yaw), np.sin(yaw)
+            rot = np.array(
+                [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+            return Coordinates(pos=np.array([x, y, 0.0]), rot=rot)
+        if use_base == '6dof':
+            x, y, z = (float(joint_angles[0]), float(joint_angles[1]),
+                       float(joint_angles[2]))
+            rx, ry, rz = (float(joint_angles[3]), float(joint_angles[4]),
+                          float(joint_angles[5]))
+            cx, sx = np.cos(rx), np.sin(rx)
+            cy, sy = np.cos(ry), np.sin(ry)
+            cz, sz = np.cos(rz), np.sin(rz)
+            Rx = np.array(
+                [[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+            Ry = np.array(
+                [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+            Rz = np.array(
+                [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+            return Coordinates(
+                pos=np.array([x, y, z]), rot=Rx @ Ry @ Rz)
+        raise ValueError(
+            "Unknown use_base value %r" % (use_base,))
 
     @staticmethod
     def _multi_ee_targets_to_pos_rot(target_coords_for_task):
@@ -3065,6 +3287,14 @@ class RobotModel(CascadedLink):
           applied to the stacked DLS residuals. Default: uniform 1.0.
         """
         from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        _base_state = kwargs.pop('_base_state', None)
+        _base_weight = kwargs.pop('base_weight', None)
+        if _base_state is not None and _base_weight is not None:
+            warnings.warn(
+                'base_weight is not yet wired into batch inverse_kinematics '
+                '(Phase 3C); falling back to uniform base weighting.',
+                RuntimeWarning)
 
         if backend is None:
             from skrobot.pycompat import HAS_JAX
@@ -3190,6 +3420,33 @@ class RobotModel(CascadedLink):
 
         success_flags = [bool(s) for s in success_np]
         attempt_counts = [attempts_per_pose] * n_poses
+
+        if _base_state is not None:
+            # Extract virtual-chain joint angles from the union solution by
+            # looking up each virtual joint in union_refs.
+            n_dof = _base_state['n_dof']
+            chain_joints = _base_state['chain_joints']
+            virtual_union_indices = []
+            for vj in chain_joints:
+                for uidx, ref in enumerate(union_refs):
+                    if ref is vj:
+                        virtual_union_indices.append(uidx)
+                        break
+            if len(virtual_union_indices) != n_dof:
+                raise RuntimeError(
+                    "Failed to locate all virtual-chain joints in union "
+                    "(found {} of {}).".format(
+                        len(virtual_union_indices), n_dof))
+            virtual_idx_arr = np.asarray(virtual_union_indices,
+                                         dtype=np.int64)
+            virtual_angles = solutions_np[:, virtual_idx_arr]
+            base_poses = [
+                self._virtual_chain_angles_to_base_pose(
+                    virtual_angles[i], _base_state['use_base'])
+                for i in range(n_poses)
+            ]
+            return full_solutions, base_poses, success_flags, attempt_counts
+
         return full_solutions, success_flags, attempt_counts
 
     def inverse_kinematics_loop(self,
