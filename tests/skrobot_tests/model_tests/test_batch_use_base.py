@@ -192,19 +192,77 @@ def test_batch_use_base_does_not_grow_solver_cache():
             before, after))
 
 
-def test_batch_use_base_base_weight_warns():
-    """base_weight is accepted but ignored with a RuntimeWarning in 3B."""
+def _pr2_base_displacement(base_weight, dx=0.3):
+    """Solve a +x target on PR2 rarm with the given base_weight and
+    report how much the base moved. PR2's rarm is flexible enough from
+    its reset pose that arm vs. base is genuinely weight-sensitive;
+    Fetch's default pose tucks the arm and skews this test."""
+    robot = skrobot.models.PR2()
+    robot.reset_pose()
+    ee = robot.rarm.end_coords.worldpos()
+    targets = [Coordinates(pos=ee + np.array([dx, 0.0, 0.0]))]
+    _, base_poses, success, _ = robot.batch_inverse_kinematics(
+        target_coords=targets,
+        move_target=robot.rarm.end_coords,
+        link_list=robot.link_lists(robot.rarm.end_coords.parent),
+        rotation_mask=False,
+        stop=500, thre=0.005,
+        backend='numpy', initial_angles='current',
+        use_base='planar', base_weight=base_weight,
+    )
+    return base_poses[0].worldpos(), bool(success[0])
+
+
+def test_batch_base_weight_shifts_effort():
+    """Higher base_weight => base moves more; lower base_weight => less."""
+    pos_heavy, ok_heavy = _pr2_base_displacement(base_weight=0.01)
+    pos_light, ok_light = _pr2_base_displacement(base_weight=10.0)
+    assert ok_heavy and ok_light, (
+        "both solves should succeed; heavy={}, light={}".format(
+            ok_heavy, ok_light))
+    # A "heavy" base (weight << 1) makes the base barely move; a "light"
+    # base (weight >> 1) makes the base do most of the work. Expect a
+    # sizeable gap on the same 30 cm target.
+    assert pos_light[0] > pos_heavy[0] + 0.1, (
+        "expected light-base to travel further than heavy-base; "
+        "heavy_x={:.3f}, light_x={:.3f}".format(pos_heavy[0], pos_light[0]))
+
+
+def test_batch_base_weight_per_axis_discourages_yaw():
+    """Per-axis base_weight [1, 1, 0.01] discourages base yaw rotation."""
     robot = _build_fetch()
     ee = robot.rarm_end_coords.worldpos()
-    targets = [Coordinates(pos=ee + np.array([0.5, 0, 0]))]
+    # Off-axis target makes yaw attractive to the solver.
+    targets = [Coordinates(pos=ee + np.array([0.4, 0.3, 0.0]))]
+    solutions, base_poses, success, _ = robot.batch_inverse_kinematics(
+        target_coords=targets,
+        move_target=robot.rarm_end_coords,
+        link_list=robot.rarm.link_list,
+        rotation_mask=False,
+        stop=200, thre=0.01,
+        backend='numpy', initial_angles='current',
+        use_base='planar', base_weight=[1.0, 1.0, 0.01],
+    )
+    assert success[0]
+    # Extract yaw from base pose rotation (planar → rotation is Rz(yaw)).
+    rot = base_poses[0].worldrot()
+    yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
+    assert abs(yaw) < 0.05, (
+        "expected near-zero yaw under heavy yaw weighting, got {}".format(
+            yaw))
 
-    with pytest.warns(RuntimeWarning, match="base_weight"):
+
+def test_batch_base_weight_rejects_nonpositive():
+    """base_weight <= 0 raises a clear ValueError."""
+    robot = _build_fetch()
+    ee = robot.rarm_end_coords.worldpos()
+    targets = [Coordinates(pos=ee + np.array([0.4, 0, 0]))]
+    with pytest.raises(ValueError, match="base_weight"):
         robot.batch_inverse_kinematics(
             target_coords=targets,
             move_target=robot.rarm_end_coords,
             link_list=robot.rarm.link_list,
             rotation_mask=False,
-            stop=50, thre=0.01,
-            backend='numpy', initial_angles='current',
-            use_base='planar', base_weight=0.1,
+            stop=30, backend='numpy', initial_angles='current',
+            use_base='planar', base_weight=0.0,
         )

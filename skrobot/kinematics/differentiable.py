@@ -1529,6 +1529,7 @@ def _create_numpy_optimized_solver(fk_params):
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
+              joint_weights=None,
               **kwargs):
         """Solve batch IK using Jacobian-based damped least-squares in NumPy.
 
@@ -1548,6 +1549,12 @@ def _create_numpy_optimized_solver(fk_params):
             Position error threshold for success.
         rot_threshold : float
             Rotation error threshold for success.
+        joint_weights : array-like of shape (n_opt,), optional
+            Per-opt-variable weights in the damped least-squares update.
+            Larger entries make the corresponding opt variable "lighter"
+            (preferred for motion); smaller entries make it "heavier"
+            (discouraged). None (default) is uniform weighting (identity).
+            Applied as ``δq = W J^T (J W J^T + λI)^{-1} e``.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as JAX solver.
         """
@@ -1629,6 +1636,20 @@ def _create_numpy_optimized_solver(fk_params):
         # Precompute damping matrix
         damping_eye = damping * np.eye(n_active)
 
+        # Resolve optional per-opt-variable weights for a weighted DLS.
+        if joint_weights is None:
+            weight_diag = None
+        else:
+            weight_diag = np.asarray(joint_weights, dtype=np.float64)
+            if weight_diag.shape != (n_opt,):
+                raise ValueError(
+                    "joint_weights must have shape ({},), got {}".format(
+                        n_opt, weight_diag.shape))
+            if np.any(weight_diag <= 0):
+                raise ValueError("joint_weights must be strictly positive")
+            if np.allclose(weight_diag, 1.0):
+                weight_diag = None  # identity: fast-path to unweighted
+
         # Jacobian-based damped least-squares optimization loop
         opt_angles = init_opt_angles.copy()
 
@@ -1685,14 +1706,24 @@ def _create_numpy_optimized_solver(fk_params):
             err = full_err[:, active_rows]           # (batch, n_active)
             J = J_opt[:, active_rows, :]             # (batch, n_active, n_opt)
 
-            # Damped least squares: Δq = J^T (J J^T + λI)^{-1} e
-            # (batch, n_active, n_active)
-            JJT = np.matmul(J, np.transpose(J, (0, 2, 1))) + damping_eye
-            # (batch, n_active, 1) -> solve -> (batch, n_active, 1) -> squeeze
-            solved = np.linalg.solve(
-                JJT, err[..., np.newaxis]).squeeze(-1)
-            # (batch, n_opt)
-            delta_q = np.einsum('bji,bj->bi', J, solved)
+            if weight_diag is None:
+                # Damped least squares: Δq = J^T (J J^T + λI)^{-1} e
+                JJT = np.matmul(
+                    J, np.transpose(J, (0, 2, 1))) + damping_eye
+                solved = np.linalg.solve(
+                    JJT, err[..., np.newaxis]).squeeze(-1)
+                delta_q = np.einsum('bji,bj->bi', J, solved)
+            else:
+                # Weighted DLS: Δq = W J^T (J W J^T + λI)^{-1} e, where W
+                # is the diagonal of per-opt-variable weights. Larger W
+                # entries are "lighter" and move more; smaller entries
+                # are "heavier" and move less.
+                JW = J * weight_diag  # broadcast over columns
+                JWJT = np.matmul(
+                    JW, np.transpose(J, (0, 2, 1))) + damping_eye
+                solved = np.linalg.solve(
+                    JWJT, err[..., np.newaxis]).squeeze(-1)
+                delta_q = np.einsum('bji,bj->bi', JW, solved)
 
             opt_angles = opt_angles + delta_q
             opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
@@ -1901,6 +1932,7 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
               rotation_masks=True,
               rotation_mirrors=None,
               task_weights=None,
+              joint_weights=None,
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
@@ -2045,6 +2077,21 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
             row_ranges[t] = (cursor, cursor + nrows)
             cursor += nrows
 
+        # Per-opt-variable weights for weighted DLS; None skips the fast-
+        # path allocation and uses the plain unweighted update.
+        if joint_weights is None:
+            weight_diag = None
+        else:
+            weight_diag = np.asarray(joint_weights, dtype=np.float64)
+            if weight_diag.shape != (union_n_opt,):
+                raise ValueError(
+                    "joint_weights must have shape ({},), got {}".format(
+                        union_n_opt, weight_diag.shape))
+            if np.any(weight_diag <= 0):
+                raise ValueError("joint_weights must be strictly positive")
+            if np.allclose(weight_diag, 1.0):
+                weight_diag = None
+
         damping_eye = damping * np.eye(total_active)
 
         # Handle attempts_per_pose
@@ -2150,11 +2197,22 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
                 J_stack[:, rs:re_, mapping] = w * J_opt_t[:, rows_t, :]
                 err_stack[:, rs:re_] = w * full_err_t[:, rows_t]
 
-            JJT = np.matmul(
-                J_stack, np.transpose(J_stack, (0, 2, 1))) + damping_eye
-            solved = np.linalg.solve(
-                JJT, err_stack[..., np.newaxis]).squeeze(-1)
-            delta_q = np.einsum('bji,bj->bi', J_stack, solved)
+            if weight_diag is None:
+                JJT = np.matmul(
+                    J_stack, np.transpose(J_stack, (0, 2, 1))) + damping_eye
+                solved = np.linalg.solve(
+                    JJT, err_stack[..., np.newaxis]).squeeze(-1)
+                delta_q = np.einsum('bji,bj->bi', J_stack, solved)
+            else:
+                # Weighted DLS: Δq = W J^T (J W J^T + λI)^{-1} e. JW
+                # column-scales J_stack by weight_diag; J^T @ y then
+                # equals (JW)^T @ y applied via einsum below.
+                JW = J_stack * weight_diag
+                JWJT = np.matmul(
+                    JW, np.transpose(J_stack, (0, 2, 1))) + damping_eye
+                solved = np.linalg.solve(
+                    JWJT, err_stack[..., np.newaxis]).squeeze(-1)
+                delta_q = np.einsum('bji,bj->bi', JW, solved)
 
             opt_angles = opt_angles + delta_q
             opt_angles = np.clip(

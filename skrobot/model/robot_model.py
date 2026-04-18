@@ -2982,11 +2982,6 @@ class RobotModel(CascadedLink):
         # Fullbody IK state threaded from the public wrapper.
         _base_state = kwargs.pop('_base_state', None)
         _base_weight = kwargs.pop('base_weight', None)
-        if _base_state is not None and _base_weight is not None:
-            warnings.warn(
-                'base_weight is not yet wired into batch inverse_kinematics '
-                '(Phase 3C); falling back to uniform base weighting.',
-                RuntimeWarning)
 
         # Auto-select backend: prefer JAX if available, fallback to NumPy
         if backend is None:
@@ -3157,6 +3152,26 @@ class RobotModel(CascadedLink):
         )
         solver_kwargs['damping'] = 0.01
 
+        # Build per-opt-variable weights when use_base + base_weight is
+        # active. The virtual chain joints are always the leading non-mimic
+        # entries of link_list (see _attach_batch_virtual_base_chain), so
+        # they occupy opt indices 0..n_dof-1 in the single-EE solver.
+        if _base_state is not None and _base_weight is not None:
+            n_dof = _base_state['n_dof']
+            base_weight_vec = np.broadcast_to(
+                np.asarray(_base_weight, dtype=np.float64),
+                (n_dof,)).copy()
+            if np.any(base_weight_vec <= 0):
+                raise ValueError(
+                    "base_weight must be strictly positive")
+            n_opt = solver.fk_params['n_joints'] - int(
+                np.sum(np.asarray(
+                    solver.fk_params.get(
+                        'mimic_parent_indices', np.array([-1])) >= 0)))
+            joint_weights = np.ones(n_opt, dtype=np.float64)
+            joint_weights[:n_dof] = base_weight_vec
+            solver_kwargs['joint_weights'] = joint_weights
+
         solutions_array, success_array, errors_array = solver(
             target_positions,
             target_rotations,
@@ -3298,11 +3313,6 @@ class RobotModel(CascadedLink):
 
         _base_state = kwargs.pop('_base_state', None)
         _base_weight = kwargs.pop('base_weight', None)
-        if _base_state is not None and _base_weight is not None:
-            warnings.warn(
-                'base_weight is not yet wired into batch inverse_kinematics '
-                '(Phase 3C); falling back to uniform base weighting.',
-                RuntimeWarning)
 
         if backend is None:
             from skrobot.pycompat import HAS_JAX
@@ -3404,6 +3414,38 @@ class RobotModel(CascadedLink):
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
         )
+
+        # Per-union-variable weights when use_base + base_weight is set.
+        # The virtual chain joints always end up at the leading union
+        # indices (first task to register them owns 0..n_dof-1 and later
+        # tasks map to the same slots).
+        if _base_state is not None and _base_weight is not None:
+            n_dof = _base_state['n_dof']
+            base_weight_vec = np.broadcast_to(
+                np.asarray(_base_weight, dtype=np.float64),
+                (n_dof,)).copy()
+            if np.any(base_weight_vec <= 0):
+                raise ValueError("base_weight must be strictly positive")
+            union_n_opt = solver.union_n_opt
+            joint_weights = np.ones(union_n_opt, dtype=np.float64)
+            # Locate each virtual-chain joint in union_refs (they should
+            # be at the beginning, but look them up explicitly rather
+            # than assuming the position).
+            chain_joints = _base_state['chain_joints']
+            located = []
+            for vj in chain_joints:
+                for uidx, ref in enumerate(union_refs):
+                    if ref is vj:
+                        located.append(uidx)
+                        break
+            if len(located) != n_dof:
+                raise RuntimeError(
+                    "could not locate all virtual-chain joints in union "
+                    "for base_weight wiring ({} of {})".format(
+                        len(located), n_dof))
+            joint_weights[np.asarray(located, dtype=np.int64)] = (
+                base_weight_vec)
+            solver_kwargs['joint_weights'] = joint_weights
 
         solutions_array, success_array, errors_array = solver(
             target_positions_list, target_rotations_list, **solver_kwargs)
