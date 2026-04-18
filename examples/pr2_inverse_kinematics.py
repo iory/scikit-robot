@@ -143,6 +143,108 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     print("=" * 60)
 
 
+def demonstrate_fullbody_ik(robot_model, link_list, viewer,
+                            no_ik_visualization):
+    """Demonstrate fullbody IK (use_base) reaching a target that is
+    out of arm range without moving the mobile base."""
+    print("\n" + "=" * 60)
+    print("Fullbody IK: reaching a far target by moving the base")
+    print("=" * 60)
+
+    # Reset to a clean pose so the demo starts deterministic.
+    robot_model.reset_pose()
+    viewer.redraw()
+
+    ee_pos0 = robot_model.right_arm_end_coords.worldpos().copy()
+    base_pos0 = robot_model.root_link.worldpos().copy()
+
+    # Target 0.8 m forward from the current end-effector pose — beyond
+    # the right arm's reach without base motion.
+    far_target_pos = ee_pos0 + np.array([0.8, 0.0, 0.0])
+    far_target = skrobot.coordinates.Coordinates(far_target_pos, [0, 0, 0])
+    print("Far target position: {}".format(far_target_pos))
+    print("Initial base position: {}".format(base_pos0))
+
+    far_target_axis = skrobot.model.Axis(
+        axis_radius=0.012,
+        axis_length=0.18,
+        pos=far_target.translation,
+        rot=far_target.rotation,
+    )
+    far_target_axis.set_color([255, 128, 0])  # orange
+    viewer.add(far_target_axis)
+    viewer.redraw()
+
+    # 1) Arm-only IK — expected to fail because target is out of reach.
+    print("\n1. Arm-only IK (use_base=False):")
+    result_armonly = robot_model.inverse_kinematics(
+        far_target,
+        link_list=link_list,
+        move_target=robot_model.right_arm_end_coords,
+        rotation_mask=False,
+        stop=100,
+    )
+    success_armonly = result_armonly is not False \
+        and result_armonly is not None
+    ee_armonly = robot_model.right_arm_end_coords.worldpos()
+    err_armonly = np.linalg.norm(ee_armonly - far_target_pos)
+    print("   Result: {}".format(
+        "Success" if success_armonly else "Failed"))
+    print("   End-effector position: {}".format(ee_armonly))
+    print("   Distance to target: {:.3f}m".format(err_armonly))
+
+    # Reset between attempts.
+    robot_model.reset_pose()
+    viewer.redraw()
+
+    # 2) Fullbody IK with planar base — base translates/rotates on
+    # the ground so the arm can reach.
+    print("\n2. Fullbody IK (use_base='planar'):")
+    if not no_ik_visualization:
+        with ik_visualization(viewer, sleep_time=0.5):
+            result_fullbody = robot_model.inverse_kinematics(
+                far_target,
+                link_list=link_list,
+                move_target=robot_model.right_arm_end_coords,
+                rotation_mask=False,
+                stop=100,
+                use_base='planar',
+            )
+    else:
+        result_fullbody = robot_model.inverse_kinematics(
+            far_target,
+            link_list=link_list,
+            move_target=robot_model.right_arm_end_coords,
+            rotation_mask=False,
+            stop=100,
+            use_base='planar',
+        )
+    success_fullbody = result_fullbody is not False \
+        and result_fullbody is not None
+    ee_fullbody = robot_model.right_arm_end_coords.worldpos()
+    base_fullbody = robot_model.root_link.worldpos()
+    err_fullbody = np.linalg.norm(ee_fullbody - far_target_pos)
+    base_moved = np.linalg.norm(base_fullbody - base_pos0)
+    print("   Result: {}".format(
+        "Success" if success_fullbody else "Failed"))
+    print("   End-effector position: {}".format(ee_fullbody))
+    print("   Distance to target: {:.3f}m".format(err_fullbody))
+    print("   Base moved by: {:.3f}m".format(base_moved))
+
+    viewer.redraw()
+    print("\n" + "-" * 50)
+    print("Comparison:")
+    print("   Arm-only distance to target: {:.3f}m".format(err_armonly))
+    print("   Fullbody  distance to target: {:.3f}m".format(err_fullbody))
+    if err_fullbody < err_armonly:
+        print("   [OK] Fullbody IK reached the target by moving the base.")
+    print("\n" + "=" * 60)
+    print("VISUALIZATION LEGEND (fullbody demo):")
+    print("=" * 60)
+    print("Orange coordinate frame: Far target (out of arm-only reach)")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Simple PR2 inverse kinematics example.')
@@ -164,6 +266,11 @@ def main():
         '--skip-revert-demo',
         action='store_true',
         help="Skip the revert_if_fail demonstration"
+    )
+    parser.add_argument(
+        '--skip-fullbody-demo',
+        action='store_true',
+        help="Skip the fullbody IK (use_base) demonstration"
     )
     parser.add_argument(
         '--translation-tolerance', '--translation_tolerance',
@@ -263,6 +370,11 @@ def main():
     if not args.skip_revert_demo:
         demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
                                    args.no_ik_visualization)
+
+    # Demonstrate fullbody IK with a far target
+    if not args.skip_fullbody_demo:
+        demonstrate_fullbody_ik(robot_model, link_list, viewer,
+                                args.no_ik_visualization)
 
     if not args.no_interactive:
         print('==> Press [q] to close window')

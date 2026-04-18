@@ -31,9 +31,11 @@ from skrobot.coordinates.math import select_by_mask
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import FixedJoint
+from skrobot.model.joint import FloatingJoint
 from skrobot.model.joint import joint_angle_limit_nspace
 from skrobot.model.joint import joint_angle_limit_weight
 from skrobot.model.joint import LinearJoint
+from skrobot.model.joint import PlanarJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
@@ -1090,6 +1092,86 @@ class CascadedLink(CascadedCoords):
                     ret=ret,
                     **kwargs)
 
+    def _find_fullbody_root_link(self):
+        root_link = getattr(self, 'root_link', None)
+        if root_link is not None:
+            return root_link
+        for link in self.link_list:
+            if link.parent_link is None:
+                return link
+        raise RuntimeError(
+            'Cannot determine root_link for fullbody IK; '
+            'set self.root_link or ensure one link has no parent_link.')
+
+    def _attach_virtual_base_joint(self, use_base, link_list):
+        """Inject a temporary virtual joint above root_link so IK can
+        solve for the base pose as additional DoFs.
+
+        Returns a state dict used by _detach_virtual_base_joint to
+        undo the injection, and the rewritten link_list that contains
+        root_link at the head of every sub-chain.
+        """
+        if use_base == 'planar':
+            joint_cls = PlanarJoint
+        elif use_base == '6dof':
+            joint_cls = FloatingJoint
+        else:
+            raise ValueError(
+                "use_base must be False, 'planar', or '6dof', got %r"
+                % (use_base,))
+        root_link = self._find_fullbody_root_link()
+        virtual_link = Link(name='_fullbody_ik_virtual_world')
+        state = {
+            'root_link': root_link,
+            'virtual_link': virtual_link,
+            'orig_parent_link': root_link._parent_link,
+            'orig_joint': root_link.joint,
+            'rel_entries': [],
+        }
+        virtual_joint = joint_cls(
+            parent_link=virtual_link,
+            child_link=root_link,
+            name='_fullbody_ik_base_joint',
+        )
+        root_link._parent_link = virtual_link
+        virtual_link.add_child_link(root_link)
+        root_link.joint = virtual_joint
+        state['virtual_joint'] = virtual_joint
+        # Make _is_relevant(virtual_joint, link) return True for every link
+        # in the robot (the virtual joint sits at the root so it influences
+        # every descendant).
+        if self._relevance_predicate_table is not None:
+            for link in self.link_list:
+                key = (virtual_joint, link)
+                self._relevance_predicate_table[key] = True
+                state['rel_entries'].append(key)
+        # Prepend root_link to every sub link_list so the virtual joint
+        # enters union_link_list and contributes Jacobian columns.
+        if link_list is None:
+            new_link_list = None
+        else:
+            if len(link_list) > 0 and not isinstance(link_list[0], list):
+                sub_lists = [list(link_list)]
+            else:
+                sub_lists = [list(ll) for ll in link_list]
+            new_link_list = [
+                [root_link] + [lk for lk in ll if lk is not root_link]
+                for ll in sub_lists
+            ]
+        state['link_list'] = new_link_list
+        return state
+
+    def _detach_virtual_base_joint(self, state):
+        root_link = state['root_link']
+        virtual_link = state['virtual_link']
+        root_link.joint = state['orig_joint']
+        root_link._parent_link = state['orig_parent_link']
+        if root_link in virtual_link._child_links:
+            virtual_link.del_child_link(root_link)
+        if self._relevance_predicate_table is not None:
+            for key in state['rel_entries']:
+                self._relevance_predicate_table.pop(key, None)
+
     def inverse_kinematics(
             self,
             target_coords,
@@ -1115,6 +1197,8 @@ class CascadedLink(CascadedCoords):
             additional_vel=None,
             translation_tolerance=None,
             rotation_tolerance=None,
+            use_base=False,
+            base_weight=None,
             **kwargs):
         """Solve inverse kinematics to reach target coordinates.
 
@@ -1151,6 +1235,25 @@ class CascadedLink(CascadedCoords):
             Per-axis rotation tolerance from target as
             [roll_tol, pitch_tol, yaw_tol] in radians. If error on an axis
             is within tolerance, it's treated as reached.
+        use_base : False, 'planar', or '6dof'
+            If not False, inject a virtual joint above root_link so
+            fullbody inverse kinematics can solve for the base pose as
+            additional DoFs. 'planar' uses 3 DoF (x, y, yaw), intended
+            for flat-ground mobile bases. '6dof' uses 6 DoF
+            (x, y, z, rx, ry, rz), appropriate for humanoids on uneven
+            terrain when combined with held-fixed end-effectors (feet)
+            as contact constraints. The virtual joint is detached
+            before the call returns.
+        base_weight : float, sequence, or None
+            Per-DoF weighting of the virtual base joint in the weighted
+            SR-inverse. Only meaningful when ``use_base`` is set.
+            ``1.0`` (default when ``use_base`` is set) treats base DoFs
+            the same as arm joints. Values ``< 1.0`` make the base
+            "heavier" and prefer arm motion; values ``> 1.0`` make the
+            base "lighter" and prefer base motion. A sequence of length
+            matching the base joint's DoF (3 for ``'planar'``, 6 for
+            ``'6dof'``) allows per-axis weighting, e.g. ``[1.0, 1.0,
+            0.1]`` for planar to discourage yaw changes.
         **kwargs
             Additional keyword arguments passed to inverse_kinematics_loop.
 
@@ -1179,101 +1282,182 @@ class CascadedLink(CascadedCoords):
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
 
-        additional_jacobi = additional_jacobi or []
-        additional_vel = additional_vel or []
-        target_coords = listify(target_coords)
-        if callable(union_link_list):
-            union_link_list = union_link_list(link_list)
-        else:
-            union_link_list = self.calc_union_link_list(link_list)
-
-        if thre is None:
-            if isinstance(move_target, list):
-                thre = [0.001] * len(move_target)
+        # Inject virtual joint for fullbody IK if requested.
+        _base_state = None
+        if use_base:
+            _base_state = self._attach_virtual_base_joint(use_base, link_list)
+            link_list = _base_state['link_list']
+            base_joint_dof = _base_state['virtual_joint'].joint_dof
+            if base_weight is None:
+                base_weight_vec = np.ones(base_joint_dof, dtype=np.float64)
             else:
-                thre = [0.001]
-        if rthre is None:
-            if isinstance(move_target, list):
-                rthre = [np.deg2rad(1)] * len(move_target)
+                base_weight_vec = np.broadcast_to(
+                    np.asarray(base_weight, dtype=np.float64),
+                    (base_joint_dof,)).copy()
+            existing_awl = list(kwargs.pop('additional_weight_list', []) or [])
+            existing_awl.append((_base_state['root_link'], base_weight_vec))
+            kwargs['additional_weight_list'] = existing_awl
+        elif base_weight is not None:
+            logger.warning(
+                'base_weight is ignored when use_base is False')
+        try:
+            additional_jacobi = additional_jacobi or []
+            additional_vel = additional_vel or []
+            target_coords = listify(target_coords)
+            if callable(union_link_list):
+                union_link_list = union_link_list(link_list)
             else:
-                rthre = [np.deg2rad(1)]
+                union_link_list = self.calc_union_link_list(link_list)
 
-        # store current angle vector
-        joint_list = list(
-            set([l.joint for l in union_link_list] + self.joint_list))
-        if None in joint_list:
-            logger.error('All links in link_list must have a parent joint')
-            return True
-        av0 = [j.joint_angle() for j in joint_list]
-        c0 = None
-        if self.parent is None:
-            c0 = self.copy_worldcoords()
-        success = True
-        # (old-analysis-level (send-all union-link-list :analysis-level))
-        # (send-all union-link-list :analysis-level :coords)
+            if thre is None:
+                if isinstance(move_target, list):
+                    thre = [0.001] * len(move_target)
+                else:
+                    thre = [0.001]
+            if rthre is None:
+                if isinstance(move_target, list):
+                    rthre = [np.deg2rad(1)] * len(move_target)
+                else:
+                    rthre = [np.deg2rad(1)]
 
-        # argument check
-        if link_list is None or move_target is None:
-            logger.error('both :link-list and :move-target required')
-            return True
-        # Check if no constraint at all
-        if np.sum(position_mask) == 0 and np.sum(rotation_mask) == 0:
-            return True
-        if not isinstance(link_list[0], list):
-            link_list = [link_list]
-        move_target = listify(move_target)
-        position_mask = listify(position_mask)
-        rotation_mask = listify(rotation_mask)
-        thre = listify(thre)
-        rthre = listify(rthre)
+            # store current angle vector
+            joint_list = list(
+                set([l.joint for l in union_link_list] + self.joint_list))
+            if None in joint_list:
+                logger.error('All links in link_list must have a parent joint')
+                return True
+            av0 = [j.joint_angle() for j in joint_list]
+            c0 = None
+            if self.parent is None:
+                c0 = self.copy_worldcoords()
+            success = True
+            # (old-analysis-level (send-all union-link-list :analysis-level))
+            # (send-all union-link-list :analysis-level :coords)
 
-        if not (len(position_mask)
-                == len(rotation_mask)
-                == len(move_target)
-                == len(link_list)
-                == len(target_coords)):
-            logger.error('list length differ : position_mask %s'
-                         ', rotation_mask %s, move_target %s '
-                         'link_list %s, target_coords %s',
-                         len(position_mask), len(rotation_mask),
-                         len(move_target), len(link_list), len(target_coords))
-            return False
+            # argument check
+            if link_list is None or move_target is None:
+                logger.error('both :link-list and :move-target required')
+                return True
+            # Check if no constraint at all
+            if np.sum(position_mask) == 0 and np.sum(rotation_mask) == 0:
+                return True
+            if not isinstance(link_list[0], list):
+                link_list = [link_list]
+            move_target = listify(move_target)
+            position_mask = listify(position_mask)
+            rotation_mask = listify(rotation_mask)
+            thre = listify(thre)
+            rthre = listify(rthre)
 
-        if len(additional_jacobi) != len(additional_vel):
-            logger.error('list length differ : additional_jacobi %s, '
-                         'additional_vel %s',
-                         len(additional_jacobi), len(additional_vel))
-            return False
+            if not (len(position_mask)
+                    == len(rotation_mask)
+                    == len(move_target)
+                    == len(link_list)
+                    == len(target_coords)):
+                logger.error('list length differ : position_mask %s'
+                             ', rotation_mask %s, move_target %s '
+                             'link_list %s, target_coords %s',
+                             len(position_mask), len(rotation_mask),
+                             len(move_target), len(link_list), len(target_coords))
+                return False
 
-        tmp_additional_jacobi = map(
-            lambda aj: aj(link_list) if callable(aj) else aj,
-            additional_jacobi)
-        if cog_null_space is None and target_centroid_pos is not None:
-            additional_jacobi_dimension = self.calc_target_axis_dimension(
-                False, cog_translation_axis)
-        else:
-            additional_jacobi_dimension = 0
-        additional_jacobi_dimension += sum(map(lambda aj: (
-            aj(link_list) if callable(aj) else aj).shape[0],
-            tmp_additional_jacobi))
-        ik_args = self.inverse_kinematics_args(
-            union_link_list=union_link_list,
-            position_mask=position_mask,
-            rotation_mask=rotation_mask,
-            # evaluate additional-jacobi function and
-            # calculate row dimension of additional_jacobi
-            additional_jacobi_dimension=additional_jacobi_dimension,
-            **kwargs)
-        # self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset
-        # weight
+            if len(additional_jacobi) != len(additional_vel):
+                logger.error('list length differ : additional_jacobi %s, '
+                             'additional_vel %s',
+                             len(additional_jacobi), len(additional_vel))
+                return False
 
-        # inverse_kinematics loop
-        loop = 0
-        while loop < stop:
-            loop += 1
-            target_coords = list(map(
-                lambda x: x() if callable(x) else x,
-                target_coords))
+            tmp_additional_jacobi = map(
+                lambda aj: aj(link_list) if callable(aj) else aj,
+                additional_jacobi)
+            if cog_null_space is None and target_centroid_pos is not None:
+                additional_jacobi_dimension = self.calc_target_axis_dimension(
+                    False, cog_translation_axis)
+            else:
+                additional_jacobi_dimension = 0
+            additional_jacobi_dimension += sum(map(lambda aj: (
+                aj(link_list) if callable(aj) else aj).shape[0],
+                tmp_additional_jacobi))
+            ik_args = self.inverse_kinematics_args(
+                union_link_list=union_link_list,
+                position_mask=position_mask,
+                rotation_mask=rotation_mask,
+                # evaluate additional-jacobi function and
+                # calculate row dimension of additional_jacobi
+                additional_jacobi_dimension=additional_jacobi_dimension,
+                **kwargs)
+            # self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset
+            # weight
+
+            # inverse_kinematics loop
+            loop = 0
+            while loop < stop:
+                loop += 1
+                target_coords = list(map(
+                    lambda x: x() if callable(x) else x,
+                    target_coords))
+                dif_pos = list(map(lambda mv, tc, pmask:
+                                   mv.difference_position(tc, position_mask=pmask),
+                                   move_target, target_coords, position_mask))
+                dif_rot = list(map(lambda mv, tc, rmask:
+                                   mv.difference_rotation(
+                                       tc, rotation_mask=rmask,
+                                       rotation_mirror=rotation_mirror),
+                                   move_target, target_coords, rotation_mask))
+
+                # Apply translation tolerance in target_coords' local frame
+                # Note: tol > 0 check ensures 0.0 means "no special tolerance"
+                if translation_tolerance is not None:
+                    for i, (mt, tc) in enumerate(zip(move_target, target_coords)):
+                        # Calculate error in target_coords' local frame
+                        world_error = tc.worldpos() - mt.worldpos()
+                        local_error = tc.worldrot().T @ world_error
+                        for axis_idx, tol in enumerate(translation_tolerance):
+                            if tol is not None and tol > 0:
+                                if abs(local_error[axis_idx]) <= tol:
+                                    # Zero out the corresponding dif_pos component
+                                    # dif_pos is in move_target's frame, so transform
+                                    target_axis_in_mt = mt.worldrot().T @ tc.worldrot()[:, axis_idx]
+                                    dif_pos[i] -= (dif_pos[i] @ target_axis_in_mt) * target_axis_in_mt
+
+                # Apply rotation tolerance: if error is within tolerance,
+                # treat as reached (set dif to 0)
+                if rotation_tolerance is not None:
+                    for i, dr in enumerate(dif_rot):
+                        for axis_idx, tol in enumerate(rotation_tolerance):
+                            if tol is not None and tol > 0 and abs(dr[axis_idx]) <= tol:
+                                dif_rot[i][axis_idx] = 0.0
+
+                if loop == 1 and self.ik_convergence_check(
+                        dif_pos, dif_rot, thre, rthre):
+                    success = 'ik-succeed'
+                    break
+
+                success = self.inverse_kinematics_loop(
+                    dif_pos, dif_rot,
+                    target_coords=target_coords,
+                    periodic_time=periodic_time,
+                    stop=stop,
+                    loop=loop,
+                    position_mask=position_mask,
+                    rotation_mask=rotation_mask,
+                    rotation_mirror=rotation_mirror,
+                    move_target=move_target,
+                    link_list=link_list,
+                    union_link_list=union_link_list,
+                    thre=thre,
+                    rthre=rthre,
+                    additional_jacobi=additional_jacobi,
+                    additional_vel=additional_vel,
+                    **ik_args)
+                if success == 'ik-succeed':
+                    break
+
+            if target_centroid_pos is not None:
+                self.update_mass_properties()
+
+            target_coords = list(map(lambda x: x() if callable(x) else x,
+                                     target_coords))
             dif_pos = list(map(lambda mv, tc, pmask:
                                mv.difference_position(tc, position_mask=pmask),
                                move_target, target_coords, position_mask))
@@ -1283,86 +1467,27 @@ class CascadedLink(CascadedCoords):
                                    rotation_mirror=rotation_mirror),
                                move_target, target_coords, rotation_mask))
 
-            # Apply translation tolerance in target_coords' local frame
-            # Note: tol > 0 check ensures 0.0 means "no special tolerance"
-            if translation_tolerance is not None:
-                for i, (mt, tc) in enumerate(zip(move_target, target_coords)):
-                    # Calculate error in target_coords' local frame
-                    world_error = tc.worldpos() - mt.worldpos()
-                    local_error = tc.worldrot().T @ world_error
-                    for axis_idx, tol in enumerate(translation_tolerance):
-                        if tol is not None and tol > 0:
-                            if abs(local_error[axis_idx]) <= tol:
-                                # Zero out the corresponding dif_pos component
-                                # dif_pos is in move_target's frame, so transform
-                                target_axis_in_mt = mt.worldrot().T @ tc.worldrot()[:, axis_idx]
-                                dif_pos[i] -= (dif_pos[i] @ target_axis_in_mt) * target_axis_in_mt
+            # success
+            success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
 
-            # Apply rotation tolerance: if error is within tolerance,
-            # treat as reached (set dif to 0)
-            if rotation_tolerance is not None:
-                for i, dr in enumerate(dif_rot):
-                    for axis_idx, tol in enumerate(rotation_tolerance):
-                        if tol is not None and tol > 0 and abs(dr[axis_idx]) <= tol:
-                            dif_rot[i][axis_idx] = 0.0
+            # reset joint angle limit weight
+            self.reset_joint_angle_limit_weight(union_link_list)
 
-            if loop == 1 and self.ik_convergence_check(
-                    dif_pos, dif_rot, thre, rthre):
-                success = 'ik-succeed'
-                break
+            # TODO(add collision check)
+            if success or not revert_if_fail:
+                # Apply joint limit table constraints to ensure
+                # bidirectional dependencies are satisfied
+                return self.apply_joint_limit_table_constraints()
 
-            success = self.inverse_kinematics_loop(
-                dif_pos, dif_rot,
-                target_coords=target_coords,
-                periodic_time=periodic_time,
-                stop=stop,
-                loop=loop,
-                position_mask=position_mask,
-                rotation_mask=rotation_mask,
-                rotation_mirror=rotation_mirror,
-                move_target=move_target,
-                link_list=link_list,
-                union_link_list=union_link_list,
-                thre=thre,
-                rthre=rthre,
-                additional_jacobi=additional_jacobi,
-                additional_vel=additional_vel,
-                **ik_args)
-            if success == 'ik-succeed':
-                break
-
-        if target_centroid_pos is not None:
-            self.update_mass_properties()
-
-        target_coords = list(map(lambda x: x() if callable(x) else x,
-                                 target_coords))
-        dif_pos = list(map(lambda mv, tc, pmask:
-                           mv.difference_position(tc, position_mask=pmask),
-                           move_target, target_coords, position_mask))
-        dif_rot = list(map(lambda mv, tc, rmask:
-                           mv.difference_rotation(
-                               tc, rotation_mask=rmask,
-                               rotation_mirror=rotation_mirror),
-                           move_target, target_coords, rotation_mask))
-
-        # success
-        success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
-
-        # reset joint angle limit weight
-        self.reset_joint_angle_limit_weight(union_link_list)
-
-        # TODO(add collision check)
-        if success or not revert_if_fail:
-            # Apply joint limit table constraints to ensure
-            # bidirectional dependencies are satisfied
-            return self.apply_joint_limit_table_constraints()
-
-        # reset angle vector
-        for joint, angle in zip(joint_list, av0):
-            joint.joint_angle(angle)
-        if c0 is not None:
-            self.newcoords(c0)
-        return False
+            # reset angle vector
+            for joint, angle in zip(joint_list, av0):
+                joint.joint_angle(angle)
+            if c0 is not None:
+                self.newcoords(c0)
+            return False
+        finally:
+            if _base_state is not None:
+                self._detach_virtual_base_joint(_base_state)
 
     def ik_convergence_check(self, dif_pos, dif_rot, thre, rthre):
         """Check IK convergence.
