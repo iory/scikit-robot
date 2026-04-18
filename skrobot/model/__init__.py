@@ -15,9 +15,11 @@ from skrobot.model.primitives import PointCloudLink
 from skrobot.model.primitives import Sphere
 
 from skrobot.model.joint import FixedJoint
+from skrobot.model.joint import FloatingJoint
 from skrobot.model.joint import Joint
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import OmniWheelJoint
+from skrobot.model.joint import PlanarJoint
 from skrobot.model.joint import RotationalJoint
 
 from skrobot.model.joint import calc_angle_speed_gain_scalar

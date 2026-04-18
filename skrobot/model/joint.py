@@ -700,6 +700,215 @@ class OmniWheelJoint(Joint):
         return jacobian
 
 
+class PlanarJoint(Joint):
+    """3-DoF virtual joint for a floating base constrained to a plane.
+
+    Joint angle vector layout: [x, y, yaw]. Intended as a virtual joint
+    inserted between the world and a robot's root_link so that fullbody
+    inverse kinematics can solve for base pose on flat ground.
+    """
+
+    def __init__(self,
+                 max_joint_velocity=(np.inf, np.inf, np.inf),
+                 max_joint_torque=(np.inf, np.inf, np.inf),
+                 min_angle=None,
+                 max_angle=None,
+                 *args, **kwargs):
+        if min_angle is None:
+            min_angle = np.array([-np.inf] * 3)
+        if max_angle is None:
+            max_angle = np.array([np.inf] * 3)
+        self.axis = ((1, 0, 0),
+                     (0, 1, 0),
+                     (0, 0, 1))
+        self._joint_angle = np.zeros(3, dtype=np.float64)
+        super(PlanarJoint, self).__init__(
+            max_joint_velocity=max_joint_velocity,
+            max_joint_torque=max_joint_torque,
+            min_angle=min_angle,
+            max_angle=max_angle,
+            *args, **kwargs)
+        self.joint_velocity = (0, 0, 0)
+        self.joint_acceleration = (0, 0, 0)
+        self.joint_torque = (0, 0, 0)
+
+    @property
+    def type(self):
+        return 'planar'
+
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
+        if v is not None:
+            v = np.array(v, dtype=np.float64)
+            if relative is not None:
+                self._joint_angle = v + self._joint_angle
+            else:
+                self._joint_angle = v
+            self._joint_angle = np.minimum(
+                np.maximum(self._joint_angle, self.min_angle), self.max_angle)
+            self.child_link.rotation = self.default_coords.rotation.copy()
+            self.child_link.translation = \
+                self.default_coords.translation.copy()
+            self.child_link.translate(
+                (self._joint_angle[0], self._joint_angle[1], 0))
+            self.child_link.rotate(self._joint_angle[2], 'z')
+            if enable_hook:
+                for hook in self._hooks:
+                    hook()
+        return self._joint_angle
+
+    @property
+    def joint_dof(self):
+        return 3
+
+    def calc_angle_speed_gain(self, dav, i, periodic_time):
+        return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
+
+    def calc_jacobian(self,
+                      jacobian, row, column,
+                      joint, paxis, child_link,
+                      world_default_coords,
+                      move_target, transform_coords,
+                      rotation_axis, translation_axis):
+        calc_jacobian_linear(jacobian, row, column + 0,
+                             joint, [1, 0, 0], child_link,
+                             world_default_coords,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_linear(jacobian, row, column + 1,
+                             joint, [0, 1, 0], child_link,
+                             world_default_coords,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_rotational(jacobian, row, column + 2,
+                                 joint, [0, 0, 1], child_link,
+                                 world_default_coords,
+                                 move_target, transform_coords,
+                                 rotation_axis, translation_axis)
+        return jacobian
+
+
+class FloatingJoint(Joint):
+    """6-DoF virtual joint for an unconstrained floating base.
+
+    Joint angle vector layout: [x, y, z, rx, ry, rz]. The rotational
+    part is applied as successive rotations about the child link's
+    local x, y, z axes (body-fixed XYZ Euler). Intended as a virtual
+    joint inserted between the world and a robot's root_link so that
+    fullbody inverse kinematics can solve for base pose on uneven
+    terrain (e.g. slopes).
+    """
+
+    def __init__(self,
+                 max_joint_velocity=(np.inf,) * 6,
+                 max_joint_torque=(np.inf,) * 6,
+                 min_angle=None,
+                 max_angle=None,
+                 *args, **kwargs):
+        if min_angle is None:
+            min_angle = np.array([-np.inf] * 6)
+        if max_angle is None:
+            max_angle = np.array([np.inf] * 6)
+        self.axis = ((1, 0, 0),
+                     (0, 1, 0),
+                     (0, 0, 1),
+                     (1, 0, 0),
+                     (0, 1, 0),
+                     (0, 0, 1))
+        self._joint_angle = np.zeros(6, dtype=np.float64)
+        super(FloatingJoint, self).__init__(
+            max_joint_velocity=max_joint_velocity,
+            max_joint_torque=max_joint_torque,
+            min_angle=min_angle,
+            max_angle=max_angle,
+            *args, **kwargs)
+        self.joint_velocity = (0,) * 6
+        self.joint_acceleration = (0,) * 6
+        self.joint_torque = (0,) * 6
+
+    @property
+    def type(self):
+        return 'floating'
+
+    def joint_angle(self, v=None, relative=None, enable_hook=True):
+        if v is not None:
+            v = np.array(v, dtype=np.float64)
+            if relative is not None:
+                self._joint_angle = v + self._joint_angle
+            else:
+                self._joint_angle = v
+            self._joint_angle = np.minimum(
+                np.maximum(self._joint_angle, self.min_angle), self.max_angle)
+            self.child_link.rotation = self.default_coords.rotation.copy()
+            self.child_link.translation = \
+                self.default_coords.translation.copy()
+            self.child_link.translate(
+                (self._joint_angle[0],
+                 self._joint_angle[1],
+                 self._joint_angle[2]))
+            self.child_link.rotate(self._joint_angle[3], 'x')
+            self.child_link.rotate(self._joint_angle[4], 'y')
+            self.child_link.rotate(self._joint_angle[5], 'z')
+            if enable_hook:
+                for hook in self._hooks:
+                    hook()
+        return self._joint_angle
+
+    @property
+    def joint_dof(self):
+        return 6
+
+    def calc_angle_speed_gain(self, dav, i, periodic_time):
+        return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
+
+    def calc_jacobian(self,
+                      jacobian, row, column,
+                      joint, paxis, child_link,
+                      world_default_coords,
+                      move_target, transform_coords,
+                      rotation_axis, translation_axis):
+        calc_jacobian_linear(jacobian, row, column + 0,
+                             joint, [1, 0, 0], child_link,
+                             world_default_coords,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_linear(jacobian, row, column + 1,
+                             joint, [0, 1, 0], child_link,
+                             world_default_coords,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        calc_jacobian_linear(jacobian, row, column + 2,
+                             joint, [0, 0, 1], child_link,
+                             world_default_coords,
+                             move_target, transform_coords,
+                             rotation_axis, translation_axis)
+        # Rotational DoFs are applied in body-fixed XYZ order (rx->ry->rz).
+        # The effective rotation axis for each DoF must reflect the
+        # intermediate rotations, otherwise ry/rz columns diverge from the
+        # numerical derivative once rx/ry are non-zero.
+        rx = self._joint_angle[3]
+        ry = self._joint_angle[4]
+        c_rx, s_rx = np.cos(rx), np.sin(rx)
+        c_ry, s_ry = np.cos(ry), np.sin(ry)
+        ry_axis_local = np.array([0.0, c_rx, s_rx])
+        rz_axis_local = np.array([s_ry, -s_rx * c_ry, c_rx * c_ry])
+        calc_jacobian_rotational(jacobian, row, column + 3,
+                                 joint, [1, 0, 0], child_link,
+                                 world_default_coords,
+                                 move_target, transform_coords,
+                                 rotation_axis, translation_axis)
+        calc_jacobian_rotational(jacobian, row, column + 4,
+                                 joint, ry_axis_local, child_link,
+                                 world_default_coords,
+                                 move_target, transform_coords,
+                                 rotation_axis, translation_axis)
+        calc_jacobian_rotational(jacobian, row, column + 5,
+                                 joint, rz_axis_local, child_link,
+                                 world_default_coords,
+                                 move_target, transform_coords,
+                                 rotation_axis, translation_axis)
+        return jacobian
+
+
 def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     if jamm is None:
         jamm = np.zeros(3, 'f')
