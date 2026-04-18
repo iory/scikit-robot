@@ -1845,18 +1845,13 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
                     full_angles[:, p] * m_mult[i] + m_off[i])
         return full_angles
 
-    def _compute_task_jacobian_and_pose(union_opt_angles, info):
-        """Compute (J_union, pos, rot) for a task given union-level opt angles.
+    def _compute_task_jacobian_local(union_opt_angles, info):
+        """Compute (J_opt_task, pos, rot) in the task's local opt space.
 
-        Returns
-        -------
-        J_union : np.ndarray
-            Shape (batch, 6, union_n_opt) with columns for this task's joints
-            scattered into their union positions; other columns are zero.
-        pos : np.ndarray
-            End-effector positions (batch, 3).
-        rot : np.ndarray
-            End-effector rotations (batch, 3, 3).
+        Unlike an earlier version, this does not allocate a per-task union
+        scatter buffer; callers are expected to write the returned
+        task-local Jacobian directly into a preallocated stacked buffer
+        using ``info['union_mapping']`` for the column indices.
         """
         mapping = info['union_mapping']
         task_opt = union_opt_angles[:, mapping]
@@ -1866,10 +1861,7 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
             non_mimic_indices=info['non_mimic_indices'],
             mimic_parent_indices=info['mimic_parent_indices'],
             mimic_multipliers=info['mimic_multipliers'])
-        batch = pos.shape[0]
-        J_union = np.zeros((batch, 6, union_n_opt))
-        J_union[:, :, mapping] = J_opt
-        return J_union, pos, rot
+        return J_opt, pos, rot
 
     def solve(target_positions_list, target_rotations_list,
               initial_angles=None,
@@ -2015,6 +2007,16 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
                 "to solve: every task is either fully masked out or has "
                 "task_weight == 0.")
 
+        # Precompute the DLS stack layout once: for each contributing task,
+        # record its contiguous row slice in the stacked Jacobian.
+        contrib_tasks = [t for t in range(n_tasks) if contributes[t]]
+        row_ranges = {}
+        cursor = 0
+        for t in contrib_tasks:
+            nrows = len(active_rows_per_task[t])
+            row_ranges[t] = (cursor, cursor + nrows)
+            cursor += nrows
+
         damping_eye = damping * np.eye(total_active)
 
         # Handle attempts_per_pose
@@ -2094,28 +2096,31 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
                 rot_err_world = np.zeros_like(pos_err)
             return np.concatenate([pos_err, rot_err_world], axis=1)
 
+        # Preallocate the stacked Jacobian and residual buffers. Column
+        # positions not in any contributing task's mapping stay zero for the
+        # life of the solve; per task, each iteration only overwrites its
+        # own (row-slice, mapped-column) cells.
+        J_stack = np.zeros((n_expanded, total_active, union_n_opt))
+        err_stack = np.zeros((n_expanded, total_active))
+
         # Main DLS iteration
         for _iter in range(max_iterations):
-            J_rows = []
-            err_rows = []
-            for t in range(n_tasks):
-                if not contributes[t]:
-                    continue
-                J_union_t, pos_t, rot_t = _compute_task_jacobian_and_pose(
-                    opt_angles, task_info[t])
+            for t in contrib_tasks:
+                info = task_info[t]
+                mapping = info['union_mapping']
+                J_opt_t, pos_t, rot_t = _compute_task_jacobian_local(
+                    opt_angles, info)
                 full_err_t = _compute_task_err(
                     rot_t, pos_t,
                     target_pos_expanded[t], target_rot_expanded[t],
                     pos_mask_arrs[t], rot_mask_arrs[t], mirror_rots[t])
                 rows_t = active_rows_per_task[t]
-                J_sel = J_union_t[:, rows_t, :]  # (batch, len(rows), union)
-                e_sel = full_err_t[:, rows_t]    # (batch, len(rows))
+                rs, re_ = row_ranges[t]
                 w = sqrt_weights[t]
-                J_rows.append(w * J_sel)
-                err_rows.append(w * e_sel)
-
-            J_stack = np.concatenate(J_rows, axis=1)
-            err_stack = np.concatenate(err_rows, axis=1)
+                # Scatter task-local Jacobian into this task's row slice at
+                # its union column positions; weights are folded in here.
+                J_stack[:, rs:re_, mapping] = w * J_opt_t[:, rows_t, :]
+                err_stack[:, rs:re_] = w * full_err_t[:, rows_t]
 
             JJT = np.matmul(
                 J_stack, np.transpose(J_stack, (0, 2, 1))) + damping_eye
