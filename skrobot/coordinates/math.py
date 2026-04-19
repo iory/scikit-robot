@@ -494,9 +494,25 @@ def sr_inverse(J, k=1.0, weight_vector=None):
     if weight_vector is None:
         return sr_inverse_org(J, k)
 
-    # k=0 => sr-inverse = pseudo-inverse
+    # k=0 with uniform weight degenerates to the plain pseudo-inverse.
+    # With a non-uniform weight we must still respect it, otherwise any
+    # per-DoF weighting is silently dropped when the Jacobian is
+    # well-conditioned (pre-existing bug that breaks fullbody IK
+    # base_weight and joint-limit weighting at high manipulability).
     if k == 0.0:
-        return np.linalg.pinv(J)
+        w0 = weight_vector[0]
+        if np.all(weight_vector == w0):
+            return np.linalg.pinv(J)
+        if not np.all(np.isfinite(weight_vector)) \
+                or np.any(np.asarray(weight_vector) < 0):
+            raise ValueError(
+                'weight_vector must be finite and non-negative, got {}'
+                .format(weight_vector))
+        weight_matrix = np.diag(weight_vector)
+        return np.matmul(
+            weight_matrix,
+            np.matmul(J.T, np.linalg.pinv(
+                np.matmul(J, np.matmul(weight_matrix, J.T)))))
 
     # with weight
     weight_matrix = np.diag(weight_vector)

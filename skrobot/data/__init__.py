@@ -118,6 +118,20 @@ def fetch_urdfpath():
     return path
 
 
+def griphis_urdfpath():
+    path = osp.join(get_cache_dir(),
+                    'griphis_description', 'urdf', 'griphis.urdf')
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url='https://github.com/iory/scikit-robot-models/raw/main/griphis_description.tar.gz',  # NOQA
+        fname='griphis_description.tar.gz',
+        md5='e74a5e9887b51a918227b4fc185a6a33',
+        extract=True,
+    )
+    return path
+
+
 def kuka_urdfpath():
     return osp.join(data_dir, 'kuka_description', 'kuka.urdf')
 

@@ -31,9 +31,11 @@ from skrobot.coordinates.math import select_by_mask
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import FixedJoint
+from skrobot.model.joint import FloatingJoint
 from skrobot.model.joint import joint_angle_limit_nspace
 from skrobot.model.joint import joint_angle_limit_weight
 from skrobot.model.joint import LinearJoint
+from skrobot.model.joint import PlanarJoint
 from skrobot.model.joint import RotationalJoint
 from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
@@ -122,6 +124,86 @@ class CascadedLink(CascadedCoords):
         if key in self._relevance_predicate_table:
             return self._relevance_predicate_table[key]
         return False
+
+    @staticmethod
+    def _reorder_link_lists_for_move_targets(link_lists, move_targets):
+        """Reorder ``link_lists`` so entry ``i`` is the chain whose kinematic
+        descendants include ``move_targets[i]``.
+
+        Multi-end-effector IK requires ``link_lists[i]`` to correspond to
+        ``move_targets[i]`` because the per-task Jacobian is computed along
+        ``link_lists[i]`` but the position/orientation error is measured on
+        ``move_targets[i]``.  If a caller passes them in different orders
+        the solver silently converges to a wrong joint configuration (the
+        errors get projected through mismatched Jacobians).  Detect this
+        case and fix it automatically, so the caller only has to supply
+        the right *set* of chains and the right *set* of end-effectors.
+
+        A chain matches a move_target when at least one link in the chain
+        appears on the parent path from the move_target back to the root.
+        If the match is ambiguous (more than one candidate chain per
+        move_target, or two move_targets mapping to the same chain) the
+        original ``link_lists`` is returned unchanged so existing
+        validation paths can emit their usual error.
+        """
+        if not isinstance(link_lists, list) or len(link_lists) < 2:
+            return link_lists
+        if (not isinstance(move_targets, list)
+                or len(move_targets) != len(link_lists)):
+            return link_lists
+        if not all(isinstance(ll, list) for ll in link_lists):
+            return link_lists
+
+        def ancestor_id_set(mt):
+            ids = set()
+            cur = mt
+            # Guard against circular parent links (shouldn't happen but we
+            # don't want the helper to hang if the graph is malformed).
+            for _ in range(4096):
+                if cur is None:
+                    break
+                ids.add(id(cur))
+                cur = getattr(cur, 'parent', None)
+            return ids
+
+        n = len(link_lists)
+        # A link shared across multiple chains (e.g. a virtual base joint
+        # injected by use_base, which prepends root_link to every sub-chain)
+        # cannot discriminate move_targets, so filter those out before
+        # matching.
+        occurrences = {}
+        for ll in link_lists:
+            for link in ll:
+                occurrences[id(link)] = occurrences.get(id(link), 0) + 1
+        unique_link_ids = [
+            {id(link) for link in ll if occurrences[id(link)] == 1}
+            for ll in link_lists
+        ]
+
+        matches = []
+        for mt in move_targets:
+            ancestor_ids = ancestor_id_set(mt)
+            candidates = [j for j, ids in enumerate(unique_link_ids)
+                          if ancestor_ids & ids]
+            if len(candidates) != 1:
+                return link_lists
+            matches.append(candidates[0])
+
+        if sorted(matches) != list(range(n)):
+            return link_lists
+        if matches == list(range(n)):
+            return link_lists
+
+        # Debug-level because the reorder is an intentional transparency
+        # feature: callers often pass a fixed link_list while move_target
+        # cycles (e.g. alternating stance/swing), and they should not see a
+        # warning on every step for that legitimate usage.
+        logger.debug(
+            'inverse_kinematics: reordered link_list via kinematic-chain '
+            'membership to match move_target order '
+            '(move_target[i] -> link_list[%s]).',
+            matches)
+        return [link_lists[matches[i]] for i in range(n)]
 
     def _resolve_mask_params(self, position_mask, rotation_mask, rotation_mirror):
         """Resolve mask parameters to normalized format.
@@ -889,6 +971,8 @@ class CascadedLink(CascadedCoords):
         if link_list is None or not isinstance(link_list[0], list):
             link_list = [link_list]
         move_target = listify(move_target)
+        link_list = self._reorder_link_lists_for_move_targets(
+            link_list, move_target)
         target_coords = listify(target_coords)
         dif_pos = listify(dif_pos)
         dif_rot = listify(dif_rot)
@@ -1090,6 +1174,246 @@ class CascadedLink(CascadedCoords):
                     ret=ret,
                     **kwargs)
 
+    def _find_fullbody_root_link(self):
+        root_link = getattr(self, 'root_link', None)
+        if root_link is not None:
+            return root_link
+        for link in self.link_list:
+            if link.parent_link is None:
+                return link
+        raise RuntimeError(
+            'Cannot determine root_link for fullbody IK; '
+            'set self.root_link or ensure one link has no parent_link.')
+
+    def _attach_virtual_base_joint(self, use_base, link_list):
+        """Inject a temporary virtual joint above root_link so IK can
+        solve for the base pose as additional DoFs.
+
+        Returns a state dict used by _detach_virtual_base_joint to
+        undo the injection, and the rewritten link_list that contains
+        root_link at the head of every sub-chain.
+        """
+        if use_base == 'planar':
+            joint_cls = PlanarJoint
+        elif use_base == '6dof':
+            joint_cls = FloatingJoint
+        else:
+            raise ValueError(
+                "use_base must be False, 'planar', or '6dof', got %r"
+                % (use_base,))
+        root_link = self._find_fullbody_root_link()
+        virtual_link = Link(name='_fullbody_ik_virtual_world')
+        state = {
+            'root_link': root_link,
+            'virtual_link': virtual_link,
+            'orig_parent_link': root_link._parent_link,
+            'orig_joint': root_link.joint,
+            'rel_entries': [],
+        }
+        virtual_joint = joint_cls(
+            parent_link=virtual_link,
+            child_link=root_link,
+            name='_fullbody_ik_base_joint',
+        )
+        # Detach root_link from its original parent's _child_links before
+        # reparenting so the kinematic graph stays consistent (a link must
+        # appear in at most one parent's child list at a time).
+        state['orig_parent_had_child'] = False
+        if state['orig_parent_link'] is not None and root_link in \
+                state['orig_parent_link']._child_links:
+            state['orig_parent_link'].del_child_link(root_link)
+            state['orig_parent_had_child'] = True
+        root_link._parent_link = virtual_link
+        virtual_link.add_child_link(root_link)
+        root_link.joint = virtual_joint
+        state['virtual_joint'] = virtual_joint
+        # Make _is_relevant(virtual_joint, link) return True for every link
+        # in the robot (the virtual joint sits at the root so it influences
+        # every descendant).
+        if self._relevance_predicate_table is not None:
+            for link in self.link_list:
+                key = (virtual_joint, link)
+                self._relevance_predicate_table[key] = True
+                state['rel_entries'].append(key)
+        # Prepend root_link to every sub link_list so the virtual joint
+        # enters union_link_list and contributes Jacobian columns.
+        if link_list is None:
+            new_link_list = None
+        else:
+            if len(link_list) > 0 and not isinstance(link_list[0], list):
+                sub_lists = [list(link_list)]
+            else:
+                sub_lists = [list(ll) for ll in link_list]
+            new_link_list = [
+                [root_link] + [lk for lk in ll if lk is not root_link]
+                for ll in sub_lists
+            ]
+        state['link_list'] = new_link_list
+        return state
+
+    def _detach_virtual_base_joint(self, state):
+        root_link = state['root_link']
+        virtual_link = state['virtual_link']
+        root_link.joint = state['orig_joint']
+        root_link._parent_link = state['orig_parent_link']
+        if root_link in virtual_link._child_links:
+            virtual_link.del_child_link(root_link)
+        # Restore the original parent -> root_link child edge we removed
+        # during attach, if it existed before.
+        if state.get('orig_parent_had_child') \
+                and state['orig_parent_link'] is not None:
+            state['orig_parent_link'].add_child_link(root_link)
+        if self._relevance_predicate_table is not None:
+            for key in state['rel_entries']:
+                self._relevance_predicate_table.pop(key, None)
+
+    def _attach_batch_virtual_base_chain(self, use_base, link_list):
+        """Inject a chain of single-DoF virtual joints above ``root_link``.
+
+        Unlike :meth:`_attach_virtual_base_joint`, which uses the multi-DoF
+        :class:`PlanarJoint` / :class:`FloatingJoint`, the batch IK solver
+        only supports single-DoF joints. We decompose the virtual base into
+        an equivalent chain of :class:`LinearJoint` and
+        :class:`RotationalJoint` links so ``extract_fk_parameters`` and
+        ``compute_geometric_jacobian_batched_*`` accept it unchanged.
+
+        Chain layouts:
+
+        - ``'planar'``: ``world -> px -> py -> rz -> root`` (3 DoF).
+        - ``'6dof'``:   ``world -> px -> py -> pz -> rx -> ry -> rz ->
+          root`` (6 DoF, body-fixed XYZ-Euler).
+
+        The chain is kinematically equivalent to the corresponding
+        multi-DoF :class:`PlanarJoint` / :class:`FloatingJoint` because
+        subsequent joints in a serial chain operate in the preceding
+        joint's body frame, which reproduces intrinsic-Euler composition.
+        """
+        if use_base == 'planar':
+            specs = [
+                ('lin', 'x'),
+                ('lin', 'y'),
+                ('rot', 'z'),
+            ]
+            n_dof = 3
+        elif use_base == '6dof':
+            specs = [
+                ('lin', 'x'),
+                ('lin', 'y'),
+                ('lin', 'z'),
+                ('rot', 'x'),
+                ('rot', 'y'),
+                ('rot', 'z'),
+            ]
+            n_dof = 6
+        else:
+            raise ValueError(
+                "use_base must be False, 'planar', or '6dof', got %r"
+                % (use_base,))
+
+        root_link = self._find_fullbody_root_link()
+        virtual_world = Link(name='_batch_ik_virtual_world')
+
+        chain_links = []
+        chain_joints = []
+        parent = virtual_world
+        for i, (kind, axis) in enumerate(specs):
+            # The final joint in the chain attaches to the real root_link.
+            if i == len(specs) - 1:
+                child = root_link
+            else:
+                child = Link(name='_batch_ik_virtual_{}_{}'.format(
+                    i, axis))
+                chain_links.append(child)
+            if kind == 'lin':
+                j = LinearJoint(
+                    axis=axis,
+                    parent_link=parent, child_link=child,
+                    name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
+                    min_angle=-np.inf, max_angle=np.inf,
+                )
+            else:
+                j = RotationalJoint(
+                    axis=axis,
+                    parent_link=parent, child_link=child,
+                    name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
+                    min_angle=-np.inf, max_angle=np.inf,
+                )
+            chain_joints.append(j)
+            parent.add_child_link(child)
+            # Wire child -> its joint + parent link (Joint.__init__ records
+            # parent_link/child_link but does not mutate the child's
+            # .joint or ._parent_link fields).
+            if child is not root_link:
+                child.joint = j
+                child._parent_link = parent
+            parent = child
+
+        # The final chain link IS root_link. Its original parent/joint are
+        # snapshotted so we can restore them in detach.
+        state = {
+            'root_link': root_link,
+            'virtual_world': virtual_world,
+            'chain_links': chain_links,
+            'chain_joints': chain_joints,
+            'n_dof': n_dof,
+            'use_base': use_base,
+            'orig_parent_link': root_link._parent_link,
+            'orig_joint': root_link.joint,
+            'orig_parent_had_child': False,
+        }
+        # Detach root_link from its original parent's child list before
+        # reparenting so the graph stays consistent (a link must appear in
+        # at most one parent's child list at a time).
+        if state['orig_parent_link'] is not None and root_link in \
+                state['orig_parent_link']._child_links:
+            state['orig_parent_link'].del_child_link(root_link)
+            state['orig_parent_had_child'] = True
+        root_link._parent_link = chain_joints[-1].parent_link
+        root_link.joint = chain_joints[-1]
+
+        # Prepend the full virtual chain (in kinematic order, excluding
+        # virtual_world which has no joint) to every sub link_list, so the
+        # batch solver's union_link_list sees the virtual joints.
+        virtual_chain_links = chain_links + [root_link]
+        if link_list is None:
+            new_link_list = None
+        else:
+            was_nested = (
+                len(link_list) > 0 and isinstance(link_list[0], list))
+            if was_nested:
+                sub_lists = [list(ll) for ll in link_list]
+            else:
+                sub_lists = [list(link_list)]
+            rewritten = [
+                list(virtual_chain_links)
+                + [lk for lk in ll if lk is not root_link]
+                for ll in sub_lists
+            ]
+            new_link_list = rewritten if was_nested else rewritten[0]
+        state['link_list'] = new_link_list
+        state['virtual_chain_links'] = virtual_chain_links
+        state['was_nested'] = was_nested if link_list is not None else False
+        return state
+
+    def _detach_batch_virtual_base_chain(self, state):
+        """Undo a previous ``_attach_batch_virtual_base_chain`` call."""
+        root_link = state['root_link']
+        root_link._parent_link = state['orig_parent_link']
+        root_link.joint = state['orig_joint']
+        # Break parent/child links within the virtual chain so GC can
+        # reclaim them; joints hold strong refs both ways.
+        for j in state['chain_joints']:
+            pl = j.parent_link
+            cl = j.child_link
+            if cl in pl._child_links:
+                pl.del_child_link(cl)
+        # Restore the original parent -> root_link edge we removed in
+        # attach, if one existed. Placed after chain-teardown so root_link
+        # is only re-added once its virtual-chain parent edge is gone.
+        if state.get('orig_parent_had_child') \
+                and state['orig_parent_link'] is not None:
+            state['orig_parent_link'].add_child_link(root_link)
+
     def inverse_kinematics(
             self,
             target_coords,
@@ -1115,6 +1439,8 @@ class CascadedLink(CascadedCoords):
             additional_vel=None,
             translation_tolerance=None,
             rotation_tolerance=None,
+            use_base=False,
+            base_weight=None,
             **kwargs):
         """Solve inverse kinematics to reach target coordinates.
 
@@ -1151,6 +1477,25 @@ class CascadedLink(CascadedCoords):
             Per-axis rotation tolerance from target as
             [roll_tol, pitch_tol, yaw_tol] in radians. If error on an axis
             is within tolerance, it's treated as reached.
+        use_base : False, 'planar', or '6dof'
+            If not False, inject a virtual joint above root_link so
+            fullbody inverse kinematics can solve for the base pose as
+            additional DoFs. 'planar' uses 3 DoF (x, y, yaw), intended
+            for flat-ground mobile bases. '6dof' uses 6 DoF
+            (x, y, z, rx, ry, rz), appropriate for humanoids on uneven
+            terrain when combined with held-fixed end-effectors (feet)
+            as contact constraints. The virtual joint is detached
+            before the call returns.
+        base_weight : float, sequence, or None
+            Per-DoF weighting of the virtual base joint in the weighted
+            SR-inverse. Only meaningful when ``use_base`` is set.
+            ``1.0`` (default when ``use_base`` is set) treats base DoFs
+            the same as arm joints. Values ``< 1.0`` make the base
+            "heavier" and prefer arm motion; values ``> 1.0`` make the
+            base "lighter" and prefer base motion. A sequence of length
+            matching the base joint's DoF (3 for ``'planar'``, 6 for
+            ``'6dof'``) allows per-axis weighting, e.g. ``[1.0, 1.0,
+            0.1]`` for planar to discourage yaw changes.
         **kwargs
             Additional keyword arguments passed to inverse_kinematics_loop.
 
@@ -1179,101 +1524,190 @@ class CascadedLink(CascadedCoords):
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
 
-        additional_jacobi = additional_jacobi or []
-        additional_vel = additional_vel or []
-        target_coords = listify(target_coords)
-        if callable(union_link_list):
-            union_link_list = union_link_list(link_list)
-        else:
-            union_link_list = self.calc_union_link_list(link_list)
-
-        if thre is None:
-            if isinstance(move_target, list):
-                thre = [0.001] * len(move_target)
+        # Inject virtual joint for fullbody IK if requested.
+        _base_state = None
+        if use_base:
+            _base_state = self._attach_virtual_base_joint(use_base, link_list)
+            link_list = _base_state['link_list']
+            base_joint_dof = _base_state['virtual_joint'].joint_dof
+            if base_weight is None:
+                base_weight_vec = np.ones(base_joint_dof, dtype=np.float64)
             else:
-                thre = [0.001]
-        if rthre is None:
-            if isinstance(move_target, list):
-                rthre = [np.deg2rad(1)] * len(move_target)
+                base_weight_vec = np.broadcast_to(
+                    np.asarray(base_weight, dtype=np.float64),
+                    (base_joint_dof,)).copy()
+            existing_awl = list(kwargs.pop('additional_weight_list', []) or [])
+            existing_awl.append((_base_state['root_link'], base_weight_vec))
+            kwargs['additional_weight_list'] = existing_awl
+        elif base_weight is not None:
+            logger.warning(
+                'base_weight is ignored when use_base is False')
+        try:
+            additional_jacobi = additional_jacobi or []
+            additional_vel = additional_vel or []
+            target_coords = listify(target_coords)
+            # Re-pair each link_list chain with its corresponding move_target
+            # before deriving anything else (union_link_list, joint_list, etc.)
+            # so the fix takes effect for every downstream path, not just the
+            # per-task Jacobian in inverse_kinematics_loop.
+            if (isinstance(link_list, list) and len(link_list) > 0
+                    and isinstance(link_list[0], list)):
+                link_list = self._reorder_link_lists_for_move_targets(
+                    link_list, listify(move_target))
+            if callable(union_link_list):
+                union_link_list = union_link_list(link_list)
             else:
-                rthre = [np.deg2rad(1)]
+                union_link_list = self.calc_union_link_list(link_list)
 
-        # store current angle vector
-        joint_list = list(
-            set([l.joint for l in union_link_list] + self.joint_list))
-        if None in joint_list:
-            logger.error('All links in link_list must have a parent joint')
-            return True
-        av0 = [j.joint_angle() for j in joint_list]
-        c0 = None
-        if self.parent is None:
-            c0 = self.copy_worldcoords()
-        success = True
-        # (old-analysis-level (send-all union-link-list :analysis-level))
-        # (send-all union-link-list :analysis-level :coords)
+            if thre is None:
+                if isinstance(move_target, list):
+                    thre = [0.001] * len(move_target)
+                else:
+                    thre = [0.001]
+            if rthre is None:
+                if isinstance(move_target, list):
+                    rthre = [np.deg2rad(1)] * len(move_target)
+                else:
+                    rthre = [np.deg2rad(1)]
 
-        # argument check
-        if link_list is None or move_target is None:
-            logger.error('both :link-list and :move-target required')
-            return True
-        # Check if no constraint at all
-        if np.sum(position_mask) == 0 and np.sum(rotation_mask) == 0:
-            return True
-        if not isinstance(link_list[0], list):
-            link_list = [link_list]
-        move_target = listify(move_target)
-        position_mask = listify(position_mask)
-        rotation_mask = listify(rotation_mask)
-        thre = listify(thre)
-        rthre = listify(rthre)
+            # store current angle vector
+            joint_list = list(
+                set([l.joint for l in union_link_list] + self.joint_list))
+            if None in joint_list:
+                logger.error('All links in link_list must have a parent joint')
+                return True
+            av0 = [j.joint_angle() for j in joint_list]
+            c0 = None
+            if self.parent is None:
+                c0 = self.copy_worldcoords()
+            success = True
+            # (old-analysis-level (send-all union-link-list :analysis-level))
+            # (send-all union-link-list :analysis-level :coords)
 
-        if not (len(position_mask)
-                == len(rotation_mask)
-                == len(move_target)
-                == len(link_list)
-                == len(target_coords)):
-            logger.error('list length differ : position_mask %s'
-                         ', rotation_mask %s, move_target %s '
-                         'link_list %s, target_coords %s',
-                         len(position_mask), len(rotation_mask),
-                         len(move_target), len(link_list), len(target_coords))
-            return False
+            # argument check
+            if link_list is None or move_target is None:
+                logger.error('both :link-list and :move-target required')
+                return True
+            # Check if no constraint at all
+            if np.sum(position_mask) == 0 and np.sum(rotation_mask) == 0:
+                return True
+            if not isinstance(link_list[0], list):
+                link_list = [link_list]
+            move_target = listify(move_target)
+            position_mask = listify(position_mask)
+            rotation_mask = listify(rotation_mask)
+            thre = listify(thre)
+            rthre = listify(rthre)
 
-        if len(additional_jacobi) != len(additional_vel):
-            logger.error('list length differ : additional_jacobi %s, '
-                         'additional_vel %s',
-                         len(additional_jacobi), len(additional_vel))
-            return False
+            if not (len(position_mask)
+                    == len(rotation_mask)
+                    == len(move_target)
+                    == len(link_list)
+                    == len(target_coords)):
+                logger.error('list length differ : position_mask %s'
+                             ', rotation_mask %s, move_target %s '
+                             'link_list %s, target_coords %s',
+                             len(position_mask), len(rotation_mask),
+                             len(move_target), len(link_list), len(target_coords))
+                return False
 
-        tmp_additional_jacobi = map(
-            lambda aj: aj(link_list) if callable(aj) else aj,
-            additional_jacobi)
-        if cog_null_space is None and target_centroid_pos is not None:
-            additional_jacobi_dimension = self.calc_target_axis_dimension(
-                False, cog_translation_axis)
-        else:
-            additional_jacobi_dimension = 0
-        additional_jacobi_dimension += sum(map(lambda aj: (
-            aj(link_list) if callable(aj) else aj).shape[0],
-            tmp_additional_jacobi))
-        ik_args = self.inverse_kinematics_args(
-            union_link_list=union_link_list,
-            position_mask=position_mask,
-            rotation_mask=rotation_mask,
-            # evaluate additional-jacobi function and
-            # calculate row dimension of additional_jacobi
-            additional_jacobi_dimension=additional_jacobi_dimension,
-            **kwargs)
-        # self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset
-        # weight
+            if len(additional_jacobi) != len(additional_vel):
+                logger.error('list length differ : additional_jacobi %s, '
+                             'additional_vel %s',
+                             len(additional_jacobi), len(additional_vel))
+                return False
 
-        # inverse_kinematics loop
-        loop = 0
-        while loop < stop:
-            loop += 1
-            target_coords = list(map(
-                lambda x: x() if callable(x) else x,
-                target_coords))
+            tmp_additional_jacobi = map(
+                lambda aj: aj(link_list) if callable(aj) else aj,
+                additional_jacobi)
+            if cog_null_space is None and target_centroid_pos is not None:
+                additional_jacobi_dimension = self.calc_target_axis_dimension(
+                    False, cog_translation_axis)
+            else:
+                additional_jacobi_dimension = 0
+            additional_jacobi_dimension += sum(map(lambda aj: (
+                aj(link_list) if callable(aj) else aj).shape[0],
+                tmp_additional_jacobi))
+            ik_args = self.inverse_kinematics_args(
+                union_link_list=union_link_list,
+                position_mask=position_mask,
+                rotation_mask=rotation_mask,
+                # evaluate additional-jacobi function and
+                # calculate row dimension of additional_jacobi
+                additional_jacobi_dimension=additional_jacobi_dimension,
+                **kwargs)
+            # self.reset_joint_angle_limit_weight_old(union_link_list) ;; reset
+            # weight
+
+            # inverse_kinematics loop
+            loop = 0
+            while loop < stop:
+                loop += 1
+                target_coords = list(map(
+                    lambda x: x() if callable(x) else x,
+                    target_coords))
+                dif_pos = list(map(lambda mv, tc, pmask:
+                                   mv.difference_position(tc, position_mask=pmask),
+                                   move_target, target_coords, position_mask))
+                dif_rot = list(map(lambda mv, tc, rmask:
+                                   mv.difference_rotation(
+                                       tc, rotation_mask=rmask,
+                                       rotation_mirror=rotation_mirror),
+                                   move_target, target_coords, rotation_mask))
+
+                # Apply translation tolerance in target_coords' local frame
+                # Note: tol > 0 check ensures 0.0 means "no special tolerance"
+                if translation_tolerance is not None:
+                    for i, (mt, tc) in enumerate(zip(move_target, target_coords)):
+                        # Calculate error in target_coords' local frame
+                        world_error = tc.worldpos() - mt.worldpos()
+                        local_error = tc.worldrot().T @ world_error
+                        for axis_idx, tol in enumerate(translation_tolerance):
+                            if tol is not None and tol > 0:
+                                if abs(local_error[axis_idx]) <= tol:
+                                    # Zero out the corresponding dif_pos component
+                                    # dif_pos is in move_target's frame, so transform
+                                    target_axis_in_mt = mt.worldrot().T @ tc.worldrot()[:, axis_idx]
+                                    dif_pos[i] -= (dif_pos[i] @ target_axis_in_mt) * target_axis_in_mt
+
+                # Apply rotation tolerance: if error is within tolerance,
+                # treat as reached (set dif to 0)
+                if rotation_tolerance is not None:
+                    for i, dr in enumerate(dif_rot):
+                        for axis_idx, tol in enumerate(rotation_tolerance):
+                            if tol is not None and tol > 0 and abs(dr[axis_idx]) <= tol:
+                                dif_rot[i][axis_idx] = 0.0
+
+                if loop == 1 and self.ik_convergence_check(
+                        dif_pos, dif_rot, thre, rthre):
+                    success = 'ik-succeed'
+                    break
+
+                success = self.inverse_kinematics_loop(
+                    dif_pos, dif_rot,
+                    target_coords=target_coords,
+                    periodic_time=periodic_time,
+                    stop=stop,
+                    loop=loop,
+                    position_mask=position_mask,
+                    rotation_mask=rotation_mask,
+                    rotation_mirror=rotation_mirror,
+                    move_target=move_target,
+                    link_list=link_list,
+                    union_link_list=union_link_list,
+                    thre=thre,
+                    rthre=rthre,
+                    additional_jacobi=additional_jacobi,
+                    additional_vel=additional_vel,
+                    **ik_args)
+                if success == 'ik-succeed':
+                    break
+
+            if target_centroid_pos is not None:
+                self.update_mass_properties()
+
+            target_coords = list(map(lambda x: x() if callable(x) else x,
+                                     target_coords))
             dif_pos = list(map(lambda mv, tc, pmask:
                                mv.difference_position(tc, position_mask=pmask),
                                move_target, target_coords, position_mask))
@@ -1283,86 +1717,27 @@ class CascadedLink(CascadedCoords):
                                    rotation_mirror=rotation_mirror),
                                move_target, target_coords, rotation_mask))
 
-            # Apply translation tolerance in target_coords' local frame
-            # Note: tol > 0 check ensures 0.0 means "no special tolerance"
-            if translation_tolerance is not None:
-                for i, (mt, tc) in enumerate(zip(move_target, target_coords)):
-                    # Calculate error in target_coords' local frame
-                    world_error = tc.worldpos() - mt.worldpos()
-                    local_error = tc.worldrot().T @ world_error
-                    for axis_idx, tol in enumerate(translation_tolerance):
-                        if tol is not None and tol > 0:
-                            if abs(local_error[axis_idx]) <= tol:
-                                # Zero out the corresponding dif_pos component
-                                # dif_pos is in move_target's frame, so transform
-                                target_axis_in_mt = mt.worldrot().T @ tc.worldrot()[:, axis_idx]
-                                dif_pos[i] -= (dif_pos[i] @ target_axis_in_mt) * target_axis_in_mt
+            # success
+            success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
 
-            # Apply rotation tolerance: if error is within tolerance,
-            # treat as reached (set dif to 0)
-            if rotation_tolerance is not None:
-                for i, dr in enumerate(dif_rot):
-                    for axis_idx, tol in enumerate(rotation_tolerance):
-                        if tol is not None and tol > 0 and abs(dr[axis_idx]) <= tol:
-                            dif_rot[i][axis_idx] = 0.0
+            # reset joint angle limit weight
+            self.reset_joint_angle_limit_weight(union_link_list)
 
-            if loop == 1 and self.ik_convergence_check(
-                    dif_pos, dif_rot, thre, rthre):
-                success = 'ik-succeed'
-                break
+            # TODO(add collision check)
+            if success or not revert_if_fail:
+                # Apply joint limit table constraints to ensure
+                # bidirectional dependencies are satisfied
+                return self.apply_joint_limit_table_constraints()
 
-            success = self.inverse_kinematics_loop(
-                dif_pos, dif_rot,
-                target_coords=target_coords,
-                periodic_time=periodic_time,
-                stop=stop,
-                loop=loop,
-                position_mask=position_mask,
-                rotation_mask=rotation_mask,
-                rotation_mirror=rotation_mirror,
-                move_target=move_target,
-                link_list=link_list,
-                union_link_list=union_link_list,
-                thre=thre,
-                rthre=rthre,
-                additional_jacobi=additional_jacobi,
-                additional_vel=additional_vel,
-                **ik_args)
-            if success == 'ik-succeed':
-                break
-
-        if target_centroid_pos is not None:
-            self.update_mass_properties()
-
-        target_coords = list(map(lambda x: x() if callable(x) else x,
-                                 target_coords))
-        dif_pos = list(map(lambda mv, tc, pmask:
-                           mv.difference_position(tc, position_mask=pmask),
-                           move_target, target_coords, position_mask))
-        dif_rot = list(map(lambda mv, tc, rmask:
-                           mv.difference_rotation(
-                               tc, rotation_mask=rmask,
-                               rotation_mirror=rotation_mirror),
-                           move_target, target_coords, rotation_mask))
-
-        # success
-        success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
-
-        # reset joint angle limit weight
-        self.reset_joint_angle_limit_weight(union_link_list)
-
-        # TODO(add collision check)
-        if success or not revert_if_fail:
-            # Apply joint limit table constraints to ensure
-            # bidirectional dependencies are satisfied
-            return self.apply_joint_limit_table_constraints()
-
-        # reset angle vector
-        for joint, angle in zip(joint_list, av0):
-            joint.joint_angle(angle)
-        if c0 is not None:
-            self.newcoords(c0)
-        return False
+            # reset angle vector
+            for joint, angle in zip(joint_list, av0):
+                joint.joint_angle(angle)
+            if c0 is not None:
+                self.newcoords(c0)
+            return False
+        finally:
+            if _base_state is not None:
+                self._detach_virtual_base_joint(_base_state)
 
     def ik_convergence_check(self, dif_pos, dif_rot, thre, rthre):
         """Check IK convergence.
@@ -2567,6 +2942,8 @@ class RobotModel(CascadedLink):
             translation_tolerance=None,
             rotation_tolerance=None,
             backend=None,
+            use_base=False,
+            base_weight=None,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -2675,11 +3052,41 @@ class RobotModel(CascadedLink):
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
 
-        return self._batch_inverse_kinematics_impl(
-            target_coords, move_target, link_list,
-            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
-            initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, backend=backend, **kwargs)
+        # Fullbody IK via a virtual base joint chain. When set, returns a
+        # 4-tuple (angle_vectors, base_poses, success_flags, attempts).
+        _base_state = None
+        if use_base:
+            if link_list is None:
+                # Need move_target to derive the default link_list; fall
+                # through to impl which handles that case.
+                resolved_mt = (self.end_coords if move_target is None
+                               else move_target)
+                if isinstance(resolved_mt, list):
+                    link_list = [self.link_lists(mt.parent)
+                                 for mt in resolved_mt]
+                else:
+                    link_list = self.link_lists(resolved_mt.parent)
+            _base_state = self._attach_batch_virtual_base_chain(
+                use_base, link_list)
+            link_list = _base_state['link_list']
+        elif base_weight is not None:
+            warnings.warn(
+                'base_weight is ignored when use_base is False',
+                RuntimeWarning)
+        try:
+            result = self._batch_inverse_kinematics_impl(
+                target_coords, move_target, link_list,
+                rotation_mask, position_mask, rotation_mirror, stop, thre,
+                rthre, initial_angles, alpha, attempts_per_pose,
+                random_initial_range, translation_tolerance,
+                rotation_tolerance, backend=backend,
+                _base_state=_base_state,
+                base_weight=base_weight,
+                **kwargs)
+        finally:
+            if _base_state is not None:
+                self._detach_batch_virtual_base_chain(_base_state)
+        return result
 
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
@@ -2688,6 +3095,10 @@ class RobotModel(CascadedLink):
             translation_tolerance, rotation_tolerance, backend=None, **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        # Fullbody IK state threaded from the public wrapper.
+        _base_state = kwargs.pop('_base_state', None)
+        _base_weight = kwargs.pop('base_weight', None)
 
         # Auto-select backend: prefer JAX if available, fallback to NumPy
         if backend is None:
@@ -2709,17 +3120,40 @@ class RobotModel(CascadedLink):
             else:
                 link_list = list(map(lambda mt: self.link_lists(mt.parent), move_target))
 
-        # Handle single link list (not list of lists) for now
-        if isinstance(link_list, list) and len(link_list) > 0 and isinstance(link_list[0], list):
-            single_link_list = link_list[0]  # Use first link list for batch processing
-        else:
-            single_link_list = link_list
+        # Detect multi-EE. Require BOTH inputs to be matching lists so that
+        # legacy callers passing a single-element list-of-lists with a scalar
+        # move_target still land on the single-EE path. Mismatched lists are
+        # ambiguous and raise an explicit error instead of guessing.
+        link_list_is_nested = (isinstance(link_list, list)
+                               and len(link_list) > 0
+                               and isinstance(link_list[0], list))
+        move_target_is_list = isinstance(move_target, list)
+        if link_list_is_nested and move_target_is_list \
+                and len(move_target) == len(link_list):
+            return self._batch_inverse_kinematics_multi_ee_impl(
+                target_coords, move_target, link_list,
+                rotation_mask, position_mask, rotation_mirror, stop, thre,
+                rthre, initial_angles, alpha, attempts_per_pose,
+                random_initial_range, translation_tolerance,
+                rotation_tolerance, backend=backend,
+                _base_state=_base_state, **kwargs)
+        if link_list_is_nested and len(link_list) > 1:
+            raise ValueError(
+                "Ambiguous batch_inverse_kinematics inputs: link_list has {} "
+                "sub-lists but move_target is not a matching list of that "
+                "length. For multi-EE batch IK, pass move_target as a list "
+                "of the same length as link_list.".format(len(link_list)))
+        if link_list_is_nested:
+            # Legacy shorthand: link_list=[[...]] with a scalar or 1-element
+            # move_target means single-EE.
+            link_list = link_list[0]
+        if isinstance(move_target, list) and len(move_target) == 1:
+            move_target = move_target[0]
 
-        # Handle single move_target (not list)
-        if isinstance(move_target, list):
-            single_move_target = move_target[0]
-        else:
-            single_move_target = move_target
+        single_link_list = link_list
+
+        # Single move_target (multi-EE already handled above).
+        single_move_target = move_target
 
         # Convert target_coords to positions (N, 3) and rotation matrices (N, 3, 3)
         if isinstance(target_coords, list) and all(isinstance(coord, Coordinates) for coord in target_coords):
@@ -2798,20 +3232,28 @@ class RobotModel(CascadedLink):
             raise ValueError(
                 f"initial_angles must be None, 'random', 'current', or np.ndarray, got {type(initial_angles)}")
 
-        # Create or retrieve cached backend solver
-        # Cache key: (link_list ids, move_target id, backend)
-        cache_key = (
-            tuple(id(link) for link in single_link_list),
-            id(single_move_target),
-            backend,
-        )
-        if not hasattr(self, '_batch_ik_solver_cache'):
-            self._batch_ik_solver_cache = {}
-        if cache_key not in self._batch_ik_solver_cache:
-            self._batch_ik_solver_cache[cache_key] = create_batch_ik_solver(
+        # Create or retrieve cached backend solver. When use_base attaches
+        # a virtual chain, the fresh Link/Joint objects give unique id()s
+        # every call, so caching would accumulate stale entries without
+        # ever hitting. Bypass the cache in that case.
+        if _base_state is None:
+            cache_key = (
+                tuple(id(link) for link in single_link_list),
+                id(single_move_target),
+                backend,
+            )
+            if not hasattr(self, '_batch_ik_solver_cache'):
+                self._batch_ik_solver_cache = {}
+            if cache_key not in self._batch_ik_solver_cache:
+                self._batch_ik_solver_cache[cache_key] = \
+                    create_batch_ik_solver(
+                        self, single_link_list, single_move_target,
+                        backend_name=backend)
+            solver = self._batch_ik_solver_cache[cache_key]
+        else:
+            solver = create_batch_ik_solver(
                 self, single_link_list, single_move_target,
                 backend_name=backend)
-        solver = self._batch_ik_solver_cache[cache_key]
 
         # Build solver kwargs based on backend
         solver_kwargs = dict(
@@ -2826,6 +3268,26 @@ class RobotModel(CascadedLink):
             use_current_angles=use_current_angles,
         )
         solver_kwargs['damping'] = 0.01
+
+        # Build per-opt-variable weights when use_base + base_weight is
+        # active. The virtual chain joints are always the leading non-mimic
+        # entries of link_list (see _attach_batch_virtual_base_chain), so
+        # they occupy opt indices 0..n_dof-1 in the single-EE solver.
+        if _base_state is not None and _base_weight is not None:
+            n_dof = _base_state['n_dof']
+            base_weight_vec = np.broadcast_to(
+                np.asarray(_base_weight, dtype=np.float64),
+                (n_dof,)).copy()
+            if np.any(base_weight_vec <= 0):
+                raise ValueError(
+                    "base_weight must be strictly positive")
+            n_opt = solver.fk_params['n_joints'] - int(
+                np.sum(np.asarray(
+                    solver.fk_params.get(
+                        'mimic_parent_indices', np.array([-1])) >= 0)))
+            joint_weights = np.ones(n_opt, dtype=np.float64)
+            joint_weights[:n_dof] = base_weight_vec
+            solver_kwargs['joint_weights'] = joint_weights
 
         solutions_array, success_array, errors_array = solver(
             target_positions,
@@ -2862,6 +3324,302 @@ class RobotModel(CascadedLink):
 
         # Compute attempt counts (backend always uses all attempts, return attempts_per_pose)
         attempt_counts = [attempts_per_pose] * n_poses
+
+        if _base_state is not None:
+            # Virtual chain joints occupy the first n_dof positions of
+            # single_link_list; their angles in the fk solution vector are
+            # interpreted per use_base to synthesize the per-pose base pose.
+            n_dof = _base_state['n_dof']
+            base_poses = [
+                self._virtual_chain_angles_to_base_pose(
+                    solutions_np[i, :n_dof], _base_state['use_base'])
+                for i in range(n_poses)
+            ]
+            return full_solutions, base_poses, success_flags, attempt_counts
+
+        return full_solutions, success_flags, attempt_counts
+
+    @staticmethod
+    def _virtual_chain_angles_to_base_pose(joint_angles, use_base):
+        """Convert virtual-chain joint angles to a world-frame base pose.
+
+        The decomposition in :meth:`_attach_batch_virtual_base_chain` means
+        the per-DoF angles compose exactly like the corresponding
+        :class:`PlanarJoint` / :class:`FloatingJoint` applied to
+        ``default_coords = identity``.
+        """
+        if use_base == 'planar':
+            x, y, yaw = float(joint_angles[0]), float(joint_angles[1]), float(
+                joint_angles[2])
+            cz, sz = np.cos(yaw), np.sin(yaw)
+            rot = np.array(
+                [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+            return Coordinates(pos=np.array([x, y, 0.0]), rot=rot)
+        if use_base == '6dof':
+            x, y, z = (float(joint_angles[0]), float(joint_angles[1]),
+                       float(joint_angles[2]))
+            rx, ry, rz = (float(joint_angles[3]), float(joint_angles[4]),
+                          float(joint_angles[5]))
+            cx, sx = np.cos(rx), np.sin(rx)
+            cy, sy = np.cos(ry), np.sin(ry)
+            cz, sz = np.cos(rz), np.sin(rz)
+            Rx = np.array(
+                [[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+            Ry = np.array(
+                [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+            Rz = np.array(
+                [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+            return Coordinates(
+                pos=np.array([x, y, z]), rot=Rx @ Ry @ Rz)
+        raise ValueError(
+            "Unknown use_base value %r" % (use_base,))
+
+    @staticmethod
+    def _multi_ee_targets_to_pos_rot(target_coords_for_task):
+        """Convert one task's batch of targets to (pos, rot) arrays.
+
+        Mirrors the conversion used for single-EE batch IK. Accepts:
+        - list of Coordinates objects,
+        - ``np.ndarray`` of shape ``(N, 6)`` (x, y, z, roll, pitch, yaw), or
+        - ``np.ndarray`` of shape ``(N, 7)`` (x, y, z, qw, qx, qy, qz).
+        """
+        tc = target_coords_for_task
+        if isinstance(tc, list) and all(isinstance(c, Coordinates) for c in tc):
+            positions = np.array([c.worldpos() for c in tc])
+            rotations = np.array([c.worldrot() for c in tc])
+            return positions, rotations
+        if isinstance(tc, np.ndarray):
+            if tc.ndim != 2:
+                raise ValueError(
+                    "per-task target_coords must be 2D, got shape {}".format(
+                        tc.shape))
+            if tc.shape[1] == 6:
+                positions = tc[:, :3]
+                quats = np.array([rpy2quaternion(r) for r in tc[:, 3:]])
+                rotations = np.array([quaternion2matrix(q) for q in quats])
+                return positions, rotations
+            if tc.shape[1] == 7:
+                positions = tc[:, :3]
+                rotations = np.array(
+                    [quaternion2matrix(q) for q in tc[:, 3:]])
+                return positions, rotations
+            raise ValueError(
+                "per-task target_coords must have shape (batch, 6) or "
+                "(batch, 7), got {}".format(tc.shape))
+        raise ValueError(
+            "per-task target_coords must be numpy array or list of "
+            "Coordinates objects")
+
+    def _batch_inverse_kinematics_multi_ee_impl(
+            self, target_coords, move_target, link_list,
+            rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
+            initial_angles, alpha, attempts_per_pose, random_initial_range,
+            translation_tolerance, rotation_tolerance, backend=None, **kwargs):
+        """Multi-end-effector batch IK.
+
+        ``link_list`` is ``list[list[Link]]`` (one chain per task) and
+        ``move_target`` is ``list[CascadedCoords]`` of the same length.
+        ``target_coords`` must be a list of per-task batches (ndarray or list
+        of Coordinates). All tasks must share the same batch size ``N``.
+
+        Additional kwargs:
+        - ``task_weights``: ``(n_tasks,)`` array-like of per-task weights
+          applied to the stacked DLS residuals. Default: uniform 1.0.
+        """
+        from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+        _base_state = kwargs.pop('_base_state', None)
+        _base_weight = kwargs.pop('base_weight', None)
+
+        if backend is None:
+            from skrobot.pycompat import HAS_JAX
+            backend = 'jax' if HAS_JAX else 'numpy'
+        elif backend not in ('numpy', 'jax'):
+            warnings.warn(
+                "Multi-EE batch IK supports backend='numpy' or 'jax'; "
+                "falling back to 'numpy' from {!r}.".format(backend),
+                RuntimeWarning)
+            backend = 'numpy'
+
+        n_tasks = len(link_list)
+        if not isinstance(move_target, list) or len(move_target) != n_tasks:
+            raise ValueError(
+                "For multi-EE batch IK, move_target must be a list of length "
+                "{}, got {}".format(
+                    n_tasks,
+                    type(move_target).__name__ + (
+                        "(len={})".format(len(move_target))
+                        if isinstance(move_target, list) else "")))
+        if not isinstance(target_coords, list) or len(target_coords) != n_tasks:
+            raise ValueError(
+                "For multi-EE batch IK, target_coords must be a list of "
+                "length {} (one batch per task)".format(n_tasks))
+
+        target_positions_list = []
+        target_rotations_list = []
+        n_poses = None
+        for t, tc in enumerate(target_coords):
+            pos, rot = self._multi_ee_targets_to_pos_rot(tc)
+            if n_poses is None:
+                n_poses = pos.shape[0]
+            elif pos.shape[0] != n_poses:
+                raise ValueError(
+                    "Inconsistent batch sizes across tasks: task 0 has {} "
+                    "poses, task {} has {}".format(
+                        n_poses, t, pos.shape[0]))
+            target_positions_list.append(pos)
+            target_rotations_list.append(rot)
+
+        task_weights = kwargs.pop('task_weights', None)
+
+        # Cached solver keyed by per-task link/move-target identities.
+        # Bypass the cache when a virtual base chain is attached: its
+        # fresh Link/Joint objects would poison the cache with one-shot
+        # entries (id()s never match again).
+        if _base_state is None:
+            cache_key = (
+                tuple(tuple(id(link) for link in ll) for ll in link_list),
+                tuple(id(mt) for mt in move_target),
+                backend,
+            )
+            if not hasattr(self, '_batch_ik_multi_ee_solver_cache'):
+                self._batch_ik_multi_ee_solver_cache = {}
+            if cache_key not in self._batch_ik_multi_ee_solver_cache:
+                self._batch_ik_multi_ee_solver_cache[cache_key] = \
+                    create_batch_ik_solver(
+                        self, link_list, move_target, backend_name=backend)
+            solver = self._batch_ik_multi_ee_solver_cache[cache_key]
+        else:
+            solver = create_batch_ik_solver(
+                self, link_list, move_target, backend_name=backend)
+
+        union_refs = solver.union_info['union_joint_refs']
+        union_n_opt = solver.union_n_opt
+
+        # Initial angles (in union opt space, not full robot angle vector).
+        use_current_angles = True
+        if initial_angles is None or (
+                isinstance(initial_angles, str) and initial_angles == "random"):
+            initial_angles_for_solver = None
+            use_current_angles = False
+        elif isinstance(initial_angles, str) and initial_angles == "current":
+            current = np.array(
+                [j.joint_angle() for j in union_refs], dtype=np.float64)
+            initial_angles_for_solver = np.tile(current, (n_poses, 1))
+        elif isinstance(initial_angles, np.ndarray):
+            if initial_angles.shape == (n_poses, union_n_opt):
+                initial_angles_for_solver = initial_angles.copy()
+            else:
+                raise ValueError(
+                    "initial_angles for multi-EE must have shape ({}, {}), "
+                    "got {}".format(n_poses, union_n_opt, initial_angles.shape))
+        else:
+            raise ValueError(
+                "initial_angles must be None, 'random', 'current', or "
+                "np.ndarray, got {}".format(type(initial_angles)))
+
+        solver_kwargs = dict(
+            initial_angles=initial_angles_for_solver,
+            max_iterations=stop,
+            damping=0.01,
+            pos_threshold=thre,
+            rot_threshold=rthre,
+            position_masks=position_mask,
+            rotation_masks=rotation_mask,
+            rotation_mirrors=rotation_mirror,
+            task_weights=task_weights,
+            attempts_per_pose=attempts_per_pose,
+            use_current_angles=use_current_angles,
+        )
+
+        # Per-union-variable weights when use_base + base_weight is set.
+        # The virtual chain joints always end up at the leading union
+        # indices (first task to register them owns 0..n_dof-1 and later
+        # tasks map to the same slots).
+        if _base_state is not None and _base_weight is not None:
+            n_dof = _base_state['n_dof']
+            base_weight_vec = np.broadcast_to(
+                np.asarray(_base_weight, dtype=np.float64),
+                (n_dof,)).copy()
+            if np.any(base_weight_vec <= 0):
+                raise ValueError("base_weight must be strictly positive")
+            union_n_opt = solver.union_n_opt
+            joint_weights = np.ones(union_n_opt, dtype=np.float64)
+            # Locate each virtual-chain joint in union_refs (they should
+            # be at the beginning, but look them up explicitly rather
+            # than assuming the position).
+            chain_joints = _base_state['chain_joints']
+            located = []
+            for vj in chain_joints:
+                for uidx, ref in enumerate(union_refs):
+                    if ref is vj:
+                        located.append(uidx)
+                        break
+            if len(located) != n_dof:
+                raise RuntimeError(
+                    "could not locate all virtual-chain joints in union "
+                    "for base_weight wiring ({} of {})".format(
+                        len(located), n_dof))
+            joint_weights[np.asarray(located, dtype=np.int64)] = (
+                base_weight_vec)
+            solver_kwargs['joint_weights'] = joint_weights
+
+        solutions_array, success_array, errors_array = solver(
+            target_positions_list, target_rotations_list, **solver_kwargs)
+        solutions_np = np.asarray(solutions_array)
+        success_np = np.asarray(success_array)
+
+        # Map union opt solutions to robot's full angle vector. An id-keyed
+        # dict turns the O(n_union * n_robot_joints) membership test into
+        # O(n_union), and the double loop over poses and joints collapses
+        # into a single fancy-indexed assignment.
+        robot_joint_to_idx = {
+            id(j): k for k, j in enumerate(self.joint_list)}
+        union_idx_list = []
+        robot_idx_list = []
+        for uidx, joint in enumerate(union_refs):
+            ridx = robot_joint_to_idx.get(id(joint))
+            if ridx is not None:
+                union_idx_list.append(uidx)
+                robot_idx_list.append(ridx)
+        union_idx_arr = np.asarray(union_idx_list, dtype=np.int64)
+        robot_idx_arr = np.asarray(robot_idx_list, dtype=np.int64)
+
+        full_av_org = self.angle_vector()
+        full_solutions_arr = np.tile(full_av_org, (n_poses, 1))
+        if len(union_idx_arr) > 0:
+            full_solutions_arr[:, robot_idx_arr] = \
+                solutions_np[:, union_idx_arr]
+        full_solutions = list(full_solutions_arr)
+
+        success_flags = [bool(s) for s in success_np]
+        attempt_counts = [attempts_per_pose] * n_poses
+
+        if _base_state is not None:
+            # Extract virtual-chain joint angles from the union solution by
+            # looking up each virtual joint in union_refs.
+            n_dof = _base_state['n_dof']
+            chain_joints = _base_state['chain_joints']
+            virtual_union_indices = []
+            for vj in chain_joints:
+                for uidx, ref in enumerate(union_refs):
+                    if ref is vj:
+                        virtual_union_indices.append(uidx)
+                        break
+            if len(virtual_union_indices) != n_dof:
+                raise RuntimeError(
+                    "Failed to locate all virtual-chain joints in union "
+                    "(found {} of {}).".format(
+                        len(virtual_union_indices), n_dof))
+            virtual_idx_arr = np.asarray(virtual_union_indices,
+                                         dtype=np.int64)
+            virtual_angles = solutions_np[:, virtual_idx_arr]
+            base_poses = [
+                self._virtual_chain_angles_to_base_pose(
+                    virtual_angles[i], _base_state['use_base'])
+                for i in range(n_poses)
+            ]
+            return full_solutions, base_poses, success_flags, attempt_counts
 
         return full_solutions, success_flags, attempt_counts
 

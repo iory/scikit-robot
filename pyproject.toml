@@ -36,3 +36,8 @@ default.extend-ignore-re = [
 default.extend-ignore-identifiers-re = [
     "iy",  # y-index variable (ix, iy, iz pattern)
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
