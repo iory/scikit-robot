@@ -73,8 +73,12 @@ def transform_coords(c1, c2, out=None):
         out = Coordinates(check_validity=False)
     elif not isinstance(out, Coordinates):
         raise TypeError("Input type should be skrobot.coordinates.Coordinates")
-    out._translation = c1._translation + np.dot(c1._rotation, c2._translation)
-    out._rotation = np.matmul(c1._rotation, c2._rotation)
+    # ``np.dot`` matches ``np.matmul`` for 2-D inputs but has a
+    # shorter dispatch path; reuse it for both products and cache
+    # ``c1._rotation`` once.
+    r1 = c1._rotation
+    out._translation = c1._translation + np.dot(r1, c2._translation)
+    out._rotation = np.dot(r1, c2._rotation)
     return out
 
 
@@ -1812,6 +1816,36 @@ class CascadedCoords(Coordinates):
         >>> child.worldpos()
         array([20., 20., 20.])
         """
+        # Fast path: the common internal callers pass
+        # ``relative_coords='local'`` (or ``None``/``'parent'``, both
+        # no-ops at this level).  Skip the ``isinstance``/``.lower()``
+        # chain; mixed-case user strings fall through to the generic
+        # branch below.
+        if (relative_coords is None
+                or relative_coords == 'local'
+                or relative_coords == 'parent'):
+            # Extra-fast path: when the caller already assigned the
+            # new rotation/translation onto ``self`` (as
+            # ``rotate_with_matrix`` and ``translate`` do, via
+            # ``self._rotation = np.dot(...)``), ``target`` and
+            # ``pos`` are the same objects as ``self._rotation`` /
+            # ``self._translation``.  ``Coordinates.newcoords`` would
+            # then do four ``id()`` checks and no copy, so we can
+            # skip the ``super()`` call entirely -- as long as
+            # ``self._hook`` is not attached, so any user-side effect
+            # still routes through the standard path.
+            if (not check_validity
+                    and self._hook is None
+                    and pos is not None
+                    and target is self._rotation
+                    and pos is self._translation):
+                self.changed()
+                return self
+            super(CascadedCoords, self).newcoords(
+                target, pos, check_validity, relative_coords=None)
+            self.changed()
+            return self
+
         if self.parent is not None:
             if isinstance(relative_coords, str):
                 if relative_coords.lower() == 'world':
@@ -1846,10 +1880,19 @@ class CascadedCoords(Coordinates):
         return self
 
     def changed(self):
-        if self._changed is False:
-            self._changed = True
-            return [c.changed() for c in self._descendants]
-        return [False]
+        # Iterative descent.  No caller consumes the return value, so
+        # drop the per-call list allocation the old recursive body
+        # produced and use an explicit stack instead.
+        if self._changed:
+            return
+        self._changed = True
+        stack = list(self._descendants)
+        while stack:
+            c = stack.pop()
+            if c._changed:
+                continue
+            c._changed = True
+            stack.extend(c._descendants)
 
     def parentcoords(self):
         if self.parent:
@@ -1905,6 +1948,29 @@ class CascadedCoords(Coordinates):
         self
         """
         if isinstance(axis, list) or isinstance(axis, np.ndarray):
+            # Fast path for ``wrt='local'`` with an ndarray axis and no
+            # user hook: inline ``rotate_with_matrix`` + ``newcoords``
+            # + ``changed`` into one body.  The identity guards fall
+            # back to the standard dispatch when any member of the
+            # chain is overridden by a subclass.
+            t = type(self)
+            if (wrt == 'local'
+                    and self._hook is None
+                    and t.rotate_with_matrix is CascadedCoords.rotate_with_matrix
+                    and t.newcoords is CascadedCoords.newcoords
+                    and t.changed is CascadedCoords.changed):
+                R = rotation_matrix(theta, axis,
+                                    skip_normalization=skip_normalization)
+                self._rotation = np.dot(self._rotation, R)
+                if not self._changed:
+                    self._changed = True
+                    stack = list(self._descendants)
+                    while stack:
+                        c = stack.pop()
+                        if not c._changed:
+                            c._changed = True
+                            stack.extend(c._descendants)
+                return self
             return self.rotate_with_matrix(
                 rotation_matrix(theta, axis,
                                 skip_normalization=skip_normalization), wrt)
