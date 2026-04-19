@@ -221,7 +221,28 @@ def select_by_mask(vector, mask, mirror_axis=None):
     """
     if mirror_axis is not None:
         return vector.copy()
-    return vector[mask == 1]
+    # Dispatch the eight 0/1 mask patterns directly; avoids the
+    # ``mask == 1`` intermediate ndarray that ``vector[mask == 1]``
+    # allocates.  ``== 1`` preserves the "select exactly where mask
+    # equals 1" semantics for any non-0/1 entries.
+    m0 = mask[0] == 1
+    m1 = mask[1] == 1
+    m2 = mask[2] == 1
+    if m0:
+        if m1:
+            if m2:
+                return vector.copy()
+            return np.array([vector[0], vector[1]])
+        if m2:
+            return np.array([vector[0], vector[2]])
+        return np.array([vector[0]])
+    if m1:
+        if m2:
+            return np.array([vector[1], vector[2]])
+        return np.array([vector[1]])
+    if m2:
+        return np.array([vector[2]])
+    return np.array([])
 
 
 def select_by_axis(vector, axis):
@@ -850,13 +871,26 @@ def rotation_matrix(theta, axis, skip_normalization=False):
     if not skip_normalization:
         axis = convert_to_axis_vector(axis)
         axis = axis / np.sqrt(np.dot(axis, axis))
-    a = np.cos(theta / 2.0)
-    b, c, d = -axis * np.sin(theta / 2.0)
-    aa, bb, cc, dd = a * a, b * b, c * c, d * d
-    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
-    return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
-                     [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
-                     [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
+    c = np.cos(theta)
+    s = np.sin(theta)
+    C = 1.0 - c
+    x, y, z = axis[0], axis[1], axis[2]
+    xs, ys, zs = x * s, y * s, z * s
+    xC, yC, zC = x * C, y * C, z * C
+    xyC = x * yC
+    yzC = y * zC
+    zxC = z * xC
+    out = np.empty((3, 3))
+    out[0, 0] = x * xC + c
+    out[0, 1] = xyC - zs
+    out[0, 2] = zxC + ys
+    out[1, 0] = xyC + zs
+    out[1, 1] = y * yC + c
+    out[1, 2] = yzC - xs
+    out[2, 0] = zxC - ys
+    out[2, 1] = yzC + xs
+    out[2, 2] = z * zC + c
+    return out
 
 
 def rotate_vector(vec, theta, axis):
@@ -1184,17 +1218,25 @@ def normalize_vector(v, ord=2):
     >>> normalize_vector([0, 0, 0])
     array([0., 0., 0.])
     """
-    v = np.array(v, dtype=np.float64)
+    # ``np.asarray`` skips the copy when ``v`` is already a float64
+    # ndarray (typical for internal callers — joint axes, IK rotation
+    # residuals, etc.).  The division below always yields a fresh
+    # array, so returning an aliased view in the non-zero path is safe.
+    # The zero-norm branch explicitly copies to keep the old contract
+    # of always handing back an independent array.
+    v = np.asarray(v, dtype=np.float64)
     if ord == 2:
-        # Optimized L2 norm calculation
+        # Scalar ``math.sqrt`` on the 0-d norm_squared is markedly
+        # cheaper than ``np.sqrt``, which wraps its result in a 0-d
+        # ndarray.  Same L2 formula as before.
         norm_squared = np.dot(v, v)
         if norm_squared == 0:
-            return v
-        norm = np.sqrt(norm_squared)
+            return v.copy()
+        norm = math.sqrt(norm_squared)
     else:
         norm = np.linalg.norm(v, ord=ord)
         if norm == 0:
-            return v
+            return v.copy()
     return v / norm
 
 
@@ -1218,32 +1260,43 @@ def matrix2quaternion(m):
     >>> matrix2quaternion(np.eye(3))
     array([1., 0., 0., 0.])
     """
-    m = np.array(m, dtype=np.float64)
+    m = np.asarray(m, dtype=np.float64)
     if m.ndim == 2:
-        tr = m[0, 0] + m[1, 1] + m[2, 2]
+        # Cache the nine scalars once; the branches below dereference
+        # several of them multiple times.
+        m00 = m[0, 0]
+        m01 = m[0, 1]
+        m02 = m[0, 2]
+        m10 = m[1, 0]
+        m11 = m[1, 1]
+        m12 = m[1, 2]
+        m20 = m[2, 0]
+        m21 = m[2, 1]
+        m22 = m[2, 2]
+        tr = m00 + m11 + m22
         if tr > 0:
             S = math.sqrt(tr + 1.0) * 2
             qw = 0.25 * S
-            qx = (m[2, 1] - m[1, 2]) / S
-            qy = (m[0, 2] - m[2, 0]) / S
-            qz = (m[1, 0] - m[0, 1]) / S
-        elif (m[0, 0] > m[1, 1]) and (m[0, 0] > m[2, 2]):
-            S = math.sqrt(1. + m[0, 0] - m[1, 1] - m[2, 2]) * 2
-            qw = (m[2, 1] - m[1, 2]) / S
+            qx = (m21 - m12) / S
+            qy = (m02 - m20) / S
+            qz = (m10 - m01) / S
+        elif (m00 > m11) and (m00 > m22):
+            S = math.sqrt(1. + m00 - m11 - m22) * 2
+            qw = (m21 - m12) / S
             qx = 0.25 * S
-            qy = (m[0, 1] + m[1, 0]) / S
-            qz = (m[0, 2] + m[2, 0]) / S
-        elif m[1, 1] > m[2, 2]:
-            S = math.sqrt(1. + m[1, 1] - m[0, 0] - m[2, 2]) * 2
-            qw = (m[0, 2] - m[2, 0]) / S
-            qx = (m[0, 1] + m[1, 0]) / S
+            qy = (m01 + m10) / S
+            qz = (m02 + m20) / S
+        elif m11 > m22:
+            S = math.sqrt(1. + m11 - m00 - m22) * 2
+            qw = (m02 - m20) / S
+            qx = (m01 + m10) / S
             qy = 0.25 * S
-            qz = (m[1, 2] + m[2, 1]) / S
+            qz = (m12 + m21) / S
         else:
-            S = math.sqrt(1. + m[2, 2] - m[0, 0] - m[1, 1]) * 2
-            qw = (m[1, 0] - m[0, 1]) / S
-            qx = (m[0, 2] + m[2, 0]) / S
-            qy = (m[1, 2] + m[2, 1]) / S
+            S = math.sqrt(1. + m22 - m00 - m11) * 2
+            qw = (m10 - m01) / S
+            qx = (m02 + m20) / S
+            qy = (m12 + m21) / S
             qz = 0.25 * S
         return np.array([qw, qx, qy, qz])
     elif m.ndim == 3:
@@ -1312,9 +1365,15 @@ def quaternion2matrix(q, normalize=False):
            [0., 1., 0.],
            [0., 0., 1.]])
     """
-    q = np.array(q)
+    q = np.asarray(q)
     if normalize:
         q = quaternion_normalize(q)
+    elif q.ndim == 1:
+        # Scalar norm check on squared norm; threshold corresponds to
+        # ``np.allclose``'s default |norm - 1| <= ~1.1e-5.
+        nsq = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]
+        if abs(nsq - 1.0) > 2.2e-5:
+            raise ValueError("quaternion q's norm is not 1")
     else:
         norm = quaternion_norm(q)
         if not np.allclose(norm, 1.0):
@@ -1324,19 +1383,32 @@ def quaternion2matrix(q, normalize=False):
         q1 = q[1]
         q2 = q[2]
         q3 = q[3]
+        # Pre-compute shared products to avoid recomputing each entry.
+        q0q0 = q0 * q0
+        q1q1 = q1 * q1
+        q2q2 = q2 * q2
+        q3q3 = q3 * q3
+        q0q1 = q0 * q1
+        q0q2 = q0 * q2
+        q0q3 = q0 * q3
+        q1q2 = q1 * q2
+        q1q3 = q1 * q3
+        q2q3 = q2 * q3
 
-        m = np.zeros((3, 3))
-        m[0, 0] = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
-        m[0, 1] = 2 * (q1 * q2 - q0 * q3)
-        m[0, 2] = 2 * (q1 * q3 + q0 * q2)
+        # ``np.empty`` rather than ``np.zeros``: every entry is assigned
+        # below, so skipping the zero-fill is safe and a touch faster.
+        m = np.empty((3, 3))
+        m[0, 0] = q0q0 + q1q1 - q2q2 - q3q3
+        m[0, 1] = 2 * (q1q2 - q0q3)
+        m[0, 2] = 2 * (q1q3 + q0q2)
 
-        m[1, 0] = 2 * (q1 * q2 + q0 * q3)
-        m[1, 1] = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
-        m[1, 2] = 2 * (q2 * q3 - q0 * q1)
+        m[1, 0] = 2 * (q1q2 + q0q3)
+        m[1, 1] = q0q0 - q1q1 + q2q2 - q3q3
+        m[1, 2] = 2 * (q2q3 - q0q1)
 
-        m[2, 0] = 2 * (q1 * q3 - q0 * q2)
-        m[2, 1] = 2 * (q2 * q3 + q0 * q1)
-        m[2, 2] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+        m[2, 0] = 2 * (q1q3 - q0q2)
+        m[2, 1] = 2 * (q2q3 + q0q1)
+        m[2, 2] = q0q0 - q1q1 - q2q2 + q3q3
     elif q.ndim == 2:
         m = np.zeros((q.shape[0], 3, 3), dtype=np.float64)
         m[:, 0, 0] = q[:, 0] * q[:, 0] + \
@@ -1381,16 +1453,25 @@ def rotation_matrix_to_axis_angle_vector(m):
     >>> rotation_matrix_to_axis_angle_vector(np.eye(3))
     array([0., 0., 0.])
     """
-    # calc logarithm of quaternion
+    # Scalar math: ``math.sqrt`` / ``math.atan`` on plain floats is
+    # cheaper than the equivalent numpy scalar calls, and reusing the
+    # norm to scale directly avoids a second ``normalize_vector``.
     q = matrix2quaternion(m)
     q_w = q[0]
-    q_xyz = q[1:]
-    theta = 2.0 * np.arctan(np.linalg.norm(q_xyz) / q_w)
-    if theta > np.pi:
-        theta = theta - 2.0 * np.pi
-    elif theta < - np.pi:
-        theta = theta + 2.0 * np.pi
-    return theta * normalize_vector(q_xyz)
+    q1 = q[1]
+    q2 = q[2]
+    q3 = q[3]
+    norm_sq = q1 * q1 + q2 * q2 + q3 * q3
+    if norm_sq == 0:
+        return np.zeros(3)
+    norm = math.sqrt(norm_sq)
+    theta = 2.0 * math.atan(norm / q_w)
+    if theta > pi:
+        theta -= 2.0 * pi
+    elif theta < -pi:
+        theta += 2.0 * pi
+    scale = theta / norm
+    return np.array([q1 * scale, q2 * scale, q3 * scale])
 
 
 def matrix_log(m):
@@ -1626,11 +1707,18 @@ def cross_product(a, b):
     cross_prod : numpy.ndarray
         calculated cross product
     """
-    # Direct implementation instead of matrix multiplication for better performance
+    # Cache the six scalar indices; ``a[i]`` inside ``np.array([...])``
+    # re-dereferences through ndarray scalar lookup each time.
+    a0 = a[0]
+    a1 = a[1]
+    a2 = a[2]
+    b0 = b[0]
+    b1 = b[1]
+    b2 = b[2]
     return np.array([
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0]
+        a1 * b2 - a2 * b1,
+        a2 * b0 - a0 * b2,
+        a0 * b1 - a1 * b0,
     ])
 
 
