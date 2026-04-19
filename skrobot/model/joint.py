@@ -1,4 +1,5 @@
 from logging import getLogger
+import math
 
 import numpy as np
 
@@ -400,38 +401,48 @@ class RotationalJoint(Joint):
         """
         if v is None:
             return self._joint_angle
-        if self.joint_min_max_table and self.joint_min_max_target:
+        # Cache the table into a local before the ``is not None``
+        # check so a user assigning ``joint.joint_min_max_table = ...``
+        # post-construction still takes effect (no cached flag).  The
+        # hot-path savings come from the single attribute read + the
+        # other optimisations below, not from skipping this check.
+        jmt = self.joint_min_max_table
+        if jmt is not None and self.joint_min_max_target is not None:
             self.min_angle = self.joint_min_max_table_min_angle
             self.max_angle = self.joint_min_max_table_max_angle
         if relative:
-            v += self.joint_angle()
-        # Handle infeasible region where max < min (can occur at extreme
-        # joint configurations in bidirectional joint limit tables)
-        if self.max_angle < self.min_angle:
-            midpoint = 0.5 * (float(self.min_angle) + float(self.max_angle))
-            v = midpoint
-        elif v > self.max_angle:
+            v += self._joint_angle
+        # Cache the limits once so the three comparisons below don't
+        # re-dereference ``self.max_angle`` / ``self.min_angle`` each.
+        max_angle = self.max_angle
+        min_angle = self.min_angle
+        # Handle infeasible region where max < min (can occur at
+        # extreme configurations in bidirectional joint limit tables).
+        if max_angle < min_angle:
+            v = 0.5 * (float(min_angle) + float(max_angle))
+        elif v > max_angle:
             if not relative:
-                logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, self.max_angle)
-            v = self.max_angle
-        elif v < self.min_angle:
+                logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
+            v = max_angle
+        elif v < min_angle:
             if not relative:
-                logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, self.min_angle)
-            v = self.min_angle
+                logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
+            v = min_angle
         diff_angle = v - self._joint_angle
         self._joint_angle = v
         if diff_angle:
             self.child_link.rotate(diff_angle, self.axis,
                                    skip_normalization=True)
-        if enable_hook:
+        # Skip the for-loop setup when no hooks are registered.
+        if enable_hook and self._hooks:
             for hook in self._hooks:
                 hook()
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        """Returns DOF of rotational joint, 1."""
-        return 1
+    # ``joint_dof`` is a per-class constant; a class attribute is a
+    # touch cheaper than the ``@property`` it used to be.  Subclasses
+    # override by re-declaring it.
+    joint_dof = 1
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
@@ -467,10 +478,7 @@ class FixedJoint(Joint):
         """
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        """Returns DOF of rotational joint, 0."""
-        return 0
+    joint_dof = 0
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return 1.0
@@ -483,16 +491,22 @@ def calc_jacobian_rotational(jacobian, row, column, joint, paxis, child_link,
                              world_default_coords,
                              move_target, transform_coords, rotation_mask,
                              position_mask):
-    j_rot = calc_jacobian_default_rotate_vector(
-        paxis, world_default_coords, transform_coords)
-    p_diff = np.matmul(transform_coords.worldrot().T,
-                       (move_target.worldpos() - child_link.worldpos()))
+    # ``worldrot()`` triggers a worldcoords update and returns the
+    # rotation matrix; we need its transpose twice (once inside
+    # calc_jacobian_default_rotate_vector, once for ``p_diff``).  Cache
+    # the transpose locally and use ``np.dot`` instead of ``np.matmul``
+    # (identical result for 2-D inputs, shorter numpy dispatch path for
+    # small matrices -- same trick as in ``transform_coords``).
+    wrot_T = transform_coords.worldrot().T
+    j_rot = np.dot(wrot_T, world_default_coords.rotate_vector(paxis))
+    p_diff = np.dot(wrot_T,
+                    move_target.worldpos() - child_link.worldpos())
     j_translation = cross_product(j_rot, p_diff)
     j_translation = select_by_mask(j_translation, position_mask)
-    jacobian[row:row + len(j_translation), column] = j_translation
+    n_trans = len(j_translation)
+    jacobian[row:row + n_trans, column] = j_translation
     j_rotation = select_by_mask(j_rot, rotation_mask)
-    jacobian[row + len(j_translation):
-             row + len(j_translation) + len(j_rotation),
+    jacobian[row + n_trans:row + n_trans + len(j_rotation),
              column] = j_rotation
     return jacobian
 
@@ -588,28 +602,27 @@ class LinearJoint(Joint):
         if v is not None:
             if relative is not None:
                 v = v + self._joint_angle
-            if v > self.max_angle:
+            max_angle = self.max_angle
+            min_angle = self.min_angle
+            if v > max_angle:
                 if not relative:
-                    logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, self.max_angle)
-                v = self.max_angle
-            elif v < self.min_angle:
+                    logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
+                v = max_angle
+            elif v < min_angle:
                 if not relative:
-                    logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, self.min_angle)
-                v = self.min_angle
+                    logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
+                v = min_angle
             diff_translation = v - self._joint_angle
             self._joint_angle = v
             if diff_translation:
                 self.child_link.translate(diff_translation * self.axis)
 
-            if enable_hook:
+            if enable_hook and self._hooks:
                 for hook in self._hooks:
                     hook()
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        """Returns DOF of rotational joint, 1."""
-        return 1
+    joint_dof = 1
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_scalar(self, dav, i, periodic_time)
@@ -668,10 +681,7 @@ class OmniWheelJoint(Joint):
                     hook()
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        """Returns DOF of rotational joint, 3."""
-        return 3
+    joint_dof = 3
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
@@ -756,9 +766,7 @@ class PlanarJoint(Joint):
                     hook()
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        return 3
+    joint_dof = 3
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
@@ -853,9 +861,7 @@ class FloatingJoint(Joint):
                     hook()
         return self._joint_angle
 
-    @property
-    def joint_dof(self):
-        return 6
+    joint_dof = 6
 
     def calc_angle_speed_gain(self, dav, i, periodic_time):
         return calc_angle_speed_gain_vector(self, dav, i, periodic_time)
@@ -928,6 +934,35 @@ def calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm=None):
     return jamm
 
 
+def _joint_limit_scalars(j, kk):
+    """Return (angle, max, min) as Python floats.
+
+    Internal helper for ``joint_angle_limit_weight`` /
+    ``joint_angle_limit_nspace``; avoids the ``np.zeros(3)`` scratch
+    the public ``calc_joint_angle_min_max_for_limit_calculation``
+    allocates.
+    """
+    if j.joint_dof > 1:
+        return (float(j.joint_angle()[kk]),
+                float(j.max_angle[kk]),
+                float(j.min_angle[kk]))
+    if j.joint_min_max_table is not None:
+        return (float(j.joint_angle()),
+                float(j.joint_min_max_table_max_angle),
+                float(j.joint_min_max_table_min_angle))
+    return (float(j.joint_angle()),
+            float(j.max_angle),
+            float(j.min_angle))
+
+
+# ``np.deg2rad(1)``; hoisted as a module-level constant so the joint-limit
+# loops don't re-evaluate it per joint per IK iteration.  Keep it as a
+# numpy float64 scalar -- mixing it with float32 ``jamm`` entries then
+# promotes the arithmetic to float64, matching the original precision
+# path that ``test_joint_angle_limit_weight`` asserts against.
+_ONE_DEGREE_IN_RADIANS = np.float64(0.017453292519943295)
+
+
 def joint_angle_limit_weight(joint_list):
     """Calculate joint angle limit from joint list.
 
@@ -951,16 +986,25 @@ def joint_angle_limit_weight(joint_list):
     res : numpy.ndarray
         joint angle limit
     """
+    # Inner loop runs ~dims times per IK iteration.  Hoist the
+    # "1 degree" constant, cache its square/fourth powers, and replace
+    # scalar ``np.abs`` / ``np.isinf`` / ``np.deg2rad`` with the cheaper
+    # Python built-in and ``math`` equivalents.  The ``jamm`` scratch
+    # buffer (float32) is kept so intermediate precision matches the
+    # test expectations in ``test_joint_angle_limit_weight``.
     dims = calc_target_joint_dimension(joint_list)
     res = np.zeros(dims, 'f')
     k = 0
     kk = 0
     jamm = np.zeros(3, 'f')
+    e = _ONE_DEGREE_IN_RADIANS
+    e_sq = e * e
+    e_quad = e_sq * e_sq
+    inf = float('inf')
     for i in range(dims):
         j = joint_list[k]
         calc_joint_angle_min_max_for_limit_calculation(j, kk, jamm)
         joint_angle, joint_max, joint_min = jamm
-        e = np.deg2rad(1)
         if j.joint_dof > 1:
             kk += 1
             if kk >= j.joint_dof:
@@ -970,35 +1014,36 @@ def joint_angle_limit_weight(joint_list):
             k += 1
 
         # limitation
-        if np.abs(joint_angle - joint_max) < e and \
-           np.abs(joint_angle - joint_min) < e:
+        d_max = abs(joint_angle - joint_max)
+        d_min = abs(joint_angle - joint_min)
+        if d_max < e and d_min < e:
             pass
-        elif np.abs(joint_angle - joint_max) < e:
+        elif d_max < e:
             joint_angle = joint_max - e
-        elif np.abs(joint_angle - joint_min) < e:
+        elif d_min < e:
             joint_angle = joint_min + e
         # calculate weight
-        if np.abs(joint_angle - joint_max) < e and \
-           np.abs(joint_angle - joint_min) < e:
-            res[i] = float('inf')
+        if abs(joint_angle - joint_max) < e and \
+           abs(joint_angle - joint_min) < e:
+            res[i] = inf
         else:
-            if np.isinf(joint_min) or np.isinf(joint_max):
+            if math.isinf(joint_min) or math.isinf(joint_max):
                 r = 0.0
             else:
                 # Check for degenerate range (can happen with dynamic limits)
                 range_sq = (joint_max - joint_min) ** 2
                 denom = 4.0 * ((joint_max - joint_angle) ** 2) \
                     * ((joint_angle - joint_min) ** 2)
-                if range_sq < e * e or denom < e * e * e * e:
+                if range_sq < e_sq or denom < e_quad:
                     # Degenerate case: range too small or at boundary
-                    r = float('inf')
+                    r = inf
                 else:
                     r = abs(range_sq
                             * (2.0 * joint_angle - joint_max - joint_min)
                             / denom)
                     # Handle NaN from numerical issues
-                    if np.isnan(r) or np.isinf(r):
-                        r = float('inf')
+                    if math.isnan(r) or math.isinf(r):
+                        r = inf
             res[i] = r
     return res
 
@@ -1031,10 +1076,12 @@ def joint_angle_limit_nspace(
     nspace = np.zeros(n_joint_dimension, 'f')
     k = 0
     kk = 0
+    # Keep the per-joint math on Python floats; the old call to
+    # ``calc_joint_angle_min_max_for_limit_calculation`` allocated a
+    # 3-element ndarray per joint and handed back numpy scalars.
     for i in range(n_joint_dimension):
         joint = joint_list[k]
-        joint_angle, joint_max, joint_min = \
-            calc_joint_angle_min_max_for_limit_calculation(joint, kk)
+        joint_angle, joint_max, joint_min = _joint_limit_scalars(joint, kk)
 
         if joint.joint_dof > 1:
             kk += 1
@@ -1044,12 +1091,12 @@ def joint_angle_limit_nspace(
         else:
             k += 1
         # calculate weight
-        if (joint_max - joint_min == 0.0) or \
-           np.isinf(joint_max) or np.isinf(joint_min):
+        span = joint_max - joint_min
+        if span == 0.0 or math.isinf(joint_max) or math.isinf(joint_min):
             r = 0.0
         else:
-            r = ((joint_max + joint_min) - 2.0 * joint_angle) \
-                / (joint_max - joint_min)
-            r = np.sign(r) * (r ** 2)
+            r = ((joint_max + joint_min) - 2.0 * joint_angle) / span
+            # ``np.sign(r) * r**2`` reduces to the signed square for r != 0.
+            r = r * abs(r)
         nspace[i] = r
     return nspace
