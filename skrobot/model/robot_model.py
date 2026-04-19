@@ -1,6 +1,7 @@
 import io
 import itertools
 from logging import getLogger
+import math
 import os
 import sys
 import tempfile
@@ -22,6 +23,7 @@ from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
 from skrobot.coordinates.math import convert_legacy_axis_to_mask
+from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import jacobian_inverse
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import normalize_mask
@@ -51,6 +53,34 @@ except ImportError:
     auto_ik_hook = None
 
 logger = getLogger(__name__)
+
+
+def _count_dim(mask):
+    mask = np.asarray(mask)
+    return int(np.sum(mask))
+
+
+def _is_single_mask(val):
+    if isinstance(val, np.ndarray):
+        return val.ndim == 1 and len(val) == 3
+    if isinstance(val, list) and len(val) == 3:
+        return all(isinstance(x, (int, float, np.integer, np.floating))
+                   for x in val)
+    return False
+
+
+def _is_resolved_mask_list(val):
+    """Return True if ``val`` is already a list of 3-element mask ndarrays.
+
+    Used by ``inverse_kinematics_loop`` to skip mask re-resolution on
+    iterations where the outer caller has already resolved them.
+    """
+    if not isinstance(val, list):
+        return False
+    if len(val) == 0:
+        return False
+    first = val[0]
+    return isinstance(first, np.ndarray) and first.shape == (3,)
 
 
 class CascadedLink(CascadedCoords):
@@ -105,25 +135,15 @@ class CascadedLink(CascadedCoords):
         which means movement of `joint` affects `something`, thus
         this method returns `True`. Otherwise returns `False`.
         """
-
         assert isinstance(something, CascadedCoords), \
             "input must be at least a cascaded coords"
-
-        def find_nearest_ancestor_link(something):
-            # back-recursively find the closest ancestor link
-            # if ancestor link is not found, return None
-            if (something is None) or (isinstance(something, Link)):
-                return something
-            return find_nearest_ancestor_link(something.parent)
-        link = find_nearest_ancestor_link(something)
-
-        found_ancestor_link = (link is not None)
-        assert found_ancestor_link, "input is not connected to the robot"
-
-        key = (joint, link)
-        if key in self._relevance_predicate_table:
-            return self._relevance_predicate_table[key]
-        return False
+        # Walk the parent chain iteratively instead of via a
+        # recursive inner function redefined on each call.
+        link = something
+        while link is not None and not isinstance(link, Link):
+            link = link.parent
+        assert link is not None, "input is not connected to the robot"
+        return self._relevance_predicate_table.get((joint, link), False)
 
     @staticmethod
     def _reorder_link_lists_for_move_targets(link_lists, move_targets):
@@ -808,15 +828,14 @@ class CascadedLink(CascadedCoords):
         if avoid_weight_gain > 0.0:
             current_joint_angle_limit_weight = avoid_weight_gain * \
                 joint_angle_limit_weight(joint_list)
+            # ``math.isinf`` on plain floats is cheaper than the
+            # ufunc dispatch ``np.isinf`` takes on a scalar.
             for i in range(n_joint_dimension):
-                curr_w = current_joint_angle_limit_weight[i]
-                prev_w = previous_joint_angle_limit_weight[i]
-                # Handle inf - inf case which produces NaN
-                if np.isinf(curr_w) and np.isinf(prev_w):
-                    # Both are inf, treat as no change (weight = small value)
-                    new_weight[i] = 0.0
-                elif np.isinf(curr_w):
-                    # Current is inf, use small weight
+                curr_w = float(current_joint_angle_limit_weight[i])
+                prev_w = float(previous_joint_angle_limit_weight[i])
+                if math.isinf(curr_w):
+                    # current is inf (with or without prev inf):
+                    # both branches assigned 0.0 in the old code.
                     new_weight[i] = 0.0
                 elif (curr_w - prev_w) >= 0.0:
                     new_weight[i] = 1.0 / (1.0 + curr_w)
@@ -827,14 +846,28 @@ class CascadedLink(CascadedCoords):
             for i in range(n_joint_dimension):
                 new_weight[i] = weight[i]
 
-        w_cnt = 0
-        for ul in union_link_list:
-            dof = ul.joint.joint_dof
-            n_duplicate = sum([1 for x in link_list if ul in x])
-            if n_duplicate > 1:
-                for i in range(dof):
-                    new_weight[w_cnt + i] = new_weight[w_cnt + i] / n_duplicate
-            w_cnt += dof
+        # ``link_list`` is always wrapped in a list by callers.  For
+        # the single-EE case (``len(link_list) == 1``) no joint can
+        # be duplicated across chains, so the per-joint n_duplicate
+        # computation collapses to 1 and there is nothing to divide.
+        # Skip the whole loop in that case.  For multi-EE, precompute
+        # the per-joint duplicate count once rather than rescanning
+        # ``link_list`` inside the per-joint loop (the inner
+        # ``sum([1 for x in link_list if ul in x])`` was O(N * M)
+        # over joints and chains, rerun every IK iteration).
+        if len(link_list) > 1:
+            n_dup_per_ul = [
+                sum(1 for x in link_list if ul in x)
+                for ul in union_link_list]
+            w_cnt = 0
+            for idx, ul in enumerate(union_link_list):
+                dof = ul.joint.joint_dof
+                n_duplicate = n_dup_per_ul[idx]
+                if n_duplicate > 1:
+                    for i in range(dof):
+                        new_weight[w_cnt + i] = \
+                            new_weight[w_cnt + i] / n_duplicate
+                w_cnt += dof
         return new_weight
 
     def calc_inverse_kinematics_weight_from_link_list(
@@ -931,16 +964,9 @@ class CascadedLink(CascadedCoords):
         n = len(move_target)
 
         # Resolve new/legacy mask parameters only if legacy params are used
-        # or if masks haven't been resolved yet
-        def _is_resolved_mask_list(val):
-            """Check if val is already a list of mask arrays."""
-            if not isinstance(val, list):
-                return False
-            if len(val) == 0:
-                return False
-            first = val[0]
-            return isinstance(first, np.ndarray) and first.shape == (3,)
-
+        # or if masks haven't been resolved yet.  ``_is_resolved_mask_list``
+        # is the module-level helper so we don't redefine it on every
+        # iteration.
         if not _is_resolved_mask_list(position_mask):
             position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
                 position_mask, rotation_mask, rotation_mirror)
@@ -1010,9 +1036,20 @@ class CascadedLink(CascadedCoords):
             aj(link_list) if callable(aj) else aj).shape[0],
             tmp_additional_jacobi))
 
-        union_vel = np.zeros(self.calc_target_axis_dimension(
-            rotation_mask, position_mask, rotation_mirror=rotation_mirror)
-            + additional_jacobi_dimension, 'f')
+        # ``inverse_kinematics_args`` already computes the full
+        # Jacobian row dimension and forwards it to us as
+        # ``kwargs['dim']``; prefer that over recomputing via another
+        # ``calc_target_axis_dimension`` call per IK iteration.  The
+        # fallback stays for direct callers that bypass
+        # ``inverse_kinematics_args``.
+        cached_dim = kwargs.get('dim')
+        if cached_dim is not None:
+            union_vel = np.zeros(cached_dim, 'f')
+        else:
+            union_vel = np.zeros(self.calc_target_axis_dimension(
+                rotation_mask, position_mask,
+                rotation_mirror=rotation_mirror)
+                + additional_jacobi_dimension, 'f')
 
         # (if (memq :tmp-dims ik-args)
         #     (setq tmp-dims (cadr (memq :tmp-dims ik-args)))
@@ -1842,19 +1879,20 @@ class CascadedLink(CascadedCoords):
         dim : int
             Total dimension of constrained axes.
         """
-        def _count_dim(mask):
-            mask = np.asarray(mask)
-            return int(np.sum(mask))
+        # Fast path for single 3-element ndarray masks: sum three
+        # entries directly without the list-wrapping dance.
+        if (isinstance(position_mask, np.ndarray)
+                and position_mask.shape == (3,)
+                and isinstance(rotation_mask, np.ndarray)
+                and rotation_mask.shape == (3,)):
+            p = (int(position_mask[0]) + int(position_mask[1])
+                 + int(position_mask[2]))
+            if rotation_mirror is not None:
+                return p + 3
+            return p + (int(rotation_mask[0]) + int(rotation_mask[1])
+                        + int(rotation_mask[2]))
 
-        def _is_single_mask(val):
-            if isinstance(val, np.ndarray):
-                return val.ndim == 1 and len(val) == 3
-            if isinstance(val, list) and len(val) == 3:
-                return all(isinstance(x, (int, float, np.integer, np.floating))
-                           for x in val)
-            return False
-
-        # Convert to lists for uniform handling
+        # General path for list-of-masks / legacy inputs.
         if not isinstance(position_mask, list) or _is_single_mask(position_mask):
             position_mask = [position_mask]
         if not isinstance(rotation_mask, list) or _is_single_mask(rotation_mask):
@@ -2014,53 +2052,144 @@ class CascadedLink(CascadedCoords):
         else:
             position_masks = position_mask
 
+        # Hoist per-target invariants out of the per-joint loop:
+        # row stride, link-id set for O(1) membership, target world
+        # position, and target-frame rotation transpose.
+        task_data = []
+        for (link_list, move_target, transform_coord,
+             rot_mask, pos_mask) in zip(
+                 link_lists, move_targets, transform_coords,
+                 rotation_masks, position_masks):
+            task_data.append((
+                link_list,
+                set(id(l) for l in link_list),
+                move_target,
+                transform_coord,
+                rot_mask,
+                pos_mask,
+                move_target.worldpos(),
+                transform_coord.worldrot().T,
+                self.calc_target_axis_dimension(
+                    rot_mask, pos_mask,
+                    rotation_mirror=rotation_mirror),
+            ))
+
+        col_end = col_offset + jdim
+
+        if len(task_data) == 1:
+            # Single-end-effector fast path: unroll the one-element
+            # task loop.  ``union_link_list == link_list`` in this
+            # case (see ``calc_union_link_list``), so membership is
+            # guaranteed and ``row`` is always 0.  For RotationalJoint
+            # we also inline the matmul chain directly -- the old
+            # code allocated a temporary ``Coordinates`` per joint
+            # via ``parent_link.worldcoords().transform(default_coords,
+            # out=world_default_coords)`` and then went through
+            # ``world_default_coords.rotate_vector(paxis)``; we just
+            # chain ``parent_rot @ default_rot @ paxis`` directly.
+            (_link_list, _link_set, move_target, transform_coord,
+             rot_mask, pos_mask, mt_pos, tc_wrot_T,
+             _row_stride) = task_data[0]
+            col = col_offset
+            # Scratch only needed for the non-Rotational fall-through.
+            world_default_coords = None
+            for ul in union_link_list:
+                if col >= col_end:
+                    break
+                joint = ul.joint
+                if self._is_relevant(joint, move_target):
+                    paxis = joint.axis
+                    if joint.joint_dof <= 1 and not isinstance(
+                            paxis, np.ndarray):
+                        paxis = convert_to_axis_vector(paxis)
+                    child_link = joint.child_link
+                    parent_link = joint.parent_link
+                    default_coords = joint.default_coords
+
+                    if type(joint) is RotationalJoint:
+                        parent_rot = parent_link.worldcoords()._rotation
+                        world_default_rot = np.dot(
+                            parent_rot, default_coords._rotation)
+                        z_world = np.dot(world_default_rot, paxis)
+                        j_rot = np.dot(tc_wrot_T, z_world)
+                        p_diff = np.dot(
+                            tc_wrot_T,
+                            mt_pos - child_link.worldpos())
+                        j_translation = cross_product(j_rot, p_diff)
+                        j_translation = select_by_mask(
+                            j_translation, pos_mask)
+                        n_trans = len(j_translation)
+                        jacobian[:n_trans, col] = j_translation
+                        j_rotation = select_by_mask(j_rot, rot_mask)
+                        jacobian[n_trans:n_trans + len(j_rotation),
+                                 col] = j_rotation
+                    else:
+                        if world_default_coords is None:
+                            world_default_coords = Coordinates()
+                        parent_link.worldcoords().transform(
+                            default_coords, out=world_default_coords)
+                        jacobian = joint.calc_jacobian(
+                            jacobian, 0, col, joint, paxis,
+                            child_link, world_default_coords,
+                            move_target, transform_coord,
+                            rot_mask, pos_mask)
+                col += joint.joint_dof
+            return jacobian
+
+        world_default_coords = Coordinates()
+
+        # Multi-end-effector path: keep the nested loop over tasks.
         col = col_offset
         i = 0
-        world_default_coords = Coordinates()
-        while col < (col_offset + jdim):
+        while col < col_end:
             ul = union_link_list[i]
+            ul_id = id(ul)
             row = 0
 
-            for (link_list,
-                 move_target,
-                 transform_coord,
-                 rot_mask,
-                 pos_mask) in zip(
-                     link_lists,
-                     move_targets,
-                     transform_coords,
-                     rotation_masks,
-                     position_masks):
-                if ul in link_list:
+            for (link_list, link_set, move_target, transform_coord,
+                 rot_mask, pos_mask, mt_pos, tc_wrot_T,
+                 row_stride) in task_data:
+                if ul_id in link_set:
                     joint = ul.joint
-
                     if self._is_relevant(joint, move_target):
-                        if joint.joint_dof <= 1:
-                            paxis = convert_to_axis_vector(joint.axis)
-                        else:
-                            paxis = joint.axis
+                        paxis = joint.axis
+                        if joint.joint_dof <= 1 and not isinstance(
+                                paxis, np.ndarray):
+                            paxis = convert_to_axis_vector(paxis)
                         child_link = joint.child_link
                         parent_link = joint.parent_link
                         default_coords = joint.default_coords
-                        # set new coordinates to world_default_coords.
-                        parent_link.worldcoords().\
-                            transform(default_coords, out=world_default_coords)
 
-                        jacobian = joint.calc_jacobian(
-                            jacobian,
-                            row,
-                            col,
-                            joint,
-                            paxis,
-                            child_link,
-                            world_default_coords,
-                            move_target,
-                            transform_coord,
-                            rot_mask,
-                            pos_mask)
-                row += self.calc_target_axis_dimension(rot_mask,
-                                                       pos_mask,
-                                                       rotation_mirror=rotation_mirror)
+                        if type(joint) is RotationalJoint:
+                            # Skip the temp-Coordinates construction:
+                            # chain ``parent_rot @ default_rot @ paxis``
+                            # directly (same optimisation as the
+                            # single-EE path above).
+                            parent_rot = parent_link.worldcoords()._rotation
+                            world_default_rot = np.dot(
+                                parent_rot, default_coords._rotation)
+                            z_world = np.dot(world_default_rot, paxis)
+                            j_rot = np.dot(tc_wrot_T, z_world)
+                            p_diff = np.dot(
+                                tc_wrot_T,
+                                mt_pos - child_link.worldpos())
+                            j_translation = cross_product(j_rot, p_diff)
+                            j_translation = select_by_mask(
+                                j_translation, pos_mask)
+                            n_trans = len(j_translation)
+                            jacobian[row:row + n_trans, col] = j_translation
+                            j_rotation = select_by_mask(j_rot, rot_mask)
+                            jacobian[row + n_trans:row + n_trans + len(j_rotation),
+                                     col] = j_rotation
+                        else:
+                            parent_link.worldcoords().transform(
+                                default_coords, out=world_default_coords)
+                            jacobian = joint.calc_jacobian(
+                                jacobian, row, col, joint, paxis,
+                                child_link, world_default_coords,
+                                move_target, transform_coord,
+                                rot_mask, pos_mask)
+                row += row_stride
             col += joint.joint_dof
             i += 1
         return jacobian
