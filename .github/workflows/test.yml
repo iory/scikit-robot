@@ -310,5 +310,5 @@ jobs:
       run: |
         source /opt/ros/${{ matrix.ros-distribution }}/setup.bash
         pytest -v -p pytest_timeout --timeout=60 \
-          tests/skrobot_tests/interfaces_tests/ros2/test_base.py
+          tests/skrobot_tests/interfaces_tests/ros2/
 
