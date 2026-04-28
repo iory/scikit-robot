@@ -106,7 +106,7 @@ def extract_dynamics_parameters(robot_model, link_list=None):
 
         # Mass properties
         mass = getattr(link, 'mass', None) or 0.1  # Default 100g
-        com = getattr(link, 'center_of_mass', None)
+        com = getattr(link, 'centroid', None)
         if com is None:
             com = np.zeros(3)
         default_masses.append(float(mass))
@@ -714,8 +714,6 @@ def extract_inverse_dynamics_parameters(robot_model, link_list=None,
         # Center of mass (centroid in link frame)
         com = getattr(link, 'centroid', None)
         if com is None:
-            com = getattr(link, 'center_of_mass', None)
-        if com is None:
             com = np.zeros(3)
         link_coms.append(np.array(com, dtype=np.float64))
 
@@ -744,8 +742,6 @@ def extract_inverse_dynamics_parameters(robot_model, link_list=None,
 
                 # Center of mass
                 com = getattr(link, 'centroid', None)
-                if com is None:
-                    com = getattr(link, 'center_of_mass', None)
                 if com is None:
                     com = np.zeros(3)
                 all_mass_link_coms.append(np.array(com, dtype=np.float64))
