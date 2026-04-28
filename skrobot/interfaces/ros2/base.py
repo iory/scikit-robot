@@ -54,7 +54,9 @@ class ROS2RobotInterfaceBase(Node):
                  joint_states_queue_size=1,
                  controller_timeout=3,
                  namespace=None,
-                 node_name='robot_interface'):
+                 node_name='robot_interface',
+                 wait_for_joint_states=False,
+                 joint_states_timeout=10.0):
         """Initialization of RobotInterface
 
         Parameters
@@ -73,6 +75,17 @@ class ROS2RobotInterfaceBase(Node):
             namespace of controller
         node_name : string
             name of the ROS2 node
+        wait_for_joint_states : bool
+            If True, block in ``__init__`` until at least one ``JointState``
+            message is received on ``joint_states_topic``. This makes the
+            instance immediately usable for ``angle_vector`` / ``update_robot_state``
+            without manual polling. Default is False to preserve backwards
+            compatibility — set to True when you want the constructor to fail
+            fast on misconfigured topics. Has no effect when an executor is
+            not spinning the node externally; in that case rclpy.spin_once
+            is used to drain pending messages.
+        joint_states_timeout : float
+            Timeout in seconds for the ``wait_for_joint_states`` option.
 
         """
         super().__init__(node_name)
@@ -85,11 +98,20 @@ class ROS2RobotInterfaceBase(Node):
         self.joint_action_enable = True
         self.namespace = namespace
         self._joint_state_msg = None
+        # Joint names actually seen on the joint_states topic. Used to filter
+        # which joints wait_until_update_all_joints actually waits for, so
+        # that joints declared in the URDF but never published (e.g. gripper
+        # finger joints when the gripper node is not running) do not cause
+        # an indefinite wait.
+        self._received_joint_names = set()
+        self._not_updated_joints = []
+        self._timeout_reason = ""
 
         if self.namespace:
             topic_name = f'{self.namespace}/{joint_states_topic}'
         else:
             topic_name = joint_states_topic
+        self._joint_states_topic_name = topic_name
 
         self.joint_state_sub = self.create_subscription(
             JointState,
@@ -97,6 +119,9 @@ class ROS2RobotInterfaceBase(Node):
             self.joint_state_callback,
             joint_states_queue_size
         )
+
+        if wait_for_joint_states:
+            self._wait_for_first_joint_state(joint_states_timeout)
 
         self.controller_table = {}
         self.controller_param_table = {}
@@ -164,51 +189,116 @@ class ROS2RobotInterfaceBase(Node):
                 'time is invalid type. {}'.format(time))
         return time
 
-    def wait_until_update_all_joints(self, tgt_tm):
-        """Wait until all joints have been updated with timestamps newer than target time.
+    def _wait_for_first_joint_state(self, timeout):
+        """Spin the node until a JointState is received or timeout elapses."""
+        deadline = time.time() + timeout
+        while self._joint_state_msg is None and time.time() < deadline:
+            try:
+                rclpy.spin_once(self, timeout_sec=0.1)
+            except Exception:
+                # If an external executor is already spinning this node,
+                # spin_once raises. Just yield and let it deliver the message.
+                time.sleep(0.05)
+        if self._joint_state_msg is None:
+            raise TimeoutError(
+                "No JointState received on '{}' within {:.1f}s. "
+                "Check that joint_state_publisher / joint_state_broadcaster "
+                "are running and that the topic name / namespace matches."
+                .format(self._joint_states_topic_name, timeout))
 
-        This method handles both rclpy.time.Time objects (with nanoseconds attribute)
-        and builtin_interfaces.msg.Time objects (with sec and nanosec attributes).
+    @staticmethod
+    def _stamp_nanoseconds(ts):
+        if ts is None:
+            return None
+        if hasattr(ts, 'nanoseconds'):
+            return ts.nanoseconds
+        if hasattr(ts, 'sec') and hasattr(ts, 'nanosec'):
+            return ts.sec * 1_000_000_000 + ts.nanosec
+        return None
+
+    def wait_until_update_all_joints(self, tgt_tm, timeout=3.0):
+        """Wait until joints seen on joint_states have timestamps > tgt_tm.
+
+        Only joints that have ever been received on the joint_states topic
+        are considered (see ``_received_joint_names``). Joints declared in
+        the URDF but never published — e.g. finger joints when the gripper
+        node is not running — are ignored, so this method does not hang
+        when a subset of the URDF is being driven.
 
         Parameters
         ----------
-        tgt_tm : rclpy.time.Time or bool
-            Target time to wait for. If True, uses current time.
+        tgt_tm : rclpy.time.Time, builtin_interfaces.msg.Time, bool, or None
+            Target time. If True / None, uses the current ROS time (i.e. waits
+            for any joint_state newer than now).
+        timeout : float
+            Maximum seconds to wait. ``0`` or ``None`` waits forever.
+
+        Returns
+        -------
+        bool
+            True if all received joints have a stamp newer than ``tgt_tm``
+            within the timeout, False otherwise. The reason for a False
+            return is recorded in ``self._timeout_reason``.
         """
-        if hasattr(tgt_tm, 'nanoseconds'):
-            initial_time = tgt_tm.nanoseconds
-        else:
+        self._not_updated_joints = []
+        self._timeout_reason = "wait_until_update_all_joints did not complete"
+
+        initial_time = self._stamp_nanoseconds(tgt_tm)
+        if initial_time is None:
             initial_time = self.get_clock().now().nanoseconds
 
+        start = time.time()
         while True:
-            if 'stamp_list' in self.robot_state:
-                all_valid = True
-                for ts in self.robot_state['stamp_list']:
-                    if ts is None:
-                        all_valid = False
-                        break
+            if 'stamp_list' in self.robot_state and self._received_joint_names:
+                names = self.robot_state['name']
+                stamps = self.robot_state['stamp_list']
+                check_results = []
+                for i, name in enumerate(names):
+                    if name in self._received_joint_names:
+                        ts_ns = self._stamp_nanoseconds(stamps[i])
+                        check_results.append(
+                            ts_ns is not None and ts_ns > initial_time)
+                if check_results and all(check_results):
+                    self._timeout_reason = ""
+                    return True
 
-                    # Handle rclpy.time.Time objects
-                    if hasattr(ts, 'nanoseconds'):
-                        if ts.nanoseconds <= initial_time:
-                            all_valid = False
-                            break
-                    # Handle builtin_interfaces.msg.Time objects
-                    elif hasattr(ts, 'sec') and hasattr(ts, 'nanosec'):
-                        ts_nano = ts.sec * 1e9 + ts.nanosec
-                        if ts_nano <= initial_time:
-                            all_valid = False
-                            break
-                    else:
-                        # Unknown timestamp type
-                        all_valid = False
-                        break
+            if timeout and (time.time() - start) > timeout:
+                self._set_timeout_reason(initial_time)
+                logger.warning(
+                    "wait_until_update_all_joints timeout. %s",
+                    self._timeout_reason)
+                return False
+            time.sleep(0.005)
 
-                if all_valid:
-                    return
-
-            # Small sleep to avoid busy waiting and allow other threads to run
-            time.sleep(0.001)
+    def _set_timeout_reason(self, initial_time):
+        """Populate self._timeout_reason for diagnostic logging."""
+        if 'stamp_list' not in self.robot_state \
+                or 'name' not in self.robot_state:
+            self._timeout_reason = (
+                "No joint_states message received. robot_state keys: {}"
+                .format(list(self.robot_state.keys())))
+            return
+        stamps = self.robot_state['stamp_list']
+        names = self.robot_state['name']
+        if not names or not stamps:
+            self._timeout_reason = (
+                "joint_names or stamp_list is empty. "
+                "len(joint_names)={}, len(stamp_list)={}"
+                .format(len(names), len(stamps)))
+            return
+        for name, ts in zip(names, stamps):
+            if name not in self._received_joint_names:
+                continue
+            ts_ns = self._stamp_nanoseconds(ts)
+            if ts_ns is None or ts_ns <= initial_time:
+                self._not_updated_joints.append(name)
+        if self._not_updated_joints:
+            self._timeout_reason = (
+                "Not updated joints: {}".format(self._not_updated_joints))
+        else:
+            self._timeout_reason = (
+                "All received joints have stamps but none newer than "
+                "initial_time. Check use_sim_time / clock alignment.")
 
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
@@ -234,20 +324,29 @@ class ROS2RobotInterfaceBase(Node):
             self.moving_status[key] = False
 
     def update_robot_state(self, wait_until_update=False):
-        """Update robot state.
+        """Update the robot model from the latest joint_states.
 
         Parameters
         ----------
-        wait_until_update : bool
-            if True TODO
+        wait_until_update : bool, rclpy.time.Time, or float
+            If truthy, wait via :meth:`wait_until_update_all_joints` for a
+            joint_state newer than this time (or "now" when True) before
+            applying the update. Useful right after :meth:`wait_interpolation`
+            to avoid reading state from before motion completion.
 
         Returns
         -------
-        TODO
+        bool
+            True if the model was updated, False if no joint_states have been
+            received yet or wait_until_update timed out. ``self._timeout_reason``
+            holds a description in the False case.
         """
         if wait_until_update:
-            self.wait_until_update_all_joints(wait_until_update)
+            if not self.wait_until_update_all_joints(wait_until_update):
+                return False
         if not self.robot_state:
+            self._timeout_reason = (
+                "robot_state is empty (no joint_states callback received)")
             return False
         joint_names = self.robot_state['name']
         positions = self.robot_state['position']
@@ -269,13 +368,23 @@ class ROS2RobotInterfaceBase(Node):
             joint.joint_angle(position)
             joint.joint_velocity = velocity
             joint.joint_torque = effort
+        return True
 
     def joint_state_callback(self, msg):
         self._joint_state_msg = msg
+        # Track every joint name we have ever seen on this topic so that
+        # wait_until_update_all_joints only waits for joints that are
+        # actually being published.
+        self._received_joint_names.update(msg.name)
+
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
         else:
-            robot_state_names = msg.name
+            # Pre-allocate the state slots from the URDF model, not from the
+            # first message — joints arriving from a later publisher (e.g. a
+            # gripper node started after the controllers) need their slot to
+            # already exist for stamp tracking.
+            robot_state_names = [j.name for j in self.robot.joint_list]
             self.robot_state['name'] = robot_state_names
             for key in ['position', 'velocity', 'effort']:
                 self.robot_state[key] = np.zeros(len(robot_state_names))
@@ -289,6 +398,11 @@ class ROS2RobotInterfaceBase(Node):
             if len(joint_names) == len(joint_data):
                 data = self.robot_state[key]
                 for jn in joint_names:
+                    # Skip joints not in the robot model (e.g. when a stray
+                    # publisher sends names that are not part of the URDF).
+                    if jn not in robot_state_names:
+                        index += 1
+                        continue
                     joint_index = robot_state_names.index(jn)
                     data[joint_index] = joint_data[index]
                     index += 1
@@ -664,7 +778,9 @@ class ROS2RobotInterfaceBase(Node):
                 traj_points)
         return avs
 
-    def wait_interpolation(self, controller_type=None, timeout=0):
+    def wait_interpolation(self, controller_type=None, timeout=0,
+                           wait_for_state_update=True,
+                           state_update_timeout=1.0):
         """Wait until last sent motion is finished.
 
         Parameters
@@ -673,6 +789,17 @@ class ROS2RobotInterfaceBase(Node):
             controller to be wait
         timeout : float
             max time of for waiting
+        wait_for_state_update : bool
+            If True (default), after each action result arrives, also wait
+            until a joint_state with stamp newer than the result time is
+            received. This guarantees that an immediate ``update_robot_state``
+            / ``self.robot.angle_vector()`` afterwards sees the post-motion
+            state instead of a frame from before completion. Set to False to
+            preserve the old "return as soon as the action result arrives"
+            behaviour.
+        state_update_timeout : float
+            Seconds to wait for the post-motion joint_state. Bounded so a
+            stalled state publisher cannot make wait_interpolation hang.
 
         Returns
         -------
@@ -747,6 +874,16 @@ class ROS2RobotInterfaceBase(Node):
                 except Exception as e:
                     self.get_logger().error(f"Error getting result: {e}")
                     results.append(False)
+
+        # After every controller has reported its goal result, optionally wait
+        # for a fresh joint_state so that callers immediately seeing the post-
+        # motion model state via update_robot_state() do not get a sample from
+        # before the action result arrived (action result completes ~1 cycle
+        # before joint_state_broadcaster publishes the final state).
+        if wait_for_state_update:
+            now = self.get_clock().now()
+            self.wait_until_update_all_joints(
+                now, timeout=state_update_timeout)
 
         return results
 

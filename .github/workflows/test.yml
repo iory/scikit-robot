@@ -260,3 +260,55 @@ jobs:
           fi
         done
 
+  ros2-tests:
+    name: Run ROS 2 Unit Tests (${{ matrix.ros-distribution }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ros-distribution: jazzy
+            os: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup ROS 2
+      uses: ros-tooling/setup-ros@v0.7
+      with:
+        required-ros-distributions: ${{ matrix.ros-distribution }}
+    - name: Install ROS 2 interface packages
+      # ros-tooling/setup-ros only installs ros-<distro>-ros-base, which lacks
+      # the message / action packages that skrobot.interfaces.ros2.base imports
+      # (control_msgs, trajectory_msgs, action_msgs, sensor_msgs).
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          ros-${{ matrix.ros-distribution }}-control-msgs \
+          ros-${{ matrix.ros-distribution }}-trajectory-msgs \
+          ros-${{ matrix.ros-distribution }}-action-msgs \
+          ros-${{ matrix.ros-distribution }}-sensor-msgs
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        source /opt/ros/${{ matrix.ros-distribution }}/setup.bash
+        python -m pip install --upgrade pip setuptools wheel
+        pip install pytest pytest-timeout
+        # Install the project itself; '[all]' would pull pybullet etc., but
+        # the ROS 2 unit tests only need the core skrobot model + URDF code.
+        pip install -e .
+    - name: Run ROS 2 unit tests
+      shell: bash
+      # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 stops pytest from auto-loading every
+      # plugin advertised on the ROS 2 distro's PYTHONPATH (launch_testing,
+      # launch_testing_ros, ament_lint, ...). They each ship pytest hooks that
+      # are incompatible with newer pluggy or assume their own collector
+      # entrypoint, which crashes plain unit-test collection. We explicitly
+      # opt back in to the plugins this job needs (pytest-timeout) via -p.
+      # --timeout=60 keeps any regression of the wait_until_update_all_joints
+      # hang surfacing as a per-test timeout instead of a stuck CI run.
+      env:
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      run: |
+        source /opt/ros/${{ matrix.ros-distribution }}/setup.bash
+        pytest -v -p pytest_timeout --timeout=60 \
+          tests/skrobot_tests/interfaces_tests/ros2/test_base.py
+
