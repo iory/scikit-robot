@@ -8,6 +8,7 @@ import numpy as np
 from skrobot.coordinates import Coordinates
 from skrobot.model.primitives import Axis
 from skrobot.models import Fetch
+from skrobot.models import JaxonJVRC
 from skrobot.models import Nextage
 from skrobot.models import Panda
 from skrobot.models import PR2
@@ -28,7 +29,8 @@ def parse_mask_constraint(mask_str):
 def main():
     parser = argparse.ArgumentParser(description='Advanced Batch IK Demo with mask constraints')
     parser.add_argument('--robot', type=str, default='pr2',
-                        choices=['fetch', 'pr2', 'panda', 'r8_6', 'nextage'],
+                        choices=['fetch', 'pr2', 'panda', 'r8_6', 'nextage',
+                                 'jaxon'],
                         help='Robot model to use. Default: fetch')
     parser.add_argument('--rotation-mask', '--rotation_mask', '-r',
                         default='True',
@@ -104,8 +106,14 @@ def main():
     elif args.robot == 'nextage':
         robot = Nextage()
         arm = robot.right_arm
+    elif args.robot == 'jaxon':
+        robot = JaxonJVRC()
+        arm = robot.right_arm
 
-    robot.reset_pose()
+    if args.robot == 'jaxon':
+        robot.reset_manip_pose()
+    else:
+        robot.reset_pose()
 
     # Define target poses based on robot type
     if args.robot == 'r8_6':
@@ -122,6 +130,20 @@ def main():
             Coordinates(pos=(0.46, -0.24, 0.89)).rotate(np.deg2rad(8), 'z').rotate(np.deg2rad(3), 'x'),
             Coordinates(pos=(0.56, -0.24, 0.89)),
         ]
+    elif args.robot == 'jaxon':
+        # Generate target poses by perturbing the manipulation pose's
+        # joint angles, so every target is provably reachable.
+        home_angles = np.array(
+            [j.joint_angle() for j in arm.joint_list])
+        rng = np.random.default_rng(0)
+        target_poses = []
+        for _ in range(6):
+            delta = rng.uniform(-0.4, 0.4, size=len(home_angles))
+            for j, q, d in zip(arm.joint_list, home_angles, delta):
+                j.joint_angle(np.clip(q + d, j.min_angle, j.max_angle))
+            target_poses.append(arm.end_coords.copy_worldcoords())
+        for j, q in zip(arm.joint_list, home_angles):
+            j.joint_angle(q)
     elif args.robot == 'nextage':
         target_poses = [
             Coordinates(pos=(0.3, -0.25, -0.1)).rotate(
