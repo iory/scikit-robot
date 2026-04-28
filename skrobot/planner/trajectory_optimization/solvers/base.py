@@ -99,7 +99,8 @@ class BaseSolver(ABC):
             If trajectory shape is incorrect.
         """
         trajectory = np.asarray(trajectory)
-        expected_shape = (problem.n_waypoints, problem.n_joints)
+        n_total = getattr(problem, 'n_total_dof', problem.n_joints)
+        expected_shape = (problem.n_waypoints, n_total)
 
         if trajectory.shape != expected_shape:
             raise ValueError(
