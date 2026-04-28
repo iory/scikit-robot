@@ -1027,9 +1027,12 @@ class CascadedLink(CascadedCoords):
         tmp_additional_jacobi = map(
             lambda aj: aj(link_list) if callable(aj) else aj,
             additional_jacobi)
-        if cog_null_space is None and target_centroid_pos is not None:
+        # Normalize cog_translation_axis once so the dimension count
+        # and the Jacobian / velocity helpers all use the same array.
+        cog_axis_mask_arr = normalize_mask(cog_translation_axis)
+        if (not cog_null_space) and target_centroid_pos is not None:
             additional_jacobi_dimension = self.calc_target_axis_dimension(
-                False, cog_translation_axis)
+                np.array([0, 0, 0]), cog_axis_mask_arr)
         else:
             additional_jacobi_dimension = 0
         additional_jacobi_dimension += sum(map(lambda aj: (
@@ -1086,6 +1089,21 @@ class CascadedLink(CascadedCoords):
 
         if success is True:
             success = self.ik_convergence_check(dif_pos, dif_rot, thre, rthre)
+        if (success and target_centroid_pos is not None
+                and not cog_null_space):
+            # Treat the CoG as just another converging task: the loop
+            # is only "done" when the CoG error is also under
+            # ``centroid_thre``. Without this, EE-only convergence
+            # short-circuits the iteration (returns 'ik-succeed') and
+            # the CoG augmentation we added below never gets a chance
+            # to drive the joints.
+            cur_cog_xyz = self.update_mass_properties()['total_centroid']
+            cog_sel = np.where(np.asarray(cog_axis_mask_arr) == 1)[0]
+            cog_err_norm = float(np.linalg.norm(
+                (np.asarray(target_centroid_pos)
+                 - cur_cog_xyz)[cog_sel]))
+            if cog_err_norm > centroid_thre:
+                success = False
         if additional_check is not None:
             success &= additional_check()
 
@@ -1119,25 +1137,35 @@ class CascadedLink(CascadedCoords):
                 union_vel[j + vec_count] = union_vels[i][j]
             vec_count += len(union_vels[i])
 
-        # Use cog jacobian as first task
-        # (when (and (not cog-null-space) target-centroid-pos)
-        #   (setq additional-jacobi
-        #         (append (list (send self :calc-cog-jacobian-from-link-list
-        #                             :update-mass-properties nil
-        #                             :link-list union-link-list
-        #                             :translation-axis cog-translation-axis))
-        #                 additional-jacobi))
-        #   (let ((tmp-cog-gain (if (> cog-gain 1.0) 1.0 cog-gain)))
-        #     (setq additional-vel
-        #           (append (list
-        # (send self :calc-vel-for-cog tmp-cog-gain cog-translation-axis
-        #                                                target-centroid-pos
-        #                          :centroid-offset-func centroid-offset-func
-        #                          :update-mass-properties nil))
-        #                   additional-vel))
-        #     (when (send self :get :ik-target-error)
-        #       (push (car additional-vel) (cdr (assoc :centroid (send self :ge
-        #     ))
+        # CoG task: when ``target_centroid_pos`` is set, prepend the
+        # CoG Jacobian row(s) and velocity to ``additional_jacobi`` /
+        # ``additional_vel`` so the augmented system steers the robot
+        # centre of gravity along the axes selected by
+        # ``cog_translation_axis``.
+        if (not cog_null_space) and target_centroid_pos is not None:
+            cog_gain_clipped = (
+                cog_gain if cog_gain <= 1.0 else 1.0)
+            # One mass-properties refresh shared between the Jacobian
+            # and velocity helpers. ``calc_vel_for_cog`` reads from
+            # ``self._cached_mass_props`` when given
+            # ``update_mass_properties=False``.
+            mp = self.update_mass_properties()
+            self._cached_mass_props = mp
+            cog_jac = self.calc_cog_jacobian_from_link_list(
+                link_list=union_link_list,
+                translation_axis=cog_axis_mask_arr,
+                update_mass_properties=False,
+                n_joint_dimension=jacobi.shape[1],
+            )
+            cog_vel = self.calc_vel_for_cog(
+                target_centroid_pos,
+                translation_axis=cog_axis_mask_arr,
+                cog_gain=cog_gain_clipped,
+                update_mass_properties=False,
+                centroid_offset_func=centroid_offset_func,
+            )
+            additional_jacobi = [cog_jac] + list(additional_jacobi or [])
+            additional_vel = [cog_vel] + list(additional_vel or [])
 
         # append additional-jacobi and additional-vel
         if additional_jacobi is not None:
@@ -1657,9 +1685,9 @@ class CascadedLink(CascadedCoords):
             tmp_additional_jacobi = map(
                 lambda aj: aj(link_list) if callable(aj) else aj,
                 additional_jacobi)
-            if cog_null_space is None and target_centroid_pos is not None:
+            if (not cog_null_space) and target_centroid_pos is not None:
                 additional_jacobi_dimension = self.calc_target_axis_dimension(
-                    False, cog_translation_axis)
+                    np.array([0, 0, 0]), normalize_mask(cog_translation_axis))
             else:
                 additional_jacobi_dimension = 0
             additional_jacobi_dimension += sum(map(lambda aj: (
@@ -1717,8 +1745,25 @@ class CascadedLink(CascadedCoords):
 
                 if loop == 1 and self.ik_convergence_check(
                         dif_pos, dif_rot, thre, rthre):
-                    success = 'ik-succeed'
-                    break
+                    # Don't early-exit while a CoG target is still
+                    # unsatisfied. Otherwise the iteration-1 fast-path
+                    # silently skips ``inverse_kinematics_loop`` (and
+                    # therefore the CoG Jacobian augmentation) when the
+                    # end-effector errors happen to already be zero.
+                    cog_ok = True
+                    if target_centroid_pos is not None and not cog_null_space:
+                        cur_cog = self.update_mass_properties()[
+                            'total_centroid']
+                        axis_mask = normalize_mask(cog_translation_axis)
+                        sel = np.where(np.asarray(axis_mask) == 1)[0]
+                        cog_err = float(np.linalg.norm(
+                            (np.asarray(target_centroid_pos)
+                             - cur_cog)[sel]))
+                        if cog_err > centroid_thre:
+                            cog_ok = False
+                    if cog_ok:
+                        success = 'ik-succeed'
+                        break
 
                 success = self.inverse_kinematics_loop(
                     dif_pos, dif_rot,
@@ -1736,6 +1781,11 @@ class CascadedLink(CascadedCoords):
                     rthre=rthre,
                     additional_jacobi=additional_jacobi,
                     additional_vel=additional_vel,
+                    centroid_thre=centroid_thre,
+                    target_centroid_pos=target_centroid_pos,
+                    centroid_offset_func=centroid_offset_func,
+                    cog_translation_axis=cog_translation_axis,
+                    cog_null_space=cog_null_space,
                     **ik_args)
                 if success == 'ik-succeed':
                     break
@@ -4003,6 +4053,293 @@ class RobotModel(CascadedLink):
                 mass_props = self.update_mass_properties()
                 self._cached_mass_props = mass_props
                 return mass_props['total_centroid']
+
+    def calc_cog_jacobian_from_link_list(
+            self,
+            link_list=None,
+            translation_axis=True,
+            update_mass_properties=True,
+            col_offset=0,
+            n_joint_dimension=None,
+            jacobian=None):
+        """Compute the Jacobian of the centre of gravity (CoG).
+
+        The CoG Jacobian relates joint velocities to the world-frame
+        velocity of the robot's centre of gravity:
+
+        .. math::
+
+           \\mathbf{J}_c
+           = \\frac{1}{M} \\sum_i m_i \\mathbf{J}_{c_i}
+
+        where :math:`\\mathbf{J}_{c_i}` is the linear-velocity Jacobian
+        of link *i*'s CoM, :math:`m_i` is its mass, and :math:`M` is the
+        total robot mass. For a rotational joint *j* with world axis
+        :math:`\\hat{a}_j` and origin :math:`\\mathbf{p}_j`,
+        :math:`\\mathbf{J}_{c_i,j} = \\hat{a}_j \\times
+        (\\mathbf{c}_i^{\\text{world}} - \\mathbf{p}_j)` if joint *j* is
+        an ancestor of link *i*, and zero otherwise. For a linear
+        (prismatic) joint, the column is :math:`\\hat{a}_j` for every
+        affected link. The :class:`PlanarJoint` and
+        :class:`FloatingJoint` virtual base joints used by
+        ``use_base='planar'`` / ``'6dof'`` are handled by composing
+        these primitives along the multi-DoF chain.
+
+        Parameters
+        ----------
+        link_list : list, optional
+            Joint chain(s) over which the Jacobian columns are filled.
+            Either a flat list of links or a list of lists (multi-EE
+            convention). If None, uses ``self.link_list``.
+        translation_axis : str, bool, list, or numpy.ndarray
+            Selects which CoG axes are constrained.  ``True`` keeps all
+            three (xyz); ``'xy'`` returns a 2-row Jacobian for the
+            horizontal projection of the CoM (the standard ZMP
+            formulation); ``'z'`` returns a 1-row Jacobian for the
+            vertical CoM. Lists/arrays are passed to
+            :func:`normalize_mask`.
+        update_mass_properties : bool
+            If True (default), recompute link world poses + total mass
+            via :meth:`update_mass_properties` before assembling the
+            Jacobian. Pass False if the IK loop has already updated
+            mass properties this iteration to avoid redundant work.
+        col_offset : int
+            Column offset into the destination Jacobian. Used by
+            ``inverse_kinematics_loop`` when stacking the CoG row(s)
+            into the augmented system.
+        n_joint_dimension : int, optional
+            Total joint DoF used by the IK problem. If None, derived
+            from the union link list.
+        jacobian : numpy.ndarray, optional
+            Pre-allocated output array of shape ``(n_axes, dim)`` where
+            ``n_axes = sum(translation_axis_mask)``. If None, a new
+            array is allocated.
+
+        Returns
+        -------
+        numpy.ndarray
+            CoG Jacobian of shape ``(n_axes, n_joint_dimension)``.
+        """
+        if update_mass_properties:
+            self.update_mass_properties()
+
+        # Resolve translation axis mask.
+        axis_mask = normalize_mask(translation_axis)
+        selected_axes = np.where(np.asarray(axis_mask) == 1)[0]
+        n_axes = int(selected_axes.size)
+        if n_axes == 0:
+            raise ValueError(
+                'translation_axis must select at least one CoG axis, '
+                'got {!r}'.format(translation_axis))
+
+        # Total mass.
+        total_mass = 0.0
+        massive_links = []
+        for link in self.link_list:
+            m = getattr(link, 'mass', 0.0) or 0.0
+            if m > 0:
+                total_mass += float(m)
+                massive_links.append(link)
+        if total_mass <= 0:
+            raise ValueError(
+                'Total robot mass is zero -- did the URDF inertial '
+                'block load correctly?')
+
+        # Pre-compute each link's world CoM to amortise across joints.
+        link_world_com = []
+        for link in massive_links:
+            if link.centroid is not None:
+                com_i = link.worldpos() + link.worldrot().dot(link.centroid)
+            else:
+                com_i = link.worldpos()
+            link_world_com.append(com_i)
+
+        # Resolve link_list and the joint chain we iterate over.
+        if link_list is None:
+            link_list = self.link_list
+        if (isinstance(link_list, list) and len(link_list) > 0
+                and isinstance(link_list[0], list)):
+            sub_link_lists = link_list
+        else:
+            sub_link_lists = [list(link_list)]
+        union_link_list = self.calc_union_link_list(sub_link_lists)
+        if n_joint_dimension is None:
+            n_joint_dimension = self.calc_target_joint_dimension(
+                union_link_list)
+        if jacobian is None:
+            jacobian = np.zeros(
+                (n_axes, n_joint_dimension), dtype=np.float64)
+
+        # For each joint column, sum mass-weighted contributions from
+        # every massive link the joint is an ancestor of.
+        col = col_offset
+        col_end = col_offset + self.calc_target_joint_dimension(
+            union_link_list)
+        for ul in union_link_list:
+            if col >= col_end:
+                break
+            joint = ul.joint
+            if joint is None:
+                continue
+            jdof = joint.joint_dof
+            self._fill_cog_jacobian_columns(
+                jacobian, col, joint, massive_links, link_world_com,
+                total_mass, selected_axes,
+            )
+            col += jdof
+        return jacobian
+
+    def _fill_cog_jacobian_columns(self, jacobian, col, joint, massive_links,
+                                    link_world_com, total_mass, selected_axes):
+        """Write the CoG Jacobian column(s) for a single joint.
+
+        Handles RotationalJoint, LinearJoint, FixedJoint, PlanarJoint
+        (3 DoF) and FloatingJoint (6 DoF). For multi-DoF base joints
+        the columns are filled in the same XYZ-Euler convention used by
+        :meth:`FloatingJoint.joint_angle`.
+        """
+        if isinstance(joint, FixedJoint):
+            return
+
+        # Determine which massive links this joint affects.
+        affected_idx = [
+            i for i, lk in enumerate(massive_links)
+            if self._is_relevant(joint, lk)
+        ]
+        if not affected_idx:
+            return
+
+        # Mass-weighted sum over affected links of (link.mass * com_i_world).
+        m_aff = 0.0
+        m_com_sum = np.zeros(3, dtype=np.float64)
+        for i in affected_idx:
+            m_i = float(massive_links[i].mass)
+            m_aff += m_i
+            m_com_sum += m_i * link_world_com[i]
+
+        parent_link = joint.parent_link
+        default_coords = joint.default_coords
+        parent_rot = parent_link.worldcoords()._rotation
+        joint_origin = joint.child_link.worldpos()
+        joint_world_rot = parent_rot.dot(default_coords._rotation)
+
+        if isinstance(joint, RotationalJoint):
+            paxis = joint.axis
+            if not isinstance(paxis, np.ndarray):
+                paxis = convert_to_axis_vector(paxis)
+            z_world = joint_world_rot.dot(paxis)
+            # Mass-weighted CoM position relative to joint origin.
+            r = m_com_sum - m_aff * joint_origin
+            col_data = np.cross(z_world, r) / total_mass
+            jacobian[:, col] = col_data[selected_axes]
+            return
+
+        if isinstance(joint, LinearJoint):
+            paxis = joint.axis
+            if not isinstance(paxis, np.ndarray):
+                paxis = convert_to_axis_vector(paxis)
+            z_world = joint_world_rot.dot(paxis)
+            col_data = (m_aff / total_mass) * z_world
+            jacobian[:, col] = col_data[selected_axes]
+            return
+
+        if isinstance(joint, PlanarJoint) or isinstance(joint, FloatingJoint):
+            # Multi-DoF virtual base joint. Layout:
+            #   PlanarJoint  : (x_lin, y_lin, yaw_rot)
+            #   FloatingJoint: (x_lin, y_lin, z_lin, rx_rot, ry_rot, rz_rot)
+            # The rotational DoFs apply body-fixed XYZ Euler around
+            # joint_origin, so the effective axis for ry/rz must reflect
+            # the intermediate rotations -- exactly the same logic
+            # FloatingJoint.calc_jacobian uses for its own EE Jacobian.
+            r_total = m_com_sum - m_aff * joint_origin
+            mass_ratio = m_aff / total_mass
+            x_axis = joint_world_rot.dot(np.array([1.0, 0.0, 0.0]))
+            y_axis = joint_world_rot.dot(np.array([0.0, 1.0, 0.0]))
+            z_axis = joint_world_rot.dot(np.array([0.0, 0.0, 1.0]))
+            if isinstance(joint, PlanarJoint):
+                # x linear, y linear, yaw rotational
+                lin_axes = [x_axis, y_axis]
+                rot_axes = [z_axis]
+            else:
+                # x lin, y lin, z lin, rx rot, ry rot, rz rot
+                lin_axes = [x_axis, y_axis, z_axis]
+                # Body-fixed XYZ Euler intermediate axes.
+                ja = joint._joint_angle
+                rx = float(ja[3]) if hasattr(ja, '__len__') else 0.0
+                ry = float(ja[4]) if hasattr(ja, '__len__') else 0.0
+                c_rx, s_rx = np.cos(rx), np.sin(rx)
+                c_ry, s_ry = np.cos(ry), np.sin(ry)
+                ry_axis_local = np.array([0.0, c_rx, s_rx])
+                rz_axis_local = np.array([
+                    s_ry, -s_rx * c_ry, c_rx * c_ry,
+                ])
+                ry_axis_world = joint_world_rot.dot(ry_axis_local)
+                rz_axis_world = joint_world_rot.dot(rz_axis_local)
+                rot_axes = [x_axis, ry_axis_world, rz_axis_world]
+            # Linear DoFs: column = mass_ratio * lin_axis
+            for i, axis_w in enumerate(lin_axes):
+                col_data = mass_ratio * axis_w
+                jacobian[:, col + i] = col_data[selected_axes]
+            # Rotational DoFs: column = (axis × r_total) / total_mass
+            base_rot_col = col + len(lin_axes)
+            for i, axis_w in enumerate(rot_axes):
+                col_data = np.cross(axis_w, r_total) / total_mass
+                jacobian[:, base_rot_col + i] = col_data[selected_axes]
+            return
+
+        # Unknown joint type: leave columns at zero.
+
+    def calc_vel_for_cog(
+            self,
+            target_centroid_pos,
+            translation_axis=True,
+            cog_gain=1.0,
+            update_mass_properties=True,
+            centroid_offset_func=None):
+        """Compute the desired CoG velocity (delta) toward a world target.
+
+        Used by ``inverse_kinematics_loop`` together with
+        :meth:`calc_cog_jacobian_from_link_list` to drive the centre of
+        gravity to a specified world-frame position.
+
+        Parameters
+        ----------
+        target_centroid_pos : array-like
+            Desired CoG position in world coordinates.
+        translation_axis : str, bool, list, or numpy.ndarray
+            Selects which CoG axes participate in the error.
+        cog_gain : float
+            Gain on the CoG error vector. ``1.0`` aims to close the
+            error in one IK iteration; smaller values are more
+            conservative.
+        update_mass_properties : bool
+            If True, refresh ``self.update_mass_properties()`` before
+            reading the current CoG. Pass False from inside the IK loop
+            after a recent update to amortise cost.
+        centroid_offset_func : callable or None
+            If provided, the result is shifted by
+            ``centroid_offset_func()`` before computing the error. Used
+            when a non-link-attached object (e.g. carried payload)
+            should be considered part of the CoG.
+
+        Returns
+        -------
+        numpy.ndarray
+            Desired velocity vector of length ``sum(axis_mask)``.
+        """
+        if update_mass_properties:
+            mp = self.update_mass_properties()
+            cur_cog = mp['total_centroid']
+        else:
+            cur_cog = self.centroid(update_mass_properties=False)
+        if centroid_offset_func is not None:
+            cur_cog = cur_cog + np.asarray(
+                centroid_offset_func(), dtype=np.float64)
+        target = np.asarray(target_centroid_pos, dtype=np.float64)
+        axis_mask = normalize_mask(translation_axis)
+        selected_axes = np.where(np.asarray(axis_mask) == 1)[0]
+        diff = target[selected_axes] - cur_cog[selected_axes]
+        return float(cog_gain) * diff
 
     def _get_cached_inverse_dynamics_fn(self, link_list=None, backend='numpy'):
         """Get or create cached differentiable inverse dynamics function.
