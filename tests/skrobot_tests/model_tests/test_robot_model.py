@@ -1651,3 +1651,135 @@ class TestRobotModel(unittest.TestCase):
         r_angle = wrist_r.joint_angle()
         self.assertIsInstance(y_angle, (float, np.floating))
         self.assertIsInstance(r_angle, (float, np.floating))
+
+
+class TestCogIK(unittest.TestCase):
+    """Tests for the CoG-aware inverse kinematics path.
+
+    Covers ``calc_cog_jacobian_from_link_list``, ``calc_vel_for_cog``
+    and the ``target_centroid_pos`` argument of
+    ``RobotModel.inverse_kinematics``.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fetch = skrobot.models.Fetch()
+
+    def _arm_link_list(self, robot):
+        return list(robot.rarm.link_list)
+
+    def test_calc_cog_jacobian_shape(self):
+        robot = self.fetch
+        link_list = self._arm_link_list(robot)
+        # xy projection -> 2 rows, n_joints columns
+        jac = robot.calc_cog_jacobian_from_link_list(
+            link_list=link_list, translation_axis='xy')
+        n = robot.calc_target_joint_dimension(link_list)
+        self.assertEqual(jac.shape, (2, n))
+        # Full xyz -> 3 rows
+        jac3 = robot.calc_cog_jacobian_from_link_list(
+            link_list=link_list, translation_axis=True)
+        self.assertEqual(jac3.shape, (3, n))
+
+    def test_calc_cog_jacobian_matches_finite_difference(self):
+        """Analytic CoG Jacobian agrees with numerical finite diff."""
+        robot = self.fetch
+        link_list = self._arm_link_list(robot)
+        joints = [link.joint for link in link_list]
+        n = sum(j.joint_dof for j in joints)
+        # Random valid configuration.
+        rng = np.random.default_rng(0)
+        for j in joints:
+            lo = j.min_angle if np.isfinite(j.min_angle) else -1.0
+            hi = j.max_angle if np.isfinite(j.max_angle) else 1.0
+            j.joint_angle(float(rng.uniform(lo, hi)))
+        jac = robot.calc_cog_jacobian_from_link_list(
+            link_list=link_list, translation_axis=True)
+        # Capture initial angles for restoration after each perturbation.
+        av0 = np.array([j.joint_angle() for j in joints])
+        eps = 1e-5
+        num_jac = np.zeros((3, n))
+        for i in range(n):
+            joints[i].joint_angle(av0[i] + eps)
+            cog_p = robot.update_mass_properties()['total_centroid'].copy()
+            joints[i].joint_angle(av0[i] - eps)
+            cog_m = robot.update_mass_properties()['total_centroid'].copy()
+            joints[i].joint_angle(av0[i])
+            num_jac[:, i] = (cog_p - cog_m) / (2 * eps)
+        # Restore so other tests see a clean robot.
+        robot.update_mass_properties()
+        # Sanity: at least one column should be non-trivial.
+        self.assertGreater(float(np.abs(num_jac).max()), 1e-4)
+        testing.assert_allclose(jac, num_jac, atol=1e-4, rtol=5e-3)
+        # Restore to where we found the robot.
+        robot.reset_pose()
+
+    def test_calc_vel_for_cog_returns_signed_difference(self):
+        robot = self.fetch
+        cog_now = robot.update_mass_properties()['total_centroid'].copy()
+        target = cog_now + np.array([0.05, -0.02, 0.0])
+        vel = robot.calc_vel_for_cog(
+            target, translation_axis='xy', cog_gain=1.0)
+        # 'xy' selects 2 components, signed difference target - current.
+        self.assertEqual(vel.shape, (2,))
+        testing.assert_allclose(vel, [0.05, -0.02], atol=1e-6)
+        # cog_gain > 1 is clipped neither here nor by the IK loop;
+        # this helper just multiplies through.
+        vel_half = robot.calc_vel_for_cog(
+            target, translation_axis='xy', cog_gain=0.5)
+        testing.assert_allclose(vel_half, [0.025, -0.01], atol=1e-6)
+
+    def test_inverse_kinematics_target_centroid_pos(self):
+        """IK with ``target_centroid_pos`` actually moves the CoG."""
+        robot = self.fetch
+        robot.reset_pose()
+        target_arm = skrobot.coordinates.Coordinates(
+            pos=robot.rarm.end_coords.worldpos().copy())
+
+        # Ask the CoG to shift +y by 5 cm. With use_base='planar' the
+        # solver has translational base DoF that can move CoG cheaply.
+        cog_init = robot.update_mass_properties()['total_centroid'].copy()
+        target_cog = cog_init.copy()
+        target_cog[1] += 0.05
+
+        result = robot.inverse_kinematics(
+            target_arm,
+            move_target=robot.rarm.end_coords,
+            link_list=robot.rarm.link_list,
+            target_centroid_pos=target_cog,
+            cog_translation_axis='xy',
+            centroid_thre=0.005,
+            use_base='planar',
+            stop=200,
+            rotation_mask=False,
+            revert_if_fail=False,
+        )
+        self.assertIsNot(result, False)
+        cog_final = robot.update_mass_properties()['total_centroid']
+        err = float(np.linalg.norm(target_cog[:2] - cog_final[:2]))
+        self.assertLess(err, 0.005,
+                        msg='CoG xy err {:.4f} m exceeds threshold'.format(err))
+        robot.reset_pose()
+
+    def test_inverse_kinematics_target_centroid_pos_no_op_when_satisfied(self):
+        """If CoG already at target, IK returns immediately."""
+        robot = self.fetch
+        robot.reset_pose()
+        target_arm = robot.rarm.end_coords.copy_worldcoords()
+        cog_target = robot.update_mass_properties()['total_centroid'].copy()
+        # Initial CoG == target -> convergence on iteration 1.
+        result = robot.inverse_kinematics(
+            target_arm,
+            move_target=robot.rarm.end_coords,
+            link_list=robot.rarm.link_list,
+            target_centroid_pos=cog_target,
+            cog_translation_axis='xy',
+            centroid_thre=1e-3,
+            stop=100,
+            rotation_mask=False,
+        )
+        self.assertIsNot(result, False)
+        cog_after = robot.update_mass_properties()['total_centroid']
+        # Should stay essentially unchanged.
+        testing.assert_allclose(cog_after[:2], cog_target[:2], atol=1e-3)
+        robot.reset_pose()
