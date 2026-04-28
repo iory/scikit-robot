@@ -132,6 +132,29 @@ def griphis_urdfpath():
     return path
 
 
+def jaxon_urdfpath():
+    """Path to the JAXON JVRC humanoid URDF.
+
+    Downloads a pinned snapshot of upstream
+    `robot-descriptions/jaxon_description
+    <https://github.com/robot-descriptions/jaxon_description>`_,
+    licensed under CC BY-SA 4.0.
+    """
+    sha = '4a0cb7a4a737864312f8d6e3f89823a741539bfc'
+    base = 'jaxon_description-{}'.format(sha)
+    path = osp.join(get_cache_dir(), base, 'urdf', 'jaxon_jvrc.urdf')
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url=('https://github.com/robot-descriptions/jaxon_description'
+             '/archive/{}.tar.gz'.format(sha)),
+        fname='{}.tar.gz'.format(base),
+        md5='9252ff96753e2c788dd6681bdf0597be',
+        extract=True,
+    )
+    return path
+
+
 def kuka_urdfpath():
     return osp.join(data_dir, 'kuka_description', 'kuka.urdf')
 
