@@ -145,6 +145,290 @@ def extract_dynamics_parameters(robot_model, link_list=None):
     }
 
 
+def _resolve_array_module(backend):
+    """Resolve ``backend`` to a numpy-compatible array module.
+
+    Accepts ``None`` (auto-pick jax.numpy when available), the
+    ``numpy`` / ``jax.numpy`` module itself, or a backend object
+    returned by :func:`skrobot.backend.get_backend`.
+    """
+    if backend is None:
+        try:
+            import jax.numpy as jnp
+            return jnp
+        except ImportError:
+            return np
+    if hasattr(backend, 'einsum') and hasattr(backend, 'asarray'):
+        return backend
+    name = getattr(backend, 'name', '').lower()
+    if name == 'jax':
+        import jax.numpy as jnp
+        return jnp
+    if name == 'numpy':
+        return np
+    raise TypeError(
+        'Unrecognised backend: {!r}. Pass numpy, jax.numpy, '
+        'or get_backend("jax"|"numpy").'.format(backend))
+
+
+def extract_robot_centroid_params(robot_model, link_lists=None):
+    """Extract per-link mass + centroid bookkeeping for whole-body CoG.
+
+    Splits every robot link with positive mass into
+
+    * ``chain`` links — links whose world poses are produced by FK on
+      one of the chains in ``link_lists``;
+    * ``fixed`` links — links that are rigidly attached to the base,
+      so their world poses follow the base pose alone (this includes
+      every link when ``link_lists`` is ``None``).
+
+    The output feeds :func:`build_world_centroid_fn`, which returns a
+    callable that evaluates the world centre of gravity for a given
+    pose. The split is what lets balance-aware planners compute CoG
+    in JAX without paying for a full robot FK every iteration: only
+    chain links touch the FK output; the rest fold into a single
+    pre-multiplied moment that just rotates / translates with the
+    base.
+
+    Parameters
+    ----------
+    robot_model : RobotModel
+        Robot in the configuration that should serve as the
+        body-frame reference for fixed-to-base links.
+    link_lists : None | list of Link | list of list of Link
+        ``None`` (default): no chains, the whole robot is treated as
+        rigidly attached to the base.  ``list of Link``: a single
+        chain.  ``list of list of Link``: multi-chain (e.g. both legs
+        of a humanoid).
+
+    Returns
+    -------
+    dict
+        Layout::
+
+            {
+                'n_chains': int,
+                'chain_data': [
+                    {'link_indices', 'centroids', 'masses'},
+                    ...
+                ],
+                'fixed_link_body_pos': (n_fixed, 3),
+                'fixed_link_body_rot': (n_fixed, 3, 3),
+                'fixed_link_centroids': (n_fixed, 3),
+                'fixed_link_masses': (n_fixed,),
+                'total_mass': float,
+            }
+
+        ``chain_data[i]['link_indices']`` indexes into
+        ``link_lists[i]``; the FK results for that chain must be
+        consistent with that index order.
+    """
+    if link_lists is None:
+        chains = []
+    elif (isinstance(link_lists, list) and len(link_lists) > 0
+            and isinstance(link_lists[0], list)):
+        chains = list(link_lists)
+    else:
+        chains = [list(link_lists)]
+    n_chains = len(chains)
+
+    base_link = getattr(robot_model, 'root_link', None)
+    if base_link is None:
+        for link in robot_model.link_list:
+            if link.parent is None:
+                base_link = link
+                break
+    base_T = base_link.worldcoords().T()
+    base_T_inv = np.linalg.inv(base_T)
+
+    chain_lookup = {}
+    for ci, chain in enumerate(chains):
+        for li, link in enumerate(chain):
+            chain_lookup[id(link)] = (ci, li)
+
+    per_chain_indices = [[] for _ in range(n_chains)]
+    per_chain_centroids = [[] for _ in range(n_chains)]
+    per_chain_masses = [[] for _ in range(n_chains)]
+    fixed_pos, fixed_rot, fixed_coms, fixed_masses = [], [], [], []
+    total_mass = 0.0
+
+    for link in robot_model.link_list:
+        m = getattr(link, 'mass', 0.0) or 0.0
+        if m <= 0:
+            continue
+        c = np.asarray(
+            link.centroid if link.centroid is not None else np.zeros(3),
+            dtype=np.float64,
+        )
+        total_mass += float(m)
+        key = id(link)
+        if key in chain_lookup:
+            ci, li = chain_lookup[key]
+            per_chain_indices[ci].append(li)
+            per_chain_centroids[ci].append(c)
+            per_chain_masses[ci].append(float(m))
+        else:
+            link_T = link.worldcoords().T()
+            body_T = base_T_inv @ link_T
+            fixed_pos.append(body_T[:3, 3])
+            fixed_rot.append(body_T[:3, :3])
+            fixed_coms.append(c)
+            fixed_masses.append(float(m))
+
+    chain_data = []
+    for ci in range(n_chains):
+        if per_chain_indices[ci]:
+            chain_data.append({
+                'link_indices': np.asarray(per_chain_indices[ci],
+                                            dtype=np.int64),
+                'centroids':    np.asarray(per_chain_centroids[ci],
+                                            dtype=np.float64),
+                'masses':       np.asarray(per_chain_masses[ci],
+                                            dtype=np.float64),
+            })
+        else:
+            chain_data.append({
+                'link_indices': np.zeros((0,), dtype=np.int64),
+                'centroids':    np.zeros((0, 3), dtype=np.float64),
+                'masses':       np.zeros((0,), dtype=np.float64),
+            })
+
+    def _stack(seq, shape):
+        if not seq:
+            return np.zeros((0,) + shape, dtype=np.float64)
+        return np.asarray(seq, dtype=np.float64)
+
+    return {
+        'n_chains':            n_chains,
+        'chain_data':          chain_data,
+        'fixed_link_body_pos': _stack(fixed_pos, (3,)),
+        'fixed_link_body_rot': _stack(fixed_rot, (3, 3)),
+        'fixed_link_centroids': _stack(fixed_coms, (3,)),
+        'fixed_link_masses':   np.asarray(fixed_masses, dtype=np.float64),
+        'total_mass':          float(total_mass),
+    }
+
+
+def build_world_centroid_fn(centroid_params, get_link_transforms,
+                             backend=None,
+                             base_pos_default=None,
+                             base_rot_default=None):
+    """Build a centre-of-gravity forward function.
+
+    The returned callable evaluates the whole-body CoG in world
+    coordinates given per-chain joint angles and a base pose.  Chain
+    links contribute via ``get_link_transforms`` (sensitive to
+    angles); fixed-to-base links rotate / translate with the base
+    pose only.
+
+    Parameters
+    ----------
+    centroid_params : dict
+        Output of :func:`extract_robot_centroid_params`.
+    get_link_transforms : callable | list of callables | None
+        Per-chain link FK function(s).  Each callable has signature
+        ``get_link_transforms(angles, base_pos, base_rot) ->
+        (positions, rotations)`` and returns world poses for every
+        link in the corresponding chain.  Pass ``None`` when there
+        are no chains.  A bare callable is treated as a single chain.
+    backend : module or backend object, optional
+        Array module (``numpy`` or ``jax.numpy``) or a backend
+        object returned by :func:`skrobot.backend.get_backend`.
+        Defaults to ``jax.numpy`` if available, else ``numpy``.
+    base_pos_default, base_rot_default : optional
+        Defaults used when the returned function is called without an
+        explicit base pose.
+
+    Returns
+    -------
+    callable
+        ``compute_centroid(angles_per_chain=None, base_pos=None,
+        base_rot=None)`` returning a length-3 world CoG.
+    """
+    xp = _resolve_array_module(backend)
+
+    n_chains = centroid_params['n_chains']
+    if get_link_transforms is None:
+        get_lt_per_chain = []
+    elif callable(get_link_transforms):
+        get_lt_per_chain = [get_link_transforms]
+    else:
+        get_lt_per_chain = list(get_link_transforms)
+    if len(get_lt_per_chain) != n_chains:
+        raise ValueError(
+            'get_link_transforms count ({}) does not match '
+            'centroid_params n_chains ({})'.format(
+                len(get_lt_per_chain), n_chains))
+
+    chain_jax = []
+    for ci in range(n_chains):
+        cd = centroid_params['chain_data'][ci]
+        chain_jax.append({
+            'indices': xp.asarray(cd['link_indices']),
+            'coms':    xp.asarray(cd['centroids']),
+            'masses':  xp.asarray(cd['masses']),
+        })
+    fixed_pos = xp.asarray(centroid_params['fixed_link_body_pos'])
+    fixed_rot = xp.asarray(centroid_params['fixed_link_body_rot'])
+    fixed_coms = xp.asarray(centroid_params['fixed_link_centroids'])
+    fixed_masses = xp.asarray(centroid_params['fixed_link_masses'])
+    total_mass = float(centroid_params['total_mass'])
+    if total_mass <= 0:
+        raise ValueError(
+            'Total robot mass is zero; cannot compute centroid.')
+
+    if base_pos_default is None:
+        base_pos_default = xp.zeros(3)
+    else:
+        base_pos_default = xp.asarray(base_pos_default)
+    if base_rot_default is None:
+        base_rot_default = xp.eye(3)
+    else:
+        base_rot_default = xp.asarray(base_rot_default)
+
+    def compute_centroid(angles_per_chain=None, base_pos=None,
+                          base_rot=None):
+        if base_pos is None:
+            base_pos = base_pos_default
+        if base_rot is None:
+            base_rot = base_rot_default
+        if angles_per_chain is None:
+            angles_per_chain = []
+        if n_chains > 0 and not isinstance(angles_per_chain, (list, tuple)):
+            # Allow a single bare angle vector for the single-chain case.
+            angles_per_chain = [angles_per_chain]
+        if len(angles_per_chain) != n_chains:
+            raise ValueError(
+                'angles_per_chain count ({}) does not match '
+                'n_chains ({})'.format(
+                    len(angles_per_chain), n_chains))
+
+        moment = xp.zeros(3)
+        for ci in range(n_chains):
+            cd = chain_jax[ci]
+            if cd['indices'].shape[0] == 0:
+                continue
+            link_pos, link_rot = get_lt_per_chain[ci](
+                angles_per_chain[ci], base_pos, base_rot,
+            )
+            cp = link_pos[cd['indices']]
+            cr = link_rot[cd['indices']]
+            cw_com = cp + xp.einsum('nij,nj->ni', cr, cd['coms'])
+            moment = moment + xp.sum(
+                cd['masses'][:, None] * cw_com, axis=0,
+            )
+        if fixed_pos.shape[0] > 0:
+            fwp = base_pos + xp.einsum('ij,nj->ni', base_rot, fixed_pos)
+            fwr = xp.einsum('ij,njk->nik', base_rot, fixed_rot)
+            fwcom = fwp + xp.einsum('nij,nj->ni', fwr, fixed_coms)
+            moment = moment + xp.sum(
+                fixed_masses[:, None] * fwcom, axis=0,
+            )
+        return moment / total_mass
+
+    return compute_centroid
+
+
 def build_gravity_fn(robot_model, link_list=None, backend=None):
     """Build differentiable gravity torque function with autodiff support.
 

@@ -19,9 +19,11 @@ from skrobot.dynamics.differentiable import build_optimized_gravity_torque_fn
 from skrobot.dynamics.differentiable import build_rnea_gravity_fn
 from skrobot.dynamics.differentiable import build_rnea_serial_gravity_fn
 from skrobot.dynamics.differentiable import build_torque_vector_fn
+from skrobot.dynamics.differentiable import build_world_centroid_fn
 from skrobot.dynamics.differentiable import estimate_external_torque
 from skrobot.dynamics.differentiable import extract_dynamics_parameters
 from skrobot.dynamics.differentiable import extract_inverse_dynamics_parameters
+from skrobot.dynamics.differentiable import extract_robot_centroid_params
 from skrobot.dynamics.differentiable import preprocess_external_forces
 from skrobot.dynamics.differentiable import preprocess_velocities
 from skrobot.dynamics.gravity import build_gravity_torque_function
@@ -40,9 +42,11 @@ __all__ = [
     'build_jacobian_gravity_fn',
     'build_inverse_dynamics_fn',
     'build_torque_vector_fn',
+    'build_world_centroid_fn',
     'estimate_external_torque',
     'extract_dynamics_parameters',
     'extract_inverse_dynamics_parameters',
+    'extract_robot_centroid_params',
     # Optimized gravity torque functions
     'build_optimized_gravity_torque_fn',
     'build_gravity_torque_fn_vectorized',
