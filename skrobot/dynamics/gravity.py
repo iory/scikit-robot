@@ -90,7 +90,7 @@ def compute_gravity_torque(
             if mass <= 0:
                 continue
 
-            com_local = getattr(link_j, 'center_of_mass', None)
+            com_local = getattr(link_j, 'centroid', None)
             if com_local is None:
                 com_local = np.zeros(3)
             else:
