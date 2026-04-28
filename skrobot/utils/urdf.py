@@ -205,22 +205,81 @@ def unparse_origin(matrix):
     return node
 
 
+def _try_ament(ros_package):
+    """Resolve via ament_index_python. Returns path or None if unavailable / not found."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        from ament_index_python.packages import PackageNotFoundError
+    except ImportError:
+        return None
+    try:
+        return get_package_share_directory(ros_package)
+    except PackageNotFoundError:
+        return None
+    except Exception as e:
+        logger.warning(
+            "ament_index lookup for ROS package '%s' failed: %s",
+            ros_package, e)
+        return None
+
+
+def _try_rospkg(ros_package):
+    """Resolve via rospkg. Returns path or None if unavailable / not found."""
+    if rospkg is None:
+        return None
+    try:
+        return rospkg.RosPack().get_path(ros_package)
+    except rospkg.common.ResourceNotFound:
+        return None
+
+
 @lru_cache(maxsize=None)
 def get_path_with_cache(ros_package):
-    ros_version = os.environ.get('ROS_VERSION', '1')
+    """Resolve a ROS package name to its share/install directory.
 
-    if ros_version == '2':
-        try:
-            from ament_index_python.packages import get_package_share_directory
-            return get_package_share_directory(ros_package)
-        except ImportError:
-            logger.warning("ament_index_python not available, falling back to rospkg")
-        except Exception as e:
-            logger.warning("Failed to find ROS2 package %s: %s", ros_package, e)
+    Tries both ``ament_index_python`` (ROS 2) and ``rospkg`` (ROS 1) when
+    available. The order respects the ``ROS_VERSION`` environment variable so
+    that users with ROS 1 and ROS 2 coexisting on the same machine get the
+    resolver matching their currently-sourced distro:
 
-    # ROS1 or fallback: Use rospkg
-    rospack = rospkg.RosPack()
-    return rospack.get_path(ros_package)
+    * ``ROS_VERSION=1`` -> rospkg first, then ament (preserves the old
+      behaviour where rospkg-only resolution was used).
+    * ``ROS_VERSION=2`` or unset -> ament first, then rospkg. This is what
+      makes the function work on plain ``ros-<distro>-desktop`` installs that
+      ship ament but not rospkg (previously such environments hit a
+      ``TypeError`` deeper in mesh loading).
+
+    Raises
+    ------
+    ImportError
+        Neither resolver is available.
+    LookupError
+        Both resolvers were tried but the package was not found by either.
+    """
+    if os.environ.get('ROS_VERSION') == '1':
+        resolvers = (_try_rospkg, _try_ament)
+    else:
+        resolvers = (_try_ament, _try_rospkg)
+
+    for resolver in resolvers:
+        path = resolver(ros_package)
+        if path is not None:
+            return path
+
+    # Distinguish "neither resolver installed" from "package missing".
+    ament_available = True
+    try:
+        import ament_index_python  # noqa: F401
+    except ImportError:
+        ament_available = False
+    if not ament_available and rospkg is None:
+        raise ImportError(
+            "Cannot resolve ROS package '{}': neither ament_index_python "
+            "nor rospkg is installed.".format(ros_package))
+    raise LookupError(
+        "ROS package '{}' was not found by ament_index_python or rospkg. "
+        "Did you forget to source your ROS workspace "
+        "(e.g. `source install/setup.bash` for ROS 2)?".format(ros_package))
 
 
 def search_up(start_dir, relative_path):
@@ -239,7 +298,7 @@ def resolve_filepath(base_path, file_path):
     parsed_url = urlparse(file_path)
     base_path = os.path.abspath(base_path)
 
-    if rospkg and parsed_url.scheme == 'package':
+    if parsed_url.scheme == 'package':
         try:
             ros_package = parsed_url.netloc
             package_path = get_path_with_cache(ros_package)
@@ -247,7 +306,12 @@ def resolve_filepath(base_path, file_path):
             resolved_filepath = os.path.join(package_path, pkg_relative_path)
             if os.path.exists(resolved_filepath):
                 return resolved_filepath
-        except rospkg.common.ResourceNotFound:
+        except Exception:
+            # Catches ament's PackageNotFoundError, rospkg's ResourceNotFound,
+            # and the ImportError raised by get_path_with_cache when neither
+            # resolver is installed. We fall through to the search_up()
+            # heuristic below so behaviour stays graceful for pure-filesystem
+            # URDFs that just happen to use package:// for documentation.
             pass
 
     rel_paths = [
@@ -363,6 +427,13 @@ def _load_meshes(filename):
     meshes : list of :class:`~trimesh.base.Trimesh`
         The meshes loaded from the file.
     """
+    if filename is None:
+        raise FileNotFoundError(
+            "Cannot load mesh: file path is None. This usually means a "
+            "package:// URI in the URDF could not be resolved. Make sure the "
+            "referenced ROS package is installed and your environment is "
+            "sourced (`source install/setup.bash` for ROS 2, or set "
+            "`ROS_PACKAGE_PATH` for ROS 1).")
     trimesh = _lazy_trimesh()
     _, ext = os.path.splitext(filename)
     is_glb_or_gltf = ext.lower() in ('.glb', '.gltf')
