@@ -42,6 +42,7 @@ class TrajectoryProblem:
         n_waypoints,
         dt=0.1,
         move_target=None,
+        n_base_dof=0,
     ):
         """Initialize trajectory problem.
 
@@ -59,13 +60,39 @@ class TrajectoryProblem:
             End-effector coordinates for pose tracking.
         """
         self.robot_model = robot_model
-        self.link_list = link_list
+        # Multi-chain: link_list may be a list of lists.
+        if (isinstance(link_list, list) and len(link_list) > 0
+                and isinstance(link_list[0], list)):
+            self.link_lists = link_list
+            self.link_list = [lk for chain in link_list for lk in chain]
+            self.is_multi_chain = True
+        else:
+            self.link_lists = [link_list]
+            self.link_list = list(link_list)
+            self.is_multi_chain = False
+        if isinstance(move_target, list):
+            self.move_targets = move_target
+        else:
+            self.move_targets = (
+                [move_target] if move_target is not None else None)
         self.n_waypoints = n_waypoints
         self.dt = dt
-        self.move_target = move_target
+        self.move_target = (
+            self.move_targets[0] if self.move_targets else None)
+        # Number of additional DoF for the floating base. 0 = fixed
+        # base (current behaviour), 3 = planar base (x, y, yaw),
+        # 6 = full floating base. Per-waypoint variables become
+        # ``[joint_angles, base_dof]`` with shape ``(n_joints +
+        # n_base_dof,)``.
+        self.n_base_dof = int(n_base_dof)
+        if self.n_base_dof not in (0, 3, 6):
+            raise ValueError(
+                'n_base_dof must be 0, 3 or 6 (got {})'.format(n_base_dof))
 
-        self.joint_list = [link.joint for link in link_list]
+        self.joint_list = [link.joint for chain in self.link_lists
+                           for link in chain]
         self.n_joints = len(self.joint_list)
+        self.n_total_dof = self.n_joints + self.n_base_dof
 
         # Extract joint limits
         self.joint_limits_lower = np.array([
@@ -101,14 +128,43 @@ class TrajectoryProblem:
 
     @property
     def fk_params(self):
-        """Get FK parameters (lazily computed)."""
+        """Get FK parameters for the FIRST chain (legacy single-chain access)."""
         if self._fk_params is None:
             from skrobot.kinematics.differentiable import extract_fk_parameters
+            mt = (self.move_targets[0] if self.move_targets
+                  else self.robot_model)
             self._fk_params = extract_fk_parameters(
-                self.robot_model, self.link_list,
-                self.move_target or self.robot_model
+                self.robot_model, self.link_lists[0], mt,
             )
         return self._fk_params
+
+    @property
+    def fk_params_per_chain(self):
+        """List of fk_data, one per chain (multi-chain)."""
+        if not hasattr(self, '_fk_params_per_chain') \
+                or self._fk_params_per_chain is None:
+            from skrobot.kinematics.differentiable import extract_fk_parameters
+            self._fk_params_per_chain = []
+            for ci, chain in enumerate(self.link_lists):
+                mt = (self.move_targets[ci] if self.move_targets
+                      else self.robot_model)
+                self._fk_params_per_chain.append(
+                    extract_fk_parameters(self.robot_model, chain, mt))
+        return self._fk_params_per_chain
+
+    @property
+    def centroid_data(self):
+        """Mass / centroid bookkeeping for CoG cost (lazily computed).
+
+        Always returns the unified multi-chain layout produced by
+        :func:`skrobot.dynamics.extract_robot_centroid_params` (one
+        ``chain_data`` entry per chain in ``self.link_lists``).
+        """
+        if not hasattr(self, '_centroid_data') or self._centroid_data is None:
+            from skrobot.dynamics import extract_robot_centroid_params
+            self._centroid_data = extract_robot_centroid_params(
+                self.robot_model, link_lists=self.link_lists)
+        return self._centroid_data
 
     def add_smoothness_cost(self, weight=1.0):
         """Add smoothness cost (minimize velocity between waypoints).
@@ -163,6 +219,56 @@ class TrajectoryProblem:
             residual_fn='posture',
             params={
                 'nominal_angles': nominal_angles,
+            },
+            kind='soft',
+            weight=weight,
+        ))
+
+    def add_com_cost(self, target_positions, weight=10.0,
+                     translation_axis='xy',
+                     waypoint_indices=None):
+        """Add a centre-of-gravity tracking cost.
+
+        For each waypoint *i*, penalise
+        ``|| CoG(q_i, base_i) - target_positions[i] ||`` along the
+        selected world axes.  This is the trajectory-optimisation
+        analogue of ``RobotModel.inverse_kinematics``'s
+        ``target_centroid_pos`` and is required for genuinely
+        balance-aware multi-step plans where the body must shift
+        continuously between successive support feet.
+
+        Parameters
+        ----------
+        target_positions : (n_waypoints, 3) ndarray *or* (k, 3) ndarray
+            Per-waypoint world CoG targets.  ``z`` entries are kept
+            even when ``translation_axis`` masks them out so users can
+            also constrain CoG height by switching to
+            ``translation_axis=True``.
+        weight : float
+            Position-error weight.
+        translation_axis : str / array-like
+            Mask selecting which CoG axes participate in the cost
+            (``'xy'``, ``'z'``, ``True`` for 3 axes, etc.).  Same
+            normalisation rules as ``rotation_mask`` / ``position_mask``
+            elsewhere in scikit-robot.
+        waypoint_indices : sequence of int, optional
+            If given, the cost only applies at these waypoint indices
+            and ``target_positions`` should match in length.  Default
+            (None) targets every waypoint with the row of
+            ``target_positions[i]``.
+        """
+        target_positions = np.asarray(target_positions, dtype=np.float64)
+        if waypoint_indices is None:
+            waypoint_indices = np.arange(self.n_waypoints)
+        else:
+            waypoint_indices = np.asarray(waypoint_indices, dtype=np.int64)
+        self.residuals.append(ResidualSpec(
+            name='com',
+            residual_fn='com',
+            params={
+                'target_positions': target_positions,
+                'translation_axis': translation_axis,
+                'waypoint_indices': waypoint_indices,
             },
             kind='soft',
             weight=weight,
@@ -683,6 +789,53 @@ class TrajectoryProblem:
         self.waypoint_constraints.append(
             (waypoint_index, np.array(joint_angles))
         )
+
+    def add_multi_ee_waypoint_cost(
+        self,
+        target_positions_per_chain,
+        target_rotations_per_chain=None,
+        position_weight=100.0,
+        rotation_weight=10.0,
+    ):
+        """Per-waypoint multi-EE pose tracking with floating base.
+
+        For balance-aware walking we need to constrain the world
+        pose of MULTIPLE end-effectors (both feet) at every waypoint
+        simultaneously, not just one. This cost is a multi-chain
+        analogue of :meth:`add_cartesian_path_cost` that consumes the
+        chain index implicitly: ``target_positions_per_chain[i]`` and
+        ``target_rotations_per_chain[i]`` apply to chain ``i``.
+
+        Parameters
+        ----------
+        target_positions_per_chain : list of (n_waypoints, 3) ndarray
+            One per-waypoint position trajectory per chain.
+        target_rotations_per_chain : list of (n_waypoints, 3, 3), optional
+            One per-waypoint rotation trajectory per chain. ``None``
+            disables rotation tracking.
+        position_weight, rotation_weight : float
+            Position / rotation tracking weights (uniform across all
+            chains and waypoints).
+        """
+        target_positions_per_chain = [
+            np.asarray(t, dtype=np.float64)
+            for t in target_positions_per_chain]
+        if target_rotations_per_chain is not None:
+            target_rotations_per_chain = [
+                np.asarray(r, dtype=np.float64)
+                for r in target_rotations_per_chain]
+        self.residuals.append(ResidualSpec(
+            name='multi_ee_waypoint',
+            residual_fn='multi_ee_waypoint',
+            params={
+                'target_positions_per_chain': target_positions_per_chain,
+                'target_rotations_per_chain': target_rotations_per_chain,
+                'position_weight': position_weight,
+                'rotation_weight': rotation_weight,
+            },
+            kind='soft',
+            weight=1.0,
+        ))
 
     def add_ee_waypoint_cost(
         self,

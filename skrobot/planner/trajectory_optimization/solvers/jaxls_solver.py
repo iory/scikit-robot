@@ -19,6 +19,113 @@ from skrobot.planner.trajectory_optimization.solvers.base import BaseSolver
 from skrobot.planner.trajectory_optimization.solvers.base import SolverResult
 
 
+_JAXLS_INSTALL_HINT = (
+    "jaxls is required for JaxlsSolver but is not importable.\n"
+    "It is not on PyPI, so 'pip install jaxls' / 'uv pip install jaxls' "
+    "will not work.\n"
+    "Install it from source instead:\n"
+    "    pip install \"git+https://github.com/brentyi/jaxls.git\""
+)
+
+
+def _require_jaxls():
+    """Import jaxls or raise ImportError with the correct install hint."""
+    try:
+        import jaxls  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "{}\nOriginal error: {}".format(_JAXLS_INSTALL_HINT, e)) from e
+
+
+def _root_link_world_pose(problem):
+    """Return the world pose of the robot's root link as numpy arrays."""
+    root = problem.robot_model.root_link.worldcoords()
+    return root.worldpos().astype(np.float64), \
+        root.worldrot().astype(np.float64)
+
+
+def _chain_parent_relative_to_root(fk_params, root_pos, root_rot):
+    """Compute (rel_pos, rel_rot): chain parent pose in root_link frame."""
+    natural_pos = np.asarray(fk_params['base_position'], dtype=np.float64)
+    natural_rot = np.asarray(fk_params['base_rotation'], dtype=np.float64)
+    root_T = np.eye(4)
+    root_T[:3, :3] = root_rot
+    root_T[:3, 3] = root_pos
+    inv = np.linalg.inv(root_T)
+    rel_pos = inv[:3, :3] @ natural_pos + inv[:3, 3]
+    rel_rot = inv[:3, :3] @ natural_rot
+    return rel_pos, rel_rot
+
+
+def _build_root_relative_chain_fks(problem, fk_data, jnp_module):
+    """Per-chain link FK that accepts root_link world pose as base.
+
+    Each callable composes the chain's natural parent transform
+    (captured at extraction time, relative to root_link) with the
+    floating-base pose at call time, then runs the chain's serial FK.
+    """
+    from skrobot.planner.trajectory_optimization.fk_utils import build_chain_link_transforms_with_base
+
+    root_pos_np, root_rot_np = _root_link_world_pose(problem)
+    callables = []
+    for fkp in problem.fk_params_per_chain:
+        jdata = {
+            'link_translations': jnp_module.array(fkp['link_translations']),
+            'link_rotations':    jnp_module.array(fkp['link_rotations']),
+            'joint_axes':        jnp_module.array(fkp['joint_axes']),
+            'n_joints':          fkp['n_joints'],
+            'ref_angles':        jnp_module.array(fkp['ref_angles']),
+        }
+        rel_pos_np, rel_rot_np = _chain_parent_relative_to_root(
+            fkp, root_pos_np, root_rot_np)
+        rel_pos = jnp_module.asarray(rel_pos_np)
+        rel_rot = jnp_module.asarray(rel_rot_np)
+        inner = build_chain_link_transforms_with_base(jdata, jnp_module)
+
+        def _make(inner=inner, rel_pos=rel_pos, rel_rot=rel_rot):
+            def chain_fk(angles, base_pos, base_rot):
+                parent_pos = base_pos + base_rot @ rel_pos
+                parent_rot = base_rot @ rel_rot
+                return inner(angles, parent_pos, parent_rot)
+            return chain_fk
+        callables.append(_make())
+    return callables
+
+
+def _build_root_relative_chain_ee_fks(problem, jnp_module):
+    """Per-chain EE pose FK that accepts root_link world pose as base."""
+    from skrobot.planner.trajectory_optimization.fk_utils import build_chain_ee_pose_with_base
+
+    root_pos_np, root_rot_np = _root_link_world_pose(problem)
+    callables = []
+    for fkp in problem.fk_params_per_chain:
+        jdata = {
+            'link_translations': jnp_module.array(fkp['link_translations']),
+            'link_rotations':    jnp_module.array(fkp['link_rotations']),
+            'joint_axes':        jnp_module.array(fkp['joint_axes']),
+            'n_joints':          fkp['n_joints'],
+            'ref_angles':        jnp_module.array(fkp['ref_angles']),
+            'ee_offset_position': jnp_module.array(
+                fkp['ee_offset_position']),
+            'ee_offset_rotation': jnp_module.array(
+                fkp['ee_offset_rotation']),
+        }
+        rel_pos_np, rel_rot_np = _chain_parent_relative_to_root(
+            fkp, root_pos_np, root_rot_np)
+        rel_pos = jnp_module.asarray(rel_pos_np)
+        rel_rot = jnp_module.asarray(rel_rot_np)
+        inner = build_chain_ee_pose_with_base(jdata, jnp_module)
+
+        def _make(inner=inner, rel_pos=rel_pos, rel_rot=rel_rot):
+            def ee_fk(angles, base_pos, base_rot):
+                parent_pos = base_pos + base_rot @ rel_pos
+                parent_rot = base_rot @ rel_rot
+                return inner(angles, parent_pos, parent_rot)
+            return ee_fk
+        callables.append(_make())
+    return callables
+
+
 class JaxlsSolver(BaseSolver):
     """JAXls-based trajectory optimization solver.
 
@@ -45,6 +152,9 @@ class JaxlsSolver(BaseSolver):
             Print optimization progress.
         """
         super().__init__(verbose=verbose)
+        # Fail fast with an actionable hint if jaxls is missing — it is
+        # not on PyPI, so the usual ``pip install jaxls`` will not work.
+        _require_jaxls()
         self.max_iterations = max_iterations
         self._cached_problem = None
         self._cached_traj_var = None
@@ -157,6 +267,8 @@ class JaxlsSolver(BaseSolver):
         max_iterations = kwargs.get('max_iterations', self.max_iterations)
         T = problem.n_waypoints
         n_joints = problem.n_joints
+        n_total_dof = getattr(problem, 'n_total_dof', n_joints)
+        n_base_dof = getattr(problem, 'n_base_dof', 0)
 
         cache_key = self._make_cache_key(problem)
 
@@ -173,7 +285,7 @@ class JaxlsSolver(BaseSolver):
             has_cart_rot = self._cached_has_cart_rot
             has_ee_waypoints = self._cached_has_ee_waypoints
         else:
-            default_cfg = jnp.zeros(n_joints)
+            default_cfg = jnp.zeros(n_total_dof)
             default_pos = jnp.zeros(3)
             default_rot = jnp.zeros(9)
 
@@ -293,6 +405,14 @@ class JaxlsSolver(BaseSolver):
                     costs.append(self._make_jerk_limit_cost(
                         problem, TrajectoryVar, residual_spec
                     ))
+                elif residual_spec.name == 'com':
+                    costs.append(self._make_com_cost(
+                        problem, TrajectoryVar, fk_data, residual_spec
+                    ))
+                elif residual_spec.name == 'multi_ee_waypoint':
+                    costs.append(self._make_multi_ee_waypoint_cost(
+                        problem, TrajectoryVar, fk_data, residual_spec
+                    ))
 
             # --- EE waypoint costs ---
             if has_ee_waypoints:
@@ -358,9 +478,22 @@ class JaxlsSolver(BaseSolver):
             constraint_ids['waypoints'] = wp_ct_ids
             constraint_ids['n_params'] = next_ct_id
 
-            # Joint limits
-            lower = jnp.array(problem.joint_limits_lower)
-            upper = jnp.array(problem.joint_limits_upper)
+            # Joint limits (extend with -inf/+inf for base DoF so the
+            # base translation/rotation are unconstrained).
+            if n_base_dof > 0:
+                lower_full = np.concatenate([
+                    problem.joint_limits_lower,
+                    np.full(n_base_dof, -1e6, dtype=np.float64),
+                ])
+                upper_full = np.concatenate([
+                    problem.joint_limits_upper,
+                    np.full(n_base_dof, +1e6, dtype=np.float64),
+                ])
+            else:
+                lower_full = problem.joint_limits_lower
+                upper_full = problem.joint_limits_upper
+            lower = jnp.array(lower_full)
+            upper = jnp.array(upper_full)
 
             @jaxls.Cost.factory(
                 kind='constraint_geq_zero', name='joint_limits',
@@ -398,6 +531,20 @@ class JaxlsSolver(BaseSolver):
                     EEWpRotParamVar(jnp.arange(n_ee_wps))
                 )
 
+            # CoG cost ParamVars (one per add_com_cost call). The cost
+            # factory stashes them on ``problem._com_param_vars``.
+            for entry in getattr(problem, '_com_param_vars', []):
+                vc = entry['var_class']
+                n = entry['targets_sel'].shape[0]
+                all_variables.append(vc(jnp.arange(n)))
+            # Multi-EE waypoint cost ParamVars.
+            for entry in getattr(problem, '_multi_ee_param_vars', []):
+                pos_vc = entry['pos_var_class']
+                all_variables.append(pos_vc(jnp.arange(T)))
+                if entry['rot_var_class'] is not None:
+                    all_variables.append(
+                        entry['rot_var_class'](jnp.arange(T)))
+
             ls_problem = jaxls.LeastSquaresProblem(
                 costs=costs,
                 variables=all_variables,
@@ -425,14 +572,16 @@ class JaxlsSolver(BaseSolver):
         # Constraint param values
         n_ct = constraint_ids['n_params']
         if n_ct > 0:
-            ct_values = np.zeros((n_ct, n_joints))
+            ct_values = np.zeros((n_ct, n_total_dof))
             if 'start' in constraint_ids:
                 ct_values[constraint_ids['start']] = initial_trajectory[0]
             if 'end' in constraint_ids:
                 ct_values[constraint_ids['end']] = initial_trajectory[-1]
             for wp_idx, wp_angles in problem.waypoint_constraints:
                 ct_id = constraint_ids['waypoints'][wp_idx]
-                ct_values[ct_id] = wp_angles
+                wp_full = np.zeros(n_total_dof)
+                wp_full[:len(wp_angles)] = wp_angles
+                ct_values[ct_id] = wp_full
             init_pairs.append(
                 ConstraintParamVar(jnp.arange(n_ct)).with_value(
                     jnp.array(ct_values)
@@ -478,11 +627,35 @@ class JaxlsSolver(BaseSolver):
                         )
                     break
 
+        # CoG ParamVar values: write the per-waypoint targets stashed
+        # by ``_make_com_cost`` so the closure-frozen ParamVars carry
+        # the right numbers when the JIT plan executes.
+        for entry in getattr(problem, '_com_param_vars', []):
+            vc = entry['var_class']
+            n = entry['targets_sel'].shape[0]
+            init_pairs.append(
+                vc(jnp.arange(n)).with_value(entry['targets_sel'])
+            )
+        # Multi-EE waypoint ParamVar values.
+        for entry in getattr(problem, '_multi_ee_param_vars', []):
+            pos_vc = entry['pos_var_class']
+            init_pairs.append(
+                pos_vc(jnp.arange(T)).with_value(entry['target_pos'])
+            )
+            if entry['rot_var_class'] is not None:
+                init_pairs.append(
+                    entry['rot_var_class'](jnp.arange(T)).with_value(
+                        entry['target_rot'])
+                )
+
         init_vals = jaxls.VarValues.make(tuple(init_pairs))
 
         solution = ls_problem.solve(
             initial_vals=init_vals,
             verbose=self.verbose,
+            termination=jaxls.TerminationConfig(
+                max_iterations=int(max_iterations),
+            ),
         )
 
         result_traj = np.array(solution[traj_vars])
@@ -983,3 +1156,301 @@ class JaxlsSolver(BaseSolver):
             TrajectoryVar(jnp.arange(1, T - 5)),  # t-2
             TrajectoryVar(jnp.arange(0, T - 6)),  # t-3
         )
+
+    def _make_com_cost(self, problem, TrajectoryVar, fk_data, spec):
+        """Per-waypoint centre-of-gravity tracking cost.
+
+        Splits the per-waypoint augmented variable
+        ``aug = [chain0_q | chain1_q | ... | base_xyz | base_rpy]``
+        and routes:
+          * each chain's joint slice through its own FK to recover
+            chain-link world poses (mass contribution from the chain),
+          * the base portion through the unified centroid forward
+            from :mod:`skrobot.dynamics` so fixed-to-base links also
+            pick up the right rigid transform.
+
+        Per-waypoint targets are wired through a frozen
+        ``ComTargetParamVar`` (``tangent_dim=0``) so the optimisation
+        treats them as constants while still benefiting from the
+        cached JIT plan.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        from skrobot.coordinates.math import normalize_mask
+        from skrobot.dynamics import build_world_centroid_fn
+
+        targets = np.asarray(spec.params['target_positions'],
+                             dtype=np.float64)
+        wp_indices = np.asarray(spec.params['waypoint_indices'],
+                                dtype=np.int64)
+        axis_mask = np.asarray(normalize_mask(spec.params['translation_axis']))
+        sel_np = np.where(axis_mask == 1)[0].astype(np.int64)
+        n_axes = int(sel_np.size)
+        sel = jnp.asarray(sel_np)
+        weight = jnp.sqrt(spec.weight)
+
+        n_base_dof = getattr(problem, 'n_base_dof', 0)
+        chain_offsets = []
+        offset = 0
+        for chain in problem.link_lists:
+            chain_offsets.append((offset, offset + len(chain)))
+            offset += len(chain)
+
+        # Build per-chain link FK that takes the root_link world pose
+        # as its base argument. The chain's natural parent (e.g.
+        # ``torso_lift_link`` for Fetch's right arm) is recovered by
+        # composing with its relative-to-root transform, so a single
+        # ``base_pos`` / ``base_rot`` (the floating-base pose) drives
+        # both the chain FK and the fixed-link contribution
+        # consistently.
+        get_lt_per_chain = _build_root_relative_chain_fks(
+            problem, fk_data, jnp)
+        root_pos_np, root_rot_np = _root_link_world_pose(problem)
+        compute_centroid_mc = build_world_centroid_fn(
+            problem.centroid_data, get_lt_per_chain, backend=jnp,
+            base_pos_default=root_pos_np,
+            base_rot_default=root_rot_np,
+        )
+
+        base_pos_default = jnp.asarray(root_pos_np)
+        base_rot_default = jnp.asarray(root_rot_np)
+        n_joints_total = problem.n_joints
+
+        def _euler_xyz_to_matrix(rx, ry, rz):
+            cx, sx = jnp.cos(rx), jnp.sin(rx)
+            cy, sy = jnp.cos(ry), jnp.sin(ry)
+            cz, sz = jnp.cos(rz), jnp.sin(rz)
+            Rx = jnp.array([[1, 0, 0],
+                            [0, cx, -sx],
+                            [0, sx, cx]])
+            Ry = jnp.array([[cy, 0, sy],
+                            [0, 1, 0],
+                            [-sy, 0, cy]])
+            Rz = jnp.array([[cz, -sz, 0],
+                            [sz, cz, 0],
+                            [0, 0, 1]])
+            return Rx @ Ry @ Rz
+
+        def compute_centroid(angles_aug):
+            angles_per_chain = [
+                angles_aug[a:b] for (a, b) in chain_offsets
+            ]
+            if n_base_dof == 0:
+                return compute_centroid_mc(
+                    angles_per_chain,
+                    base_pos=base_pos_default,
+                    base_rot=base_rot_default,
+                )
+            base_section = angles_aug[n_joints_total:]
+            if n_base_dof == 6:
+                bx, by, bz, rx, ry, rz = (
+                    base_section[0], base_section[1], base_section[2],
+                    base_section[3], base_section[4], base_section[5])
+                base_pos = base_pos_default + jnp.array([bx, by, bz])
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(
+                    rx, ry, rz)
+            else:  # planar 3 DoF (x, y, yaw)
+                bx, by, ryaw = (
+                    base_section[0], base_section[1], base_section[2])
+                base_pos = base_pos_default + jnp.array([bx, by, 0.0])
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(
+                    0.0, 0.0, ryaw)
+            return compute_centroid_mc(
+                angles_per_chain, base_pos=base_pos, base_rot=base_rot,
+            )
+
+        # Targets per waypoint, only the selected axes.
+        if targets.ndim == 2:
+            targets_sel = targets[:, sel_np]
+        else:
+            # Single target broadcast to every waypoint.
+            targets_sel = np.broadcast_to(
+                targets[sel_np], (len(wp_indices), n_axes),
+            )
+
+        default_target = jnp.zeros(n_axes)
+
+        class ComTargetParamVar(
+            jaxls.Var[jnp.ndarray],
+            default_factory=lambda: default_target,
+            retract_fn=lambda x, delta: x,
+            tangent_dim=0,
+        ):
+            pass
+
+        @jaxls.Cost.factory(name='com')
+        def com_cost(vals, joint_var, target_var):
+            angles = vals[joint_var]
+            cog = compute_centroid(angles)
+            target = vals[target_var]
+            err = (cog[sel] - target) * weight
+            return err.flatten()
+
+        # Stash the param var class + values so the outer ``solve()``
+        # method can populate them in init_pairs alongside the joint
+        # trajectory.
+        if not hasattr(problem, '_com_param_vars'):
+            problem._com_param_vars = []
+        problem._com_param_vars.append({
+            'var_class': ComTargetParamVar,
+            'targets_sel': jnp.asarray(targets_sel, dtype=jnp.float64),
+        })
+
+        return com_cost(
+            TrajectoryVar(jnp.asarray(wp_indices)),
+            ComTargetParamVar(jnp.arange(len(wp_indices))),
+        )
+
+    def _make_multi_ee_waypoint_cost(self, problem, TrajectoryVar,
+                                      fk_data, spec):
+        """Multi-EE per-waypoint pose tracking with floating base.
+
+        At every waypoint, drive every chain's end-effector to its
+        corresponding world-frame target. This is the missing piece
+        that lets a single trajectory-optimisation solve handle a
+        multi-stance gait (foot pose constraints + base 6-DoF + CoM)
+        in one shot.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
+
+        T = problem.n_waypoints
+        n_joints_total = problem.n_joints
+        n_base_dof = getattr(problem, 'n_base_dof', 0)
+        n_chains = len(problem.link_lists)
+
+        chain_offsets = []
+        offset = 0
+        for chain in problem.link_lists:
+            chain_offsets.append((offset, offset + len(chain)))
+            offset += len(chain)
+
+        target_pos_per_chain = spec.params['target_positions_per_chain']
+        target_rot_per_chain = spec.params['target_rotations_per_chain']
+        pos_w = jnp.sqrt(spec.params['position_weight'])
+        rot_w = jnp.sqrt(spec.params['rotation_weight']) \
+            if target_rot_per_chain is not None else None
+
+        # Per-chain EE FK that takes the root_link world pose as its
+        # base argument; the chain's natural parent transform relative
+        # to root is composed inside.
+        get_ee_pose_per_chain = _build_root_relative_chain_ee_fks(
+            problem, jnp)
+        root_pos_np, root_rot_np = _root_link_world_pose(problem)
+        base_pos_default = jnp.asarray(root_pos_np)
+        base_rot_default = jnp.asarray(root_rot_np)
+
+        def _euler_xyz_to_matrix(rx, ry, rz):
+            cx, sx = jnp.cos(rx), jnp.sin(rx)
+            cy, sy = jnp.cos(ry), jnp.sin(ry)
+            cz, sz = jnp.cos(rz), jnp.sin(rz)
+            Rx = jnp.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+            Ry = jnp.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+            Rz = jnp.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+            return Rx @ Ry @ Rz
+
+        def _split_aug(angles_aug):
+            angles_per_chain = [
+                angles_aug[a:b] for (a, b) in chain_offsets
+            ]
+            if n_base_dof == 0:
+                return angles_per_chain, base_pos_default, base_rot_default
+            base_section = angles_aug[n_joints_total:]
+            if n_base_dof == 6:
+                base_pos = base_pos_default + base_section[:3]
+                rx, ry, rz = base_section[3], base_section[4], base_section[5]
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(rx, ry, rz)
+            else:
+                base_pos = base_pos_default + jnp.array(
+                    [base_section[0], base_section[1], 0.0])
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(
+                    0.0, 0.0, base_section[2])
+            return angles_per_chain, base_pos, base_rot
+
+        # Stack per-chain targets to (T, n_chains, 3) and (T, n_chains, 9).
+        T_pos = np.stack(target_pos_per_chain, axis=1)  # (T, n_chains, 3)
+        if target_rot_per_chain is not None:
+            T_rot = np.stack(
+                [r.reshape(T, 9) for r in target_rot_per_chain], axis=1,
+            )
+        else:
+            T_rot = None
+
+        default_pos = jnp.zeros((n_chains, 3))
+        default_rot = jnp.zeros((n_chains, 9))
+
+        class MEEPosParamVar(
+            jaxls.Var[jnp.ndarray],
+            default_factory=lambda: default_pos,
+            retract_fn=lambda x, delta: x,
+            tangent_dim=0,
+        ):
+            pass
+
+        if T_rot is not None:
+            class MEERotParamVar(
+                jaxls.Var[jnp.ndarray],
+                default_factory=lambda: default_rot,
+                retract_fn=lambda x, delta: x,
+                tangent_dim=0,
+            ):
+                pass
+        else:
+            MEERotParamVar = None
+
+        if T_rot is not None:
+            @jaxls.Cost.factory(name='multi_ee_waypoint')
+            def cost_pose(vals, var, pos_param, rot_param):
+                aug = vals[var]
+                apc, bpos, brot = _split_aug(aug)
+                tgt_pos = vals[pos_param]    # (n_chains, 3)
+                tgt_rot = vals[rot_param]    # (n_chains, 9)
+                errs = []
+                for ci in range(n_chains):
+                    ee_pos, ee_rot = get_ee_pose_per_chain[ci](
+                        apc[ci], bpos, brot)
+                    target_rot = tgt_rot[ci].reshape(3, 3)
+                    pose_err = pose_error_log(
+                        ee_pos, ee_rot, tgt_pos[ci], target_rot)
+                    errs.append(pos_w * pose_err[:3])
+                    errs.append(rot_w * pose_err[3:])
+                return jnp.concatenate(errs).flatten()
+
+            cost_node = cost_pose(
+                TrajectoryVar(jnp.arange(T)),
+                MEEPosParamVar(jnp.arange(T)),
+                MEERotParamVar(jnp.arange(T)),
+            )
+        else:
+            @jaxls.Cost.factory(name='multi_ee_waypoint')
+            def cost_pos_only(vals, var, pos_param):
+                aug = vals[var]
+                apc, bpos, brot = _split_aug(aug)
+                tgt_pos = vals[pos_param]    # (n_chains, 3)
+                errs = []
+                for ci in range(n_chains):
+                    ee_pos, _ = get_ee_pose_per_chain[ci](
+                        apc[ci], bpos, brot)
+                    errs.append(pos_w * (ee_pos - tgt_pos[ci]))
+                return jnp.concatenate(errs).flatten()
+
+            cost_node = cost_pos_only(
+                TrajectoryVar(jnp.arange(T)),
+                MEEPosParamVar(jnp.arange(T)),
+            )
+
+        # Stash so solve() can populate values.
+        if not hasattr(problem, '_multi_ee_param_vars'):
+            problem._multi_ee_param_vars = []
+        problem._multi_ee_param_vars.append({
+            'pos_var_class': MEEPosParamVar,
+            'rot_var_class': MEERotParamVar,
+            'target_pos': jnp.asarray(T_pos, dtype=jnp.float64),
+            'target_rot': (jnp.asarray(T_rot, dtype=jnp.float64)
+                            if T_rot is not None else None),
+        })
+
+        return cost_node

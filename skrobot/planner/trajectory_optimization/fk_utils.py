@@ -287,6 +287,81 @@ def compute_collision_residuals(signed_distances, activation_distance, backend):
     return xp.maximum(0.0, activation_distance - signed_distances)
 
 
+def build_chain_link_transforms_with_base(fk_data, backend):
+    """Like :func:`build_fk_functions`'s ``get_link_transforms`` but the
+    base pose is an *argument*, not a closure-captured constant.
+
+    Needed for trajectory optimisation where the base translation /
+    rotation are part of the per-waypoint variable (floating-base DoF).
+
+    Parameters
+    ----------
+    fk_data : dict
+        Same FK data dict consumed by :func:`build_fk_functions`.
+    backend : module
+        Array module.
+
+    Returns
+    -------
+    callable
+        ``get_link_transforms(angles, base_pos, base_rot)`` returning
+        ``(positions, rotations)``.
+    """
+    xp = backend
+    link_trans = fk_data['link_translations']
+    link_rots = fk_data['link_rotations']
+    joint_axes = fk_data['joint_axes']
+    n_joints = fk_data['n_joints']
+    ref_angles = fk_data.get('ref_angles')
+
+    def get_link_transforms(angles, base_pos, base_rot):
+        positions = []
+        rotations = []
+        current_pos = base_pos
+        current_rot = base_rot
+        for i in range(n_joints):
+            current_pos = current_pos + current_rot @ link_trans[i]
+            current_rot = current_rot @ link_rots[i]
+            delta = angles[i]
+            if ref_angles is not None:
+                delta = delta - ref_angles[i]
+            joint_rot = rodrigues_rotation(xp, joint_axes[i], delta)
+            current_rot = current_rot @ joint_rot
+            positions.append(current_pos)
+            rotations.append(current_rot)
+        return xp.stack(positions), xp.stack(rotations)
+
+    return get_link_transforms
+
+
+def build_chain_ee_pose_with_base(fk_data, backend):
+    """EE-pose function with explicit base pose argument.
+
+    Counterpart to :func:`build_chain_link_transforms_with_base`. The
+    EE offset (last_link -> move_target) baked into ``fk_data`` is
+    applied at the end.
+    """
+    get_link_transforms = build_chain_link_transforms_with_base(fk_data, backend)
+    ee_off_pos = fk_data.get('ee_offset_position')
+    ee_off_rot = fk_data.get('ee_offset_rotation')
+
+    def get_ee_pose(angles, base_pos, base_rot):
+        positions, rotations = get_link_transforms(angles, base_pos, base_rot)
+        last_pos = positions[-1]
+        last_rot = rotations[-1]
+        if ee_off_pos is not None:
+            ee_pos = last_pos + last_rot @ ee_off_pos
+        else:
+            ee_pos = last_pos
+        if ee_off_rot is not None:
+            ee_rot = last_rot @ ee_off_rot
+        else:
+            ee_rot = last_rot
+        return ee_pos, ee_rot
+
+    return get_ee_pose
+
+
 def prepare_fk_data(problem, backend):
     """Prepare FK data dictionary from problem definition.
 
