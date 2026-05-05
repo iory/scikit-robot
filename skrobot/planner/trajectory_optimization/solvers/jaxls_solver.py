@@ -413,6 +413,10 @@ class JaxlsSolver(BaseSolver):
                     costs.append(self._make_multi_ee_waypoint_cost(
                         problem, TrajectoryVar, fk_data, residual_spec
                     ))
+                elif residual_spec.name == 'base_pose':
+                    costs.append(self._make_base_pose_cost(
+                        problem, TrajectoryVar, residual_spec
+                    ))
 
             # --- EE waypoint costs ---
             if has_ee_waypoints:
@@ -544,6 +548,13 @@ class JaxlsSolver(BaseSolver):
                 if entry['rot_var_class'] is not None:
                     all_variables.append(
                         entry['rot_var_class'](jnp.arange(T)))
+            # Base-pose cost ParamVars.
+            for entry in getattr(problem, '_base_pose_param_vars', []):
+                pos_vc = entry['pos_var_class']
+                all_variables.append(pos_vc(jnp.arange(T)))
+                if entry['rot_var_class'] is not None:
+                    all_variables.append(
+                        entry['rot_var_class'](jnp.arange(T)))
 
             ls_problem = jaxls.LeastSquaresProblem(
                 costs=costs,
@@ -638,6 +649,17 @@ class JaxlsSolver(BaseSolver):
             )
         # Multi-EE waypoint ParamVar values.
         for entry in getattr(problem, '_multi_ee_param_vars', []):
+            pos_vc = entry['pos_var_class']
+            init_pairs.append(
+                pos_vc(jnp.arange(T)).with_value(entry['target_pos'])
+            )
+            if entry['rot_var_class'] is not None:
+                init_pairs.append(
+                    entry['rot_var_class'](jnp.arange(T)).with_value(
+                        entry['target_rot'])
+                )
+        # Base-pose ParamVar values.
+        for entry in getattr(problem, '_base_pose_param_vars', []):
             pos_vc = entry['pos_var_class']
             init_pairs.append(
                 pos_vc(jnp.arange(T)).with_value(entry['target_pos'])
@@ -1330,9 +1352,43 @@ class JaxlsSolver(BaseSolver):
 
         target_pos_per_chain = spec.params['target_positions_per_chain']
         target_rot_per_chain = spec.params['target_rotations_per_chain']
-        pos_w = jnp.sqrt(spec.params['position_weight'])
-        rot_w = jnp.sqrt(spec.params['rotation_weight']) \
-            if target_rot_per_chain is not None else None
+        # Per-chain weights: fall back to scalar position/rotation_weight
+        # for chains not explicitly weighted.  The sqrt is folded into
+        # the residual scale so the LM minimises the squared weighted
+        # error (= original weight * squared-error).
+        pos_w_pc = spec.params.get('position_weights_per_chain')
+        rot_w_pc = spec.params.get('rotation_weights_per_chain')
+        if pos_w_pc is not None:
+            pos_w_chain = jnp.sqrt(jnp.asarray(pos_w_pc, dtype=jnp.float64))
+            np.asarray(pos_w_pc, dtype=np.float64)
+        else:
+            pos_w_chain = jnp.sqrt(jnp.asarray(
+                [spec.params['position_weight']] * n_chains,
+                dtype=jnp.float64))
+            np.full(
+                n_chains, float(spec.params['position_weight']),
+                dtype=np.float64)
+        if target_rot_per_chain is not None:
+            if rot_w_pc is not None:
+                rot_w_chain = jnp.sqrt(
+                    jnp.asarray(rot_w_pc, dtype=jnp.float64))
+                rot_w_pc_arr = np.asarray(rot_w_pc, dtype=np.float64)
+            else:
+                rot_w_chain = jnp.sqrt(jnp.asarray(
+                    [spec.params['rotation_weight']] * n_chains,
+                    dtype=jnp.float64))
+                rot_w_pc_arr = np.full(
+                    n_chains, float(spec.params['rotation_weight']),
+                    dtype=np.float64)
+        else:
+            rot_w_chain = None
+            rot_w_pc_arr = np.zeros(n_chains, dtype=np.float64)
+        # Chains with zero rotation weight bypass the SE(3) log error to
+        # avoid the body-frame translation coupling (J^{-1}(ω) term)
+        # that warps gradients when actual_rot != target_rot.  Decided
+        # at trace time so JAX sees a static graph per chain.
+        chain_track_rot = [
+            bool(rot_w_pc_arr[ci] > 0.0) for ci in range(n_chains)]
 
         # Per-chain EE FK that takes the root_link world pose as its
         # base argument; the chain's natural parent transform relative
@@ -1412,11 +1468,18 @@ class JaxlsSolver(BaseSolver):
                 for ci in range(n_chains):
                     ee_pos, ee_rot = get_ee_pose_per_chain[ci](
                         apc[ci], bpos, brot)
-                    target_rot = tgt_rot[ci].reshape(3, 3)
-                    pose_err = pose_error_log(
-                        ee_pos, ee_rot, tgt_pos[ci], target_rot)
-                    errs.append(pos_w * pose_err[:3])
-                    errs.append(rot_w * pose_err[3:])
+                    if chain_track_rot[ci]:
+                        target_rot = tgt_rot[ci].reshape(3, 3)
+                        pose_err = pose_error_log(
+                            ee_pos, ee_rot, tgt_pos[ci], target_rot)
+                        errs.append(pos_w_chain[ci] * pose_err[:3])
+                        errs.append(rot_w_chain[ci] * pose_err[3:])
+                    else:
+                        # World-frame position error only — avoids the
+                        # SE(3) log's J^{-1}(ω) coupling that distorts
+                        # gradients when rot_w == 0.
+                        errs.append(
+                            pos_w_chain[ci] * (ee_pos - tgt_pos[ci]))
                 return jnp.concatenate(errs).flatten()
 
             cost_node = cost_pose(
@@ -1434,7 +1497,7 @@ class JaxlsSolver(BaseSolver):
                 for ci in range(n_chains):
                     ee_pos, _ = get_ee_pose_per_chain[ci](
                         apc[ci], bpos, brot)
-                    errs.append(pos_w * (ee_pos - tgt_pos[ci]))
+                    errs.append(pos_w_chain[ci] * (ee_pos - tgt_pos[ci]))
                 return jnp.concatenate(errs).flatten()
 
             cost_node = cost_pos_only(
@@ -1451,6 +1514,149 @@ class JaxlsSolver(BaseSolver):
             'target_pos': jnp.asarray(T_pos, dtype=jnp.float64),
             'target_rot': (jnp.asarray(T_rot, dtype=jnp.float64)
                             if T_rot is not None else None),
+            # Metadata so problem.update_multi_ee_targets can swap
+            # the per-frame targets without rebuilding / recompiling.
+            'n_chains': n_chains,
+            'n_waypoints': T,
         })
 
+        return cost_node
+
+    def _make_base_pose_cost(self, problem, TrajectoryVar, spec):
+        """Per-waypoint base-pose tracking cost.
+
+        Drives the floating-base 6 DoF (or 3 DoF for planar) so the
+        base world pose at every waypoint follows the target trajectory.
+        Uses simple (Euclidean translation, axis-angle rotation) errors
+        — no SE(3) coupling — because both targets and the base
+        parameterisation live in the world frame.
+        """
+        import jax.numpy as jnp
+        import jaxls
+
+        T = problem.n_waypoints
+        n_joints_total = problem.n_joints
+        n_base_dof = getattr(problem, 'n_base_dof', 0)
+        if n_base_dof == 0:
+            return None
+
+        target_pos = np.asarray(
+            spec.params['target_positions'], dtype=np.float64)
+        target_rot = spec.params['target_rotations']
+        if target_rot is not None:
+            target_rot = np.asarray(target_rot, dtype=np.float64)
+        pos_w = jnp.sqrt(jnp.asarray(
+            spec.params['position_weight'], dtype=jnp.float64))
+        rot_w = jnp.sqrt(jnp.asarray(
+            spec.params['rotation_weight'], dtype=jnp.float64))
+
+        root_pos_np, root_rot_np = _root_link_world_pose(problem)
+        base_pos_default = jnp.asarray(root_pos_np)
+        base_rot_default = jnp.asarray(root_rot_np)
+
+        def _euler_xyz_to_matrix(rx, ry, rz):
+            cx, sx = jnp.cos(rx), jnp.sin(rx)
+            cy, sy = jnp.cos(ry), jnp.sin(ry)
+            cz, sz = jnp.cos(rz), jnp.sin(rz)
+            Rx = jnp.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+            Ry = jnp.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+            Rz = jnp.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+            return Rx @ Ry @ Rz
+
+        def _split_aug(angles_aug):
+            base_section = angles_aug[n_joints_total:]
+            if n_base_dof == 6:
+                base_pos = base_pos_default + base_section[:3]
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(
+                    base_section[3], base_section[4], base_section[5])
+            else:
+                base_pos = base_pos_default + jnp.array(
+                    [base_section[0], base_section[1], 0.0])
+                base_rot = base_rot_default @ _euler_xyz_to_matrix(
+                    0.0, 0.0, base_section[2])
+            return base_pos, base_rot
+
+        def _so3_log(R):
+            # Robust axis-angle log: clamp trace to [-1, 3] for safety.
+            tr = jnp.trace(R)
+            cos_theta = jnp.clip(0.5 * (tr - 1.0), -1.0, 1.0)
+            theta = jnp.arccos(cos_theta)
+            # Avoid 0/0 with small_angle and singular sin.
+            sin_theta = jnp.sin(theta)
+            safe = jnp.where(sin_theta < 1e-6, 1.0, sin_theta)
+            scale = theta / (2.0 * safe)
+            v = jnp.array([
+                R[2, 1] - R[1, 2],
+                R[0, 2] - R[2, 0],
+                R[1, 0] - R[0, 1],
+            ])
+            return scale * v
+
+        T_pos_jax = jnp.asarray(target_pos, dtype=jnp.float64)
+        if target_rot is not None:
+            T_rot_jax = jnp.asarray(target_rot.reshape(T, 9),
+                                    dtype=jnp.float64)
+        else:
+            T_rot_jax = None
+
+        default_pos3 = jnp.zeros(3)
+        default_rot9 = jnp.zeros(9)
+
+        class BaseTgtPosVar(
+            jaxls.Var[jnp.ndarray],
+            default_factory=lambda: default_pos3,
+            retract_fn=lambda x, delta: x,
+            tangent_dim=0,
+        ):
+            pass
+
+        if T_rot_jax is not None:
+            class BaseTgtRotVar(
+                jaxls.Var[jnp.ndarray],
+                default_factory=lambda: default_rot9,
+                retract_fn=lambda x, delta: x,
+                tangent_dim=0,
+            ):
+                pass
+        else:
+            BaseTgtRotVar = None
+
+        if T_rot_jax is not None:
+            @jaxls.Cost.factory(name='base_pose')
+            def cost_base(vals, var, pos_param, rot_param):
+                aug = vals[var]
+                bpos, brot = _split_aug(aug)
+                tgt_pos = vals[pos_param]
+                tgt_rot = vals[rot_param].reshape(3, 3)
+                pos_err = pos_w * (bpos - tgt_pos)
+                rot_err = rot_w * _so3_log(brot.T @ tgt_rot)
+                return jnp.concatenate([pos_err, rot_err]).flatten()
+
+            cost_node = cost_base(
+                TrajectoryVar(jnp.arange(T)),
+                BaseTgtPosVar(jnp.arange(T)),
+                BaseTgtRotVar(jnp.arange(T)),
+            )
+        else:
+            @jaxls.Cost.factory(name='base_pose')
+            def cost_base_pos(vals, var, pos_param):
+                aug = vals[var]
+                bpos, _ = _split_aug(aug)
+                tgt_pos = vals[pos_param]
+                return (pos_w * (bpos - tgt_pos)).flatten()
+
+            cost_node = cost_base_pos(
+                TrajectoryVar(jnp.arange(T)),
+                BaseTgtPosVar(jnp.arange(T)),
+            )
+
+        if not hasattr(problem, '_base_pose_param_vars'):
+            problem._base_pose_param_vars = []
+        problem._base_pose_param_vars.append({
+            'pos_var_class': BaseTgtPosVar,
+            'rot_var_class': BaseTgtRotVar,
+            'target_pos': T_pos_jax,
+            'target_rot': T_rot_jax,
+            'n_waypoints': T,
+        })
         return cost_node

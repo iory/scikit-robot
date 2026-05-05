@@ -987,6 +987,133 @@ class TestFloatingBaseAndMultiChain(unittest.TestCase):
         self.assertLess(rarm_err, 0.02)
         self.assertLess(larm_err, 0.02)
 
+    def test_add_base_pose_cost_registers(self):
+        """``add_base_pose_cost`` adds a base_pose residual and solves."""
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        robot, link_list, n_joints = _make_kuka()
+        n_waypoints = 3
+        n_base = 6
+        problem = TrajectoryProblem(
+            robot, link_list, n_waypoints=n_waypoints, n_base_dof=n_base)
+        problem.set_fixed_endpoints(start=False, end=False)
+        problem.add_smoothness_cost(weight=0.01)
+
+        target_pos = np.tile(np.array([0.2, -0.1, 0.05]), (n_waypoints, 1))
+        target_rot = np.tile(np.eye(3), (n_waypoints, 1, 1))
+        problem.add_base_pose_cost(
+            target_positions=target_pos,
+            target_rotations=target_rot,
+            position_weight=300.0,
+            rotation_weight=300.0,
+        )
+
+        residual_names = [r.name for r in problem.residuals]
+        self.assertIn('base_pose', residual_names)
+
+        initial_traj = np.zeros((n_waypoints, n_joints + n_base))
+        solver = JaxlsSolver(max_iterations=40)
+        result = solver.solve(problem, initial_traj)
+        self.assertTrue(result.success)
+        self.assertTrue(np.all(np.isfinite(result.trajectory)))
+
+    def test_update_base_pose_targets_reuses_graph(self):
+        """``update_base_pose_targets`` swaps targets without recompiling."""
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        robot, link_list, n_joints = _make_kuka()
+        n_waypoints = 3
+        n_base = 6
+        problem = TrajectoryProblem(
+            robot, link_list, n_waypoints=n_waypoints, n_base_dof=n_base)
+        problem.set_fixed_endpoints(start=False, end=False)
+        problem.add_smoothness_cost(weight=0.01)
+
+        problem.add_base_pose_cost(
+            target_positions=np.zeros((n_waypoints, 3)),
+            target_rotations=np.tile(np.eye(3), (n_waypoints, 1, 1)),
+            position_weight=200.0,
+            rotation_weight=200.0,
+        )
+
+        # First solve traces the cost graph and populates the cached
+        # param vars.
+        initial_traj = np.zeros((n_waypoints, n_joints + n_base))
+        solver = JaxlsSolver(max_iterations=20)
+        result = solver.solve(problem, initial_traj)
+        self.assertTrue(result.success)
+
+        # Swap targets — should not raise and the next solve still runs.
+        problem.update_base_pose_targets(
+            target_positions=np.tile([0.1, 0.0, 0.0], (n_waypoints, 1)),
+            target_rotations=np.tile(np.eye(3), (n_waypoints, 1, 1)),
+        )
+        result2 = solver.solve(problem, initial_traj)
+        self.assertTrue(result2.success)
+        self.assertTrue(np.all(np.isfinite(result2.trajectory)))
+
+    def test_multi_ee_per_chain_weights_zero_disables(self):
+        """``rotation_weights_per_chain`` = 0 disables rotation tracking
+        for that chain (position still tracked)."""
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        robot = skrobot.models.PR2()
+        robot.reset_manip_pose()
+        rarm_links = list(robot.rarm.link_list)
+        larm_links = list(robot.larm.link_list)
+        n_waypoints = 3
+
+        nominal = np.concatenate([
+            np.array([link.joint.joint_angle() for link in rarm_links]),
+            np.array([link.joint.joint_angle() for link in larm_links]),
+        ])
+
+        rarm_initial = robot.rarm_end_coords.copy_worldcoords()
+        larm_initial = robot.larm_end_coords.copy_worldcoords()
+        # Position-only target for rarm; full pose for larm.
+        rarm_target_pos = rarm_initial.worldpos() + np.array(
+            [0.02, 0.0, 0.0])
+        larm_target_pos = larm_initial.worldpos() + np.array(
+            [0.02, 0.0, 0.02])
+
+        problem = TrajectoryProblem(
+            robot,
+            link_list=[rarm_links, larm_links],
+            n_waypoints=n_waypoints,
+            move_target=[robot.rarm_end_coords, robot.larm_end_coords],
+        )
+        problem.set_fixed_endpoints(start=False, end=False)
+        problem.add_smoothness_cost(weight=0.01)
+        problem.add_multi_ee_waypoint_cost(
+            target_positions_per_chain=[
+                np.tile(rarm_target_pos, (n_waypoints, 1)),
+                np.tile(larm_target_pos, (n_waypoints, 1))],
+            target_rotations_per_chain=[
+                np.tile(rarm_initial.worldrot(), (n_waypoints, 1, 1)),
+                np.tile(larm_initial.worldrot(), (n_waypoints, 1, 1))],
+            position_weight=500.0,
+            rotation_weight=50.0,
+            rotation_weights_per_chain=[0.0, 50.0],
+        )
+
+        initial_traj = np.tile(nominal, (n_waypoints, 1))
+        solver = JaxlsSolver(max_iterations=80)
+        result = solver.solve(problem, initial_traj)
+        self.assertTrue(result.success)
+
+        n_rarm = len(rarm_links)
+        for link, q in zip(rarm_links, result.trajectory[-1, :n_rarm]):
+            link.joint.joint_angle(float(q))
+        for link, q in zip(larm_links, result.trajectory[-1, n_rarm:]):
+            link.joint.joint_angle(float(q))
+
+        rarm_err = np.linalg.norm(
+            robot.rarm_end_coords.worldpos() - rarm_target_pos)
+        larm_err = np.linalg.norm(
+            robot.larm_end_coords.worldpos() - larm_target_pos)
+        self.assertLess(rarm_err, 0.02)
+        self.assertLess(larm_err, 0.02)
+
 
 @requires_jax
 class TestAugmentedLagrangianSolver(unittest.TestCase):
