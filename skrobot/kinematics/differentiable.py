@@ -1417,6 +1417,7 @@ def _build_union_joint_mapping(link_lists, fk_params_list):
     union_joint_refs = []
     union_joint_limits_lower = []
     union_joint_limits_upper = []
+    union_max_velocities = []
     seen = {}  # id(joint_obj) -> union index
     task_mappings = []
     task_non_mimic_indices = []
@@ -1452,11 +1453,22 @@ def _build_union_joint_mapping(link_lists, fk_params_list):
                     fk_params['joint_limits_lower'][int(full_idx)])
                 union_joint_limits_upper.append(
                     fk_params['joint_limits_upper'][int(full_idx)])
+                mv = getattr(joint, 'max_joint_velocity', np.inf)
+                if isinstance(mv, (list, tuple, np.ndarray)):
+                    mv = float(np.asarray(mv).flat[0])
+                mv = float(mv)
+                # Fixed joints carry max_joint_velocity=0; treat as
+                # unconstrained so the per-step gain scaling doesn't
+                # collapse the IK step to zero.
+                if mv <= 0.0:
+                    mv = float(np.inf)
+                union_max_velocities.append(mv)
                 mapping[k] = uidx
         task_mappings.append(mapping)
         task_non_mimic_indices.append(non_mimic)
     lower = np.asarray(union_joint_limits_lower, dtype=np.float64)
     upper = np.asarray(union_joint_limits_upper, dtype=np.float64)
+    max_vels = np.asarray(union_max_velocities, dtype=np.float64)
     # After tightening, detect cross-task limit disagreement that inverts
     # a joint's range. If lo > hi, the joint is infeasible under the shared
     # constraint and np.clip would silently collapse all iterates onto a
@@ -1477,6 +1489,7 @@ def _build_union_joint_mapping(link_lists, fk_params_list):
         'union_n_opt': len(union_joint_refs),
         'union_joint_limits_lower': lower,
         'union_joint_limits_upper': upper,
+        'union_max_velocities': max_vels,
         'union_joint_refs': union_joint_refs,
     }
 
@@ -2342,6 +2355,12 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
     union_n_opt = union_info['union_n_opt']
     joint_limits_lower = jnp.array(union_info['union_joint_limits_lower'])
     joint_limits_upper = jnp.array(union_info['union_joint_limits_upper'])
+    # Per-joint max velocities for the move_joints velocity-limit
+    # gain scaling.  ``np.inf`` for joints with no advertised limit
+    # (which makes the gain == 1 for those joints — no effect).
+    joint_max_velocities = jnp.array(
+        union_info.get('union_max_velocities',
+                       np.full(union_n_opt, np.inf, dtype=np.float64)))
 
     # Per-task precomputed structural constants. Everything below depends
     # only on the kinematic chain (link_list, move_target) and is safe to
@@ -2431,12 +2450,18 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
     def _create_solver_fn(max_iterations, damping, pos_threshold,
                           rot_threshold, pos_mask_arrs, rot_mask_arrs,
                           rotation_mirrors, task_weights_tuple,
-                          weight_diag_tuple=None):
+                          weight_diag_tuple=None,
+                          joint_limit_avoidance=0.0):
         """Create a JIT-compiled multi-EE solver for a given configuration.
 
         ``weight_diag_tuple`` is either None or a tuple of floats of length
         ``union_n_opt`` specifying per-opt-variable weights for a weighted
         DLS ``Δq = W J^T (J W J^T + λI)^-1 e``.
+
+        ``joint_limit_avoidance`` (>0) activates Yoshikawa-style
+        joint-limit weighting + null-space avoidance.  When set,
+        ``weight_diag_tuple`` is ignored — the joint-limit weight is
+        recomputed every iteration.
         """
         # Per-task mask arrays as JAX (static at graph build)
         pos_masks = [jnp.array(m) for m in pos_mask_arrs]
@@ -2602,6 +2627,31 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
                 rot_err_world = jnp.zeros_like(pos_err)
             return jnp.concatenate([pos_err, rot_err_world], axis=1)
 
+        # Skrobot move_joints velocity-limit gain scaling, mirrored
+        # for batch:
+        #   for each joint: gain_i = max_velocity_i / |Δq_i / Δt|,
+        #                   capped at 1.0 (= no scaling)
+        #   min_gain = min over joints (per batch row)
+        #   Δq_scaled = min_gain · Δq
+        # Joints with max_velocity == ∞ contribute gain = ∞ → capped
+        # at 1.0 (no effect).  Without this scaling the unweighted
+        # damped least-squares update overshoots on high-DoF cross-
+        # body problems and oscillates by 10°+ at iter 1; the
+        # uniform shrink keeps every joint within its velocity bound.
+        PERIODIC_TIME = 0.5
+
+        def _apply_velocity_gain(delta_q):
+            eps = 1e-12
+            vel_abs = jnp.abs(delta_q) / PERIODIC_TIME
+            ratio = joint_max_velocities[None, :] / jnp.maximum(
+                vel_abs, eps)
+            gain_per = jnp.where(
+                vel_abs > eps, ratio,
+                jnp.full_like(vel_abs, jnp.inf))
+            gain_per = jnp.minimum(gain_per, 1.0)
+            min_gain = jnp.min(gain_per, axis=-1, keepdims=True)
+            return delta_q * min_gain
+
         def solve_batched(init_opt_angles, target_positions_stack,
                           target_rotations_stack):
             """Run the DLS loop.
@@ -2610,7 +2660,11 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
             target_rotations_stack: (n_tasks, batch, 3, 3)
             """
 
-            def body_fn(_, opt_angles):
+            def body_fn(_, state):
+                # state is (opt_angles, phi_prev).  phi_prev is only
+                # consulted when joint_limit_avoidance > 0; otherwise
+                # it's carried through as a placeholder.
+                opt_angles = state[0] if isinstance(state, tuple) else state
                 J_rows = []
                 err_rows = []
                 for t in contrib_tasks:
@@ -2640,10 +2694,229 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
                 J_stack = jnp.concatenate(J_rows, axis=1)
                 err_stack = jnp.concatenate(err_rows, axis=1)
 
-                if weight_diag_jax is None:
-                    JJT = jnp.matmul(
-                        J_stack, jnp.transpose(J_stack, (0, 2, 1))
-                    ) + damping_eye
+                # Yoshikawa joint-limit-aware DLS + null-space
+                # avoidance.  Lets the batch IK converge to the same
+                # local minima as the iterative numpy IK path on
+                # cross-body redundant problems (high-DoF humanoids).
+                #
+                # Per iteration:
+                #   φ_i  = |dH/dt|  Yoshikawa joint-limit measure
+                #          (∞ at the limit, 0 at the centre).
+                #   W_ii = 1.0          if φ_i decreased vs prev iter
+                #                       (joint moving away from limit)
+                #        = 1/(1+φ_i)    if φ_i increased
+                #                       (moving toward limit, restrict)
+                #   k    = manipulability damping
+                #          k = gain·(1−m/lim)²  if m < lim
+                #          k = 0                otherwise
+                #   J⁺   = W Jᵀ (J W Jᵀ + (k+λ²) I)⁻¹
+                #   z    = α · W · ∇_q φ        (null-space, scaled by
+                #                                 W so the singular
+                #                                 1/v³ term is killed
+                #                                 near limits)
+                #   Δq   = J⁺ e + (I − J⁺J) z
+                #
+                # ``phi_prev`` is carried through ``lax.fori_loop`` so
+                # the asymmetric weight rule (full mobility when
+                # escaping a limit) can be evaluated each step.
+                if joint_limit_avoidance > 0.0:
+                    phi_prev = state[1]
+                    # ``joint_angle_limit_weight`` clamps the joint
+                    # angle to ``limit ∓ 1°`` BEFORE computing φ
+                    # (see ``joint.py``).  Without this clamp, once
+                    # a joint hits a limit ``v_jl → 0`` and ``φ → ∞``,
+                    # which under the asymmetric weight rule pegs
+                    # ``W → 0`` and the joint can never escape —
+                    # high-DoF humanoid shoulders get stuck at ±π in
+                    # cross-body solves for exactly this reason.  The
+                    # 1° pad keeps φ bounded so W stays usable enough
+                    # to drive the joint away from the limit on
+                    # subsequent iterations.
+                    one_deg = 0.017453292519943295
+                    # For joints whose limits are ±∞ (virtual base),
+                    # the clamp is a no-op and we mask φ to zero
+                    # below (the limit-avoidance gradient is
+                    # undefined when one bound is at infinity).
+                    safe_lower = joint_limits_lower + one_deg
+                    safe_upper = joint_limits_upper - one_deg
+                    opt_for_phi = jnp.clip(
+                        opt_angles, safe_lower, safe_upper)
+                    v_jl = joint_limits_upper - opt_for_phi
+                    w_jl = opt_for_phi - joint_limits_lower
+                    u_jl = (2.0 * opt_for_phi
+                            - joint_limits_upper - joint_limits_lower)
+                    span2_jl = (
+                        joint_limits_upper - joint_limits_lower) ** 2
+
+                    # Yoshikawa φ.  With the 1° pad ``v_jl, w_jl ≥ 1°``
+                    # so φ is finite (large but bounded).  Mask out
+                    # joints with infinite limits (no contribution).
+                    phi_curr = span2_jl * jnp.abs(u_jl) / (
+                        4.0 * v_jl ** 2 * w_jl ** 2)
+                    inf_limit = (jnp.isinf(joint_limits_lower)
+                                 | jnp.isinf(joint_limits_upper))
+                    phi_curr = jnp.where(inf_limit, 0.0, phi_curr)
+                    phi_curr = jnp.clip(phi_curr, 0.0, 1e6)
+
+                    # Asymmetric weight rule: shrink only when φ
+                    # is increasing (joint moving toward the limit);
+                    # restore full mobility otherwise.  Mirrors
+                    # ``calc_weight_from_joint_limit``.
+                    w_diag = jnp.where(
+                        phi_curr >= phi_prev,
+                        1.0 / (1.0 + joint_limit_avoidance * phi_curr),
+                        1.0)
+
+                    # Per-batch manipulability switch.  Skrobot picks
+                    # k = 0 when m > 0.1 (returns ``np.linalg.pinv``)
+                    # and k = gain·(1−m/lim)² when m < 0.1
+                    # (returns DLS).  We replicate that by computing
+                    # BOTH branches and selecting per batch with
+                    # ``jnp.where`` — JAX vmap can't conditionally
+                    # branch but the computation cost is dominated by
+                    # the SVD inside ``jnp.linalg.pinv`` and the
+                    # ``solve`` inside DLS, both of which fan out
+                    # across the batch in parallel on the GPU.
+                    JJT_raw = jnp.matmul(
+                        J_stack, jnp.transpose(J_stack, (0, 2, 1)))
+                    det_JJT = jnp.linalg.det(JJT_raw)
+                    m = jnp.sqrt(jnp.clip(det_JJT, 0.0, None))
+                    manip_lim = 0.1
+                    manip_gain = 0.001
+
+                    w_diag_b = w_diag[:, None, :]
+                    JW = J_stack * w_diag_b
+
+                    # DLS branch (low manipulability):
+                    #   k = manip_gain·(1−m/lim)²   when m < lim
+                    #     = 1e-6                    otherwise (floor)
+                    #   Δq = W Jᵀ (J W Jᵀ + k I)⁻¹ e
+                    # No additional ``damping_eye`` term here — an
+                    # extra λ²I (=0.01 I) on top of the manip-adaptive
+                    # k over-damps the step by ~5 orders of magnitude
+                    # when ``m`` is high enough that k_dls→0, driving
+                    # the solve into a different basin on cross-body
+                    # high-DoF problems.  The 1e-6 floor keeps the
+                    # solve numerically stable at the boundary.
+                    k_dls = jnp.where(
+                        m < manip_lim,
+                        manip_gain * (1.0 - m / manip_lim) ** 2,
+                        1e-6)
+                    n_rows = J_stack.shape[1]
+                    k_eye_dls = (k_dls[:, None, None]
+                                 * jnp.eye(n_rows)[None, :, :])
+                    A_dls = (jnp.matmul(
+                                JW, jnp.transpose(J_stack, (0, 2, 1)))
+                             + k_eye_dls)
+                    Ainv_e_dls = jnp.linalg.solve(
+                        A_dls,
+                        err_stack[..., jnp.newaxis]).squeeze(-1)
+                    delta_dls = jnp.einsum(
+                        'bji,bj->bi', JW, Ainv_e_dls)
+
+                    # Pinv branch (high manipulability, k=0):
+                    # ``sr_inverse(J, k=0, weight=W)`` returns
+                    # ``W J^T pinv(J W J^T)`` when W is non-uniform
+                    # (and falls back to ``pinv(J)`` only if every
+                    # element of W is identical).  The previous JAX
+                    # form ``W * pinv(J)`` is equivalent ONLY for
+                    # uniform W; for the joint-limit-weighted case
+                    # the correct denominator is ``J W J^T``, not
+                    # ``J J^T``, and the per-joint W reduction must
+                    # propagate inside the inverse so a near-zero W_i
+                    # actually masks that joint's contribution.
+                    JWJT_pinv = jnp.matmul(
+                        JW, jnp.transpose(J_stack, (0, 2, 1)))
+                    JWJT_pinv_inv = jnp.linalg.pinv(JWJT_pinv)
+                    Ae_pinv = jnp.einsum(
+                        'bij,bj->bi', JWJT_pinv_inv, err_stack)
+                    delta_pinv = jnp.einsum(
+                        'bji,bj->bi', JW, Ae_pinv)
+
+                    use_pinv = (m >= manip_lim)
+                    delta_primary = jnp.where(
+                        use_pinv[:, None], delta_pinv, delta_dls)
+
+                    # Null-space joint-limit avoidance:
+                    #   Δq = J# e + (I − J#J) y
+                    # where y is the per-joint null-space gradient
+                    # ``r·|r|`` with r = (center − q) / half_span ∈
+                    # [−1, 1] (bounded; the unbounded ``dφ/dq`` form
+                    # was numerically unstable in early iterations).
+                    # ``avoid_nspace_gain = 0.01`` is the same gain
+                    # used by ``calc_joint_angle_speed``.
+                    avoid_nspace_gain = 0.01
+                    half_span = (joint_limits_upper
+                                 - joint_limits_lower) * 0.5
+                    center = (joint_limits_upper
+                              + joint_limits_lower) * 0.5
+                    safe_half = jnp.where(
+                        inf_limit, 1.0, jnp.maximum(half_span, one_deg))
+                    r_norm = (center - opt_angles) / safe_half
+                    r_norm = jnp.where(inf_limit, 0.0, r_norm)
+                    nspace_y = avoid_nspace_gain * r_norm * jnp.abs(r_norm)
+
+                    # (I − J#J) y in DLS form:
+                    #   J#J y = JW.T (JWJT + kI)⁻¹ J y
+                    # so null_dls = y − JW.T (JWJT + kI)⁻¹ J y
+                    Jy = jnp.einsum('bij,bj->bi', J_stack, nspace_y)
+                    Ainv_Jy_dls = jnp.linalg.solve(
+                        A_dls, Jy[..., jnp.newaxis]).squeeze(-1)
+                    JsJy_dls = jnp.einsum(
+                        'bji,bj->bi', JW, Ainv_Jy_dls)
+                    null_dls = nspace_y - JsJy_dls
+
+                    # (I − J#J) y in pinv form:
+                    #   J#J y = JW.T pinv(JWJT) J y
+                    Ainv_Jy_pinv = jnp.einsum(
+                        'bij,bj->bi', JWJT_pinv_inv, Jy)
+                    JsJy_pinv = jnp.einsum(
+                        'bji,bj->bi', JW, Ainv_Jy_pinv)
+                    null_pinv = nspace_y - JsJy_pinv
+
+                    null_term = jnp.where(
+                        use_pinv[:, None], null_pinv, null_dls)
+                    delta_q = delta_primary + null_term
+
+                    # Velocity-limit gain scaling.  Identical Δq /
+                    # step semantics so the DLS + null-space iterate
+                    # matches the iterative numpy IK path bit-for-bit
+                    # on per-joint magnitudes.
+                    delta_q = _apply_velocity_gain(delta_q)
+
+                    new_opt = jnp.clip(
+                        opt_angles + delta_q,
+                        joint_limits_lower, joint_limits_upper)
+                    return (new_opt, phi_curr)
+                elif weight_diag_jax is None:
+                    # Adaptive damping by per-batch manipulability:
+                    #   m  = √det(JJᵀ)
+                    #   k  = 0                       if m ≥ 0.1
+                    #      = gain · (1 − m/0.1)²     otherwise
+                    #   Δq = Jᵀ (JJᵀ + k I)⁻¹ e
+                    # No additional constant damping — adding it
+                    # caused iter-1 sign flips on cross-body
+                    # high-DoF problems vs the iterative numpy IK
+                    # pseudo-inverse path.
+                    JJT_raw = jnp.matmul(
+                        J_stack, jnp.transpose(J_stack, (0, 2, 1)))
+                    det_JJT = jnp.linalg.det(JJT_raw)
+                    m = jnp.sqrt(jnp.clip(det_JJT, 0.0, None))
+                    manip_lim = 0.1
+                    manip_gain = 0.001
+                    # Floor k at 1e-6 to keep solve numerically
+                    # stable when m is right at the boundary; the
+                    # bias is a thousandth of the maximum k so the
+                    # iterate matches the iterative pseudo-inverse
+                    # path to ~5 significant figures in practice.
+                    k_adaptive = jnp.where(
+                        m < manip_lim,
+                        manip_gain * (1.0 - m / manip_lim) ** 2,
+                        1e-6)
+                    n_rows = J_stack.shape[1]
+                    k_eye_b = (k_adaptive[:, None, None]
+                               * jnp.eye(n_rows)[None, :, :])
+                    JJT = JJT_raw + k_eye_b
                     solved = jnp.linalg.solve(
                         JJT, err_stack[..., jnp.newaxis]).squeeze(-1)
                     delta_q = jnp.einsum('bji,bj->bi', J_stack, solved)
@@ -2654,13 +2927,37 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
                     solved = jnp.linalg.solve(
                         JWJT, err_stack[..., jnp.newaxis]).squeeze(-1)
                     delta_q = jnp.einsum('bji,bj->bi', JW, solved)
+                # Same velocity-limit gain scaling as the joint-limit
+                # branch.  Without this, the solve overshoots on
+                # high-DoF cross-body problems (e.g. 36-joint
+                # humanoid aiming) where the unscaled Δq exceeds
+                # max_velocity * periodic_time on at least one joint
+                # per iteration.
+                delta_q = _apply_velocity_gain(delta_q)
                 new_opt = opt_angles + delta_q
                 new_opt = jnp.clip(
                     new_opt, joint_limits_lower, joint_limits_upper)
+                if isinstance(state, tuple):
+                    return (new_opt, state[1])
                 return new_opt
 
-            final_opt = lax.fori_loop(
-                0, max_iterations, body_fn, init_opt_angles)
+            if joint_limit_avoidance > 0.0:
+                # Skrobot inits ``previous_joint_angle_limit_weight``
+                # at +∞, which makes the first iteration's asymmetric
+                # rule fall through to ``φ_curr < φ_prev`` (i.e.
+                # weight = 1.0) so every joint starts with full
+                # mobility regardless of its initial distance from a
+                # limit.  Without this initial state, joints that
+                # begin near a limit (e.g. a bent-knee rest stance)
+                # get clamped on iteration 1.
+                init_phi = jnp.full_like(init_opt_angles, 1e9)
+                final_state = lax.fori_loop(
+                    0, max_iterations, body_fn,
+                    (init_opt_angles, init_phi))
+                final_opt = final_state[0]
+            else:
+                final_opt = lax.fori_loop(
+                    0, max_iterations, body_fn, init_opt_angles)
 
             # Per-task final error for success/error reporting.
             batch = init_opt_angles.shape[0]
@@ -2726,10 +3023,19 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
+              joint_limit_avoidance=0.0,
               **kwargs):
         """Solve multi-EE batch IK on JAX.
 
         Signature mirrors :func:`_create_numpy_multi_ee_solver`'s ``solve``.
+
+        ``joint_limit_avoidance`` (default 0 = off) activates a
+        Yoshikawa-style joint-limit-aware DLS + null-space gradient
+        equivalent to the one used by
+        :meth:`RobotModel.inverse_kinematics_loop`.  Useful for
+        cross-body redundant problems (e.g. high-DoF humanoid aiming
+        clips) where pure DLS gets stuck in a local minimum that
+        random reseeding alone can't escape.
         """
         # Normalize inputs.
         target_pos_arrays = [
@@ -2862,13 +3168,15 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
             tuple(rot_mirrors_per_task),
             tuple(float(w) for w in weights),
             weight_diag_tuple,
+            float(joint_limit_avoidance),
         )
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_solver_fn(
                 max_iterations, damping, pos_threshold, rot_threshold,
                 pos_mask_arrs, rot_mask_arrs, rot_mirrors_per_task,
                 tuple(weights.tolist()),
-                weight_diag_tuple=weight_diag_tuple)
+                weight_diag_tuple=weight_diag_tuple,
+                joint_limit_avoidance=float(joint_limit_avoidance))
         solver_fn = _jit_cache[cache_key]
 
         final_opt, success, combined_err = solver_fn(

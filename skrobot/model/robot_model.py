@@ -1395,6 +1395,7 @@ class CascadedLink(CascadedCoords):
                     parent_link=parent, child_link=child,
                     name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
                     min_angle=-np.inf, max_angle=np.inf,
+                    max_joint_velocity=np.inf,
                 )
             else:
                 j = RotationalJoint(
@@ -1402,6 +1403,7 @@ class CascadedLink(CascadedCoords):
                     parent_link=parent, child_link=child,
                     name='_batch_ik_virtual_{}{}_joint'.format(kind, axis),
                     min_angle=-np.inf, max_angle=np.inf,
+                    max_joint_velocity=np.inf,
                 )
             chain_joints.append(j)
             parent.add_child_link(child)
@@ -3709,6 +3711,8 @@ class RobotModel(CascadedLink):
             task_weights=task_weights,
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
+            joint_limit_avoidance=float(
+                kwargs.pop('joint_limit_avoidance', 0.0)),
         )
 
         # Per-union-variable weights when use_base + base_weight is set.

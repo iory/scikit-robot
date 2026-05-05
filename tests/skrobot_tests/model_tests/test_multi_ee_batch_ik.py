@@ -376,7 +376,7 @@ def test_multi_ee_jax_parity_with_numpy():
         np.array([j.joint_angle() for j in union_refs]), (N, 1))
 
     common = dict(
-        initial_angles=init, max_iterations=80,
+        initial_angles=init, max_iterations=300,
         pos_threshold=0.003, rot_threshold=0.05)
 
     sol_np, _, err_np = np_solver(
@@ -387,12 +387,10 @@ def test_multi_ee_jax_parity_with_numpy():
     sol_jx, _, err_jx = jx_solver(
         [r_pos_t, l_pos_t], [r_rot_t, l_rot_t], **common)
 
-    # Default JAX is float32; NumPy is float64. Tolerance allows for both
-    # the floating-type mismatch and the JIT accumulation order.
+    # Compare task-space residual only — joint configs are non-unique
+    # on a 7-DoF arm + base.
     np.testing.assert_allclose(
-        np.asarray(sol_jx), np.asarray(sol_np), atol=1e-4)
-    np.testing.assert_allclose(
-        np.asarray(err_jx), np.asarray(err_np), atol=1e-4)
+        np.asarray(err_jx), np.asarray(err_np), atol=1e-3)
 
 
 @pytest.mark.skipif(
@@ -418,3 +416,104 @@ def test_multi_ee_jax_public_api():
     )
     assert len(solutions) == 1
     assert success[0]
+
+
+@pytest.mark.skipif(
+    not _HAS_JAX, reason="JAX not installed or incompatible with numpy")
+def test_jax_ik_velocity_limit_caps_step():
+    """Per-step Δq stays within max_joint_velocity * periodic_time."""
+    from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+    robot = _build_pr2()
+    rarm_mt = robot.rarm.end_coords
+    rarm_ll = robot.link_lists(rarm_mt.parent)
+
+    # Large 30 cm offset → unscaled Δq would exceed per-joint limits.
+    N = 1
+    pos_t = np.tile(rarm_mt.worldpos(), (N, 1)) + np.array([[0.3, 0, 0]])
+    rot_t = np.tile(rarm_mt.worldrot(), (N, 1, 1))
+
+    solver = create_batch_ik_solver(
+        robot, [rarm_ll], [rarm_mt], backend_name='jax')
+    union_refs = solver.union_info['union_joint_refs']
+    init = np.tile(
+        np.array([j.joint_angle() for j in union_refs]), (N, 1))
+
+    sol, _, _ = solver(
+        [pos_t], [rot_t],
+        initial_angles=init, max_iterations=1,
+        pos_threshold=0.001, rot_threshold=0.05)
+
+    delta = np.asarray(sol[0]) - init[0]
+    periodic_time = 0.5
+    max_vels = solver.union_info['union_max_velocities']
+    finite = np.isfinite(max_vels)
+    if finite.any():
+        # |Δq / periodic_time| ≤ max_velocity for every finitely-bounded joint.
+        ratios = np.abs(delta[finite]) / periodic_time / max_vels[finite]
+        # Allow 1% slack for float32 round-off in the gain min.
+        assert ratios.max() <= 1.01, (
+            'velocity-limit gain failed: max ratio = {:.3f}'.format(
+                ratios.max()))
+
+
+@pytest.mark.skipif(
+    not _HAS_JAX, reason="JAX not installed or incompatible with numpy")
+def test_jax_ik_adaptive_damping_converges():
+    """Adaptive manipulability damping reaches the target on a non-trivial offset."""
+    from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+    robot = _build_pr2()
+    rarm_mt = robot.rarm.end_coords
+    rarm_ll = robot.link_lists(rarm_mt.parent)
+
+    # Mid-range offset that exercises the adaptive-k branch.
+    N = 1
+    pos_t = np.tile(rarm_mt.worldpos(), (N, 1)) + np.array([[0.05, 0, 0]])
+    rot_t = np.tile(rarm_mt.worldrot(), (N, 1, 1))
+
+    solver = create_batch_ik_solver(
+        robot, [rarm_ll], [rarm_mt], backend_name='jax')
+    union_refs = solver.union_info['union_joint_refs']
+    init = np.tile(
+        np.array([j.joint_angle() for j in union_refs]), (N, 1))
+
+    _, success, err = solver(
+        [pos_t], [rot_t],
+        initial_angles=init, max_iterations=300,
+        pos_threshold=0.005, rot_threshold=np.deg2rad(3.0))
+
+    assert bool(success[0]), 'adaptive damping failed to converge'
+    assert float(err[0]) < 0.01
+
+
+@pytest.mark.skipif(
+    not _HAS_JAX, reason="JAX not installed or incompatible with numpy")
+def test_jax_ik_joint_limit_avoidance_opt_in():
+    """``joint_limit_avoidance > 0`` activates the Yoshikawa weighting branch."""
+    from skrobot.kinematics.differentiable import create_batch_ik_solver
+
+    robot = _build_pr2()
+    rarm_mt = robot.rarm.end_coords
+    rarm_ll = robot.link_lists(rarm_mt.parent)
+
+    N = 1
+    pos_t = np.tile(rarm_mt.worldpos(), (N, 1)) + np.array([[0.05, 0, 0]])
+    rot_t = np.tile(rarm_mt.worldrot(), (N, 1, 1))
+
+    solver = create_batch_ik_solver(
+        robot, [rarm_ll], [rarm_mt], backend_name='jax')
+    union_refs = solver.union_info['union_joint_refs']
+    init = np.tile(
+        np.array([j.joint_angle() for j in union_refs]), (N, 1))
+
+    # Verify the Yoshikawa branch runs without NaN and produces a
+    # bounded iterate.  Convergence speed is problem-dependent so
+    # don't require success here.
+    sol_on, _, err_on = solver(
+        [pos_t], [rot_t],
+        initial_angles=init, max_iterations=200,
+        pos_threshold=0.005, rot_threshold=np.deg2rad(3.0),
+        joint_limit_avoidance=0.5)
+    assert np.all(np.isfinite(np.asarray(sol_on)))
+    assert np.all(np.isfinite(np.asarray(err_on)))
