@@ -274,6 +274,85 @@ class TrajectoryProblem:
             weight=weight,
         ))
 
+    def update_com_targets(self, target_positions, cost_index=0):
+        """Replace the per-waypoint targets of an existing CoG cost.
+
+        After the first ``solver.solve(problem, ...)`` call has compiled
+        the problem, the target values are kept in a frozen jaxls
+        ``Var`` that is rebuilt every solve from this problem instance.
+        Mutating the values here lets the next solve reuse the cached
+        plan and only re-run Levenberg-Marquardt with the new targets,
+        avoiding a 20-30 s JIT recompile.
+
+        Parameters
+        ----------
+        target_positions : (n_waypoints, 3) ndarray *or* (3,) ndarray
+            New per-waypoint world targets.  A length-3 vector is
+            broadcast to every waypoint.
+        cost_index : int
+            Which ``add_com_cost`` call to update (in registration
+            order).  Default 0 == the first.
+
+        Notes
+        -----
+        Only valid after the cost has been compiled at least once.
+        Raises ``RuntimeError`` if called before any solve.
+        """
+        import jax.numpy as jnp
+        if (not hasattr(self, '_com_param_vars')
+                or len(self._com_param_vars) <= cost_index):
+            raise RuntimeError(
+                'update_com_targets() requires that solver.solve(...) '
+                'has been called at least once so the CoG cost is '
+                'compiled (cost_index={}).'.format(cost_index))
+        entry = self._com_param_vars[cost_index]
+        sel = entry['axis_mask_indices']
+        wp_idx = entry['waypoint_indices']
+        targets = np.asarray(target_positions, dtype=np.float64)
+        if targets.ndim == 1:
+            targets = np.broadcast_to(targets, (len(wp_idx), 3))
+        else:
+            targets = targets[wp_idx] if len(wp_idx) != targets.shape[0] \
+                else targets
+        entry['targets_sel'] = jnp.asarray(
+            targets[:, sel], dtype=jnp.float64)
+
+    def update_multi_ee_targets(self,
+                                target_positions_per_chain,
+                                target_rotations_per_chain=None,
+                                cost_index=0):
+        """Replace the per-waypoint targets of an existing multi-EE cost.
+
+        Counterpart to :meth:`update_com_targets`. Same semantics:
+        must be called after the first solve so the param vars exist;
+        the next solve reuses the JIT-compiled plan and only re-runs
+        Levenberg-Marquardt against the new targets.
+        """
+        import jax.numpy as jnp
+        if (not hasattr(self, '_multi_ee_param_vars')
+                or len(self._multi_ee_param_vars) <= cost_index):
+            raise RuntimeError(
+                'update_multi_ee_targets() requires that '
+                'solver.solve(...) has been called at least once so '
+                'the multi-EE cost is compiled (cost_index={}).'.format(
+                    cost_index))
+        entry = self._multi_ee_param_vars[cost_index]
+        T = entry['n_waypoints']
+        target_positions_per_chain = [
+            np.asarray(t, dtype=np.float64)
+            for t in target_positions_per_chain]
+        T_pos = np.stack(target_positions_per_chain, axis=1)
+        entry['target_pos'] = jnp.asarray(T_pos, dtype=jnp.float64)
+        if target_rotations_per_chain is not None:
+            if entry['rot_var_class'] is None:
+                raise ValueError(
+                    'this cost was registered without rotation tracking; '
+                    'cannot supply target_rotations_per_chain.')
+            T_rot = np.stack(
+                [np.asarray(r, dtype=np.float64).reshape(T, 9)
+                 for r in target_rotations_per_chain], axis=1)
+            entry['target_rot'] = jnp.asarray(T_rot, dtype=jnp.float64)
+
     def add_jerk_cost(self, weight=0.1):
         """Add jerk minimization cost.
 
@@ -796,6 +875,8 @@ class TrajectoryProblem:
         target_rotations_per_chain=None,
         position_weight=100.0,
         rotation_weight=10.0,
+        position_weights_per_chain=None,
+        rotation_weights_per_chain=None,
     ):
         """Per-waypoint multi-EE pose tracking with floating base.
 
@@ -812,10 +893,20 @@ class TrajectoryProblem:
             One per-waypoint position trajectory per chain.
         target_rotations_per_chain : list of (n_waypoints, 3, 3), optional
             One per-waypoint rotation trajectory per chain. ``None``
-            disables rotation tracking.
+            disables rotation tracking globally.
         position_weight, rotation_weight : float
-            Position / rotation tracking weights (uniform across all
-            chains and waypoints).
+            Default position / rotation tracking weights, used for
+            chains not listed in ``*_weights_per_chain``.
+        position_weights_per_chain : list of float, optional
+            Per-chain position weight (overrides ``position_weight`` for
+            that chain).  Set to ``0`` to disable position tracking on
+            a chain that should only contribute rotation (GMR-style
+            ``pos_weight=0, rot_weight=10`` rows for elbow / knee /
+            torso).  Length must equal ``n_chains``.
+        rotation_weights_per_chain : list of float, optional
+            Per-chain rotation weight (overrides ``rotation_weight``).
+            Set ``0`` for chains whose source rotation is unreliable
+            (e.g. synthetic-motion hands).
         """
         target_positions_per_chain = [
             np.asarray(t, dtype=np.float64)
@@ -824,6 +915,23 @@ class TrajectoryProblem:
             target_rotations_per_chain = [
                 np.asarray(r, dtype=np.float64)
                 for r in target_rotations_per_chain]
+        n_chains = len(target_positions_per_chain)
+        if position_weights_per_chain is not None:
+            position_weights_per_chain = np.asarray(
+                position_weights_per_chain, dtype=np.float64)
+            if position_weights_per_chain.shape != (n_chains,):
+                raise ValueError(
+                    'position_weights_per_chain must have length '
+                    'n_chains={}; got shape {}'.format(
+                        n_chains, position_weights_per_chain.shape))
+        if rotation_weights_per_chain is not None:
+            rotation_weights_per_chain = np.asarray(
+                rotation_weights_per_chain, dtype=np.float64)
+            if rotation_weights_per_chain.shape != (n_chains,):
+                raise ValueError(
+                    'rotation_weights_per_chain must have length '
+                    'n_chains={}; got shape {}'.format(
+                        n_chains, rotation_weights_per_chain.shape))
         self.residuals.append(ResidualSpec(
             name='multi_ee_waypoint',
             residual_fn='multi_ee_waypoint',
@@ -832,10 +940,96 @@ class TrajectoryProblem:
                 'target_rotations_per_chain': target_rotations_per_chain,
                 'position_weight': position_weight,
                 'rotation_weight': rotation_weight,
+                'position_weights_per_chain': position_weights_per_chain,
+                'rotation_weights_per_chain': rotation_weights_per_chain,
             },
             kind='soft',
             weight=1.0,
         ))
+
+    def add_base_pose_cost(
+        self,
+        target_positions,
+        target_rotations=None,
+        position_weight=2000.0,
+        rotation_weight=100.0,
+    ):
+        """Per-waypoint floating-base pose tracking cost.
+
+        Drives the floating base's world-frame pose at every waypoint
+        toward a target trajectory.  Useful for retargeting where the
+        source motion has a meaningful pelvis position + yaw that the
+        robot should reproduce; without this, the IK is free to put
+        the base anywhere consistent with the EE constraints (e.g.
+        robot facing backward while hands/feet still satisfy targets).
+
+        Requires the problem to have a non-zero ``n_base_dof``;
+        otherwise the call is a no-op.
+
+        Parameters
+        ----------
+        target_positions : (n_waypoints, 3) ndarray
+            World-frame target base positions.
+        target_rotations : (n_waypoints, 3, 3) ndarray, optional
+            World-frame target base rotations.  ``None`` disables
+            rotation tracking.
+        position_weight, rotation_weight : float
+            Tracking weights.
+        """
+        n_base_dof = getattr(self, 'n_base_dof', 0)
+        if n_base_dof == 0:
+            return
+        target_positions = np.asarray(target_positions, dtype=np.float64)
+        if target_positions.shape != (self.n_waypoints, 3):
+            raise ValueError(
+                'target_positions must have shape ({}, 3); got {}'.format(
+                    self.n_waypoints, target_positions.shape))
+        if target_rotations is not None:
+            target_rotations = np.asarray(target_rotations, dtype=np.float64)
+            if target_rotations.shape != (self.n_waypoints, 3, 3):
+                raise ValueError(
+                    'target_rotations must have shape ({}, 3, 3); got {}'
+                    .format(self.n_waypoints, target_rotations.shape))
+        self.residuals.append(ResidualSpec(
+            name='base_pose',
+            residual_fn='base_pose',
+            params={
+                'target_positions': target_positions,
+                'target_rotations': target_rotations,
+                'position_weight': position_weight,
+                'rotation_weight': rotation_weight,
+            },
+            kind='soft',
+            weight=1.0,
+        ))
+
+    def update_base_pose_targets(self,
+                                 target_positions,
+                                 target_rotations=None,
+                                 cost_index=0):
+        """Replace per-waypoint base-pose targets without retracing.
+
+        Mirror of :meth:`update_multi_ee_targets` for the base-pose
+        cost; lets the cached LM plan be reused across motion clips.
+        """
+        import jax.numpy as jnp
+        if (not hasattr(self, '_base_pose_param_vars')
+                or len(self._base_pose_param_vars) <= cost_index):
+            raise RuntimeError(
+                'update_base_pose_targets() requires that '
+                'solver.solve(...) has been called at least once.')
+        entry = self._base_pose_param_vars[cost_index]
+        target_positions = np.asarray(target_positions, dtype=np.float64)
+        entry['target_pos'] = jnp.asarray(
+            target_positions, dtype=jnp.float64)
+        if target_rotations is not None:
+            if entry['rot_var_class'] is None:
+                raise ValueError(
+                    'this cost was registered without rotation tracking.')
+            target_rotations = np.asarray(target_rotations, dtype=np.float64)
+            entry['target_rot'] = jnp.asarray(
+                target_rotations.reshape(self.n_waypoints, 9),
+                dtype=jnp.float64)
 
     def add_ee_waypoint_cost(
         self,
