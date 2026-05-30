@@ -4,6 +4,7 @@ import time
 from typing import Dict
 from typing import Optional
 from typing import Union
+import warnings
 import webbrowser
 
 import numpy as np
@@ -3123,14 +3124,51 @@ class ViserViewer:
         else:
             raise TypeError("geometry must be Link or CascadedLink")
 
-    def show(self):
+    def show(self, open_browser=True):
+        """Print the viewer URL and optionally open it in a web browser.
+
+        Parameters
+        ----------
+        open_browser : bool, optional
+            If True (default), call :func:`webbrowser.open` to launch the
+            URL in the user's default browser. Set this to False on
+            headless / remote / CI environments where
+            :func:`webbrowser.open` would fall back to a text-mode
+            browser (``w3m``, ``lynx``, ``elinks``...) that takes over
+            the terminal, or where the desktop session is not on the
+            machine running this code (SSH, devcontainer, Codespaces,
+            WSL2 without browser bridge, etc.). The URL is always
+            printed to stdout so the user can open it themselves.
+
+        Notes
+        -----
+        The Viser HTTP/WebSocket server is started inside
+        :meth:`__init__`; this method only handles the convenience of
+        opening a browser. Callers can therefore safely skip ``show()``
+        and copy the URL from their own logs if they prefer.
+        """
         host = self._server.get_host()
         port = self._server.get_port()
         # 0.0.0.0 is not a valid browser URL
         if host == "0.0.0.0":
             host = "localhost"
         url = f"http://{host}:{port}"
-        webbrowser.open(url)
+        print("viser viewer running at: {}".format(url), flush=True)
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                # webbrowser.open() can hit OSError when no browser is
+                # registered (some headless containers); fall through
+                # quietly — the URL is already printed.
+                warnings.warn(
+                    "Failed to open browser for viser viewer "
+                    "({}). The URL is printed above; "
+                    "open it manually, or pass "
+                    "show(open_browser=False) to silence this.".format(e),
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def redraw(self):
         for link_id, handle in self._linkid_to_handle.items():
