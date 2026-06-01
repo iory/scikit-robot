@@ -1,8 +1,13 @@
+from logging import getLogger
+
 import numpy as np
 import scipy
 
 from skrobot.planner.utils import scipinize
 from skrobot.pycompat import lru_cache
+
+
+logger = getLogger(__name__)
 
 
 try:
@@ -21,7 +26,8 @@ def sqp_plan_trajectory(collision_checker,
                         weights=None,
                         initial_trajectory=None,
                         slsqp_option=None,
-                        optimization_callback=None
+                        optimization_callback=None,
+                        base_limit=np.inf,
                         ):
     """Gradient based trajectory optimization using scipy's SLSQP.
 
@@ -59,6 +65,17 @@ def sqp_plan_trajectory(collision_checker,
     optimization_callback : callable or None
         callback function called during optimization for visualization.
         If None, automatically gets callback from visualization context.
+    base_limit : float
+        absolute bound applied to each base DOF when `with_base=True`. The
+        same scalar is used for the translational DOFs x, y (in metres) and
+        the rotational DOF theta (in radians), so choose a value large enough
+        to cover the base motion needed by the task in both. Defaults to
+        `np.inf` (unbounded), which preserves the historical behaviour. Note
+        that scipy's SLSQP can fail to satisfy the collision constraints when
+        the base is given infinite bounds; in that case passing a finite value
+        (e.g. the reachable base range for the task) makes the line search
+        converge to a collision-free trajectory. Limits coming from continuous
+        joints (e.g. forearm/wrist roll) are always left untouched.
     Returns
     ------------
     planned_trajectory : numpy.ndarray(n_wp, n_dof)
@@ -72,7 +89,20 @@ def sqp_plan_trajectory(collision_checker,
     # common stuff
     joint_limit_list = [[j.min_angle, j.max_angle] for j in joint_list]
     if with_base:
-        joint_limit_list += [[-np.inf, np.inf]] * 3
+        if not np.isscalar(base_limit) or base_limit <= 0.0 \
+                or np.isnan(base_limit):
+            raise ValueError(
+                'base_limit must be a positive scalar (np.inf for '
+                'unbounded), got {}'.format(base_limit))
+        # The base (x, y, theta) is unbounded in principle. When ``base_limit``
+        # is finite it bounds each base DOF; this is recommended because
+        # passing +/-np.inf bounds for the base to scipy's SLSQP can make its
+        # line search stall before the collision constraints are satisfied
+        # (the optimizer then returns a trajectory that still penetrates
+        # obstacles). Infinite limits coming from continuous joints (e.g.
+        # forearm/wrist roll) are left untouched on purpose -- clipping those
+        # to finite values breaks convergence as well.
+        joint_limit_list += [[-base_limit, base_limit]] * 3
 
     # determine default weight
     if weights is None:
@@ -102,6 +132,21 @@ def sqp_plan_trajectory(collision_checker,
         weights,
         slsqp_option,
         optimization_callback)
+
+    # SLSQP may hit its iteration limit without satisfying the collision
+    # constraints and then silently returns an infeasible (colliding)
+    # trajectory. Re-evaluate the signed distances at the solution and warn
+    # so the caller is not misled into thinking planning succeeded.
+    sd_vals, _ = collision_checker.compute_batch_sd_vals(
+        joint_list, optimal_trajectory,
+        with_base=with_base, with_jacobian=False)
+    min_sd = float(np.min(sd_vals))
+    if min_sd < 0.0:
+        logger.warning(
+            'sqp_plan_trajectory returned a trajectory in collision '
+            '(min signed distance %.4f < 0); the optimizer did not satisfy '
+            'the collision constraints.', min_sd)
+
     return optimal_trajectory
 
 
