@@ -53,6 +53,13 @@ parser.add_argument(
     '--iterations', type=int, default=300,
     help='Number of iterations for optimizer'
 )
+parser.add_argument(
+    '--base-limit', type=float, default=5.0,
+    help='Absolute bound on each base DOF (x, y in metres, theta in radians) '
+         'for the SQP solver when planning with the base. The base only needs '
+         'to travel ~1 m here, so this is effectively unbounded, but a finite '
+         'value keeps scipy SLSQP from stalling on infinite base bounds.'
+)
 args = parser.parse_args()
 
 # initialization stuff
@@ -273,6 +280,11 @@ if args.solver in ['jaxls', 'gradient_descent', 'scipy']:
 else:
     # SQP-based trajectory planning (original method)
     print("Using SQP-based trajectory optimizer...")
+    # When planning with the base, bound each base DOF to a finite range
+    # (see --base-limit). A finite limit keeps scipy's SLSQP from stalling on
+    # infinite base bounds (which otherwise returns a trajectory that still
+    # penetrates the obstacle).
+    base_limit = args.base_limit
     # Trajectory planning with optional visualization
     if args.trajectory_visualization:
         with trajectory_visualization(
@@ -287,11 +299,13 @@ else:
         ):
             av_seq = sqp_plan_trajectory(
                 sscc, av_start, av_goal, joint_list, n_waypoint,
-                safety_margin=5.0e-2, with_base=with_base)
+                safety_margin=5.0e-2, with_base=with_base,
+                base_limit=base_limit)
     else:
         av_seq = sqp_plan_trajectory(
             sscc, av_start, av_goal, joint_list, n_waypoint,
-            safety_margin=5.0e-2, with_base=with_base)
+            safety_margin=5.0e-2, with_base=with_base,
+            base_limit=base_limit)
 
 print("solving time : {0} sec".format(time.time() - ts))
 
