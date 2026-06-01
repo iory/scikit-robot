@@ -171,6 +171,123 @@ class TestRobotModel(unittest.TestCase):
         # check initialization of limb of RobotModel
         fetch.rarm.calc_jacobian_from_link_list(fetch.rarm.end_coords)
 
+    def test_calc_jacobian_from_joint_list(self):
+        # calc_jacobian_from_joint_list must reproduce, column for column,
+        # the result of calc_jacobian_from_link_list when given the joints
+        # of that same link_list.
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+        joint_list = [link.joint for link in link_list]
+
+        for rotation_mask in [True, 'x', 'y', 'z', 'xx', 'yy', 'zz', False]:
+            jac_link = kuka.calc_jacobian_from_link_list(
+                move_target, link_list=link_list,
+                position_mask=True, rotation_mask=rotation_mask)
+            jac_joint = kuka.calc_jacobian_from_joint_list(
+                joint_list, move_target,
+                position_mask=True, rotation_mask=rotation_mask)
+            self.assertEqual(jac_link.shape, jac_joint.shape)
+            testing.assert_array_almost_equal(jac_link, jac_joint)
+
+        # Default joint_list (derived from move_target -> root chain) matches
+        # the explicitly supplied joint_list.
+        jac_default = kuka.calc_jacobian_from_joint_list(
+            joint_list, move_target)
+        jac_explicit = kuka.calc_jacobian_from_joint_list(
+            joint_list, move_target, joint_list=joint_list)
+        testing.assert_array_almost_equal(jac_default, jac_explicit)
+
+        # Multi-end-effector: rows stack per target, columns span the union
+        # of joints.  Validate the block layout against per-target solves.
+        pr2 = self.pr2
+        pr2.reset_pose()
+        move_targets = [pr2.rarm.end_coords, pr2.larm.end_coords]
+        joint_lists = [[link.joint for link in pr2.rarm.link_list],
+                       [link.joint for link in pr2.larm.link_list]]
+        union_joints = []
+        for jl in joint_lists:
+            for joint in jl:
+                if joint not in union_joints:
+                    union_joints.append(joint)
+        jac_multi = pr2.calc_jacobian_from_joint_list(
+            union_joints, move_targets, joint_list=joint_lists,
+            position_mask=True, rotation_mask=True)
+        n_cols = sum(joint.joint_dof for joint in union_joints)
+        self.assertEqual(jac_multi.shape, (12, n_cols))
+
+        col_index = {}
+        col = 0
+        for joint in union_joints:
+            col_index[id(joint)] = col
+            col += joint.joint_dof
+        expected = np.zeros_like(jac_multi)
+        for target_idx, (mt, jl) in enumerate(
+                zip(move_targets, joint_lists)):
+            single = pr2.calc_jacobian_from_joint_list(
+                jl, mt, position_mask=True, rotation_mask=True)
+            local_col = 0
+            for joint in jl:
+                dof = joint.joint_dof
+                start = col_index[id(joint)]
+                expected[target_idx * 6:target_idx * 6 + 6,
+                         start:start + dof] = single[:, local_col:local_col + dof]
+                local_col += dof
+        testing.assert_array_almost_equal(jac_multi, expected)
+
+        # A flat joint_list with several move targets must raise rather than
+        # silently fill only the first target block.
+        with self.assertRaises(ValueError):
+            pr2.calc_jacobian_from_joint_list(
+                union_joints, move_targets, joint_list=joint_lists[0],
+                position_mask=True, rotation_mask=True)
+
+    def test_calc_jacobian_joint_list_upper_compat(self):
+        # calc_jacobian_from_joint_list is a complete superset of
+        # calc_jacobian_from_link_list: with check_relevance='auto' it
+        # reproduces the relevance filtering exactly (which is why the link
+        # method now delegates to it), while exposing relevance control.
+        pr2 = self.pr2
+        pr2.reset_pose()
+        rarm = pr2.rarm.link_list
+        larm = pr2.larm.link_list
+
+        # Build a link_list that contains an off-path joint (a larm joint
+        # that does NOT move the rarm end-effector).  The relevance table
+        # must zero its column.
+        mixed_links = rarm + [larm[3]]
+        mixed_joints = [link.joint for link in mixed_links]
+        off_col = sum(joint.joint_dof for joint in mixed_joints[:-1])
+
+        jac_link = pr2.calc_jacobian_from_link_list(
+            pr2.rarm.end_coords, link_list=mixed_links,
+            position_mask=True, rotation_mask=True)
+
+        jac_auto = pr2.calc_jacobian_from_joint_list(
+            mixed_joints, pr2.rarm.end_coords, joint_list=mixed_joints,
+            position_mask=True, rotation_mask=True, check_relevance='auto')
+        jac_strict = pr2.calc_jacobian_from_joint_list(
+            mixed_joints, pr2.rarm.end_coords, joint_list=mixed_joints,
+            position_mask=True, rotation_mask=True, check_relevance=True)
+        jac_membership = pr2.calc_jacobian_from_joint_list(
+            mixed_joints, pr2.rarm.end_coords, joint_list=mixed_joints,
+            position_mask=True, rotation_mask=True, check_relevance=False)
+
+        # 'auto' and strict both reproduce the link method (off-path column
+        # zeroed by relevance).
+        testing.assert_array_almost_equal(jac_link, jac_auto)
+        testing.assert_array_almost_equal(jac_link, jac_strict)
+        self.assertTrue(np.allclose(jac_auto[:, off_col], 0.0))
+        # Disabling relevance keeps the off-path column (proving the net is
+        # actually doing something, not vacuously passing).
+        self.assertFalse(np.allclose(jac_membership[:, off_col], 0.0))
+
+        with self.assertRaises(ValueError):
+            pr2.calc_jacobian_from_joint_list(
+                mixed_joints, pr2.rarm.end_coords,
+                check_relevance='sometimes')
+
     def test_calc_inverse_kinematics_nspace_from_link_list(self):
         kuka = self.kuka
         kuka.calc_inverse_kinematics_nspace_from_link_list(
@@ -359,6 +476,89 @@ class TestRobotModel(unittest.TestCase):
             assoc_coords_axis.copy_worldcoords(),
             move_target=robot.larm.end_coords.parent)
         self.assertIsNot(ret, False)
+
+    def test_inverse_kinematics_with_joint_list(self):
+        kuka = self.kuka
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+        joint_list = [link.joint for link in link_list]
+
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
+            [0.100, -0.100, 0.100], 'local')
+
+        # Solve with link_list (reference).
+        kuka.reset_manip_pose()
+        kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            link_list=link_list,
+            position_mask=True,
+            rotation_mask=True)
+        av_link_list = kuka.angle_vector().copy()
+
+        # Solve with joint_list; must reach the same solution.
+        kuka.reset_manip_pose()
+        ret = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            joint_list=joint_list,
+            position_mask=True,
+            rotation_mask=True)
+        self.assertIsNot(ret, False)
+        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
+        dif_rot = kuka.rarm.end_coords.difference_rotation(target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+        self.assertLess(np.linalg.norm(dif_rot), np.deg2rad(1))
+        testing.assert_array_almost_equal(kuka.angle_vector(), av_link_list)
+
+        # Passing both link_list and joint_list is an error.
+        kuka.reset_manip_pose()
+        with self.assertRaises(ValueError):
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=move_target,
+                link_list=link_list,
+                joint_list=joint_list)
+
+        # Nested (multi-end-effector style) joint_list maps element-wise to
+        # the equivalent nested link_list.
+        nested = self.kuka._link_list_from_joint_list(
+            [joint_list, joint_list])
+        self.assertEqual(nested, [link_list, link_list])
+
+    def test_inverse_kinematics_with_invariant_joint_list(self):
+        kuka = self.kuka
+        kuka.reset_manip_pose()
+        move_target = kuka.rarm.end_coords
+        link_list = kuka.rarm.link_list
+        fixed_joint = link_list[3].joint
+
+        before_fixed = fixed_joint.joint_angle()
+        before_all = kuka.angle_vector().copy()
+        # Position-only target so the remaining DoF can satisfy it.
+        target_coords = kuka.rarm.end_coords.copy_worldcoords().translate(
+            [0.03, -0.03, 0.03], 'local')
+        ret = kuka.inverse_kinematics(
+            target_coords,
+            move_target=move_target,
+            invariant_joint_list=[fixed_joint],
+            rotation_mask=False)
+        self.assertIsNot(ret, False)
+        # The invariant joint must stay fixed while others move.
+        self.assertAlmostEqual(before_fixed, fixed_joint.joint_angle())
+        self.assertFalse(np.allclose(before_all, kuka.angle_vector()))
+        dif_pos = kuka.rarm.end_coords.difference_position(target_coords, True)
+        self.assertLess(np.linalg.norm(dif_pos), 0.001)
+
+        # Removing every actuated joint is an error.
+        kuka.reset_manip_pose()
+        with self.assertRaises(ValueError):
+            kuka.inverse_kinematics(
+                target_coords,
+                move_target=move_target,
+                joint_list=[link_list[0].joint],
+                invariant_joint_list=[link_list[0].joint],
+                rotation_mask=False)
 
     def test_calc_target_joint_dimension(self):
         fetch = self.fetch
