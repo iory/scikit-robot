@@ -9,7 +9,7 @@ import skrobot
 from skrobot.utils.visualization import ik_visualization
 
 
-def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
+def demonstrate_revert_if_fail(robot_model, target_coords, joint_list, viewer,
                                no_ik_visualization):
     """Demonstrate the difference between revert_if_fail=True and False"""
     import numpy as np
@@ -57,7 +57,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     print("\n1. Standard IK (revert_if_fail=True):")
     result_standard = robot_model.inverse_kinematics(
         unreachable_coords,
-        link_list=link_list,
+        joint_list=joint_list,
         move_target=robot_model.right_arm_end_coords,
         rotation_mask=True,
         revert_if_fail=True  # Default behavior
@@ -72,7 +72,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     # Reset to a known good position (the successful target from earlier)
     robot_model.inverse_kinematics(
         target_coords,  # The original successful target
-        link_list=link_list,
+        joint_list=joint_list,
         move_target=robot_model.right_arm_end_coords,
         rotation_mask=True
     )
@@ -85,7 +85,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
         with ik_visualization(viewer, sleep_time=0.5):
             result_progressive = robot_model.inverse_kinematics(
                 unreachable_coords,
-                link_list=link_list,
+                joint_list=joint_list,
                 move_target=robot_model.right_arm_end_coords,
                 rotation_mask=True,
                 revert_if_fail=False  # Keep partial progress
@@ -93,7 +93,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     else:
         result_progressive = robot_model.inverse_kinematics(
             unreachable_coords,
-            link_list=link_list,
+            joint_list=joint_list,
             move_target=robot_model.right_arm_end_coords,
             rotation_mask=True,
             revert_if_fail=False  # Keep partial progress
@@ -143,7 +143,7 @@ def demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
     print("=" * 60)
 
 
-def demonstrate_fullbody_ik(robot_model, link_list, viewer,
+def demonstrate_fullbody_ik(robot_model, joint_list, viewer,
                             no_ik_visualization):
     """Demonstrate fullbody IK (use_base) reaching a target that is
     out of arm range without moving the mobile base."""
@@ -179,7 +179,7 @@ def demonstrate_fullbody_ik(robot_model, link_list, viewer,
     print("\n1. Arm-only IK (use_base=False):")
     result_armonly = robot_model.inverse_kinematics(
         far_target,
-        link_list=link_list,
+        joint_list=joint_list,
         move_target=robot_model.right_arm_end_coords,
         rotation_mask=False,
         stop=100,
@@ -204,7 +204,7 @@ def demonstrate_fullbody_ik(robot_model, link_list, viewer,
         with ik_visualization(viewer, sleep_time=0.5):
             result_fullbody = robot_model.inverse_kinematics(
                 far_target,
-                link_list=link_list,
+                joint_list=joint_list,
                 move_target=robot_model.right_arm_end_coords,
                 rotation_mask=False,
                 stop=100,
@@ -213,7 +213,7 @@ def demonstrate_fullbody_ik(robot_model, link_list, viewer,
     else:
         result_fullbody = robot_model.inverse_kinematics(
             far_target,
-            link_list=link_list,
+            joint_list=joint_list,
             move_target=robot_model.right_arm_end_coords,
             rotation_mask=False,
             stop=100,
@@ -294,15 +294,17 @@ def main():
     robot_model = skrobot.models.PR2()
     robot_model.reset_pose()
 
-    # Define joint list for right arm
-    link_list = [
-        robot_model.r_shoulder_pan_link,
-        robot_model.r_shoulder_lift_link,
-        robot_model.r_upper_arm_roll_link,
-        robot_model.r_elbow_flex_link,
-        robot_model.r_forearm_roll_link,
-        robot_model.r_wrist_flex_link,
-        robot_model.r_wrist_roll_link
+    # Define the joints to actuate for the right arm.  Passing joints
+    # (joint_list) is the recommended, most direct way to say which joints
+    # move; link_list is the equivalent legacy spelling.
+    joint_list = [
+        robot_model.r_shoulder_pan_joint,
+        robot_model.r_shoulder_lift_joint,
+        robot_model.r_upper_arm_roll_joint,
+        robot_model.r_elbow_flex_joint,
+        robot_model.r_forearm_roll_joint,
+        robot_model.r_wrist_flex_joint,
+        robot_model.r_wrist_roll_joint
     ]
 
     # Create viewer
@@ -340,7 +342,7 @@ def main():
 
     # Build IK kwargs
     ik_kwargs = {
-        'link_list': link_list,
+        'joint_list': joint_list,
         'move_target': robot_model.right_arm_end_coords,
         'rotation_axis': True,
     }
@@ -368,12 +370,12 @@ def main():
 
     # Demonstrate revert_if_fail=False with an unreachable target
     if not args.skip_revert_demo:
-        demonstrate_revert_if_fail(robot_model, target_coords, link_list, viewer,
+        demonstrate_revert_if_fail(robot_model, target_coords, joint_list, viewer,
                                    args.no_ik_visualization)
 
     # Demonstrate fullbody IK with a far target
     if not args.skip_fullbody_demo:
-        demonstrate_fullbody_ik(robot_model, link_list, viewer,
+        demonstrate_fullbody_ik(robot_model, joint_list, viewer,
                                 args.no_ik_visualization)
 
     if not args.no_interactive:

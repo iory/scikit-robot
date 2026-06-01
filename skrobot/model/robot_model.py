@@ -146,6 +146,166 @@ class CascadedLink(CascadedCoords):
         return self._relevance_predicate_table.get((joint, link), False)
 
     @staticmethod
+    def _resolve_to_link(something):
+        """Walk up to the nearest ``Link`` ancestor (or ``None``)."""
+        link = something
+        while link is not None and not isinstance(link, Link):
+            link = link.parent
+        return link
+
+    def _relevance_allows(self, joint, target_link):
+        """Relevance test that trusts membership for out-of-table joints.
+
+        Returns the relevance-table verdict for ``(joint, target_link)`` when
+        that pair is known -- i.e. ``joint`` is one of the robot's joints and
+        ``target_link`` one of its links -- exactly matching
+        :meth:`_is_relevant`.  For joints or links absent from the table
+        (e.g. virtual/contact joints added outside ``self.joint_list``) there
+        is no relevance information, so it returns ``True`` and defers to the
+        caller-supplied membership list.  This is what makes the relevance
+        net a *superset* of :meth:`_is_relevant`: identical for robot joints,
+        permissive for genuinely-unknown joints.
+        """
+        table = self._relevance_predicate_table
+        if table is None or target_link is None:
+            return True
+        verdict = table.get((joint, target_link))
+        # Out-of-table (None) -> trust membership; otherwise the (boolean)
+        # verdict.  ``bool(...)`` normalises any verdict type so single- and
+        # multi-target paths agree.
+        return verdict is None or bool(verdict)
+
+    @staticmethod
+    def _link_list_from_joint_list(joint_list):
+        """Convert a ``joint_list`` into the equivalent ``link_list``.
+
+        Inverse kinematics actuates joints, but the public API has
+        historically been expressed in terms of ``link_list`` (every link
+        contributes ``link.joint``).  A ``joint_list`` is the more direct
+        way to say "these are the joints to move", so this helper maps each
+        joint to its ``child_link`` -- the inverse of the ``link.joint``
+        lookup the IK internals rely on (``joint.child_link.joint is
+        joint``).
+
+        Both the flat single-chain form (``[joint, ...]``) and the nested
+        multi-end-effector form (``[[joint, ...], ...]``) are supported,
+        mirroring how ``link_list`` itself may be flat or nested.
+
+        Parameters
+        ----------
+        joint_list : list[skrobot.model.Joint] or list[list] or None
+            Joints to actuate.  ``None`` is passed through unchanged.
+
+        Returns
+        -------
+        list or None
+            The equivalent ``link_list`` (nested when ``joint_list`` is
+            nested), or ``None`` when ``joint_list`` is ``None``.
+        """
+        if joint_list is None:
+            return None
+        if len(joint_list) > 0 and isinstance(joint_list[0], list):
+            return [[joint.child_link for joint in jl] for jl in joint_list]
+        return [joint.child_link for joint in joint_list]
+
+    @staticmethod
+    def _resolve_link_list_arg(link_list, joint_list):
+        """Resolve the ``link_list``/``joint_list`` pair to a ``link_list``.
+
+        ``joint_list`` is an alternative spelling of ``link_list`` that names
+        the actuated joints directly.  The two are mutually exclusive.
+
+        Parameters
+        ----------
+        link_list : list or None
+            Links to use for IK, or ``None``.
+        joint_list : list or None
+            Joints to actuate, or ``None``.
+
+        Returns
+        -------
+        list or None
+            ``link_list`` when ``joint_list`` is ``None``, otherwise the
+            ``link_list`` derived from ``joint_list``.
+
+        Raises
+        ------
+        ValueError
+            If both ``link_list`` and ``joint_list`` are given.
+        """
+        if joint_list is None:
+            return link_list
+        if link_list is not None:
+            raise ValueError(
+                'Specify either link_list or joint_list, not both.')
+        return CascadedLink._link_list_from_joint_list(joint_list)
+
+    @staticmethod
+    def _actuated_dof(link_list):
+        """Total actuated DoF of ``link_list`` (flat or nested).
+
+        Counts ``link.joint.joint_dof`` over every link, treating links with
+        no joint (or a zero-DoF joint) as contributing nothing.  ``None`` and
+        the empty list count as zero.
+        """
+        if not link_list:
+            return 0
+        if isinstance(link_list[0], list):
+            links = itertools.chain.from_iterable(link_list)
+        else:
+            links = link_list
+        dof = 0
+        for link in links:
+            joint = getattr(link, 'joint', None)
+            if joint is not None:
+                dof += joint.joint_dof
+        return dof
+
+    def _apply_invariant_joint_list(self, link_list, invariant_joint_list):
+        """Hold ``invariant_joint_list`` fixed by removing them from IK.
+
+        Inverse kinematics actuates exactly the joints reachable through
+        ``link_list`` (each ``link.joint``).  ``invariant_joint_list`` names
+        joints that must stay fixed during the solve, so this subtracts the
+        corresponding links from ``link_list``.  The remaining links are the
+        actuated joints; the named joints are held fixed.
+
+        This is a pure filter; validation that something remains to actuate
+        is done by the caller (so it can account for ``use_base`` adding base
+        DoFs).
+
+        Parameters
+        ----------
+        link_list : list or None
+            The actuated links (flat or nested), or ``None`` to mean the
+            whole-body default ``self.link_list``.
+        invariant_joint_list : list[skrobot.model.Joint] or None
+            Joints to hold fixed.  ``None`` or empty leaves ``link_list``
+            unchanged.
+
+        Returns
+        -------
+        list or None
+            The actuated ``link_list`` with invariant-joint links removed,
+            preserving the flat/nested shape of the input.  ``None`` passes
+            through unchanged when ``invariant_joint_list`` is empty.
+        """
+        if not invariant_joint_list:
+            return link_list
+        if link_list is None:
+            link_list = self.link_list
+        invariant_ids = set(id(joint) for joint in invariant_joint_list)
+
+        def keep(link):
+            joint = getattr(link, 'joint', None)
+            return joint is None or id(joint) not in invariant_ids
+
+        if len(link_list) > 0 and isinstance(link_list[0], list):
+            return [[link for link in sub if keep(link)]
+                    for sub in link_list]
+        return [link for link in link_list if keep(link)]
+
+    @staticmethod
     def _reorder_link_lists_for_move_targets(link_lists, move_targets):
         """Reorder ``link_lists`` so entry ``i`` is the chain whose kinematic
         descendants include ``move_targets[i]``.
@@ -943,6 +1103,7 @@ class CascadedLink(CascadedCoords):
             cog_gain=1.0,
             min_loop=None,
             inverse_kinematics_hook=None,
+            joint_list=None,
             **kwargs):
         """inverse-kinematics-loop is one loop calculation.
 
@@ -951,6 +1112,9 @@ class CascadedLink(CascadedCoords):
         are updated.
         """
         inverse_kinematics_hook = inverse_kinematics_hook or []
+
+        # Resolve joint_list (alternative to link_list) into a link_list.
+        link_list = self._resolve_link_list_arg(link_list, joint_list)
 
         # Auto-inject visualization hooks from context
         if auto_ik_hook is not None:
@@ -1508,6 +1672,8 @@ class CascadedLink(CascadedCoords):
             rotation_tolerance=None,
             use_base=False,
             base_weight=None,
+            joint_list=None,
+            invariant_joint_list=None,
             **kwargs):
         """Solve inverse kinematics to reach target coordinates.
 
@@ -1517,10 +1683,26 @@ class CascadedLink(CascadedCoords):
             Target coordinate(s) for the end-effector(s).
         stop : int
             Maximum number of iterations.
-        link_list : list
-            List of links to use for IK.
         move_target : skrobot.coordinates.Coordinates or list
             End-effector coordinate frame(s).
+        joint_list : list[skrobot.model.Joint] or list[list] or None
+            (Recommended) Joints to actuate -- the most direct way to
+            express "which joints move", and the preferred spelling.  May be
+            flat (single chain) or nested (one list per end-effector).  When
+            neither ``joint_list`` nor ``link_list`` is given, the chain is
+            inferred from ``move_target``.  Mutually exclusive with
+            ``link_list`` (passing both raises ``ValueError``).
+        link_list : list or None
+            (Legacy) Equivalent to ``joint_list`` but expressed as links;
+            each link's ``link.joint`` is actuated.  ``link_list`` was the
+            original spelling and is kept for backward compatibility, but
+            ``joint_list`` reads more directly since IK acts on joints.
+            Mutually exclusive with ``joint_list``.
+        invariant_joint_list : list[skrobot.model.Joint] or None
+            Joints to hold fixed during the solve.  The actuated joints
+            become the resolved chain minus these, so you can e.g. solve the
+            default arm chain while keeping a specific joint locked.  Raises
+            ``ValueError`` if it would remove every actuated joint.
         revert_if_fail : bool
             If True, revert to initial joint angles on failure.
         position_mask : str, bool, list, numpy.ndarray, or None
@@ -1590,6 +1772,26 @@ class CascadedLink(CascadedCoords):
         # Resolve mask parameters
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
+
+        # Resolve joint_list (an alternative spelling of link_list that names
+        # the actuated joints directly) into a link_list.
+        link_list = self._resolve_link_list_arg(link_list, joint_list)
+
+        # Hold invariant joints fixed by removing them from the actuated set.
+        link_list = self._apply_invariant_joint_list(
+            link_list, invariant_joint_list)
+
+        # Reject a non-default but empty actuated set with a clear error,
+        # rather than letting it surface as a downstream IndexError.  A
+        # ``None`` link_list means "infer the default chain", so it is left
+        # alone; ``use_base`` adds base DoFs, so an otherwise-empty set is
+        # still solvable in that case.
+        if (link_list is not None and not use_base
+                and self._actuated_dof(link_list) == 0):
+            raise ValueError(
+                'inverse_kinematics has no actuated joints to solve: the '
+                'joint_list/link_list is empty or every joint was made '
+                'invariant.')
 
         # Inject virtual joint for fullbody IK if requested.
         _base_state = None
@@ -2083,7 +2285,6 @@ class CascadedLink(CascadedCoords):
             jacobian = np.zeros((dim, n_joint_dimension), dtype=np.float32)
 
         union_link_list = self.calc_union_link_list(link_list)
-        jdim = self.calc_target_joint_dimension(union_link_list)
         if not isinstance(link_list[0], list):
             link_lists = [link_list]
         else:
@@ -2104,52 +2305,278 @@ class CascadedLink(CascadedCoords):
         else:
             position_masks = position_mask
 
-        # Hoist per-target invariants out of the per-joint loop:
-        # row stride, link-id set for O(1) membership, target world
-        # position, and target-frame rotation transpose.
+        # Delegate the per-joint Jacobian kernel to
+        # ``calc_jacobian_from_joint_list`` -- the single source of truth.
+        # ``check_relevance='auto'`` reproduces this method's historical
+        # ``_is_relevant`` filtering exactly for the robot's own joints, so
+        # results are byte-for-byte unchanged; the joint-list method merely
+        # indexes the same columns by joint instead of by ``link.joint``.
+        n_targets = len(move_targets)
+
+        def _broadcast(seq):
+            # A scalar mask / single transform_coords listifies to length 1;
+            # broadcast across targets so the per-target zip in the delegate
+            # does not truncate when there is more than one move_target.
+            if len(seq) == 1 and n_targets > 1:
+                return list(seq) * n_targets
+            return seq
+
+        union_joint_list = [ul.joint for ul in union_link_list]
+        joint_lists = [[link.joint for link in sub] for sub in link_lists]
+
+        return self.calc_jacobian_from_joint_list(
+            union_joint_list,
+            move_targets,
+            joint_list=joint_lists,
+            transform_coords=_broadcast(transform_coords),
+            position_mask=_broadcast(position_masks),
+            rotation_mask=_broadcast(rotation_masks),
+            rotation_mirror=rotation_mirror,
+            col_offset=col_offset,
+            dim=dim,
+            jacobian=jacobian,
+            additional_jacobi_dimension=additional_jacobi_dimension,
+            n_joint_dimension=n_joint_dimension,
+            check_relevance='auto',
+        )
+
+    def calc_jacobian_from_joint_list(self,
+                                      union_joint_list,
+                                      move_target,
+                                      joint_list=None,
+                                      transform_coords=None,
+                                      position_mask=None,
+                                      rotation_mask=None,
+                                      rotation_mirror=None,
+                                      col_offset=0,
+                                      dim=None,
+                                      jacobian=None,
+                                      additional_jacobi_dimension=0,
+                                      n_joint_dimension=None,
+                                      check_relevance='auto',
+                                      *args, **kwargs):
+        """Compute the Jacobian with columns indexed directly by joints.
+
+        This is the ``joint_list`` analogue of
+        :meth:`calc_jacobian_from_link_list`.  That method takes a
+        ``link_list`` and derives the actuated joints indirectly via
+        ``link.joint``; here the joints are given directly, so the columns
+        of the returned Jacobian correspond, in order, to
+        ``union_joint_list`` (each joint contributing ``joint.joint_dof``
+        columns).
+
+        A joint contributes to a given ``move_target`` iff it appears in
+        that target's ``joint_list`` (the joints along the kinematic chain
+        from the target back to the root) *and* the relevance check
+        (``check_relevance``) allows it.  The per-target membership rule is
+        what lets the column set be an arbitrary union of joints, e.g.
+        spanning multiple bodies or virtual contact joints.
+
+        With ``check_relevance='auto'`` (the default) this method is a
+        complete superset of :meth:`calc_jacobian_from_link_list`: for the
+        robot's own joints it reproduces that method's relevance filtering
+        exactly, while for joints outside the relevance table it falls back
+        to pure membership.  ``calc_jacobian_from_link_list`` is implemented
+        by delegating here.
+
+        Parameters
+        ----------
+        union_joint_list : list[skrobot.model.Joint]
+            Joints forming the Jacobian columns, in order.  The number of
+            columns equals ``sum(j.joint_dof for j in union_joint_list)``.
+        move_target : skrobot.coordinates.Coordinates or list
+            End-effector coordinate frame(s).
+        joint_list : list[skrobot.model.Joint] or list[list] or None
+            Per-``move_target`` list of joints contained in that target's
+            kinematic chain.  Flat for a single target, nested (one list
+            per target) for multiple targets.  When ``None`` it is derived
+            from each target as the chain from the target's parent link
+            back to the root.
+        transform_coords : skrobot.coordinates.Coordinates or list or None
+            Frame(s) the error is expressed in.  Defaults to ``move_target``.
+        position_mask, rotation_mask, rotation_mirror
+            Axis constraint specification, same semantics as
+            :meth:`calc_jacobian_from_link_list`.
+        col_offset : int
+            Column index at which to start writing.
+        dim : int or None
+            Row dimension of the Jacobian.  Defaults to the sum of the
+            per-target task dimensions plus ``additional_jacobi_dimension``.
+        jacobian : numpy.ndarray or None
+            Pre-allocated output matrix.  Allocated when ``None``.
+        additional_jacobi_dimension : int
+            Extra rows to reserve below the kinematic block.
+        n_joint_dimension : int or None
+            Column dimension.  Defaults to the total DoF of
+            ``union_joint_list``.
+        check_relevance : {'auto', True, False}
+            How to filter a joint that is in a target's membership list but
+            may not actually move it.  ``'auto'`` (default) uses the
+            relevance table for known robot joints and trusts membership for
+            unknown joints -- a superset of
+            :meth:`calc_jacobian_from_link_list`.  ``True`` always consults
+            the relevance table (an unknown joint is excluded, exactly like
+            :meth:`_is_relevant`).  ``False`` ignores relevance and trusts
+            membership only.
+
+        Returns
+        -------
+        numpy.ndarray
+            The Jacobian matrix.
+        """
+        # Handle legacy parameters for backwards compatibility
+        if 'translation_axis' in kwargs:
+            if position_mask is None:
+                position_mask, _ = convert_legacy_axis_to_mask(
+                    kwargs.pop('translation_axis'))
+            else:
+                kwargs.pop('translation_axis')
+        if 'rotation_axis' in kwargs:
+            if rotation_mask is None:
+                rotation_mask, mirror = convert_legacy_axis_to_mask(
+                    kwargs.pop('rotation_axis'))
+                if mirror is not None and rotation_mirror is None:
+                    rotation_mirror = mirror
+            else:
+                kwargs.pop('rotation_axis')
+
+        # Resolve mask parameters
+        position_mask, rotation_mask, rotation_mirror = \
+            self._resolve_mask_params(
+                position_mask, rotation_mask, rotation_mirror)
+
+        move_targets = listify(move_target)
+        n = len(move_targets)
+
+        if transform_coords is None:
+            transform_coords = list(move_targets)
+        else:
+            transform_coords = listify(transform_coords)
+
+        # Per-target joint chains.  Default: the chain from each target's
+        # parent link back to the root (the joint-list counterpart of the
+        # default ``link_list`` in the link-based methods).
+        if joint_list is None:
+            joint_lists = [
+                [link.joint for link in self.link_lists(mt.parent)
+                 if link.joint is not None]
+                for mt in move_targets
+            ]
+        elif len(joint_list) > 0 and isinstance(joint_list[0], list):
+            joint_lists = joint_list
+        else:
+            joint_lists = [joint_list]
+
+        # Multi-end-effector inputs are consumed pairwise via zip(); guard
+        # against silent truncation when a per-target argument does not match
+        # the number of move targets (e.g. a flat joint_list passed with
+        # several targets would otherwise fill only the first target block).
+        if len(joint_lists) != n:
+            raise ValueError(
+                'joint_list must provide one chain per move_target '
+                '({} chains for {} move targets).'.format(
+                    len(joint_lists), n))
+        if len(transform_coords) != n:
+            raise ValueError(
+                'transform_coords must match the number of move targets '
+                '({} given for {} move targets).'.format(
+                    len(transform_coords), n))
+
+        rotation_masks = rotation_mask if isinstance(rotation_mask, list) \
+            else [rotation_mask] * n
+        position_masks = position_mask if isinstance(position_mask, list) \
+            else [position_mask] * n
+        if len(rotation_masks) != n or len(position_masks) != n:
+            raise ValueError(
+                'position_mask/rotation_mask lists must match the number of '
+                'move targets ({} expected).'.format(n))
+
+        if n_joint_dimension is None:
+            n_joint_dimension = calc_target_joint_dimension(union_joint_list)
+        jdim = calc_target_joint_dimension(union_joint_list)
+
+        per_target_dims = [
+            self.calc_target_axis_dimension(
+                rmask, pmask, rotation_mirror=rotation_mirror)
+            for rmask, pmask in zip(rotation_masks, position_masks)
+        ]
+        if dim is None:
+            dim = sum(per_target_dims) + additional_jacobi_dimension
+        if jacobian is None:
+            jacobian = np.zeros((dim, n_joint_dimension), dtype=np.float32)
+
+        # Resolve, per target, whether ``check_relevance`` is in effect and
+        # the Link used for the relevance lookup (hoisted out of the loop).
+        if check_relevance not in ('auto', True, False):
+            raise ValueError(
+                "check_relevance must be 'auto', True or False, got %r"
+                % (check_relevance,))
+        relevance_on = check_relevance is not False
+
+        # Hoist per-target invariants out of the per-joint loop.
         task_data = []
-        for (link_list, move_target, transform_coord,
-             rot_mask, pos_mask) in zip(
-                 link_lists, move_targets, transform_coords,
-                 rotation_masks, position_masks):
+        for (jl, mt, tc, rmask, pmask, row_stride) in zip(
+                joint_lists, move_targets, transform_coords,
+                rotation_masks, position_masks, per_target_dims):
             task_data.append((
-                link_list,
-                set(id(l) for l in link_list),
-                move_target,
-                transform_coord,
-                rot_mask,
-                pos_mask,
-                move_target.worldpos(),
-                transform_coord.worldrot().T,
-                self.calc_target_axis_dimension(
-                    rot_mask, pos_mask,
-                    rotation_mirror=rotation_mirror),
+                set(id(j) for j in jl),
+                mt,
+                tc,
+                rmask,
+                pmask,
+                mt.worldpos(),
+                tc.worldrot().T,
+                row_stride,
+                self._resolve_to_link(mt) if relevance_on else None,
             ))
+
+        def contributes(joint, joint_id, joint_set, target_link):
+            if joint_id not in joint_set:
+                return False
+            if not relevance_on:
+                return True
+            if check_relevance == 'auto':
+                return self._relevance_allows(joint, target_link)
+            # check_relevance is True: strict, exactly like _is_relevant.
+            table = self._relevance_predicate_table
+            if table is None or target_link is None:
+                return True
+            return bool(table.get((joint, target_link), False))
 
         col_end = col_offset + jdim
 
         if len(task_data) == 1:
-            # Single-end-effector fast path: unroll the one-element
-            # task loop.  ``union_link_list == link_list`` in this
-            # case (see ``calc_union_link_list``), so membership is
-            # guaranteed and ``row`` is always 0.  For RotationalJoint
-            # we also inline the matmul chain directly -- the old
-            # code allocated a temporary ``Coordinates`` per joint
-            # via ``parent_link.worldcoords().transform(default_coords,
-            # out=world_default_coords)`` and then went through
-            # ``world_default_coords.rotate_vector(paxis)``; we just
-            # chain ``parent_rot @ default_rot @ paxis`` directly.
-            (_link_list, _link_set, move_target, transform_coord,
-             rot_mask, pos_mask, mt_pos, tc_wrot_T,
-             _row_stride) = task_data[0]
-            col = col_offset
-            # Scratch only needed for the non-Rotational fall-through.
+            # Single-move_target fast path: unroll the one-element task loop
+            # (row is always 0), mirroring calc_jacobian_from_link_list.  The
+            # scratch Coordinates is only allocated for the non-Rotational
+            # fall-through.
+            (joint_set, mt, transform_coord, rot_mask, pos_mask,
+             mt_pos, tc_wrot_T, _row_stride, target_link) = task_data[0]
+            # Inline the membership + relevance test to avoid a per-joint
+            # Python call on this hot path.  ``rel_table`` is the relevance
+            # table when relevance applies (else None); ``strict`` marks
+            # check_relevance=True (out-of-table joints excluded, exactly
+            # like _is_relevant).
+            rel_table = (self._relevance_predicate_table
+                         if relevance_on and target_link is not None
+                         else None)
+            strict = check_relevance is True
             world_default_coords = None
-            for ul in union_link_list:
+            col = col_offset
+            for joint in union_joint_list:
                 if col >= col_end:
                     break
-                joint = ul.joint
-                if self._is_relevant(joint, move_target):
+                do_fill = id(joint) in joint_set
+                if do_fill and rel_table is not None:
+                    verdict = rel_table.get((joint, target_link))
+                    # Match the truthiness semantics of _relevance_allows /
+                    # contributes() exactly (independent of the verdict's
+                    # concrete type): 'auto' includes out-of-table (None)
+                    # joints and any truthy verdict; strict excludes
+                    # out-of-table joints (None -> False).
+                    do_fill = bool(verdict) if strict \
+                        else (verdict is None or bool(verdict))
+                if do_fill:
                     paxis = joint.axis
                     if joint.joint_dof <= 1 and not isinstance(
                             paxis, np.ndarray):
@@ -2165,8 +2592,7 @@ class CascadedLink(CascadedCoords):
                         z_world = np.dot(world_default_rot, paxis)
                         j_rot = np.dot(tc_wrot_T, z_world)
                         p_diff = np.dot(
-                            tc_wrot_T,
-                            mt_pos - child_link.worldpos())
+                            tc_wrot_T, mt_pos - child_link.worldpos())
                         j_translation = cross_product(j_rot, p_diff)
                         j_translation = select_by_mask(
                             j_translation, pos_mask)
@@ -2183,67 +2609,59 @@ class CascadedLink(CascadedCoords):
                         jacobian = joint.calc_jacobian(
                             jacobian, 0, col, joint, paxis,
                             child_link, world_default_coords,
-                            move_target, transform_coord,
-                            rot_mask, pos_mask)
+                            mt, transform_coord, rot_mask, pos_mask)
                 col += joint.joint_dof
             return jacobian
 
         world_default_coords = Coordinates()
 
-        # Multi-end-effector path: keep the nested loop over tasks.
         col = col_offset
-        i = 0
-        while col < col_end:
-            ul = union_link_list[i]
-            ul_id = id(ul)
+        for joint in union_joint_list:
+            if col >= col_end:
+                break
+            joint_id = id(joint)
             row = 0
+            for (joint_set, mt, transform_coord, rot_mask, pos_mask,
+                 mt_pos, tc_wrot_T, row_stride, target_link) in task_data:
+                if contributes(joint, joint_id, joint_set, target_link):
+                    paxis = joint.axis
+                    if joint.joint_dof <= 1 and not isinstance(
+                            paxis, np.ndarray):
+                        paxis = convert_to_axis_vector(paxis)
+                    child_link = joint.child_link
+                    parent_link = joint.parent_link
+                    default_coords = joint.default_coords
 
-            for (link_list, link_set, move_target, transform_coord,
-                 rot_mask, pos_mask, mt_pos, tc_wrot_T,
-                 row_stride) in task_data:
-                if ul_id in link_set:
-                    joint = ul.joint
-                    if self._is_relevant(joint, move_target):
-                        paxis = joint.axis
-                        if joint.joint_dof <= 1 and not isinstance(
-                                paxis, np.ndarray):
-                            paxis = convert_to_axis_vector(paxis)
-                        child_link = joint.child_link
-                        parent_link = joint.parent_link
-                        default_coords = joint.default_coords
-
-                        if type(joint) is RotationalJoint:
-                            # Skip the temp-Coordinates construction:
-                            # chain ``parent_rot @ default_rot @ paxis``
-                            # directly (same optimisation as the
-                            # single-EE path above).
-                            parent_rot = parent_link.worldcoords()._rotation
-                            world_default_rot = np.dot(
-                                parent_rot, default_coords._rotation)
-                            z_world = np.dot(world_default_rot, paxis)
-                            j_rot = np.dot(tc_wrot_T, z_world)
-                            p_diff = np.dot(
-                                tc_wrot_T,
-                                mt_pos - child_link.worldpos())
-                            j_translation = cross_product(j_rot, p_diff)
-                            j_translation = select_by_mask(
-                                j_translation, pos_mask)
-                            n_trans = len(j_translation)
-                            jacobian[row:row + n_trans, col] = j_translation
-                            j_rotation = select_by_mask(j_rot, rot_mask)
-                            jacobian[row + n_trans:row + n_trans + len(j_rotation),
-                                     col] = j_rotation
-                        else:
-                            parent_link.worldcoords().transform(
-                                default_coords, out=world_default_coords)
-                            jacobian = joint.calc_jacobian(
-                                jacobian, row, col, joint, paxis,
-                                child_link, world_default_coords,
-                                move_target, transform_coord,
-                                rot_mask, pos_mask)
+                    if type(joint) is RotationalJoint:
+                        # Inline ``parent_rot @ default_rot @ paxis`` -- the
+                        # same optimisation used in
+                        # calc_jacobian_from_link_list.
+                        parent_rot = parent_link.worldcoords()._rotation
+                        world_default_rot = np.dot(
+                            parent_rot, default_coords._rotation)
+                        z_world = np.dot(world_default_rot, paxis)
+                        j_rot = np.dot(tc_wrot_T, z_world)
+                        p_diff = np.dot(
+                            tc_wrot_T,
+                            mt_pos - child_link.worldpos())
+                        j_translation = cross_product(j_rot, p_diff)
+                        j_translation = select_by_mask(
+                            j_translation, pos_mask)
+                        n_trans = len(j_translation)
+                        jacobian[row:row + n_trans, col] = j_translation
+                        j_rotation = select_by_mask(j_rot, rot_mask)
+                        jacobian[row + n_trans:row + n_trans
+                                 + len(j_rotation), col] = j_rotation
+                    else:
+                        parent_link.worldcoords().transform(
+                            default_coords, out=world_default_coords)
+                        jacobian = joint.calc_jacobian(
+                            jacobian, row, col, joint, paxis,
+                            child_link, world_default_coords,
+                            mt, transform_coord,
+                            rot_mask, pos_mask)
                 row += row_stride
             col += joint.joint_dof
-            i += 1
         return jacobian
 
     @property
@@ -3081,6 +3499,7 @@ class RobotModel(CascadedLink):
             target_coords,
             move_target=None,
             link_list=None,
+            joint_list=None,
             **kwargs):
         """Solve inverse kinematics.
 
@@ -3088,10 +3507,15 @@ class RobotModel(CascadedLink):
         target supports t, nil, float-vector, coords, list of float-vector, list
         of coords link-list is set by default based on move-target -> root link
         link-list.
+
+        ``joint_list`` is an alternative to ``link_list`` that names the
+        joints to actuate directly (see the base ``inverse_kinematics``);
+        the two are mutually exclusive.  When ``joint_list`` is given the
+        default ``move_target -> root`` ``link_list`` is not inferred.
         """
         if move_target is None:
             move_target = self.end_coords
-        if link_list is None:
+        if link_list is None and joint_list is None:
             if not isinstance(move_target, list):
                 link_list = self.link_lists(move_target.parent)
             else:
@@ -3103,6 +3527,7 @@ class RobotModel(CascadedLink):
         return super(RobotModel, self).inverse_kinematics(
             target_coords, move_target=move_target,
             link_list=link_list,
+            joint_list=joint_list,
             **kwargs)
 
     def batch_inverse_kinematics(
@@ -3125,6 +3550,8 @@ class RobotModel(CascadedLink):
             backend=None,
             use_base=False,
             base_weight=None,
+            joint_list=None,
+            invariant_joint_list=None,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -3140,7 +3567,10 @@ class RobotModel(CascadedLink):
         move_target : Optional
             Target link or end-effector. If None, uses self.end_coords
         link_list : Optional[List]
-            List of links from root to target. If None, automatically computed from move_target
+            (Legacy) List of links from root to target; each link's
+            ``link.joint`` is actuated.  Equivalent to ``joint_list`` (the
+            recommended spelling).  If None, automatically computed from
+            move_target.
         position_mask : str, bool, list, numpy.ndarray, or None
             Specifies which position axes to CONSTRAIN.
             - True: constrain all axes (default)
@@ -3151,6 +3581,16 @@ class RobotModel(CascadedLink):
         rotation_mask : str, bool, list, numpy.ndarray, or None
             Specifies which rotation axes to CONSTRAIN.
             Same format as position_mask.
+        joint_list : list[skrobot.model.Joint] or list[list] or None
+            (Recommended) Joints to actuate -- the most direct way to
+            express "which joints move" (same semantics as
+            :meth:`inverse_kinematics`).  Mutually exclusive with
+            ``link_list``.
+        invariant_joint_list : list[skrobot.model.Joint] or None
+            Joints to hold fixed during the solve.  The actuated (variant)
+            joints become the resolved chain minus these.  Raises
+            ``ValueError`` if it would remove every actuated joint (unless
+            ``use_base`` supplies base DoFs).
         rotation_mirror : str or None
             Mirror axis ('x', 'y', 'z') for allowing
             180-degree rotations around the specified axis.
@@ -3232,6 +3672,32 @@ class RobotModel(CascadedLink):
         # Resolve mask parameters
         position_mask, rotation_mask, rotation_mirror = self._resolve_mask_params(
             position_mask, rotation_mask, rotation_mirror)
+
+        # API parity with inverse_kinematics: accept joint_list as an
+        # alternative spelling of link_list, and invariant_joint_list to hold
+        # joints fixed.  The batch backend consumes link_list, so resolve both
+        # into a link_list here (the backend then drops the invariant joints
+        # from its FK joint set, holding them at their current angle).
+        link_list = self._resolve_link_list_arg(link_list, joint_list)
+        if invariant_joint_list:
+            if link_list is None:
+                # Materialise the default move_target -> root chain (the same
+                # derivation the use_base branch and the impl use) so the
+                # invariant joints can be subtracted from a concrete list.
+                resolved_mt = (self.end_coords if move_target is None
+                               else move_target)
+                if isinstance(resolved_mt, list):
+                    link_list = [self.link_lists(mt.parent)
+                                 for mt in resolved_mt]
+                else:
+                    link_list = self.link_lists(resolved_mt.parent)
+            link_list = self._apply_invariant_joint_list(
+                link_list, invariant_joint_list)
+            if not use_base and self._actuated_dof(link_list) == 0:
+                raise ValueError(
+                    'batch_inverse_kinematics has no actuated joints to '
+                    'solve: the joint_list/link_list is empty or every joint '
+                    'was made invariant.')
 
         # Fullbody IK via a virtual base joint chain. When set, returns a
         # 4-tuple (angle_vectors, base_poses, success_flags, attempts).

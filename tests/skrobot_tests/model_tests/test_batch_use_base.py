@@ -339,3 +339,61 @@ def test_batch_base_weight_rejects_nonpositive():
             stop=30, backend='numpy', initial_angles='current',
             use_base='planar', base_weight=0.0,
         )
+
+
+def test_batch_joint_list_matches_link_list():
+    """joint_list is an alternative spelling of link_list (same solutions)."""
+    robot = _build_fetch()
+    ee = robot.rarm_end_coords
+    link_list = robot.rarm.link_list
+    joint_list = [link.joint for link in link_list]
+    base = ee.worldpos()
+    targets = [Coordinates(pos=base + np.array([0.02 * i, 0.0, 0.0]))
+               for i in range(3)]
+
+    robot.reset_pose()
+    av_link = np.array(robot.batch_inverse_kinematics(
+        target_coords=targets, move_target=ee, link_list=link_list,
+        rotation_mask=False, stop=100, thre=0.01,
+        backend='numpy', initial_angles='current')[0])
+    robot.reset_pose()
+    av_joint = np.array(robot.batch_inverse_kinematics(
+        target_coords=targets, move_target=ee, joint_list=joint_list,
+        rotation_mask=False, stop=100, thre=0.01,
+        backend='numpy', initial_angles='current')[0])
+    np.testing.assert_allclose(av_joint, av_link, atol=1e-6)
+
+    # link_list and joint_list are mutually exclusive.
+    with pytest.raises(ValueError):
+        robot.batch_inverse_kinematics(
+            target_coords=targets, move_target=ee,
+            link_list=link_list, joint_list=joint_list,
+            backend='numpy')
+
+
+def test_batch_invariant_joint_list_holds_joint_fixed():
+    """invariant_joint_list keeps the named joint fixed across the batch."""
+    robot = _build_fetch()
+    ee = robot.rarm_end_coords
+    link_list = robot.rarm.link_list
+    fixed_joint = link_list[2].joint
+    base = ee.worldpos()
+    targets = [Coordinates(pos=base + np.array([0.02 * i, 0.0, 0.0]))
+               for i in range(3)]
+
+    robot.reset_pose()
+    before = fixed_joint.joint_angle()
+    av = np.array(robot.batch_inverse_kinematics(
+        target_coords=targets, move_target=ee,
+        invariant_joint_list=[fixed_joint], rotation_mask=False,
+        stop=100, thre=0.01, backend='numpy', initial_angles='current')[0])
+    idx = robot.joint_list.index(fixed_joint)
+    np.testing.assert_allclose(av[:, idx], before)
+
+    # Removing every actuated joint is an error.
+    with pytest.raises(ValueError):
+        robot.batch_inverse_kinematics(
+            target_coords=targets, move_target=ee,
+            joint_list=[link_list[0].joint],
+            invariant_joint_list=[link_list[0].joint],
+            rotation_mask=False, backend='numpy')
