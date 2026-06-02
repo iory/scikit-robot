@@ -87,6 +87,17 @@ resulting in less simplification. Default is None."""
         help='Voxel size for Blender remeshing. Smaller values create more '
         'detailed meshes. Default is 0.002. Only used with --blender-remesh.')
     parser.add_argument(
+        '--blender-decimate', action='store_true',
+        help='Use Blender decimate (collapse) modifier to reduce the triangle '
+        'count while preserving shape and colors. Unlike --blender-remesh, '
+        'this keeps the original topology and works on Blender 5.x '
+        '(meshes are exchanged via glTF). Requires Blender to be installed.')
+    parser.add_argument(
+        '--blender-decimate-ratio', type=float, default=0.1,
+        help='Collapse ratio for Blender decimation. The resulting triangle '
+        'count is approximately this fraction of the original. Must be in '
+        '(0, 1]. Default is 0.1. Only used with --blender-decimate.')
+    parser.add_argument(
         '--blender-executable', type=str, default=None,
         help='Path to Blender executable. If not specified, automatically '
         'searches for Blender in common installation locations. '
@@ -204,6 +215,8 @@ def process_urdf(urdf_file, args):
             collision_mesh_format='.' + args.collision_mesh_format,
             blender_remesh=args.blender_remesh,
             blender_voxel_size=args.blender_voxel_size,
+            blender_decimate=args.blender_decimate,
+            blender_decimate_ratio=args.blender_decimate_ratio,
             blender_executable=args.blender_executable,
             remeshed_suffix=args.remeshed_suffix,
             draco_compression=args.draco), apply_scale(args.scale):

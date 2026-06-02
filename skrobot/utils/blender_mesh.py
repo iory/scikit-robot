@@ -242,6 +242,158 @@ def remesh_with_blender(
         return remeshed_mesh
 
 
+def decimate_with_blender(
+        mesh,
+        ratio=0.1,
+        blender_executable=None,
+        verbose=False):
+    """Decimate a mesh using Blender's decimate (collapse) modifier.
+
+    Unlike :func:`remesh_with_blender`, this reduces the triangle count while
+    preserving the original shape, materials and vertex colors. The mesh is
+    exchanged with Blender in glTF/glb format (Blender 5.x no longer ships the
+    Collada importer/exporter), so colors round-trip as glTF materials/vertex
+    colors.
+
+    Parameters
+    ----------
+    mesh : trimesh.Trimesh or trimesh.Scene or list of trimesh.Trimesh or str or pathlib.Path
+        Mesh to be decimated. Can be a trimesh object, a list of trimesh
+        objects, a :class:`trimesh.Scene`, or a path to a mesh file.
+    ratio : float, optional
+        Collapse ratio passed to Blender's decimate modifier. The resulting
+        triangle count is approximately ``ratio`` times the original. Must be
+        in the range ``(0, 1]``. Default is 0.1.
+    blender_executable : str, optional
+        Path to Blender executable. If None, automatically searches for Blender
+        in common installation locations. Default is None.
+    verbose : bool, optional
+        Whether to print progress information. Default is False.
+
+    Returns
+    -------
+    list of trimesh.Trimesh
+        Decimated meshes with preserved colors.
+
+    Raises
+    ------
+    RuntimeError
+        If Blender decimation fails or the output file is not created.
+    """
+    from pathlib import Path
+    import subprocess
+    import tempfile
+
+    trimesh = _lazy_trimesh()
+
+    if not 0.0 < ratio <= 1.0:
+        raise ValueError(
+            "ratio must be in the range (0, 1], got {}".format(ratio))
+
+    # Auto-detect Blender if not specified
+    if blender_executable is None:
+        blender_executable = _find_blender_executable()
+        if blender_executable is None:
+            raise RuntimeError(
+                "Blender executable not found. Please install Blender or "
+                "specify the path using the blender_executable parameter."
+            )
+        if verbose:
+            print(f"Found Blender at: {blender_executable}")
+
+    # Normalize the input into a trimesh.Scene so it can be exported to glb.
+    if isinstance(mesh, (str, Path)):
+        scene = trimesh.load(mesh, force='scene')
+    elif isinstance(mesh, trimesh.Scene):
+        scene = mesh
+    elif isinstance(mesh, (list, tuple)):
+        scene = trimesh.Scene(list(mesh))
+    else:
+        scene = trimesh.Scene(mesh)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        input_glb = temp_path / 'input.glb'
+        output_glb = temp_path / 'output.glb'
+        scene.export(str(input_glb))
+
+        script_path = temp_path / 'decimate_script.py'
+        _create_blender_decimate_script(
+            script_path, input_glb, output_glb, ratio)
+
+        cmd = [
+            blender_executable,
+            '--background',
+            '--python', str(script_path),
+        ]
+
+        if verbose:
+            print(f"Running Blender decimate with ratio={ratio}...")
+
+        result = subprocess.run(cmd, capture_output=not verbose, text=True)
+
+        if result.returncode != 0:
+            error_msg = (
+                "Blender decimation failed with return code "
+                f"{result.returncode}")
+            if not verbose and result.stderr:
+                error_msg += f"\nError: {result.stderr}"
+            raise RuntimeError(error_msg)
+
+        if not output_glb.exists():
+            raise RuntimeError(
+                f"Decimated output file not found: {output_glb}")
+
+        decimated = trimesh.load(str(output_glb), force='scene')
+
+    geometries = [g for g in decimated.dump()
+                  if isinstance(g, trimesh.Trimesh)]
+    if not geometries:
+        raise RuntimeError("Decimated mesh contains no Trimesh geometry")
+
+    if verbose:
+        total_faces = sum(len(g.faces) for g in geometries)
+        print(f"Decimation complete. Output faces: {total_faces}")
+
+    return geometries
+
+
+def _create_blender_decimate_script(script_path, input_path, output_path, ratio):
+    """Create a wrapper script that imports the core Blender decimate module.
+
+    Parameters
+    ----------
+    script_path : pathlib.Path
+        Path where the wrapper script will be written.
+    input_path : pathlib.Path
+        Path to the input glb file.
+    output_path : pathlib.Path
+        Path to the output glb file.
+    ratio : float
+        Collapse ratio for decimation.
+    """
+    from pathlib import Path
+
+    core_module_path = Path(__file__).parent / '_blender_decimate_core.py'
+
+    script_content = f"""import sys
+from pathlib import Path
+
+core_module_path = Path(r"{core_module_path}")
+sys.path.insert(0, str(core_module_path.parent))
+
+from _blender_decimate_core import decimate_glb_file
+
+input_path = Path(r"{input_path}")
+output_path = Path(r"{output_path}")
+ratio = {ratio}
+
+decimate_glb_file(input_path, output_path, ratio)
+"""
+
+    script_path.write_text(script_content)
+
+
 def _create_blender_wrapper_script(script_path, input_path, output_path, voxel_size, export_format):
     """Create a wrapper script that imports the core Blender remeshing module.
 

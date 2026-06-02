@@ -76,12 +76,17 @@ class TestConsoleScripts(unittest.TestCase):
             if _find_blender_executable() is not None:
                 out_blender_dae = osp.join(urdf_dir, 'fetch_blender.urdf')
                 out_blender_stl = osp.join(urdf_dir, 'fetch_blender_stl.urdf')
+                out_blender_decimate = osp.join(
+                    urdf_dir, 'fetch_blender_decimate.urdf')
                 blender_cmds = [
                     'convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 --output {}'.format(
                         urdfpath, out_blender_dae),
                     ('convert-urdf-mesh {} --blender-remesh --blender-voxel-size 0.005 '
                      '--collision-mesh-format stl --output {}').format(
                         urdfpath, out_blender_stl),
+                    ('convert-urdf-mesh {} --blender-decimate '
+                     '--blender-decimate-ratio 0.5 --output {}').format(
+                        urdfpath, out_blender_decimate),
                 ]
                 cmds.extend(blender_cmds)
             failures = []
