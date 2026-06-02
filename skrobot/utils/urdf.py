@@ -53,6 +53,8 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'scale_factor': 1.0,
                         'blender_remesh': False,
                         'blender_voxel_size': 0.002,
+                        'blender_decimate': False,
+                        'blender_decimate_ratio': 0.1,
                         'blender_executable': None,
                         '_current_geometry_context': None,  # 'collision' or 'visual'
                         '_source_urdf_path': None,  # Original URDF file path for mesh resolution
@@ -85,6 +87,8 @@ def export_mesh_format(
         collision_mesh_format=None,
         blender_remesh=False,
         blender_voxel_size=0.002,
+        blender_decimate=False,
+        blender_decimate_ratio=0.1,
         blender_executable=None,
         remeshed_suffix='_remeshed',
         draco_compression=False):
@@ -99,6 +103,8 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
     _CONFIGURABLE_VALUES["blender_remesh"] = blender_remesh
     _CONFIGURABLE_VALUES["blender_voxel_size"] = blender_voxel_size
+    _CONFIGURABLE_VALUES["blender_decimate"] = blender_decimate
+    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = blender_decimate_ratio
     _CONFIGURABLE_VALUES["blender_executable"] = blender_executable
     _CONFIGURABLE_VALUES["remeshed_suffix"] = remeshed_suffix
     _CONFIGURABLE_VALUES["draco_compression"] = draco_compression
@@ -113,6 +119,8 @@ def export_mesh_format(
     _CONFIGURABLE_VALUES["overwrite_mesh"] = False
     _CONFIGURABLE_VALUES["blender_remesh"] = False
     _CONFIGURABLE_VALUES["blender_voxel_size"] = 0.002
+    _CONFIGURABLE_VALUES["blender_decimate"] = False
+    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = 0.1
     _CONFIGURABLE_VALUES["blender_executable"] = None
     _CONFIGURABLE_VALUES["remeshed_suffix"] = '_remeshed'
     _CONFIGURABLE_VALUES["draco_compression"] = False
@@ -1253,6 +1261,18 @@ class Mesh(URDFType):
                     blender_remesh_applied = True
                     # Mark as processed
                     _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
+
+        # Apply Blender decimation (collapse) if requested. This reduces the
+        # triangle count while preserving shape and colors, and works on
+        # Blender 5.x because the mesh is exchanged in glb (not Collada).
+        if _CONFIGURABLE_VALUES['blender_decimate'] and not blender_remesh_applied:
+            from skrobot.utils.blender_mesh import decimate_with_blender
+            meshes = decimate_with_blender(
+                meshes,
+                ratio=_CONFIGURABLE_VALUES['blender_decimate_ratio'],
+                blender_executable=_CONFIGURABLE_VALUES['blender_executable'],
+                verbose=True,
+            )
 
         if _CONFIGURABLE_VALUES["target_triangles"] is not None:
             from skrobot.utils.mesh import auto_simplify_quadric_decimation_with_texture_preservation
