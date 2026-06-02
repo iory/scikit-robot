@@ -383,8 +383,7 @@ def main():
                                 solution_idx = (solution_idx + 1) % len(successful_solutions)
                                 last_change_time = current_time
 
-                        viewer.redraw()
-                        time.sleep(0.05)
+                        viewer.pause(0.05)
 
                     print("\nVisualization completed")
 

@@ -263,14 +263,16 @@ The following video demonstrates the interactive IK feature, where dragging the 
     robot = Panda()
     viewer.add(robot)
 
+    # Position the camera. ViserViewer implements the same set_camera API as
+    # the trimesh / pyrender viewers, so the call is identical across backends.
+    import numpy as np
+    viewer.set_camera([0, 0, np.pi / 2.0])
+
     # Open browser to view
     viewer.show()
 
-    # Keep the viewer running
-    import time
-    while viewer.is_active:
-        viewer.redraw()
-        time.sleep(0.1)
+    # Block until the browser tab / window is closed
+    viewer.wait_until_close()
 
 **Command Line Usage:**
 
@@ -291,6 +293,61 @@ The following video demonstrates the interactive IK feature, where dragging the 
     viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # 30 Hz (default)
     viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480), update_interval=1.0)           # 1 Hz, lower idle CPU
 
+
+Selecting a viewer
+==================
+
+Use :func:`skrobot.viewers.create_viewer` to pick a backend by name instead of
+importing a specific class. This is convenient for example scripts and
+applications that expose a ``--viewer`` option:
+
+.. code-block:: python
+
+    import skrobot
+
+    # name is one of 'trimesh', 'pyrender', 'viser' or 'notebook'
+    viewer = skrobot.viewers.create_viewer('pyrender', resolution=(640, 480))
+    viewer.add(skrobot.models.PR2())
+    viewer.show()
+
+Keyword arguments are forwarded to the selected viewer's constructor. Options a
+backend does not accept are ignored, so the same call works across backends
+(for example ``resolution`` applies to the trimesh / pyrender viewers but is
+dropped for ``viser``, which serves over a browser, while ``enable_ik`` applies
+only to ``viser``). An unknown name raises ``ValueError``.
+
+Interactive helpers
+===================
+
+Every interactive viewer (``TrimeshSceneViewer``, ``PyrenderViewer`` and
+``ViserViewer``) shares two convenience methods.
+
+**wait_until_close()**
+  Block until the viewer window is closed, pumping :func:`redraw` while
+  waiting. It replaces the boilerplate
+  ``while viewer.is_active: time.sleep(...); viewer.redraw()`` loop:
+
+  .. code-block:: python
+
+      viewer.show()
+      viewer.wait_until_close()   # returns once the window / tab is closed
+
+**pause(duration, fps=30.0)**
+  Pause for ``duration`` seconds **while keeping the window interactive**. Use
+  it in place of ``time.sleep(duration)`` inside animation loops. On macOS the
+  trimesh and pyrender viewers run their GL event loop on the main thread, so a
+  bare ``time.sleep`` freezes the window (the camera cannot be dragged) for the
+  whole pause because no events are dispatched. ``pause`` instead pumps
+  :func:`redraw` at ``fps`` (default 30 Hz) for the entire duration, so the view
+  stays responsive. On backends that already render in a separate thread
+  (trimesh / pyrender on Linux) or process (viser) the extra redraws are
+  harmless.
+
+  .. code-block:: python
+
+      for av in trajectory:
+          robot.angle_vector(av)
+          viewer.pause(1.0)   # show this pose for 1 s; camera stays draggable
 
 Color Management
 ----------------

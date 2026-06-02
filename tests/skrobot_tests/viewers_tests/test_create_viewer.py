@@ -9,6 +9,7 @@ from skrobot.viewers import create_viewer
 from skrobot.viewers import PyrenderViewer
 from skrobot.viewers import TrimeshSceneViewer
 from skrobot.viewers import ViserViewer
+from skrobot.viewers._base import _InteractiveViewerMixin
 
 
 class _CameraResolver(object):
@@ -17,6 +18,16 @@ class _CameraResolver(object):
     _linkid_to_link = {}
     _collect_world_points = ViserViewer._collect_world_points
     _resolve_camera_view = ViserViewer._resolve_camera_view
+
+
+class _CountingViewer(_InteractiveViewerMixin):
+    """Mixin-only viewer that counts redraw() calls (no GL backend)."""
+
+    def __init__(self):
+        self.redraw_count = 0
+
+    def redraw(self):
+        self.redraw_count += 1
 
 
 class TestCreateViewer(unittest.TestCase):
@@ -67,6 +78,32 @@ class TestCreateViewer(unittest.TestCase):
             self.assertTrue(
                 hasattr(cls, 'wait_until_close'),
                 '{} is missing wait_until_close'.format(cls.__name__))
+
+    def test_pause_available_on_all_viewers(self):
+        for cls in (TrimeshSceneViewer, PyrenderViewer, ViserViewer):
+            self.assertTrue(
+                hasattr(cls, 'pause'),
+                '{} is missing pause'.format(cls.__name__))
+
+    def test_pause_pumps_redraw(self):
+        viewer = _CountingViewer()
+        # Non-positive / non-finite duration triggers exactly one redraw
+        # and returns immediately.
+        for duration in (0, -1.0, float('nan'), float('inf')):
+            viewer.redraw_count = 0
+            viewer.pause(duration)
+            self.assertEqual(viewer.redraw_count, 1)
+
+        # A finite pause keeps pumping redraw more than once.
+        viewer.redraw_count = 0
+        viewer.pause(0.1, fps=30.0)
+        self.assertGreater(viewer.redraw_count, 1)
+
+    def test_pause_rejects_non_positive_fps(self):
+        viewer = _CountingViewer()
+        for bad_fps in (0, -5.0, float('nan'), float('inf')):
+            with self.assertRaises(ValueError):
+                viewer.pause(0.1, fps=bad_fps)
 
 
 class TestViserSetCameraMath(unittest.TestCase):

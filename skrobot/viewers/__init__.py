@@ -36,6 +36,8 @@ class DummyViewer(object):
         self._is_active = False
     def wait_until_close(self, *args, **kwargs):
         pass
+    def pause(self, *args, **kwargs):
+        pass
 
 try:
     from ._trimesh import TrimeshSceneViewer

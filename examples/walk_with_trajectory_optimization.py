@@ -352,8 +352,7 @@ def animate_segments(viewer, robot, segments_data, viewer_name,
                 base_world = seg['base_world_initial']
                 for idx in range(traj.shape[0]):
                     apply_aug_to_robot(robot, problem, traj[idx], base_world)
-                    viewer.redraw()
-                    time.sleep(dt)
+                    viewer.pause(dt)
                     if viewer_name != 'viser' and not viewer.is_active:
                         return
             if not loop:

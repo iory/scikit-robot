@@ -338,8 +338,9 @@ for av in av_seq:
         robot_coll_checker.update_color()
     else:
         sscc.update_color()
-    viewer.redraw()
-    time.sleep(1.0)
+    # viewer.pause keeps the camera draggable during the pause; a bare
+    # time.sleep would freeze the window on macOS (main-thread GL loop).
+    viewer.pause(1.0)
 
 if not args.no_interactive:
     viewer.wait_until_close()

@@ -61,8 +61,7 @@ def move_to_box(box):
             midcoords(i / 20.0, start_coords, target_coords),
             link_list=link_list,
             move_target=move_target)
-        viewer.redraw()
-        time.sleep(0.1)
+        viewer.pause(0.1)
 
 
 def grasp_box(box):
@@ -81,8 +80,7 @@ def pull_box(box):
             link_list=link_list,
             move_target=move_target)
         robot_model.look_at(box)
-        viewer.redraw()
-        time.sleep(0.1)
+        viewer.pause(0.1)
 
 
 parser = argparse.ArgumentParser(

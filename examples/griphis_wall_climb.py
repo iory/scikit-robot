@@ -332,8 +332,7 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
               f'end{swing_id} @ {end_swing.worldpos().round(4)}')
 
         if viewer is not None:
-            viewer.redraw()
-            time.sleep(step_pause)
+            viewer.pause(step_pause)
 
         stance_id, swing_id = swing_id, stance_id
 

@@ -194,8 +194,7 @@ def main():
                 status = "COLLISION" if min_dist < 0 else "Safe"
                 print(f"\rmin_dist = {min_dist:+.4f} ({status})    ", end="", flush=True)
 
-            viewer.redraw()
-            time.sleep(0.05)
+            viewer.pause(0.05)
             t += 0.05
 
         print()
