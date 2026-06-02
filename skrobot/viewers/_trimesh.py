@@ -55,7 +55,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         The resolution of the viewer. Default is (640, 480).
     update_interval : float, optional
         The update interval (in seconds) for the viewer. Default is
-        1.0 seconds.
+        1 / 30 seconds (30 Hz).
     title : str, optional
         The title of the viewer window. Default is 'scikit-robot TrimeshSceneViewer'.
 
@@ -69,7 +69,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     _instance = None
     _version_warning_issued = False
 
-    def __init__(self, resolution=None, update_interval=1.0, title=None):
+    def __init__(self, resolution=None, update_interval=1 / 30.0, title=None):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
