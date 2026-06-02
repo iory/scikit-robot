@@ -42,6 +42,7 @@ from trimesh.scene import cameras
 from skrobot import model as model_module
 from skrobot.coordinates import Coordinates
 from skrobot.model.skeleton import SkeletonModel
+from skrobot.viewers._base import _InteractiveViewerMixin
 
 
 # Check if pyrender supports always_on_top parameter
@@ -85,7 +86,7 @@ def _redraw_all_windows():
         pass
 
 
-class PyrenderViewer(pyrender.Viewer):
+class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
 
     """PyrenderViewer class implemented as a Singleton.
 

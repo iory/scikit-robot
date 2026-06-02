@@ -42,9 +42,15 @@ def main():
         action='store_true',
         help='Use simple rotation for comparison (less difference)'
     )
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender or viser'
+    )
     args = parser.parse_args()
 
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(800, 600))
+    viewer = skrobot.viewers.create_viewer(
+        args.viewer, resolution=(800, 600))
     plane = skrobot.model.Box(
         extents=(2, 2, 0.01), face_colors=(0.75, 0.75, 0.75)
     )

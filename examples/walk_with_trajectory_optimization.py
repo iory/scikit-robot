@@ -282,16 +282,6 @@ def apply_aug_to_robot(robot, problem, aug, base_world_initial):
     robot.root_link.newcoords(pose, relative_coords='world')
 
 
-def build_viewer(viewer_name):
-    if viewer_name == 'pyrender':
-        return skrobot.viewers.PyrenderViewer(resolution=(960, 720))
-    if viewer_name == 'trimesh':
-        return skrobot.viewers.TrimeshSceneViewer(resolution=(960, 720))
-    if viewer_name == 'viser':
-        return skrobot.viewers.ViserViewer()
-    raise ValueError('unknown viewer: {}'.format(viewer_name))
-
-
 def add_ground_with_stripes(viewer, segments_data, viewer_name,
                             stripe_spacing=0.25, margin=1.0):
     """Add a ground plane plus stripes for progress cue, and the planned
@@ -641,7 +631,7 @@ def main():
     apply_aug_to_robot(
         robot, segments_data[0]['problem'], segments_data[0]['traj'][0],
         segments_data[0]['base_world_initial'])
-    viewer = build_viewer(args.viewer)
+    viewer = skrobot.viewers.create_viewer(args.viewer, resolution=(960, 720))
     viewer.add(robot)
     add_ground_with_stripes(viewer, segments_data, args.viewer)
     viewer.show()

@@ -30,8 +30,8 @@ parser.add_argument(
 )
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender'], default='trimesh',
-    help='Choose the viewer type: trimesh or pyrender')
+    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+    help='Choose the viewer type: trimesh, pyrender or viser')
 parser.add_argument(
     '--no-interactive',
     action='store_true',
@@ -133,10 +133,7 @@ robot_coll_checker.add_world_obstacle(box)
 
 # visualization
 print("show trajectory")
-if args.viewer == 'trimesh':
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
-elif args.viewer == 'pyrender':
-    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
+viewer = skrobot.viewers.create_viewer(args.viewer, resolution=(640, 480))
 
 viewer.add(robot_model)
 viewer.add(box)
@@ -345,9 +342,7 @@ for av in av_seq:
     time.sleep(1.0)
 
 if not args.no_interactive:
-    print('==> Press [q] to close window')
-    while viewer.is_active:
-        time.sleep(0.1)
-        viewer.redraw()
-viewer.close()
+    viewer.wait_until_close()
+else:
+    viewer.close()
 time.sleep(1.0)

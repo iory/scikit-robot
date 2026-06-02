@@ -22,11 +22,16 @@ def main():
         action='store_true',
         help="Run in non-interactive mode (do not wait for user input)"
     )
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender or viser'
+    )
     args = parser.parse_args()
 
     robot = skrobot.models.Kuka()
 
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+    viewer = skrobot.viewers.create_viewer(args.viewer, resolution=(640, 480))
 
     # base plane
     plane = skrobot.model.Box(
@@ -89,11 +94,9 @@ def main():
         viewer.redraw()
 
         if not args.no_interactive:
-            print('==> Press [q] to close window')
-            while viewer.is_active:
-                time.sleep(0.1)
-                viewer.redraw()
-        viewer.close()
+            viewer.wait_until_close()
+        else:
+            viewer.close()
         time.sleep(1.0)
 
 

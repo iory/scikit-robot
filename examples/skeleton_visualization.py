@@ -152,6 +152,12 @@ def main():
                         help='Show only skeleton without robot mesh')
     parser.add_argument('--no-interactive', action='store_true',
                         help='Run in non-interactive mode (exit immediately)')
+    parser.add_argument('--viewer', type=str,
+                        choices=['trimesh', 'pyrender', 'viser'],
+                        default='pyrender',
+                        help='Choose the viewer type: trimesh, pyrender or '
+                             'viser (always_on_top is honored by pyrender '
+                             'only)')
     args = parser.parse_args()
 
     # Load robot
@@ -189,21 +195,15 @@ def main():
                 print(f"Saved to {f.name}")
     else:
         # Show in viewer
-        import time
+        from skrobot.viewers import create_viewer
 
-        from skrobot.viewers import PyrenderViewer
-
-        viewer = PyrenderViewer()
+        viewer = create_viewer(args.viewer)
         if not args.no_skeleton:
             viewer.add(robot)
         viewer.add(skeleton, always_on_top=True)
         viewer.show()
 
-        print("Press 'q' to quit")
-        while viewer.is_active:
-            time.sleep(0.1)
-            viewer.redraw()
-        viewer.close()
+        viewer.wait_until_close(message="Press 'q' to quit")
 
 
 if __name__ == "__main__":

@@ -252,7 +252,7 @@ def next_wall_target_above(end_swing):
 # ---------------------------------------------------------------------------
 
 def main(num_steps=40, interactive=True, step_pause=0.05,
-         substep_pause=0.0):
+         substep_pause=0.0, viewer_name='pyrender'):
     robot = Griphis()
     end1 = robot.gripper_1_end_coords
     end2 = robot.gripper_2_end_coords
@@ -275,8 +275,8 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
     axis_swing = None
     if interactive:
         try:
-            from skrobot.viewers import PyrenderViewer
-            viewer = PyrenderViewer()
+            from skrobot.viewers import create_viewer
+            viewer = create_viewer(viewer_name)
             viewer.add(robot)
             # Ground at z = 0, spanning the robot side of the wall so it
             # visually anchors where the climb starts from.
@@ -338,10 +338,7 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
         stance_id, swing_id = swing_id, stance_id
 
     if viewer is not None:
-        print('==> Press [q] to close window')
-        while viewer.is_active:
-            time.sleep(0.1)
-            viewer.redraw()
+        viewer.wait_until_close()
 
 
 if __name__ == '__main__':
@@ -352,16 +349,21 @@ if __name__ == '__main__':
              '3 with --no-interactive)')
     parser.add_argument(
         '--no-interactive', action='store_true',
-        help='skip the PyrenderViewer and exit as soon as the gait finishes; '
+        help='skip the viewer and exit as soon as the gait finishes; '
              'also reduces --steps default to 3 so smoke tests finish fast')
     parser.add_argument('--pause', type=float, default=0.05,
                         help='seconds to pause between steps in viewer')
     parser.add_argument('--substep-pause', type=float, default=0.0,
                         help='seconds to pause between arc waypoints')
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender or viser')
     args = parser.parse_args()
     steps = args.steps if args.steps is not None else (
         3 if args.no_interactive else 40)
     main(num_steps=steps,
          interactive=not args.no_interactive,
          step_pause=args.pause,
-         substep_pause=args.substep_pause)
+         substep_pause=args.substep_pause,
+         viewer_name=args.viewer)

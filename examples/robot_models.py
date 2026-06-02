@@ -23,8 +23,8 @@ def main():
         description='Set viewer for skrobot.')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender'], default='pyrender',
-        help='Choose the viewer type: trimesh or pyrender')
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender or viser')
     parser.add_argument(
         '--no-interactive',
         action='store_true',
@@ -32,10 +32,8 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.viewer == 'trimesh':
-        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
-    elif args.viewer == 'pyrender':
-        viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
+    viewer = skrobot.viewers.create_viewer(
+        args.viewer, resolution=(640, 480))
 
     robots = [
         skrobot.models.Kuka(),
@@ -63,11 +61,9 @@ def main():
     viewer.show()
 
     if not args.no_interactive:
-        print('==> Press [q] to close window')
-        while viewer.is_active:
-            time.sleep(0.1)
-            viewer.redraw()
-    viewer.close()
+        viewer.wait_until_close()
+    else:
+        viewer.close()
     time.sleep(1.0)
 
 

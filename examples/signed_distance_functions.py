@@ -22,8 +22,8 @@ parser = argparse.ArgumentParser(
     description='Visualization signed distance function.')
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender'], default='trimesh',
-    help='Choose the viewer type: trimesh or pyrender')
+    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+    help='Choose the viewer type: trimesh, pyrender or viser')
 parser.add_argument(
     '--no-interactive',
     action='store_true',
@@ -31,10 +31,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-if args.viewer == 'trimesh':
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
-elif args.viewer == 'pyrender':
-    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480))
+viewer = skrobot.viewers.create_viewer(args.viewer, resolution=(640, 480))
 
 viewer.add(b)
 viewer.add(m)
@@ -46,15 +43,11 @@ for _ in range(100):
     ax = Axis(axis_radius=0.001, axis_length=0.01, pos=pts[idx], rot=rot)
     viewer.add(ax)
 
-# Starting the viewer spins up an OpenGL render thread. Under the headless
-# software GL stack used in CI (xvfb + Mesa) this occasionally triggers a
-# native heap corruption (SIGABRT), so skip it in non-interactive runs as the
-# other examples do.
 if not args.no_interactive:
+    # Only start the GL renderer for interactive use. Showing the viewer
+    # during tests (--no-interactive) launches an OpenGL draw thread that
+    # has been an occasional source of native heap corruption under the
+    # CI's software GL, so keep it out of the test path.
     viewer.show()
-    print('==> Press [q] to close window')
-    while viewer.is_active:
-        time.sleep(0.1)
-        viewer.redraw()
-    viewer.close()
+    viewer.wait_until_close()
     time.sleep(1.0)
