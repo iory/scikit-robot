@@ -38,7 +38,6 @@ elif args.viewer == 'pyrender':
 
 viewer.add(b)
 viewer.add(m)
-viewer.show()
 pts, sd_vals = u.surface_points()
 
 for _ in range(100):
@@ -47,10 +46,15 @@ for _ in range(100):
     ax = Axis(axis_radius=0.001, axis_length=0.01, pos=pts[idx], rot=rot)
     viewer.add(ax)
 
-print('==> Press [q] to close window')
+# Starting the viewer spins up an OpenGL render thread. Under the headless
+# software GL stack used in CI (xvfb + Mesa) this occasionally triggers a
+# native heap corruption (SIGABRT), so skip it in non-interactive runs as the
+# other examples do.
 if not args.no_interactive:
+    viewer.show()
+    print('==> Press [q] to close window')
     while viewer.is_active:
         time.sleep(0.1)
         viewer.redraw()
-viewer.close()
-time.sleep(1.0)
+    viewer.close()
+    time.sleep(1.0)
