@@ -70,7 +70,7 @@ PyrenderViewer
   The viewer is initialized with specified resolution, update interval, and rendering flags. Key parameters include:
 
   - ``resolution``: Window size (default: ``(640, 480)``)
-  - ``update_interval``: Update frequency in seconds (default: ``1.0``)
+  - ``update_interval``: Update frequency in seconds (default: ``1 / 30``, i.e. 30 Hz)
   - ``enable_collision_toggle``: Enable collision/visual mesh switching (default: ``True``)
   - ``title``: Window title (default: ``'scikit-robot PyrenderViewer'``)
 
@@ -279,16 +279,17 @@ The following video demonstrates the interactive IK feature, where dragging the 
     # Use viser viewer with visualize-urdf command (IK is enabled by default)
     skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer viser
 
-.. caution::
+.. note::
 
-  To speed up the rendering cycle in **TrimeshSceneViewer** and **PyrenderViewer**, adjust the ``update_interval`` to the reciprocal of the desired frequency. For example, to achieve updates at 30 Hz, set the ``update_interval`` to 1/30. This change will increase the frequency at which the ``redraw()`` function is called, making the rendering process faster.
+  Both **TrimeshSceneViewer** and **PyrenderViewer** update at 30 Hz by default (``update_interval=1/30``). The viewer only re-renders when the scene actually changes (e.g. after :func:`redraw`), so a static view stays cheap even at 30 Hz. The ``update_interval`` controls how often the ``redraw()`` request is polled: a smaller value gives a higher refresh rate (smoother interaction and animation) at the cost of more idle CPU, while a larger value lowers idle CPU usage.
 
   Example usage:
 
   .. code-block:: python
 
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # Set update interval for 30 Hz
-    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480), update_interval=1.0/30)      # Same for PyrenderViewer
+    # 30 Hz is already the default; pass update_interval only to override it.
+    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480), update_interval=1.0/30)   # 30 Hz (default)
+    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480), update_interval=1.0)           # 1 Hz, lower idle CPU
 
 
 Color Management
