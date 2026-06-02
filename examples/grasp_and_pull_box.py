@@ -61,8 +61,7 @@ def move_to_box(box):
             midcoords(i / 20.0, start_coords, target_coords),
             link_list=link_list,
             move_target=move_target)
-        viewer.redraw()
-        time.sleep(0.1)
+        viewer.pause(0.1)
 
 
 def grasp_box(box):
@@ -81,8 +80,7 @@ def pull_box(box):
             link_list=link_list,
             move_target=move_target)
         robot_model.look_at(box)
-        viewer.redraw()
-        time.sleep(0.1)
+        viewer.pause(0.1)
 
 
 parser = argparse.ArgumentParser(
@@ -94,8 +92,8 @@ parser.add_argument(
 )
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender'], default='trimesh',
-    help='Choose the viewer type: trimesh or pyrender')
+    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+    help='Choose the viewer type: trimesh, pyrender or viser')
 args = parser.parse_args()
 
 
@@ -115,12 +113,7 @@ right_arm_end_coords = skrobot.coordinates.CascadedCoords(
 move_target = right_arm_end_coords
 
 # Create viewer
-if args.viewer == 'trimesh':
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480),
-                                                update_interval=0.1)
-elif args.viewer == 'pyrender':
-    viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480),
-                                            update_interval=0.1)
+viewer = skrobot.viewers.create_viewer(args.viewer, resolution=(640, 480))
 viewer.add(robot_model)
 viewer.show()
 viewer.set_camera([np.deg2rad(45), -np.deg2rad(0),
@@ -135,9 +128,7 @@ grasp_box(box)
 pull_box(box)
 
 if not args.no_interactive:
-    print('==> Press [q] to close window')
-    while viewer.is_active:
-        time.sleep(0.1)
-        viewer.redraw()
-viewer.close()
+    viewer.wait_until_close()
+else:
+    viewer.close()
 time.sleep(1.0)

@@ -32,6 +32,11 @@ def main():
         '--no-interactive', action='store_true',
         help='Run without waiting for user input'
     )
+    parser.add_argument(
+        '--viewer', type=str,
+        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
+        help='Choose the viewer type: trimesh, pyrender or viser'
+    )
     args = parser.parse_args()
 
     # Create robot
@@ -86,7 +91,8 @@ def main():
 
     # Setup viewer
     print("\nStarting viewer...")
-    viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(800, 600))
+    viewer = skrobot.viewers.create_viewer(
+        args.viewer, resolution=(800, 600))
     viewer.add(robot)
     viewer.add(sphere_obs)
     viewer.add(box_obs)
@@ -188,8 +194,7 @@ def main():
                 status = "COLLISION" if min_dist < 0 else "Safe"
                 print(f"\rmin_dist = {min_dist:+.4f} ({status})    ", end="", flush=True)
 
-            viewer.redraw()
-            time.sleep(0.05)
+            viewer.pause(0.05)
             t += 0.05
 
         print()

@@ -16,6 +16,10 @@ def warn_gl(error_log):
 class DummyViewer(object):
     def __init__(self, *args, **kwargs):
         self.has_exit = True
+        self._is_active = False
+    @property
+    def is_active(self):
+        return self._is_active
     def redraw(self):
         pass
     def show(self):
@@ -27,6 +31,12 @@ class DummyViewer(object):
     def set_camera(self, *args, **kwargs):
         pass
     def save_image(self, file_obj):
+        pass
+    def close(self):
+        self._is_active = False
+    def wait_until_close(self, *args, **kwargs):
+        pass
+    def pause(self, *args, **kwargs):
         pass
 
 try:
@@ -89,3 +99,76 @@ except ImportError as e:
 
 # Backwards compatibility alias
 ViserVisualizer = ViserViewer
+
+
+# Mapping from viewer name to its class. Used by :func:`create_viewer`.
+_VIEWER_CLASSES = {
+    'trimesh': TrimeshSceneViewer,
+    'pyrender': PyrenderViewer,
+    'viser': ViserViewer,
+    'notebook': JupyterNotebookViewer,
+}
+
+
+def _supported_kwargs(cls, kwargs):
+    """Return the subset of ``kwargs`` accepted by ``cls.__init__``.
+
+    Each viewer backend takes a different set of constructor options
+    (e.g. ``resolution`` applies to the trimesh / pyrender viewers but not
+    to the viser viewer, which serves over a browser). When the factory is
+    called with backend-agnostic convenience arguments, options that the
+    selected backend does not understand are dropped here so the same
+    ``create_viewer(name, resolution=...)`` call works for every backend.
+    """
+    try:
+        signature = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return dict(kwargs)
+    parameters = signature.parameters.values()
+    # If the constructor accepts **kwargs, forward everything as-is.
+    if any(p.kind == p.VAR_KEYWORD for p in parameters):
+        return dict(kwargs)
+    accepted = {p.name for p in parameters if p.name != 'self'}
+    return {k: v for k, v in kwargs.items() if k in accepted}
+
+
+def create_viewer(name='trimesh', **kwargs):
+    """Create a viewer instance by backend name.
+
+    This is the recommended entry point for examples and applications that
+    want to let the user choose a viewer backend at runtime, replacing the
+    ``if name == 'trimesh': ... elif name == 'pyrender': ...`` blocks that
+    were previously duplicated across scripts.
+
+    Parameters
+    ----------
+    name : str, optional
+        Backend to instantiate. One of ``'trimesh'``, ``'pyrender'``,
+        ``'viser'`` or ``'notebook'``. Default is ``'trimesh'``.
+    **kwargs
+        Keyword arguments forwarded to the selected viewer's constructor
+        (e.g. ``resolution``, ``update_interval``, ``title`` for the
+        trimesh / pyrender viewers, or ``enable_ik`` for the viser viewer).
+        Arguments that the selected backend does not accept are ignored so
+        the same call site can target any backend.
+
+    Returns
+    -------
+    viewer : object
+        An instance of the requested viewer class.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a known viewer backend.
+    """
+    if not isinstance(name, str):
+        raise ValueError(
+            "Viewer name must be a string, got {}.".format(type(name).__name__))
+    key = name.lower()
+    if key not in _VIEWER_CLASSES:
+        raise ValueError(
+            "Unknown viewer '{}'. Available viewers: {}.".format(
+                name, ', '.join(sorted(_VIEWER_CLASSES))))
+    cls = _VIEWER_CLASSES[key]
+    return cls(**_supported_kwargs(cls, kwargs))

@@ -14,6 +14,7 @@ import trimesh.viewer
 from trimesh.viewer.trackball import Trackball
 
 from skrobot import model as model_module
+from skrobot.viewers._base import _InteractiveViewerMixin
 
 
 logger = logging.getLogger('trimesh')
@@ -42,7 +43,7 @@ def _redraw_all_windows():
         window._legacy_invalid = False
 
 
-class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
+class TrimeshSceneViewer(trimesh.viewer.SceneViewer, _InteractiveViewerMixin):
     """TrimeshSceneViewer class implemented as a Singleton.
 
     This ensures that only one instance of the viewer

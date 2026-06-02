@@ -26,10 +26,11 @@ from skrobot.model.primitives import PointCloudLink
 from skrobot.model.primitives import Sphere
 from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
+from skrobot.viewers._base import _InteractiveViewerMixin
 from skrobot.viewers._manipulability_ellipse import ManipulabilityEllipse
 
 
-class ViserViewer:
+class ViserViewer(_InteractiveViewerMixin):
     """Viser-based 3D viewer for scikit-robot.
 
     Parameters
@@ -79,6 +80,12 @@ class ViserViewer:
         self._joint_sliders = dict()
         self._joint_folders = dict()
         self._original_joint_limits = dict()  # joint_name -> (min, max)
+
+        # Camera state shared across clients. ``_camera_view`` holds the
+        # most recent (position, look_at, up) tuple set via set_camera so
+        # that clients connecting later get the same view.
+        self._camera_view = None
+        self._camera_connect_registered = False
 
         # Motion planning implies IK
         self._enable_motion_planning = enable_motion_planning
@@ -156,6 +163,147 @@ class ViserViewer:
     def close(self):
         self._is_active = False
         self._server.stop()
+
+    def set_camera(self, angles=None, distance=None, center=None,
+                   resolution=None, fov=None, coords_or_transform=None):
+        """Set the camera pose for every connected viser client.
+
+        The signature mirrors
+        :meth:`skrobot.viewers.PyrenderViewer.set_camera` so the same call
+        site works for any viewer backend. The euler-angle convention
+        (``trimesh.transformations.euler_matrix``) matches the trimesh and
+        pyrender viewers. The resolved view is applied to all currently
+        connected clients and stored so that clients which connect later
+        receive the same view.
+
+        Parameters
+        ----------
+        angles : array-like, optional
+            Camera orientation as XYZ euler angles in radians.
+        distance : float, optional
+            Distance from the camera to the look-at center. When omitted it
+            is estimated from the scene's bounding box so the geometry fits
+            in view.
+        center : array-like, optional
+            World point the camera looks at. Defaults to the center of the
+            bounding box of the geometry currently in the scene.
+        resolution : array-like, optional
+            Accepted for signature compatibility with the other viewers;
+            the viser client controls its own framebuffer resolution, so
+            this value is unused.
+        fov : array-like, optional
+            Horizontal/vertical field of view in degrees, used only to
+            estimate ``distance`` when it is not given. Default (60, 45).
+        coords_or_transform : Coordinates or (4, 4) array-like, optional
+            Explicit camera world pose. Overrides ``angles`` / ``distance``
+            / ``center`` when provided.
+        """
+        view = self._resolve_camera_view(
+            angles, distance, center, fov, coords_or_transform)
+        if view is None:
+            return
+        self._camera_view = view
+        for client in self._server.get_clients().values():
+            self._apply_camera_view(client, view)
+        self._register_camera_on_connect()
+
+    def _resolve_camera_view(self, angles, distance, center, fov,
+                             coords_or_transform):
+        """Resolve set_camera arguments to a (position, look_at, up) tuple.
+
+        Returns None when there is not enough information to position the
+        camera (e.g. neither ``angles`` nor ``coords_or_transform`` given).
+        """
+        from trimesh import transformations
+
+        if coords_or_transform is not None:
+            if isinstance(coords_or_transform, Coordinates):
+                transform = coords_or_transform.worldcoords().T()
+            else:
+                transform = np.asarray(coords_or_transform, dtype=np.float64)
+            position = transform[:3, 3]
+            forward = -transform[:3, 2]
+            up = transform[:3, 1]
+            return position, position + forward, up
+
+        if angles is None:
+            return None
+
+        rotation = transformations.euler_matrix(*angles)[:3, :3]
+        points = self._collect_world_points()
+        if center is not None:
+            center_w = np.asarray(center, dtype=np.float64)
+        elif points is not None:
+            center_w = points.min(axis=0) + 0.5 * np.ptp(points, axis=0)
+        else:
+            center_w = np.zeros(3, dtype=np.float64)
+
+        if distance is None:
+            if points is not None and len(points) > 1:
+                radius = 0.5 * float(np.linalg.norm(np.ptp(points, axis=0)))
+                fov_arr = np.array([60.0, 45.0]) if fov is None else \
+                    np.asarray(fov, dtype=np.float64)
+                half_fov = np.radians(float(np.min(fov_arr))) / 2.0
+                distance = max(radius / max(np.tan(half_fov), 1e-6), 1e-3)
+            else:
+                distance = 1.0
+
+        z_axis = rotation[:, 2]
+        position = center_w + distance * z_axis
+        up = rotation[:, 1]
+        return position, center_w, up
+
+    def _collect_world_points(self):
+        """Return world-frame points spanning the scene geometry.
+
+        Used to derive the camera look-at center and a fit distance. Each
+        link contributes the eight corners of its visual mesh's bounding
+        box (transformed to world), or just its origin when no mesh bounds
+        are available. Returns None when the scene is empty.
+        """
+        points = []
+        for link_id, link in self._linkid_to_link.items():
+            try:
+                translation = np.asarray(link.worldpos(), dtype=np.float64)
+                rotation = np.asarray(link.worldrot(), dtype=np.float64)
+            except Exception:
+                continue
+            mesh = None
+            try:
+                mesh = link.concatenated_visual_mesh
+            except Exception:
+                mesh = None
+            bounds = getattr(mesh, 'bounds', None)
+            if bounds is not None:
+                lower, upper = bounds
+                for cx in (lower[0], upper[0]):
+                    for cy in (lower[1], upper[1]):
+                        for cz in (lower[2], upper[2]):
+                            local = np.array([cx, cy, cz], dtype=np.float64)
+                            points.append(rotation.dot(local) + translation)
+            else:
+                points.append(translation)
+        if not points:
+            return None
+        return np.asarray(points, dtype=np.float64)
+
+    @staticmethod
+    def _apply_camera_view(client, view):
+        position, look_at, up = view
+        client.camera.position = tuple(float(v) for v in position)
+        client.camera.look_at = tuple(float(v) for v in look_at)
+        client.camera.up_direction = tuple(float(v) for v in up)
+
+    def _register_camera_on_connect(self):
+        """Apply the stored camera view to clients that connect later."""
+        if self._camera_connect_registered:
+            return
+        self._camera_connect_registered = True
+
+        @self._server.on_client_connect
+        def _apply_stored_camera(client):
+            if self._camera_view is not None:
+                self._apply_camera_view(client, self._camera_view)
 
     def _get_limb_attribute(self, robot_model, group_name, attr_name):
         """Get an attribute from a robot model's limb for a given group.

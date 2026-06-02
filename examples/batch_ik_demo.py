@@ -56,8 +56,8 @@ def main():
     parser.add_argument('--no-interactive', action='store_true',
                         help='Disable interactive visualization')
     parser.add_argument('--viewer', type=str,
-                        choices=['pyrender', 'trimesh'], default='trimesh',
-                        help='Choose the viewer type: trimesh or pyrender. Default: trimesh')
+                        choices=['pyrender', 'trimesh', 'viser'], default='pyrender',
+                        help='Choose the viewer type: trimesh, pyrender or viser. Default: pyrender')
     parser.add_argument('--with-torso', action='store_true',
                         help='Include torso in IK (PR2 and Fetch only)')
 
@@ -292,12 +292,8 @@ def main():
 
         if not args.no_interactive:
             try:
-                if args.viewer == 'pyrender':
-                    from skrobot.viewers import PyrenderViewer
-                    viewer = PyrenderViewer(update_interval=1 / 30.0)
-                else:  # trimesh
-                    from skrobot.viewers import TrimeshSceneViewer
-                    viewer = TrimeshSceneViewer(update_interval=1 / 30.0)
+                from skrobot.viewers import create_viewer
+                viewer = create_viewer(args.viewer)
 
                 print(f"Adding {len(target_poses)} target poses as coordinate frames...")
                 axis_objects = []
@@ -387,8 +383,7 @@ def main():
                                 solution_idx = (solution_idx + 1) % len(successful_solutions)
                                 last_change_time = current_time
 
-                        viewer.redraw()
-                        time.sleep(0.05)
+                        viewer.pause(0.05)
 
                     print("\nVisualization completed")
 
