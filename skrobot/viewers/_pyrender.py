@@ -279,7 +279,10 @@ class PyrenderViewer(pyrender.Viewer):
 
         with self._render_lock:
             if not self._redraw:
-                super(PyrenderViewer, self).on_draw()
+                # Nothing changed since the last frame, so skip rendering
+                # entirely. Without this, the scene is re-rendered on every
+                # refresh tick (e.g. 30 times per second), which keeps the
+                # CPU busy even when the view is completely static.
                 return
             # apply latest angle-vector
             for link_id, (node, link) in self._visual_mesh_map.items():
