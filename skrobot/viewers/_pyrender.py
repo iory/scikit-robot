@@ -99,7 +99,7 @@ class PyrenderViewer(pyrender.Viewer):
         The resolution of the viewer. Default is (640, 480).
     update_interval : float, optional
         The update interval (in seconds) for the viewer. Default is
-        1.0 seconds.
+        1 / 30 seconds (30 Hz).
     title : str, optional
         The title of the viewer window. Default is 'scikit-robot PyrenderViewer'.
     enable_collision_toggle : bool, optional
@@ -123,7 +123,7 @@ class PyrenderViewer(pyrender.Viewer):
     # Class variable to hold the single instance of the class.
     _instance = None
 
-    def __init__(self, resolution=None, update_interval=1.0,
+    def __init__(self, resolution=None, update_interval=1 / 30.0,
                  render_flags=None, title=None, enable_collision_toggle=True):
         if getattr(self, '_initialized', False):
             return
@@ -279,7 +279,10 @@ class PyrenderViewer(pyrender.Viewer):
 
         with self._render_lock:
             if not self._redraw:
-                super(PyrenderViewer, self).on_draw()
+                # Nothing changed since the last frame, so skip rendering
+                # entirely. Without this, the scene is re-rendered on every
+                # refresh tick (e.g. 30 times per second), which keeps the
+                # CPU busy even when the view is completely static.
                 return
             # apply latest angle-vector
             for link_id, (node, link) in self._visual_mesh_map.items():

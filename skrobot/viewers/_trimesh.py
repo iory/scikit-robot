@@ -55,7 +55,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
         The resolution of the viewer. Default is (640, 480).
     update_interval : float, optional
         The update interval (in seconds) for the viewer. Default is
-        1.0 seconds.
+        1 / 30 seconds (30 Hz).
     title : str, optional
         The title of the viewer window. Default is 'scikit-robot TrimeshSceneViewer'.
 
@@ -69,7 +69,7 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
     _instance = None
     _version_warning_issued = False
 
-    def __init__(self, resolution=None, update_interval=1.0, title=None):
+    def __init__(self, resolution=None, update_interval=1 / 30.0, title=None):
         if getattr(self, '_initialized', False):
             return
         if resolution is None:
@@ -145,9 +145,10 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
 
     def on_draw(self):
         if not self._redraw:
-            with self.lock:
-                self._update_vertex_list()
-                super(TrimeshSceneViewer, self).on_draw()
+            # Nothing changed since the last frame, so skip rendering
+            # entirely. Without this, the scene is re-rendered on every
+            # refresh tick (e.g. 30 times per second), which keeps the
+            # CPU busy even when the view is completely static.
             return
 
         with self.lock:
@@ -263,6 +264,10 @@ class TrimeshSceneViewer(trimesh.viewer.SceneViewer):
                 )
 
     def save_image(self, file_obj):
+        # Force a redraw so the freshly rendered frame is captured. on_draw
+        # skips rendering when self._redraw is False, so without this the
+        # buffer read back below could contain a stale frame.
+        self._redraw = True
         self.switch_to()
         self.dispatch_events()
         self.dispatch_event('on_draw')
