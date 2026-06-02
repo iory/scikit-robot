@@ -132,6 +132,20 @@ def griphis_urdfpath():
     return path
 
 
+def hydrus_urdfpath():
+    path = osp.join(get_cache_dir(),
+                    'hydrus_description', 'urdf', 'hydrus.urdf')
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url='https://github.com/iory/scikit-robot-models/raw/main/hydrus_description.tar.gz',  # NOQA
+        fname='hydrus_description.tar.gz',
+        md5='88bf5714a51dcbde5b6fa37802973eeb',
+        extract=True,
+    )
+    return path
+
+
 def jaxon_urdfpath():
     """Path to the JAXON JVRC humanoid URDF.
 
