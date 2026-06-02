@@ -58,6 +58,14 @@ class TestSDF(unittest.TestCase):
         unionsdf = UnionSDF(sdf_list=[boxsdf, gridsdf])
         cls.unionsdf = unionsdf
 
+    def setUp(self):
+        # surface_points()/ray_marching rely on random ray directions
+        # (np.random.randn / np.random.permutation). Without a fixed seed the
+        # tests are non-deterministic: an unlucky direction toward an edge or
+        # corner makes ray_marching converge slowly and occasionally hit the
+        # CI per-test timeout. Seed before every test for reproducibility.
+        np.random.seed(0)
+
     def test_box__signed_distance(self):
         sdf = self.boxsdf
         X_origin = np.zeros((1, 3))
