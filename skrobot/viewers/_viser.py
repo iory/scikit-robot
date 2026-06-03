@@ -104,6 +104,11 @@ class ViserViewer(_InteractiveViewerMixin):
         # Batch IK state
         # robot_id -> {group_name -> solver}
         self._batch_ik_solvers: Dict[int, Dict[str, object]] = {}
+        # Synchronous NumPy batch solvers, used as an instant stopgap while
+        # the (faster) JAX solver is still building / JIT-warming in the
+        # background, so the very first gizmo drag already moves the robot.
+        # (robot_id, group_name) -> solver
+        self._numpy_batch_solvers: Dict[tuple, object] = {}
         self._batch_ik_samples = None
 
         # JAX availability check (done once at init)
@@ -113,6 +118,13 @@ class ViserViewer(_InteractiveViewerMixin):
             self._jax_available = 'jax' in list_backends()
         except Exception:
             pass
+        # Backend used for the interactive batch-IK fallback that catches
+        # single-shot IK failures (e.g. near singularities). JAX is much
+        # faster (JIT + parallel restarts), but the always-present NumPy
+        # backend works too, so the gizmo stays responsive even without JAX.
+        self._batch_ik_backend = 'jax' if self._jax_available else 'numpy'
+        # Show the "install JAX for speed" hint only once.
+        self._jax_hint_shown = False
 
         # Throttling for IK callbacks
         self._last_ik_time: Dict[tuple, float] = {}  # (robot_id, group_name) -> timestamp
@@ -788,7 +800,10 @@ class ViserViewer(_InteractiveViewerMixin):
             stop=30,
             revert_if_fail=True,
         )
-        if (result is False or result is None) and self._jax_available:
+        if result is False or result is None:
+            # Single-shot IK failed (often a local minimum / singularity).
+            # Retry with the batch solver, which tries many random restarts.
+            # Uses JAX when available, otherwise the NumPy backend.
             result = self._solve_ik_batch(
                 robot_id, group_name, target_pos, target_rot)
         return result
@@ -925,6 +940,62 @@ class ViserViewer(_InteractiveViewerMixin):
         with self._ik_update_guard():
             self._update_pose_inputs(target, pos, rot)
 
+    def _maybe_show_jax_hint(self):
+        """Print a one-time hint that installing JAX speeds up batch IK.
+
+        Shown in red when the interactive IK falls back to the NumPy batch
+        solver (i.e. JAX is not installed). NumPy works but JAX is much
+        faster for the random-restart batch solve.
+        """
+        if self._jax_hint_shown or self._jax_available:
+            return
+        self._jax_hint_shown = True
+        # ANSI red; falls back gracefully if the terminal ignores it.
+        print(
+            "\033[31m[ViserViewer IK] Using the NumPy batch-IK fallback. "
+            "Install JAX for much faster interactive IK: "
+            "pip install jax jaxlie\033[0m",
+            flush=True)
+
+    def _get_numpy_stopgap_solver(self, robot_id, group_name):
+        """Return a synchronous NumPy batch IK solver, creating it on demand.
+
+        Used as an instant fallback while the JAX solver is still building /
+        JIT-warming in a background thread, so interactive IK responds from
+        the first gizmo drag. NumPy solvers build quickly and need no warmup.
+
+        Parameters
+        ----------
+        robot_id : int
+            Robot model ID.
+        group_name : str
+            Name of the IK group.
+
+        Returns
+        -------
+        callable or None
+            The NumPy batch IK solver, or None if creation failed.
+        """
+        key = (robot_id, group_name)
+        solver = self._numpy_batch_solvers.get(key)
+        if solver is not None:
+            return solver
+
+        target = self._get_ik_target(robot_id, group_name)
+        if target is None:
+            return None
+        try:
+            from skrobot.kinematics.differentiable import create_batch_ik_solver
+            solver = create_batch_ik_solver(
+                target['robot_model'], target['link_list'],
+                target['end_coords'], backend_name='numpy')
+        except Exception as e:
+            print("[Batch IK] Failed to create NumPy stopgap solver: "
+                  "{}".format(e))
+            return None
+        self._numpy_batch_solvers[key] = solver
+        return solver
+
     def _get_or_create_solver(self, robot_id, group_name,
                               target_pos, target_rot, current_angles):
         """Get an existing batch IK solver, or start async creation.
@@ -983,6 +1054,31 @@ class ViserViewer(_InteractiveViewerMixin):
         robot_model = target['robot_model']
         link_list = target['link_list']
         end_coords = target['end_coords']
+        backend = self._batch_ik_backend
+
+        if backend == 'numpy':
+            # The NumPy backend builds quickly and needs no JIT warmup, so
+            # create it synchronously. This lets the very first gizmo drag
+            # already benefit from the batch fallback (no "first drag does
+            # nothing" delay that the JAX background path has).
+            self._maybe_show_jax_hint()
+            try:
+                from skrobot.kinematics.differentiable import create_batch_ik_solver
+                solver = create_batch_ik_solver(
+                    robot_model, link_list, end_coords,
+                    backend_name='numpy',
+                )
+            except Exception as e:
+                print("[Batch IK] Failed to create NumPy solver: {}".format(e))
+                with self._ik_lock:
+                    self._solver_creating_keys.discard(solver_key)
+                return None
+            with self._ik_lock:
+                if robot_id not in self._batch_ik_solvers:
+                    self._batch_ik_solvers[robot_id] = {}
+                self._batch_ik_solvers[robot_id][group_name] = solver
+                self._solver_creating_keys.discard(solver_key)
+            return solver
 
         def _create_solver_background():
             try:
@@ -1072,6 +1168,11 @@ class ViserViewer(_InteractiveViewerMixin):
 
         solver = self._get_or_create_solver(
             robot_id, group_name, target_pos, target_rot, current_angles)
+        if solver is None:
+            # Primary (JAX) solver is still warming up in the background.
+            # Use a synchronous NumPy batch solver as an instant stopgap so
+            # the gizmo responds from the very first drag.
+            solver = self._get_numpy_stopgap_solver(robot_id, group_name)
         if solver is None:
             return False
 
