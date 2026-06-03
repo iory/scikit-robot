@@ -540,8 +540,17 @@ class ViserViewer(_InteractiveViewerMixin):
                 ee_pos = end_coords.worldpos()
                 ee_rot = end_coords.worldrot()
 
+                # NOTE: the node name MUST start with a leading slash.
+                # viser normalizes the scene-node name to "/<name>" (so the
+                # browser knows the node and sends drag updates using the
+                # slashed name), but it registers the drag-update handler
+                # under the *un-normalized* name as passed. If we pass
+                # "ik_target/..." (no slash), the handler key
+                # ("ik_target/...") never matches the slashed name the
+                # browser sends, so on_update/on_drag_start silently never
+                # fire and dragging the gizmo does nothing.
                 control = self._server.scene.add_transform_controls(
-                    f"ik_target/{robot_name}/{group_name}",
+                    f"/ik_target/{robot_name}/{group_name}",
                     scale=0.1,
                     position=ee_pos,
                     wxyz=matrix2quaternion(ee_rot),
@@ -1597,8 +1606,12 @@ class ViserViewer(_InteractiveViewerMixin):
         pos = link.worldpos()
         rot = link.worldrot()
 
+        # Leading slash is required: viser registers the drag handler under
+        # the passed name but normalizes the node name to "/<name>", which is
+        # what the browser sends drag updates as. Without the slash the
+        # handler never fires (see the note in _setup_ik_controls).
         self._obstacle_transform_control = self._server.scene.add_transform_controls(
-            f"obstacle_control/{name}",
+            f"/obstacle_control/{name}",
             scale=0.15,
             position=pos,
             wxyz=matrix2quaternion(rot),
