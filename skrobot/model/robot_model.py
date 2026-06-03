@@ -18,7 +18,6 @@ from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import make_matrix
-from skrobot.coordinates import midcoords
 from skrobot.coordinates import midpoint
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates import orient_coords_to_axis
@@ -3457,10 +3456,9 @@ class RobotModel(CascadedLink):
         elif leg == 'right' or leg == 'rleg':
             support_coords = self.rleg.end_coords.copy_worldcoords()
         else:
-            support_coords = midcoords(
-                mid,
-                self.lleg.end_coords.copy_worldcoords(),
-                self.rleg.end_coords.copy_worldcoords())
+            support_coords = self.lleg.end_coords.copy_worldcoords()\
+                .interpolate(
+                    self.rleg.end_coords.copy_worldcoords(), mid)
         tmp_coords = fix_coords.copy_worldcoords()
         move_coords = support_coords.transformation(self)
         tmp_coords.transform(move_coords, 'local')

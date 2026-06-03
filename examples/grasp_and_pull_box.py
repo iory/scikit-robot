@@ -7,7 +7,6 @@ import numpy as np
 
 import skrobot
 from skrobot.coordinates.base import Coordinates
-from skrobot.coordinates.geo import midcoords
 from skrobot.model.primitives import Box
 
 
@@ -58,7 +57,7 @@ def move_to_box(box):
 
     for i in range(20):
         robot_model.inverse_kinematics(
-            midcoords(i / 20.0, start_coords, target_coords),
+            start_coords.interpolate(target_coords, i / 20.0),
             link_list=link_list,
             move_target=move_target)
         viewer.pause(0.1)
@@ -76,7 +75,7 @@ def pull_box(box):
 
     for i in range(20):
         robot_model.inverse_kinematics(
-            midcoords(i / 20.0, start_coords, target_coords),
+            start_coords.interpolate(target_coords, i / 20.0),
             link_list=link_list,
             move_target=move_target)
         robot_model.look_at(box)
