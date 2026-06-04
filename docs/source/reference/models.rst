@@ -21,6 +21,19 @@ Robot Model classes
 
 You can create use robot model classes. Here is a example of robot models.
 
+Aero
+~~~~
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   aero.Aero
+
+.. figure:: ../../image/aero.png
+    :scale: 40%
+    :align: center
+
 Fetch
 ~~~~~
 

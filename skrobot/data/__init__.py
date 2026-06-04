@@ -105,6 +105,30 @@ def bunny_objpath():
     return path
 
 
+def aero_urdfpath(use_hand=True):
+    """Return the path to the SEED-Noid / Aero URDF.
+
+    Parameters
+    ----------
+    use_hand : bool
+        If True, return the model with the SEED hand (``aero.urdf``).
+        If False, return the hand-less model whose arms end at the
+        ``*_eef_*`` frames (``aero_nohand.urdf``).
+    """
+    name = 'aero.urdf' if use_hand else 'aero_nohand.urdf'
+    path = osp.join(get_cache_dir(), 'aero_description',
+                    'typeJSK', 'urdf', name)
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url='https://github.com/iory/scikit-robot-models/raw/main/aero_description.tar.gz',  # NOQA
+        fname='aero_description.tar.gz',
+        md5='9e1e0b22c01652677150cbfc45541eb9',
+        extract=True,
+    )
+    return path
+
+
 def fetch_urdfpath():
     path = osp.join(get_cache_dir(), 'fetch_description', 'fetch.urdf')
     if osp.exists(path):

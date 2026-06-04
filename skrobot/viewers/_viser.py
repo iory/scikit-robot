@@ -1,4 +1,6 @@
+from collections import OrderedDict
 from contextlib import contextmanager
+from functools import cached_property as _functools_cached_property
 import threading
 import time
 from typing import Dict
@@ -28,6 +30,14 @@ from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
 from skrobot.viewers._base import _InteractiveViewerMixin
 from skrobot.viewers._manipulability_ellipse import ManipulabilityEllipse
+
+
+try:
+    from cached_property import cached_property as _ext_cached_property
+    _LIMB_DESCRIPTOR_TYPES = (
+        property, _functools_cached_property, _ext_cached_property)
+except ImportError:
+    _LIMB_DESCRIPTOR_TYPES = (property, _functools_cached_property)
 
 
 class ViserViewer(_InteractiveViewerMixin):
@@ -66,6 +76,12 @@ class ViserViewer(_InteractiveViewerMixin):
         'head': ['head_end_coords'],
         'torso': ['torso_end_coords'],
     }
+
+    # Base-class limb aliases that resolve to the canonical abbreviated
+    # limbs (rarm/larm/...).  Visited last during limb discovery so the
+    # canonical name wins when de-duplicating identical chains.
+    _LIMB_ALIAS_NAMES = (
+        'arm', 'right_arm', 'left_arm', 'right_leg', 'left_leg')
 
     def __init__(
         self,
@@ -487,6 +503,154 @@ class ViserViewer(_InteractiveViewerMixin):
             return list(link_list)
         return None
 
+    @staticmethod
+    def _is_unsuitable_ik_group(group_name, links):
+        """Whether a chain should be excluded from interactive IK controls.
+
+        Skips torso-only chains, grippers, and chains with fewer than three
+        links.  ``links`` may be a list of link names (geometry groups) or a
+        list of link objects (model limbs); only its length is used.
+        """
+        if 'gripper' in group_name:
+            return True
+        if 'torso' in group_name and 'arm' not in group_name:
+            return True
+        return len(links) < 3
+
+    def _discover_model_limbs(self, robot_model):
+        """Discover limbs declared on the robot model.
+
+        Enumerates every property / cached_property that returns a
+        ``RobotModel`` exposing a non-empty ``link_list`` and a
+        ``CascadedCoords`` ``end_coords``.  This is how a robot model
+        advertises kinematic chains - including ones geometry detection
+        cannot infer, such as a parallel-link lifter folded into a
+        whole-body arm (``rarm_whole_body``).
+
+        Parameters
+        ----------
+        robot_model : RobotModel
+            The robot model to inspect.
+
+        Returns
+        -------
+        collections.OrderedDict
+            ``{attr_name: (link_list, end_coords)}``.  Canonical limb
+            names are visited before their aliases.
+        """
+        found = OrderedDict()
+        model_cls = type(robot_model)
+        names = [n for n in dir(model_cls) if not n.startswith('_')]
+        # Visit canonical names before aliases so de-duplication keeps the
+        # canonical group name (e.g. ``rarm`` over ``right_arm`` / ``arm``).
+        names.sort(key=lambda n: (n in self._LIMB_ALIAS_NAMES, n))
+        for name in names:
+            descriptor = getattr(model_cls, name, None)
+            if not isinstance(descriptor, _LIMB_DESCRIPTOR_TYPES):
+                continue
+            try:
+                limb = getattr(robot_model, name)
+            except Exception:
+                continue
+            if not isinstance(limb, RobotModel) or limb is robot_model:
+                continue
+            link_list = getattr(limb, 'link_list', None)
+            end_coords = getattr(limb, 'end_coords', None)
+            if not link_list or not isinstance(end_coords, CascadedCoords):
+                continue
+            found[name] = (list(link_list), end_coords)
+        return found
+
+    def _resolve_ik_groups(self, robot_model, ik_groups):
+        """Resolve detected groups and model limbs to concrete IK chains.
+
+        Limbs the robot model declares as ``RobotModel`` attributes are
+        resolved first so their canonical name wins, then geometry-detected
+        groups fill in any chains the model did not declare.  Entries whose
+        movable-joint set duplicates an already-collected chain are dropped,
+        so aliases (``arm`` / ``right_arm`` / ``rarm``) do not create repeated
+        controls.  Torso-only chains, grippers, and chains with fewer than
+        three movable joints are filtered out uniformly across both sources.
+
+        Parameters
+        ----------
+        robot_model : RobotModel
+            The robot model being set up.
+        ik_groups : dict
+            ``{group_name: (group_data, end_coords_info)}`` from geometry
+            detection.
+
+        Returns
+        -------
+        collections.OrderedDict
+            ``{group_name: (link_list, end_coords)}``.
+        """
+        resolved = OrderedDict()
+        seen_joint_sets = set()
+
+        def joint_key(link_list):
+            return frozenset(
+                id(link.joint) for link in link_list
+                if getattr(link, 'joint', None) is not None)
+
+        def add(group_name, link_list, end_coords):
+            if not link_list or end_coords is None:
+                return
+            key = joint_key(link_list)
+            if not key or key in seen_joint_sets:
+                return
+            seen_joint_sets.add(key)
+            resolved[group_name] = (list(link_list), end_coords)
+
+        # 1. Limbs the robot model declares as RobotModel attributes are
+        #    authoritative: they win the canonical group name when their
+        #    joint set also shows up as a geometry-detected group.  They are
+        #    filtered with the same rules as the geometry groups (which were
+        #    already filtered in _setup_ik_controls).
+        for group_name, (link_list, end_coords) in \
+                self._discover_model_limbs(robot_model).items():
+            if self._is_unsuitable_ik_group(group_name, link_list):
+                continue
+            add(group_name, link_list, end_coords)
+
+        # 2. Geometry-detected groups fill in chains the model did not
+        #    declare (e.g. for models loaded straight from a URDF).
+        for group_name, (group_data, ec_info) in ik_groups.items():
+            link_list = self._find_existing_link_list(robot_model, group_name)
+            if link_list is None:
+                link_names = group_data.get('links', [])
+                link_list = []
+                for name in link_names:
+                    for link in robot_model.link_list:
+                        if link.name == name:
+                            link_list.append(link)
+                            break
+            if not link_list:
+                continue
+
+            end_coords = self._find_existing_end_coords(robot_model, group_name)
+            if end_coords is None:
+                link_names = group_data.get('links', [])
+                default_parent = (
+                    link_names[-1] if link_names else link_list[-1].name)
+                parent_link_name = ec_info.get('parent_link', default_parent)
+                parent_link = None
+                for link in robot_model.link_list:
+                    if link.name == parent_link_name:
+                        parent_link = link
+                        break
+                if parent_link is None:
+                    parent_link = link_list[-1]
+                end_coords = CascadedCoords(
+                    parent=parent_link,
+                    pos=ec_info.get('pos', [0.0, 0.0, 0.0]),
+                    rot=ec_info.get('rot'),
+                    name=f"{group_name}_end_coords",
+                )
+            add(group_name, link_list, end_coords)
+
+        return resolved
+
     def _setup_ik_controls(self, robot_model: RobotModel):
         """Set up interactive IK controls for detected end-effectors."""
         from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
@@ -501,73 +665,35 @@ class ViserViewer(_InteractiveViewerMixin):
             robot_model
         )
 
-        # Filter groups suitable for IK
+        # Filter geometry-detected groups suitable for IK.  The same
+        # suitability rules are applied to model-declared limbs in
+        # _resolve_ik_groups via _is_unsuitable_ik_group.
         ik_groups = {}
         for group_name, group_data in groups.items():
             if group_data is None:
                 continue
-            # Skip torso-only and gripper groups
-            if 'torso' in group_name and 'arm' not in group_name:
-                continue
-            if 'gripper' in group_name:
-                continue
-            # Need at least 3 joints
-            links = group_data.get('links', [])
-            if len(links) < 3:
+            if self._is_unsuitable_ik_group(
+                    group_name, group_data.get('links', [])):
                 continue
             ik_groups[group_name] = (group_data, end_coords_info.get(group_name, {}))
-
-        if not ik_groups:
-            return
 
         # Get robot display name
         robot_name = getattr(robot_model, 'name', None) or f"robot_{robot_id}"
 
+        # Resolve detected groups to concrete (link_list, end_coords) and
+        # augment with limbs the robot model declares directly as RobotModel
+        # attributes (e.g. ``rarm``, ``rarm_whole_body``, ``torso``).  Model
+        # declared limbs are how a robot exposes chains that geometry
+        # detection cannot infer - such as a parallel-link lifter folded into
+        # a whole-body arm chain.
+        resolved_groups = self._resolve_ik_groups(robot_model, ik_groups)
+
+        if not resolved_groups:
+            return
+
         # Create transform control for each group inside IK Controls folder
         with self._ik_controls_folder:
-            for group_name, (group_data, ec_info) in ik_groups.items():
-                # Try to use existing link_list from robot model (e.g., rarm.link_list)
-                link_list = self._find_existing_link_list(robot_model, group_name)
-
-                if link_list is None:
-                    # Fall back to generating from group data
-                    link_names = group_data.get('links', [])
-                    link_list = []
-                    for name in link_names:
-                        for link in robot_model.link_list:
-                            if link.name == name:
-                                link_list.append(link)
-                                break
-
-                if not link_list:
-                    continue
-
-                # Try to use existing end_coords from robot model
-                end_coords = self._find_existing_end_coords(robot_model, group_name)
-
-                if end_coords is None:
-                    # Create end_coords from detected info
-                    link_names = group_data.get('links', [])
-                    default_parent = link_names[-1] if link_names else link_list[-1].name
-                    parent_link_name = ec_info.get('parent_link', default_parent)
-                    parent_link = None
-                    for link in robot_model.link_list:
-                        if link.name == parent_link_name:
-                            parent_link = link
-                            break
-                    if parent_link is None:
-                        parent_link = link_list[-1]
-
-                    pos = ec_info.get('pos', [0.0, 0.0, 0.0])
-                    rot = ec_info.get('rot')
-
-                    end_coords = CascadedCoords(
-                        parent=parent_link,
-                        pos=pos,
-                        rot=rot,
-                        name=f"{group_name}_end_coords",
-                    )
-
+            for group_name, (link_list, end_coords) in resolved_groups.items():
                 # Add transform control at end-effector position
                 ee_pos = end_coords.worldpos()
                 ee_rot = end_coords.worldrot()

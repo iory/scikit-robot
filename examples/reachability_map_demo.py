@@ -208,7 +208,7 @@ def main():
     parser.add_argument(
         '--robot', type=str, default='pr2',
         choices=['pr2', 'panda', 'fetch', 'r8', 'nextage', 'tycoon',
-                 'differential_wrist'],
+                 'differential_wrist', 'aero'],
         help='Robot model to use (ignored if --urdf is specified)'
     )
     parser.add_argument(
@@ -311,6 +311,9 @@ def main():
         elif args.robot == 'differential_wrist':
             robot = skrobot.models.DifferentialWristSample()
             robot.reset_manip_pose()
+        elif args.robot == 'aero':
+            robot = skrobot.models.Aero()
+            robot.reset_pose()
 
         # Some robots use 'arm' instead of 'rarm'
         if args.robot in ['tycoon', 'differential_wrist']:
