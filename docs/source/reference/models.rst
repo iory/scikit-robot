@@ -30,6 +30,10 @@ Aero
 
    aero.Aero
 
+.. figure:: ../../image/aero.png
+    :scale: 40%
+    :align: center
+
 Fetch
 ~~~~~
 
