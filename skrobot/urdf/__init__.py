@@ -1,6 +1,7 @@
 from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
 from skrobot.urdf.llm_grouping import build_grouping_prompt
+from skrobot.urdf.llm_grouping import compute_jaw_gripper_frame
 from skrobot.urdf.llm_grouping import generate_groups_from_llm
 from skrobot.urdf.llm_grouping import parse_grouping_response
 from skrobot.urdf.modularize_urdf import find_root_link
@@ -41,4 +42,5 @@ __all__ = [
     'generate_groups_from_llm',
     'build_grouping_prompt',
     'parse_grouping_response',
+    'compute_jaw_gripper_frame',
 ]
