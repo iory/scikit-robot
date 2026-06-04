@@ -23,6 +23,7 @@ def get_available_apps():
         'convert_wheel_collision': ('Convert wheel collision model', None),
         'extract_sub_urdf': ('Extract sub-URDF from a root link', None),
         'generate_robot_class': ('Generate robot class from URDF geometry', None),
+        'urdf_tree': ('Print URDF link tree and validate its structure', None),
     }
 
     for filename in os.listdir(apps_dir):

@@ -192,6 +192,26 @@ class ViserViewer(_InteractiveViewerMixin):
         self._is_active = False
         self._server.stop()
 
+    def wait_until_close(self, check_interval=0.1):
+        """Block until the viewer is closed.
+
+        The Viser HTTP/WebSocket server runs in a background thread, so a
+        plain ``python my_robot.py`` script would otherwise exit immediately
+        and tear the server down. Call this at the end of such a script to
+        keep the viewer alive; it returns when :meth:`close` is called or the
+        user interrupts with Ctrl-C.
+
+        Parameters
+        ----------
+        check_interval : float, optional
+            Polling interval in seconds. Default ``0.1``.
+        """
+        try:
+            while self._is_active:
+                time.sleep(check_interval)
+        except KeyboardInterrupt:
+            self.close()
+
     def set_camera(self, angles=None, distance=None, center=None,
                    resolution=None, fov=None, coords_or_transform=None):
         """Set the camera pose for every connected viser client.
