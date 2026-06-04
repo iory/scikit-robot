@@ -47,7 +47,8 @@ Y_THRESHOLD_STRONG = 0.1  # Strong threshold for Y-coordinate detection (m)
 # Joint count thresholds for limb classification
 MIN_ARM_JOINTS = 5  # Minimum joints to classify as arm
 MIN_LEG_JOINTS = 2  # Minimum joints to classify as leg
-MIN_HEAD_JOINTS = 4  # Minimum joints to classify as head (with torso)
+# Min head/neck joints for a chain to be read as a head rather than a serial arm
+MIN_HEAD_JOINTS = 2
 
 
 # ============================================================================
@@ -541,41 +542,32 @@ def _find_best_end_coords_parent(G, link_map, tip_link_name, group_type,
             'rot': None,
         }
 
-    # First: Search DESCENDANTS for tool frame or hand link
-    # (e.g., panda_link7 -> panda_hand)
+    # First: walk DESCENDANTS along a single (non-branching) chain looking for a
+    # tool frame or hand link. Stop at the first branch point so the search
+    # stays within this limb and does not pick up a frame from another branch.
+    current = tip_link_name
+    for _ in range(MAX_SEARCH_DEPTH):
+        children = list(G.successors(current))
+        if len(children) != 1:
+            break  # branch or leaf: the limb genuinely ends around here
+        child = children[0]
+        if _is_tool_frame(child, config):
+            return {'parent_link': child, 'pos': [0.0, 0.0, 0.0], 'rot': None}
+        if _is_hand_link(child, config) and link_map.get(child) is not None:
+            return {'parent_link': child, 'pos': [0.0, 0.0, 0.0], 'rot': None}
+        current = child
+
     try:
         descendants = nx.descendants(G, tip_link_name)
     except nx.NetworkXError:
         descendants = set()
 
-    # Check descendants up to MAX_SEARCH_DEPTH
-    for depth in range(1, MAX_SEARCH_DEPTH + 1):
-        for desc in descendants:
-            try:
-                path_len = nx.shortest_path_length(G, tip_link_name, desc)
-                if path_len == depth:
-                    if _is_tool_frame(desc, config):
-                        return {
-                            'parent_link': desc,
-                            'pos': [0.0, 0.0, 0.0],
-                            'rot': None,
-                        }
-                    if _is_hand_link(desc, config):
-                        hand_link = link_map.get(desc)
-                        if hand_link is not None:
-                            return {
-                                'parent_link': desc,
-                                'pos': [0.0, 0.0, 0.0],
-                                'rot': None,
-                            }
-            except nx.NetworkXNoPath:
-                continue
-
-    # Check for symmetric child links (e.g., gripper fingers)
-    # Detect geometrically: same parent, symmetric positions
-    result = _find_symmetric_gripper_midpoint(descendants, link_map)
-    if result is not None:
-        return result
+    # Symmetric child links (e.g., gripper fingers) only make sense for
+    # manipulator/gripper groups - never for a torso/head/leg tip.
+    if 'arm' in group_type.lower() or 'gripper' in group_type.lower():
+        result = _find_symmetric_gripper_midpoint(descendants, link_map)
+        if result is not None:
+            return result
 
     # Second: Search ANCESTORS for tool frame or hand link
     undirected = G.to_undirected()
@@ -1003,7 +995,11 @@ def _detect_limb_type(link_names, tip_link=None, tip_y_coord=None,
     if movable_joint_count >= MIN_ARM_JOINTS:
         has_lr_pattern = (right_arm_count >= 2 or left_arm_count >= 2
                           or right_leg_count >= 2 or left_leg_count >= 2)
-        if not has_lr_pattern:
+        # A chain dominated by head/neck joints (e.g. a neck stacked on the
+        # torso joints) is a head, not a serial arm - don't let the single-arm
+        # heuristic steal it.
+        looks_like_head = head_count >= MIN_HEAD_JOINTS
+        if not has_lr_pattern and not looks_like_head:
             # This is likely a serial chain manipulator
             single_arm_count = movable_joint_count
 
@@ -1167,6 +1163,15 @@ def _find_limb_chains(G, base_link, link_map, config=None):
             if arm_movable:
                 movable_links = arm_movable
                 # For single arm, use last movable link as tip (not gripper)
+                if not leaf_is_preferred:
+                    actual_tip = movable_links[-1]
+        elif limb_type == 'head':
+            # Keep only the head/neck joints, dropping the torso joints the
+            # base->head path passes through.
+            head_movable = [link_name for link_name in movable_links
+                            if not config.matches('torso', link_name)]
+            if head_movable:
+                movable_links = head_movable
                 if not leaf_is_preferred:
                     actual_tip = movable_links[-1]
 
@@ -1674,22 +1679,29 @@ def generate_robot_class_from_geometry(robot, output_path=None,
 
     viewer_code = f'''
 
-
 if __name__ == '__main__':
     from skrobot.model import Axis
-    from skrobot.viewers import PyrenderViewer
+    from skrobot.viewers import ViserViewer
 
     robot = {class_name}()
+    try:
+        robot.reset_pose()
+    except NotImplementedError:
+        pass  # add a reset_pose() to give the robot a nicer default posture
 
-    viewer = PyrenderViewer()
+    # ViserViewer serves an interactive 3D view in your browser. enable_ik adds
+    # drag-to-solve IK gizmos on the standard limb end_coords
+    # (arm / rarm / larm / rleg / lleg / head / torso).
+    viewer = ViserViewer(enable_ik=True)
     viewer.add(robot)
 
 {axis_code}
 
+    # Prints the URL (and opens a browser). Pass open_browser=False on a
+    # headless / remote machine and open the printed URL yourself.
     viewer.show()
-
-    while viewer.is_active:
-        viewer.redraw()
+    print('Viser viewer is running - open the URL above. Press Ctrl-C to quit.')
+    viewer.wait_until_close()
 '''
 
     # Aliases section
