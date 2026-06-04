@@ -1,5 +1,8 @@
 from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
+from skrobot.urdf.llm_grouping import build_grouping_prompt
+from skrobot.urdf.llm_grouping import generate_groups_from_llm
+from skrobot.urdf.llm_grouping import parse_grouping_response
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
@@ -35,4 +38,7 @@ __all__ = [
     'kinematic_tree',
     'validate_urdf_structure',
     'ValidationResult',
+    'generate_groups_from_llm',
+    'build_grouping_prompt',
+    'parse_grouping_response',
 ]

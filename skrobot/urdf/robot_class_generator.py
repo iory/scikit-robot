@@ -1455,8 +1455,11 @@ def generate_robot_class_from_geometry(robot, output_path=None,
                                         class_name=None,
                                         urdf_path_function=None,
                                         urdf_path=None,
-                                        config=None):
-    """Generate a Python class from robot geometry without LLM.
+                                        config=None,
+                                        grouping='geometry',
+                                        llm_fn=None,
+                                        extra_instructions=None):
+    """Generate a scikit-robot RobotModel subclass from a URDF.
 
     Parameters
     ----------
@@ -1474,6 +1477,20 @@ def generate_robot_class_from_geometry(robot, output_path=None,
     config : PatternConfig, optional
         Pattern configuration for customizing link name detection.
         Use this for robots with non-standard naming conventions.
+    grouping : str, optional
+        How limbs are grouped:
+
+        - ``'geometry'`` (default): the fixed-taxonomy geometry heuristic
+          (arms / legs / head / torso / gripper). Fast, no LLM, but cannot
+          handle morphologies outside that taxonomy (e.g. multi-finger hands).
+        - ``'llm'``: keep kinematics deterministic but let an LLM map the
+          actuated chains onto named limbs. Generalizes to hands, quadrupeds,
+          tails, etc. Requires ``llm_fn``.
+    llm_fn : callable, optional
+        Only used when ``grouping='llm'``. ``llm_fn(prompt: str) -> str``;
+        plug in any model or agent. See :mod:`skrobot.urdf.llm_grouping`.
+    extra_instructions : str, optional
+        Extra domain context passed to the LLM when ``grouping='llm'``.
 
     Returns
     -------
@@ -1487,20 +1504,26 @@ def generate_robot_class_from_geometry(robot, output_path=None,
     >>> robot = Panda()
     >>> code = generate_robot_class_from_geometry(robot, output_path='/tmp/MyPanda.py')
 
-    >>> # Custom patterns for non-standard naming
-    >>> from skrobot.urdf.robot_class_generator import PatternConfig
-    >>> config = PatternConfig(
-    ...     patterns={'right_arm': ['RA_', 'right_arm_j']},
-    ...     force_groups={'head': ['neck_link', 'head_link']}
-    ... )
-    >>> code = generate_robot_class_from_geometry(robot, config=config)
+    >>> # LLM-assisted grouping for a multi-finger hand (bring your own llm_fn)
+    >>> code = generate_robot_class_from_geometry(
+    ...     hand_robot, grouping='llm', llm_fn=my_llm_fn)
 
     Notes
     -----
-    Left/right detection uses Y-coordinate comparison, assuming a T-pose.
-    For robots with non-standard poses, use PatternConfig.force_groups.
+    Geometry left/right detection uses Y-coordinate comparison, assuming a
+    T-pose. For robots with non-standard poses or morphologies, use
+    ``grouping='llm'``.
     """
-    result = generate_groups_from_geometry(robot, config)
+    if grouping == 'llm':
+        from skrobot.urdf.llm_grouping import generate_groups_from_llm
+        result = generate_groups_from_llm(
+            robot, llm_fn, config=config,
+            extra_instructions=extra_instructions)
+    elif grouping == 'geometry':
+        result = generate_groups_from_geometry(robot, config)
+    else:
+        raise ValueError(
+            "grouping must be 'geometry' or 'llm', got {!r}".format(grouping))
     groups, end_effectors, end_coords_info, robot_name = result
 
     if urdf_path is None:
