@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from lxml import etree
+import numpy as np
 import pytest
 
 from skrobot.utils import urdf as urdf_utils
@@ -157,3 +159,43 @@ class TestResolveFilepathWithoutRospkg(unittest.TestCase):
                 result = urdf_utils.resolve_filepath(
                     pkg_dir, 'package://pr2_description/meshes/foo.dae')
             assert result == mesh_path
+
+
+class TestGlbExportPreservesMaterialColor(unittest.TestCase):
+    """GLB export must bake a material-only color into per-vertex colors.
+
+    ``TextureVisuals.to_color`` can return a color array whose length does
+    not match the vertex count when the mesh has a material color but no UV
+    coordinates. The GLB exporter then drops the mismatched colors and the
+    mesh becomes the default gray. The exporter must broadcast the material
+    color to every vertex so the original color survives.
+    """
+
+    def test_material_color_baked_into_vertex_colors(self):
+        import trimesh
+        from trimesh.visual.material import PBRMaterial
+
+        color = [72, 169, 84, 255]
+
+        def make_box():
+            box = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+            box.visual = trimesh.visual.TextureVisuals(
+                material=PBRMaterial(baseColorFactor=color))
+            return box
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_box().export(os.path.join(tmpdir, 'box.dae'))
+            mesh = urdf_utils.Mesh(filename='box.dae', meshes=[make_box()])
+            with urdf_utils.export_mesh_format('.glb', overwrite_mesh=True):
+                mesh._to_xml(etree.Element('visual'), tmpdir)
+
+            scene = trimesh.load(
+                os.path.join(tmpdir, 'box.glb'), process=False)
+            geometries = list(scene.geometry.values())
+            self.assertEqual(len(geometries), 1)
+            geometry = geometries[0]
+            vertex_colors = np.asarray(geometry.visual.vertex_colors)
+            self.assertEqual(len(vertex_colors), len(geometry.vertices))
+            np.testing.assert_array_equal(
+                np.unique(vertex_colors.reshape(-1, 4), axis=0),
+                np.array([color], dtype=np.uint8))

@@ -1353,7 +1353,44 @@ class Mesh(URDFType):
                             )
                             if not has_image:
                                 try:
-                                    mesh.visual = mesh.visual.to_color()
+                                    color_visual = mesh.visual.to_color()
+                                    vertex_colors = np.asarray(
+                                        color_visual.vertex_colors)
+                                    if len(vertex_colors) != len(mesh.vertices):
+                                        # ``to_color`` can return a color array
+                                        # whose length does not match the
+                                        # vertex count (e.g. one entry per
+                                        # material) when the TextureVisuals has
+                                        # no UV coordinates.  GLB export then
+                                        # silently drops the mismatched colors
+                                        # and the mesh becomes the default gray.
+                                        # Broadcast the single material color to
+                                        # every vertex so the color survives.
+                                        material_color = getattr(
+                                            mat, 'main_color', None)
+                                        if material_color is None:
+                                            material_color = (
+                                                vertex_colors[0]
+                                                if len(vertex_colors)
+                                                else [200, 200, 200, 255])
+                                        material_color = np.asarray(
+                                            material_color)
+                                        if material_color.dtype.kind == 'f':
+                                            material_color = (
+                                                material_color * 255.0).round()
+                                        material_color = material_color.astype(
+                                            np.uint8)
+                                        if material_color.shape[0] == 3:
+                                            material_color = np.append(
+                                                material_color, np.uint8(255))
+                                        vertex_colors = np.tile(
+                                            material_color,
+                                            (len(mesh.vertices), 1))
+                                        color_visual = \
+                                            trimesh.visual.ColorVisuals(
+                                                mesh=mesh,
+                                                vertex_colors=vertex_colors)
+                                    mesh.visual = color_visual
                                 except Exception:
                                     pass
 
