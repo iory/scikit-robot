@@ -193,6 +193,20 @@ def jaxon_urdfpath():
     return path
 
 
+def jedy_urdfpath():
+    path = osp.join(get_cache_dir(),
+                    'jedy_description', 'urdf', 'jedy.urdf')
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url='https://github.com/iory/scikit-robot-models/raw/main/jedy_description.tar.gz',  # NOQA
+        fname='jedy_description.tar.gz',
+        md5='620dd412c96ed492e4c2f224c36ab798',
+        extract=True,
+    )
+    return path
+
+
 def kuka_urdfpath():
     return osp.join(data_dir, 'kuka_description', 'kuka.urdf')
 

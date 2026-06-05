@@ -6,6 +6,7 @@ from skrobot.models.fetch import Fetch
 from skrobot.models.griphis import Griphis
 from skrobot.models.hydrus import Hydrus
 from skrobot.models.jaxon_jvrc import JaxonJVRC
+from skrobot.models.jedy import Jedy
 from skrobot.models.kuka import Kuka
 from skrobot.models.nextage import Nextage
 from skrobot.models.panda import Panda
