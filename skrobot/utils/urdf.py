@@ -40,6 +40,12 @@ except ImportError:
 
 mesh_filenames_cache = {}
 logger = getLogger(__name__)
+
+# Whether the one-time "install DracoPy" hint has already been emitted.
+# A scene may reference many Draco-compressed meshes; we warn per file but
+# only show the verbose installation instruction once per process.
+_DRACO_MISSING_HINT_SHOWN = False
+
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
                         'export_mesh_format': None,
@@ -505,8 +511,12 @@ def _load_meshes(filename):
 
     # A Draco-compressed glTF/GLB cannot be decoded without DracoPy.  In
     # that case trimesh does not raise; it silently returns degenerate
-    # (all-zero) geometry.  Detect the situation up front and fail loudly
-    # so the broken geometry is not mistaken for a successful load.
+    # (all-zero) geometry.  Detect the situation up front and skip the mesh
+    # with a clear warning, instead of letting the broken geometry pass as a
+    # successful load.  We deliberately do NOT raise here: a single Draco
+    # mesh would otherwise abort the whole URDF load (and trigger a confusing
+    # "load as URDF string" fallback).  Skipping lets the rest of the model
+    # load while keeping the missing geometry visible in the logs.
     #
     # NOTE: PR #715 already added a "pip install DracoPy" hint, but it only
     # fired when trimesh.load() raised or returned an empty mesh list.  For
@@ -515,12 +525,18 @@ def _load_meshes(filename):
     # Parsing the extension list here covers that silent-degenerate case
     # regardless of how trimesh behaves.
     if is_glb_or_gltf and not dracopy_available and _gltf_uses_draco(filename):
-        raise ImportError(
-            "Cannot load Draco-compressed mesh '{}': it uses the "
-            "KHR_draco_mesh_compression extension but DracoPy is not "
-            "installed. Without DracoPy trimesh returns empty (all-zero) "
-            "geometry. Install DracoPy with: pip install DracoPy".format(
-                filename))
+        global _DRACO_MISSING_HINT_SHOWN
+        if not _DRACO_MISSING_HINT_SHOWN:
+            logger.error(
+                "DracoPy is not installed, so Draco-compressed glTF/GLB "
+                "meshes (KHR_draco_mesh_compression) cannot be decoded and "
+                "will be skipped; trimesh would otherwise return empty "
+                "all-zero geometry. Install DracoPy with: pip install DracoPy")
+            _DRACO_MISSING_HINT_SHOWN = True
+        logger.warning(
+            "Skipping Draco-compressed mesh (DracoPy not installed): %s",
+            filename)
+        return []
 
     load_error_reported = False
     try:
