@@ -2917,7 +2917,19 @@ class RobotModel(CascadedLink):
             # rescale
             if visual.geometry.mesh is not None:
                 if visual.geometry.mesh.scale is not None:
-                    mesh.vertices = mesh.vertices * visual.geometry.mesh.scale
+                    # Apply the scale as a transform rather than multiplying
+                    # the vertices directly. A scale with a negative
+                    # determinant (e.g. ``1 -1 1`` used to mirror a mesh)
+                    # reverses the triangle winding order; ``apply_transform``
+                    # flips the faces back so the normals keep pointing
+                    # outward. Without this the renderer's backface culling
+                    # hides the surfaces and the mesh looks see-through.
+                    # This mirrors the handling already used for collision
+                    # meshes (see ``Link.collision_mesh`` in utils/urdf.py).
+                    scale_transform = np.eye(4)
+                    scale_transform[:3, :3] = np.diag(
+                        visual.geometry.mesh.scale)
+                    mesh.apply_transform(scale_transform)
 
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
