@@ -22,6 +22,75 @@ class TestLoadMeshesNoneGuard(unittest.TestCase):
         assert 'install/setup.bash' in msg or 'ROS_PACKAGE_PATH' in msg
 
 
+class TestDracoCompressedMeshDetection(unittest.TestCase):
+    """A Draco-compressed glTF/GLB must be reported when DracoPy is absent.
+
+    Without DracoPy, trimesh does not raise; it silently returns degenerate
+    (all-zero) geometry. The loader must detect the Draco extension up front
+    and skip the mesh with a clear warning (returning no meshes) instead of
+    returning broken geometry. It must NOT raise: a single Draco mesh would
+    otherwise abort the entire URDF load.
+    """
+
+    def _make_draco_glb(self, path):
+        import json
+        import struct
+        gltf = {
+            'asset': {'version': '2.0'},
+            'extensionsUsed': ['KHR_draco_mesh_compression'],
+            'extensionsRequired': ['KHR_draco_mesh_compression'],
+        }
+        json_bytes = json.dumps(gltf).encode('utf-8')
+        json_bytes += b' ' * ((4 - len(json_bytes) % 4) % 4)
+        with open(path, 'wb') as f:
+            f.write(struct.pack('<4sII', b'glTF', 2,
+                                12 + 8 + len(json_bytes)))
+            f.write(struct.pack('<II', len(json_bytes), 0x4E4F534A))
+            f.write(json_bytes)
+
+    def test_gltf_uses_draco_detects_extension(self):
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as tmp:
+            path = tmp.name
+        try:
+            self._make_draco_glb(path)
+            self.assertTrue(urdf_utils._gltf_uses_draco(path))
+        finally:
+            os.remove(path)
+
+    def test_load_skips_and_warns_when_draco_and_no_dracopy(self):
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as tmp:
+            path = tmp.name
+        try:
+            self._make_draco_glb(path)
+            # Reset the one-time hint flag so the verbose hint is emitted.
+            urdf_utils._DRACO_MISSING_HINT_SHOWN = False
+            with mock.patch(
+                    'skrobot.utils.draco.is_dracopy_available',
+                    return_value=False):
+                with self.assertLogs(
+                        'skrobot.utils.urdf', level='WARNING') as logs:
+                    meshes = urdf_utils._load_meshes(path)
+            # The mesh is skipped (no broken geometry returned) but not raised,
+            # so the rest of a URDF can still load.
+            self.assertEqual(meshes, [])
+            joined = '\n'.join(logs.output)
+            assert 'DracoPy' in joined
+            assert path in joined
+        finally:
+            os.remove(path)
+
+    def test_plain_glb_not_flagged_as_draco(self):
+        import trimesh
+        box = trimesh.creation.box(extents=[1, 1, 1])
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as tmp:
+            path = tmp.name
+        try:
+            box.export(path)
+            self.assertFalse(urdf_utils._gltf_uses_draco(path))
+        finally:
+            os.remove(path)
+
+
 class TestGetPathWithCacheResolverOrder(unittest.TestCase):
     """get_path_with_cache should respect ROS_VERSION when both resolvers are present."""
 

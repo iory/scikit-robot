@@ -40,6 +40,12 @@ except ImportError:
 
 mesh_filenames_cache = {}
 logger = getLogger(__name__)
+
+# Whether the one-time "install DracoPy" hint has already been emitted.
+# A scene may reference many Draco-compressed meshes; we warn per file but
+# only show the verbose installation instruction once per process.
+_DRACO_MISSING_HINT_SHOWN = False
+
 _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'no_mesh_load_mode': False,
                         'export_mesh_format': None,
@@ -422,6 +428,54 @@ def load_meshes(filename):
         return meshes
 
 
+def _gltf_uses_draco(filename):
+    """Return whether a glTF/GLB file uses Draco mesh compression.
+
+    A glTF/GLB file that lists ``KHR_draco_mesh_compression`` in its
+    ``extensionsUsed`` or ``extensionsRequired`` cannot be decoded without
+    DracoPy.  trimesh silently returns degenerate (all-zero) geometry in
+    that case rather than raising, so we detect it explicitly.
+
+    Parameters
+    ----------
+    filename : str
+        Path to a ``.glb`` or ``.gltf`` file.
+
+    Returns
+    -------
+    uses_draco : bool
+        ``True`` if the file references the Draco extension, ``False``
+        otherwise (including when the file cannot be parsed).
+    """
+    import json
+    import struct
+
+    ext_name = 'KHR_draco_mesh_compression'
+    try:
+        _, ext = os.path.splitext(filename)
+        if ext.lower() == '.glb':
+            with open(filename, 'rb') as f:
+                header = f.read(12)
+                if len(header) < 12 or header[:4] != b'glTF':
+                    return False
+                chunk_header = f.read(8)
+                if len(chunk_header) < 8:
+                    return False
+                chunk_length, chunk_type = struct.unpack('<II', chunk_header)
+                if chunk_type != 0x4E4F534A:  # 'JSON'
+                    return False
+                gltf = json.loads(f.read(chunk_length))
+        else:
+            with open(filename, 'r') as f:
+                gltf = json.load(f)
+    except Exception:
+        return False
+
+    extensions = set(gltf.get('extensionsUsed', []) or [])
+    extensions.update(gltf.get('extensionsRequired', []) or [])
+    return ext_name in extensions
+
+
 def _load_meshes(filename):
     """Loads triangular meshes from a file.
 
@@ -454,6 +508,35 @@ def _load_meshes(filename):
         dracopy_available = is_dracopy_available()
         if dracopy_available:
             register_dracopy_handlers()
+
+    # A Draco-compressed glTF/GLB cannot be decoded without DracoPy.  In
+    # that case trimesh does not raise; it silently returns degenerate
+    # (all-zero) geometry.  Detect the situation up front and skip the mesh
+    # with a clear warning, instead of letting the broken geometry pass as a
+    # successful load.  We deliberately do NOT raise here: a single Draco
+    # mesh would otherwise abort the whole URDF load (and trigger a confusing
+    # "load as URDF string" fallback).  Skipping lets the rest of the model
+    # load while keeping the missing geometry visible in the logs.
+    #
+    # NOTE: PR #715 already added a "pip install DracoPy" hint, but it only
+    # fired when trimesh.load() raised or returned an empty mesh list.  For
+    # the urdfeus Draco models trimesh does neither -- it returns a single
+    # all-zero mesh -- so the hint never triggered and nothing was reported.
+    # Parsing the extension list here covers that silent-degenerate case
+    # regardless of how trimesh behaves.
+    if is_glb_or_gltf and not dracopy_available and _gltf_uses_draco(filename):
+        global _DRACO_MISSING_HINT_SHOWN
+        if not _DRACO_MISSING_HINT_SHOWN:
+            logger.error(
+                "DracoPy is not installed, so Draco-compressed glTF/GLB "
+                "meshes (KHR_draco_mesh_compression) cannot be decoded and "
+                "will be skipped; trimesh would otherwise return empty "
+                "all-zero geometry. Install DracoPy with: pip install DracoPy")
+            _DRACO_MISSING_HINT_SHOWN = True
+        logger.warning(
+            "Skipping Draco-compressed mesh (DracoPy not installed): %s",
+            filename)
+        return []
 
     load_error_reported = False
     try:
