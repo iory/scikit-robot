@@ -48,10 +48,10 @@ except TypeError:
             raise RuntimeError('TrimeshSceneViewer cannot be initialized. '
                                'This issue happens when the X window system '
                                'is not running.')
-except ImportError as error_log:
+except (ImportError, RuntimeError) as error_log:
     warn_gl(error_log)
     class TrimeshSceneViewer(DummyViewer):
-        pass
+        _import_error = error_log
 
 try:
     from ._pyrender import PyrenderViewer
@@ -66,10 +66,10 @@ try:
                     'please execute the following command:\n'
                     'pip uninstall -y pyrender && pip install scikit-robot-pyrender --no-cache-dir'
                 )
-except ImportError as error_log:
+except (ImportError, RuntimeError) as error_log:
     warn_gl(error_log)
     class PyrenderViewer(DummyViewer):
-        pass
+        _import_error = error_log
 
 try:
     from ._notebook import JupyterNotebookViewer
