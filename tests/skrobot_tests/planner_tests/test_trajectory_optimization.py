@@ -23,7 +23,8 @@ HAS_JAXLS = False
 if HAS_JAX:
     try:
         import jaxls  # noqa: F401
-        HAS_JAXLS = True
+        if hasattr(jaxls, 'LeastSquaresProblem'):
+            HAS_JAXLS = True
     except ImportError:
         pass
 

@@ -32,6 +32,8 @@ def _require_jaxls():
     """Import jaxls or raise ImportError with the correct install hint."""
     try:
         import jaxls  # noqa: F401
+        if not hasattr(jaxls, 'LeastSquaresProblem'):
+            raise ImportError("Imported 'jaxls' package is missing 'LeastSquaresProblem'.")
     except ImportError as e:
         raise ImportError(
             "{}\nOriginal error: {}".format(_JAXLS_INSTALL_HINT, e)) from e
