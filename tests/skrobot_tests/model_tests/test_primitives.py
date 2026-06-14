@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 import shutil
 import unittest
@@ -106,6 +107,7 @@ class TestMeshLink(unittest.TestCase):
                                  'meshes', 'base_v0', 'base.obj')
         skrobot.model.MeshLink(base_obj_path)
 
+    @unittest.skipIf(os.name == 'nt', 'pysdfgen not supported on Windows')
     def test_init_with_sdf(self):
         sdf_cache_dir = osp.join(get_cache_dir(), 'sdf')
         if osp.exists(sdf_cache_dir):
