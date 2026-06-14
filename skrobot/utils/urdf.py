@@ -319,7 +319,7 @@ def resolve_filepath(base_path, file_path):
             pkg_relative_path = parsed_url.path.lstrip("/")
             resolved_filepath = os.path.join(package_path, pkg_relative_path)
             if os.path.exists(resolved_filepath):
-                return resolved_filepath
+                return os.path.normpath(resolved_filepath)
         except Exception:
             # Catches ament's PackageNotFoundError, rospkg's ResourceNotFound,
             # and the ImportError raised by get_path_with_cache when neither
@@ -335,7 +335,7 @@ def resolve_filepath(base_path, file_path):
     for rel in rel_paths:
         found_path = search_up(base_path, rel)
         if found_path:
-            return found_path
+            return os.path.normpath(found_path)
     return None
 
 
