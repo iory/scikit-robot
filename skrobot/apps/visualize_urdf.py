@@ -46,7 +46,23 @@ def main():
     if args.viewer == 'trimesh':
         viewer = skrobot.viewers.TrimeshSceneViewer(update_interval=0.1)
     elif args.viewer == 'pyrender':
-        viewer = skrobot.viewers.PyrenderViewer(update_interval=0.1)
+        from skrobot.viewers import DummyViewer
+        from skrobot.viewers import PyrenderViewer
+        from skrobot.viewers import ViserViewer
+        if issubclass(PyrenderViewer, DummyViewer) and not issubclass(ViserViewer, DummyViewer):
+            cause = getattr(PyrenderViewer, '_import_error', 'Unknown error')
+            print(
+                "\033[93m"  # yellow
+                + "Warning: 'pyrender' is not available. Falling back to 'viser' viewer.\n"
+                + f"Reason: {cause}\n"
+                + "If this is unexpected, please report this issue to:\n"
+                + "  https://github.com/iory/scikit-robot/issues\n"
+                + "\033[0m"
+            )
+            args.viewer = 'viser'
+            viewer = ViserViewer(enable_ik=True)
+        else:
+            viewer = PyrenderViewer(update_interval=0.1)
     elif args.viewer == 'viser':
         viewer = skrobot.viewers.ViserViewer(enable_ik=True)
 
