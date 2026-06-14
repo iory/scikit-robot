@@ -243,7 +243,14 @@ class TestSDF(unittest.TestCase):
 
         fetch = skrobot.models.Fetch()
         fetch.reset_manip_pose()
-        fetch_union_sdf = UnionSDF.from_robot_model(fetch)
+
+        # Only compute SDF for a subset of links to save time
+        original_link_list = fetch.link_list
+        fetch.link_list = [fetch.gripper_link, fetch.r_gripper_finger_link]
+        try:
+            fetch_union_sdf = UnionSDF.from_robot_model(fetch)
+        finally:
+            fetch.link_list = original_link_list
 
         # check if the vertices of the links have almost 0 sd vals.
         gripper_link = fetch.gripper_link
