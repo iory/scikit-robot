@@ -309,6 +309,11 @@ def search_up(start_dir, relative_path):
 
 
 def resolve_filepath(base_path, file_path):
+    if os.path.isabs(file_path):
+        if os.path.exists(file_path):
+            return os.path.normpath(file_path)
+        return None
+
     parsed_url = urlparse(file_path)
     base_path = os.path.abspath(base_path)
 
