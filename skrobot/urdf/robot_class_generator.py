@@ -1618,10 +1618,10 @@ def generate_robot_class_from_geometry(robot, output_path=None,
     def default_urdf_path(self):
         return {urdf_path_function}()'''
     else:
-        urdf_path_str = group_def.urdf_path or ''
+        urdf_path_str = (group_def.urdf_path or '').replace('\\', '/')
         urdf_property = f'''    @cached_property
     def default_urdf_path(self):
-        return "{urdf_path_str}"'''
+        return {urdf_path_str!r}'''
 
     # Build group properties
     properties = []

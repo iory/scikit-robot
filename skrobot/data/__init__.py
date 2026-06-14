@@ -18,7 +18,11 @@ def _lazy_pooch():
 
 
 def get_cache_dir():
-    return os.environ.get('SKROBOT_CACHE_DIR', _default_cache_dir)
+    cache_dir = os.environ.get('SKROBOT_CACHE_DIR', _default_cache_dir)
+    worker = os.environ.get('PYTEST_XDIST_WORKER')
+    if worker:
+        cache_dir = osp.join(cache_dir, worker)
+    return cache_dir
 
 
 def _print_download_error(url, fname, cache_dir, exc):
