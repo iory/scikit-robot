@@ -335,6 +335,6 @@ jobs:
         python -m pip install --no-cache-dir .[all]
     - name: Run Pytest
       run: |
-        python -m pytest -v -n auto --dist loadscope --timeout=300 --durations=0 tests --ignore=tests/skrobot_tests/viewers_tests --ignore=tests/skrobot_tests/test_examples.py --ignore=tests/skrobot_tests/test_sdf.py
+        python -m pytest -v -n auto --dist loadscope --timeout=300 --durations=0 tests --ignore=tests/skrobot_tests/viewers_tests --ignore=tests/skrobot_tests/test_examples.py
 
 
