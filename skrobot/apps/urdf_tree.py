@@ -44,6 +44,12 @@ def main():
     tree. Exit code is non-zero when the URDF is structurally invalid, so it
     is usable in CI.
     """
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, TypeError):
+        pass
+
     parser = argparse.ArgumentParser(
         description='Print a URDF link tree and validate its structure.',
         formatter_class=argparse.RawTextHelpFormatter)

@@ -23,7 +23,7 @@ def _run(args, stdin=None):
     return subprocess.run(
         [sys.executable, '-m', 'skrobot.apps.urdf_tree'] + args,
         input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        universal_newlines=True)
+        encoding='utf-8')
 
 
 @pytest.mark.skipif(
