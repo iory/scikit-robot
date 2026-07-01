@@ -19,6 +19,8 @@ import numpy as np
 
 from skrobot.model import RobotModel
 from skrobot.model.skeleton import SkeletonModel
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def get_robot(robot_name):
@@ -153,11 +155,9 @@ def main():
     parser.add_argument('--no-interactive', action='store_true',
                         help='Run in non-interactive mode (exit immediately)')
     parser.add_argument('--viewer', type=str,
-                        choices=['trimesh', 'pyrender', 'viser'],
+                        choices=VIEWER_TYPES,
                         default='pyrender',
-                        help='Choose the viewer type: trimesh, pyrender or '
-                             'viser (always_on_top is honored by pyrender '
-                             'only)')
+                        help=VIEWER_HELP)
     args = parser.parse_args()
 
     # Load robot

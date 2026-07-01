@@ -78,6 +78,12 @@ except ImportError:
         pass
 
 try:
+    from ._mitsuba import MitsubaViewer
+except ImportError as error_log:
+    class MitsubaViewer(DummyViewer):
+        _import_error = error_log
+
+try:
     from ._viser import ViserViewer
 except ImportError as e:
     import importlib
@@ -107,7 +113,18 @@ _VIEWER_CLASSES = {
     'pyrender': PyrenderViewer,
     'viser': ViserViewer,
     'notebook': JupyterNotebookViewer,
+    'mitsuba': MitsubaViewer,
 }
+
+# Viewer names suitable for a command-line ``--viewer`` choice (every backend
+# except the notebook-only one). Examples import this so a newly added viewer
+# automatically becomes selectable everywhere.
+VIEWER_TYPES = tuple(
+    name for name in _VIEWER_CLASSES if name != 'notebook')
+
+# Shared ``help=`` text for a ``--viewer`` argparse argument, kept next to
+# VIEWER_TYPES so the wording (and the listed backends) stay in sync.
+VIEWER_HELP = 'Viewer backend to use ({}).'.format(', '.join(VIEWER_TYPES))
 
 
 def _supported_kwargs(cls, kwargs):

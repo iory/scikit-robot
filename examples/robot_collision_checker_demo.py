@@ -21,6 +21,8 @@ import skrobot
 from skrobot.collision import RobotCollisionChecker
 from skrobot.model.primitives import Box
 from skrobot.model.primitives import Sphere
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def main():
@@ -34,9 +36,8 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser'
-    )
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
     args = parser.parse_args()
 
     # Create robot

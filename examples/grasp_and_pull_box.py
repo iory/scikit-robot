@@ -8,6 +8,8 @@ import numpy as np
 import skrobot
 from skrobot.coordinates.base import Coordinates
 from skrobot.model.primitives import Box
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def init_pose():
@@ -91,8 +93,8 @@ parser.add_argument(
 )
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-    help='Choose the viewer type: trimesh, pyrender or viser')
+    choices=VIEWER_TYPES, default='pyrender',
+    help=VIEWER_HELP)
 args = parser.parse_args()
 
 

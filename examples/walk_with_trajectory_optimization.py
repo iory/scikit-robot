@@ -80,6 +80,8 @@ from skrobot.coordinates import Coordinates  # noqa: E402
 from skrobot.models import JaxonJVRC  # noqa: E402
 from skrobot.planner.trajectory_optimization import TrajectoryProblem  # noqa: E402
 from skrobot.planner.trajectory_optimization.solvers import create_solver  # noqa: E402
+from skrobot.viewers import VIEWER_HELP  # noqa: E402
+from skrobot.viewers import VIEWER_TYPES  # noqa: E402
 
 
 def set_initial_stance(robot, knee_bend_deg=20.0):
@@ -581,8 +583,8 @@ def main():
                         default=default_n_per_transition,
                         help='Waypoints per double-support transition.')
     parser.add_argument('--viewer', type=str, default='pyrender',
-                        choices=['pyrender', 'trimesh', 'viser'],
-                        help='Viewer backend for live visualisation.')
+                        choices=VIEWER_TYPES,
+                        help=VIEWER_HELP)
     parser.add_argument('--no-interactive', action='store_true',
                         help='Skip visualisation; only print timings/errors.')
     parser.add_argument('--no-loop', action='store_true',

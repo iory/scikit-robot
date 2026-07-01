@@ -49,6 +49,13 @@ class TestCreateViewer(unittest.TestCase):
         self.assertIs(
             skrobot.viewers._VIEWER_CLASSES['viser'], ViserViewer)
 
+    def test_viewer_types_constant(self):
+        from skrobot.viewers import VIEWER_TYPES
+        self.assertIn('mitsuba', VIEWER_TYPES)
+        self.assertNotIn('notebook', VIEWER_TYPES)
+        for name in VIEWER_TYPES:
+            self.assertIn(name, skrobot.viewers._VIEWER_CLASSES)
+
     def test_name_is_case_insensitive(self):
         # Exercise create_viewer with mixed-case names. A lightweight fake
         # is registered so no real viewer (window / server) is created.

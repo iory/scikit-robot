@@ -24,6 +24,8 @@ from skrobot.coordinates import Coordinates
 from skrobot.model import Axis
 from skrobot.model.primitives import Sphere
 from skrobot.models import Hydrus
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 # Body center is pinned at the world origin.
@@ -171,10 +173,9 @@ if __name__ == '__main__':
     parser.add_argument('--no-interactive', action='store_true',
                         help='run one revolution headless and exit')
     parser.add_argument('--viewer', type=str,
-                        choices=['trimesh', 'pyrender', 'viser'],
+                        choices=VIEWER_TYPES,
                         default='pyrender',
-                        help='Choose the viewer type: trimesh, pyrender or '
-                             'viser')
+                        help=VIEWER_HELP)
     parser.add_argument('--pause', type=float, default=0.0,
                         help='seconds to pause between steps in the viewer')
     args = parser.parse_args()

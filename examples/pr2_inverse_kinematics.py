@@ -7,6 +7,8 @@ import numpy as np
 
 import skrobot
 from skrobot.utils.visualization import ik_visualization
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def demonstrate_revert_if_fail(robot_model, target_coords, joint_list, viewer,
@@ -255,8 +257,8 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
     parser.add_argument(
         '--no-ik-visualization',
         action='store_true',

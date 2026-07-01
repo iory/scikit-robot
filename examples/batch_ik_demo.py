@@ -13,6 +13,8 @@ from skrobot.models import Nextage
 from skrobot.models import Panda
 from skrobot.models import PR2
 from skrobot.models import R8_6
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def parse_mask_constraint(mask_str):
@@ -56,8 +58,8 @@ def main():
     parser.add_argument('--no-interactive', action='store_true',
                         help='Disable interactive visualization')
     parser.add_argument('--viewer', type=str,
-                        choices=['pyrender', 'trimesh', 'viser'], default='pyrender',
-                        help='Choose the viewer type: trimesh, pyrender or viser. Default: pyrender')
+                        choices=VIEWER_TYPES, default='pyrender',
+                        help=VIEWER_HELP)
     parser.add_argument('--with-torso', action='store_true',
                         help='Include torso in IK (PR2 and Fetch only)')
 

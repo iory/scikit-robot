@@ -34,6 +34,8 @@ from skrobot.coordinates import Coordinates
 from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
 from skrobot.models import Griphis
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 # Collision-proxy tuning.  The default swept-sphere radii for Griphis's
@@ -356,8 +358,8 @@ if __name__ == '__main__':
                         help='seconds to pause between arc waypoints')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
     args = parser.parse_args()
     steps = args.steps if args.steps is not None else (
         3 if args.no_interactive else 40)
