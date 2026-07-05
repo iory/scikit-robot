@@ -247,14 +247,87 @@ def _try_rospkg(ros_package):
         return None
 
 
+def _manifest_package_name(directory):
+    """Return the ``<name>`` declared in ``<directory>/package.xml``, or None."""
+    manifest = os.path.join(directory, 'package.xml')
+    if not os.path.isfile(manifest):
+        return None
+    try:
+        name = ET.parse(manifest).getroot().findtext('name')
+    except (OSError, ET.XMLSyntaxError):
+        return None
+    return name.strip() if name else None
+
+
+def _env_paths(variable):
+    """Absolute, expanded, non-empty entries of an ``os.pathsep`` env variable."""
+    return [os.path.abspath(os.path.expanduser(p))
+            for p in os.environ.get(variable, '').split(os.pathsep) if p]
+
+
+def _find_package_dir(root, ros_package):
+    """Locate ``ros_package`` under one ``ROS_PACKAGE_PATH`` entry.
+
+    An entry may itself be the package, a directory that contains it, or a
+    workspace ``src`` to crawl (the several catkin layouts). The recursive walk
+    is the last resort and prunes build/VCS trees.
+    """
+    if _manifest_package_name(root) == ros_package:
+        return root
+    direct = os.path.join(root, ros_package)
+    if _manifest_package_name(direct) == ros_package:
+        return direct
+    if not os.path.isdir(root):
+        return None
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if not d.startswith('.')
+                   and d not in ('build', 'devel', 'install', 'log')]
+        if 'package.xml' in files:
+            if _manifest_package_name(current) == ros_package:
+                return current
+            # A catkin package cannot contain another; stop descending here
+            # (also avoids crawling large mesh/resource trees).
+            dirs[:] = []
+    return None
+
+
+def _try_env_prefixes(ros_package):
+    """Resolve a ROS package from the sourced shell environment alone.
+
+    Uses only the standard search-path variables, so it works when neither
+    ``ament_index_python`` nor ``rospkg`` is importable -- e.g. inside a
+    PyInstaller-frozen binary launched from a sourced ROS workspace. Returns
+    the package's share/root directory, or ``None``.
+
+    * ``AMENT_PREFIX_PATH`` / ``COLCON_PREFIX_PATH`` / ``CMAKE_PREFIX_PATH``:
+      ``<prefix>/share/<pkg>`` (the ament / ROS 2 install layout).
+    * ``ROS_PACKAGE_PATH``: each entry is the package, a directory of packages,
+      or a workspace ``src`` to crawl (the catkin / ROS 1 layouts).
+    """
+    for variable in ('AMENT_PREFIX_PATH', 'COLCON_PREFIX_PATH',
+                     'CMAKE_PREFIX_PATH'):
+        for prefix in _env_paths(variable):
+            share = os.path.join(prefix, 'share', ros_package)
+            if _manifest_package_name(share) == ros_package:
+                return share
+    for root in _env_paths('ROS_PACKAGE_PATH'):
+        found = _find_package_dir(root, ros_package)
+        if found:
+            return found
+    return None
+
+
 @lru_cache(maxsize=None)
 def get_path_with_cache(ros_package):
     """Resolve a ROS package name to its share/install directory.
 
-    Tries both ``ament_index_python`` (ROS 2) and ``rospkg`` (ROS 1) when
-    available. The order respects the ``ROS_VERSION`` environment variable so
-    that users with ROS 1 and ROS 2 coexisting on the same machine get the
-    resolver matching their currently-sourced distro:
+    Tries ``ament_index_python`` (ROS 2) and ``rospkg`` (ROS 1) when available,
+    then falls back to :func:`_try_env_prefixes`, which resolves straight from
+    the sourced shell environment and needs no ROS Python at all. The order of
+    the first two respects the ``ROS_VERSION`` environment variable so that
+    users with ROS 1 and ROS 2 coexisting on the same machine get the resolver
+    matching their currently-sourced distro:
 
     * ``ROS_VERSION=1`` -> rospkg first, then ament (preserves the old
       behaviour where rospkg-only resolution was used).
@@ -263,17 +336,30 @@ def get_path_with_cache(ros_package):
       ship ament but not rospkg (previously such environments hit a
       ``TypeError`` deeper in mesh loading).
 
+    The environment fallback runs last in both orders, so it only changes the
+    outcome when the ROS Python resolvers are absent or come up empty -- e.g. a
+    PyInstaller-frozen binary launched from a sourced workspace.
+
+    Results are cached for the process lifetime (``lru_cache``); a change to the
+    ROS search-path environment variables after the first lookup is not picked
+    up, matching the existing behaviour for the ament/rospkg resolvers.
+
     Raises
     ------
     ImportError
-        Neither resolver is available.
+        No ROS Python resolver is installed and the package was not found under
+        the ROS search-path environment variables either.
     LookupError
-        Both resolvers were tried but the package was not found by either.
+        The resolvers were tried but none of them found the package.
     """
+    # ament_index / rospkg are the authoritative package indices when present;
+    # _try_env_prefixes is a dependency-free fallback that resolves straight
+    # from the sourced shell environment, so a frozen binary (no ROS Python)
+    # still finds meshes after `source install/setup.bash`.
     if os.environ.get('ROS_VERSION') == '1':
-        resolvers = (_try_rospkg, _try_ament)
+        resolvers = (_try_rospkg, _try_ament, _try_env_prefixes)
     else:
-        resolvers = (_try_ament, _try_rospkg)
+        resolvers = (_try_ament, _try_rospkg, _try_env_prefixes)
 
     for resolver in resolvers:
         path = resolver(ros_package)
@@ -289,7 +375,10 @@ def get_path_with_cache(ros_package):
     if not ament_available and rospkg is None:
         raise ImportError(
             "Cannot resolve ROS package '{}': neither ament_index_python "
-            "nor rospkg is installed.".format(ros_package))
+            "nor rospkg is installed, and it was not found under "
+            "AMENT_PREFIX_PATH / ROS_PACKAGE_PATH / CMAKE_PREFIX_PATH. "
+            "Source your ROS workspace (e.g. `source install/setup.bash`) "
+            "or install one of the resolvers.".format(ros_package))
     raise LookupError(
         "ROS package '{}' was not found by ament_index_python or rospkg. "
         "Did you forget to source your ROS workspace "
