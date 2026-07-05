@@ -268,3 +268,97 @@ class TestGlbExportPreservesMaterialColor(unittest.TestCase):
             np.testing.assert_array_equal(
                 np.unique(vertex_colors.reshape(-1, 4), axis=0),
                 np.array([color], dtype=np.uint8))
+
+
+class TestEnvPrefixResolver(unittest.TestCase):
+    """_try_env_prefixes resolves package:// from the shell environment alone,
+    so a frozen binary (no ament_index_python / rospkg) still finds meshes
+    after sourcing a workspace."""
+
+    _VARS = ('AMENT_PREFIX_PATH', 'COLCON_PREFIX_PATH', 'CMAKE_PREFIX_PATH',
+             'ROS_PACKAGE_PATH', 'ROS_VERSION')
+
+    def setUp(self):
+        urdf_utils.get_path_with_cache.cache_clear()
+        self._saved = {v: os.environ.pop(v, None) for v in self._VARS}
+        self._tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        urdf_utils.get_path_with_cache.cache_clear()
+        for v, val in self._saved.items():
+            if val is None:
+                os.environ.pop(v, None)
+            else:
+                os.environ[v] = val
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _make_package(self, directory, name):
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, 'package.xml'), 'w') as f:
+            f.write('<?xml version="1.0"?>\n'
+                    '<package><name>{}</name></package>\n'.format(name))
+        return directory
+
+    def test_resolves_via_ament_prefix_share_layout(self):
+        prefix = os.path.join(self._tmp, 'install')
+        share = self._make_package(
+            os.path.join(prefix, 'share', 'my_robot'), 'my_robot')
+        os.environ['AMENT_PREFIX_PATH'] = prefix
+        assert os.path.samefile(
+            urdf_utils._try_env_prefixes('my_robot'), share)
+
+    def test_resolves_via_ros_package_path_direct_child(self):
+        src = os.path.join(self._tmp, 'ws', 'src')
+        pkg = self._make_package(os.path.join(src, 'my_robot'), 'my_robot')
+        os.environ['ROS_PACKAGE_PATH'] = src
+        assert os.path.samefile(
+            urdf_utils._try_env_prefixes('my_robot'), pkg)
+
+    def test_resolves_via_ros_package_path_recursive_crawl(self):
+        src = os.path.join(self._tmp, 'ws', 'src')
+        pkg = self._make_package(
+            os.path.join(src, 'nested', 'my_robot'), 'my_robot')
+        os.environ['ROS_PACKAGE_PATH'] = src
+        assert os.path.samefile(
+            urdf_utils._try_env_prefixes('my_robot'), pkg)
+
+    def test_name_in_manifest_wins_over_directory_name(self):
+        # under ROS_PACKAGE_PATH the package.xml <name>, not the folder name,
+        # is authoritative (the ament share/<pkg> layout is name-keyed instead)
+        src = os.path.join(self._tmp, 'ws', 'src')
+        pkg = self._make_package(os.path.join(src, 'pkg_dir'), 'real_name')
+        os.environ['ROS_PACKAGE_PATH'] = src
+        assert urdf_utils._try_env_prefixes('pkg_dir') is None
+        assert os.path.samefile(
+            urdf_utils._try_env_prefixes('real_name'), pkg)
+
+    def test_returns_none_when_not_found(self):
+        os.environ['AMENT_PREFIX_PATH'] = self._tmp
+        os.environ['ROS_PACKAGE_PATH'] = self._tmp
+        assert urdf_utils._try_env_prefixes('absent') is None
+
+    def test_malformed_manifest_is_skipped_gracefully(self):
+        # a broken package.xml must not raise; the crawl just moves on
+        src = os.path.join(self._tmp, 'ws', 'src')
+        broken = os.path.join(src, 'broken')
+        os.makedirs(broken)
+        with open(os.path.join(broken, 'package.xml'), 'w') as f:
+            f.write('<package><name>oops')          # unterminated XML
+        good = self._make_package(os.path.join(src, 'good'), 'good')
+        os.environ['ROS_PACKAGE_PATH'] = src
+        assert urdf_utils._manifest_package_name(broken) is None
+        assert urdf_utils._try_env_prefixes('broken') is None
+        assert os.path.samefile(
+            urdf_utils._try_env_prefixes('good'), good)
+
+    def test_get_path_with_cache_falls_back_to_env(self):
+        prefix = os.path.join(self._tmp, 'install')
+        share = self._make_package(
+            os.path.join(prefix, 'share', 'my_robot'), 'my_robot')
+        os.environ['AMENT_PREFIX_PATH'] = prefix
+        # neither ROS Python resolver available -> env fallback must resolve
+        with mock.patch.object(urdf_utils, '_try_ament', return_value=None), \
+             mock.patch.object(urdf_utils, '_try_rospkg', return_value=None):
+            assert os.path.samefile(
+                urdf_utils.get_path_with_cache('my_robot'), share)
