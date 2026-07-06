@@ -6,10 +6,11 @@ from pathlib import Path
 from lxml import etree as ET
 import numpy as np
 
-from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import rotation_matrix_z_to_axis
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.utils.primitive_fitting import fit_primitive_to_mesh
+from skrobot.utils.primitive_fitting import primitive_params_to_origin
 from skrobot.utils.urdf import get_filename
 from skrobot.utils.urdf import load_meshes
 
@@ -153,13 +154,14 @@ def create_primitive_geometry_element(primitive_params, indent_patterns):
     -------
     geometry : ET.Element
         XML geometry element.
-    origin_xyz : np.ndarray
-        Origin position for the primitive.
-    origin_rpy : np.ndarray
-        Origin rotation (RPY) for the primitive.
+
+    Notes
+    -----
+    This only builds the ``<geometry>`` element. The primitive's
+    ``<origin>`` (xyz, rpy) is computed separately via
+    :func:`skrobot.utils.primitive_fitting.primitive_params_to_origin`.
     """
     geometry = ET.Element('geometry')
-    center = primitive_params['center']
     prim_type = primitive_params['type']
 
     if prim_type == 'box':
@@ -168,37 +170,25 @@ def create_primitive_geometry_element(primitive_params, indent_patterns):
         box.set('size', f"{extents[0]} {extents[1]} {extents[2]}")
         box.tail = indent_patterns['primitive_tail']
 
-        rotation = primitive_params.get('rotation', np.eye(3))
-        ypr = matrix2ypr(rotation)
-        origin_rpy = np.array([ypr[2], ypr[1], ypr[0]])
-
     elif prim_type == 'sphere':
         radius = primitive_params['radius']
         sphere = ET.SubElement(geometry, 'sphere')
         sphere.set('radius', str(radius))
         sphere.tail = indent_patterns['primitive_tail']
 
-        origin_rpy = np.zeros(3)
-
     elif prim_type == 'cylinder':
         radius = primitive_params['radius']
         height = primitive_params['height']
-        axis = primitive_params['axis']
 
         cylinder = ET.SubElement(geometry, 'cylinder')
         cylinder.set('radius', str(radius))
         cylinder.set('length', str(height))
         cylinder.tail = indent_patterns['primitive_tail']
 
-        rotation = rotation_matrix_z_to_axis(axis)
-        ypr = matrix2ypr(rotation)
-        origin_rpy = np.array([ypr[2], ypr[1], ypr[0]])
-
     elif prim_type == 'capsule':
         logger.warning("Capsule primitives are not standard URDF. Converting to cylinder.")
         radius = primitive_params['radius']
         height = primitive_params['height']
-        axis = primitive_params['axis']
 
         cylinder = ET.SubElement(geometry, 'cylinder')
         cylinder.set('radius', str(radius))
@@ -206,16 +196,12 @@ def create_primitive_geometry_element(primitive_params, indent_patterns):
         cylinder.set('length', str(total_height))
         cylinder.tail = indent_patterns['primitive_tail']
 
-        rotation = rotation_matrix_z_to_axis(axis)
-        ypr = matrix2ypr(rotation)
-        origin_rpy = np.array([ypr[2], ypr[1], ypr[0]])
-
     else:
         raise ValueError(f"Unknown primitive type: {prim_type}")
 
     geometry.text = indent_patterns['geometry_text']
 
-    return geometry, center, origin_rpy
+    return geometry
 
 
 def convert_meshes_to_primitives(
@@ -223,7 +209,8 @@ def convert_meshes_to_primitives(
         output_file=None,
         convert_visual=True,
         convert_collision=True,
-        primitive_type=None):
+        primitive_type=None,
+        oriented=None):
     """Convert mesh geometries in URDF to primitive shapes.
 
     Parameters
@@ -239,6 +226,11 @@ def convert_meshes_to_primitives(
     primitive_type : str, optional
         Force a specific primitive type ('box', 'cylinder', 'sphere').
         If None, automatically detects the best fit for each mesh.
+    oriented : bool or None, optional
+        Orientation policy for box/cylinder fits. ``None`` (default) keeps the
+        tighter of the axis-aligned / oriented variants automatically; ``True``
+        forces oriented fits; ``False`` forces axis-aligned fits (see
+        :func:`skrobot.utils.primitive_fitting.fit_primitive_to_mesh`).
 
     Returns
     -------
@@ -317,20 +309,27 @@ def convert_meshes_to_primitives(
 
                 primitive_params = fit_primitive_to_mesh(
                     combined_mesh,
-                    primitive_type=primitive_type
+                    primitive_type=primitive_type,
+                    oriented=oriented
                 )
 
                 logger.info("    Fitted primitive: %s", primitive_params['type'])
 
+                # Origin of the primitive expressed in the mesh's own frame.
+                local_xyz, local_rpy = primitive_params_to_origin(
+                    primitive_params)
+
+                # Compose the primitive origin with the mesh element's URDF
+                # origin to obtain the primitive pose in the link frame.
                 rotation_urdf = rpy_matrix(
                     origin_rpy[2],
                     origin_rpy[1],
                     origin_rpy[0]
                 )
-                mesh_center_link = rotation_urdf @ primitive_params['center']
+                mesh_center_link = rotation_urdf @ local_xyz
                 primitive_center = origin_xyz + mesh_center_link
 
-                new_geometry, rel_center, rel_rpy = create_primitive_geometry_element(
+                new_geometry = create_primitive_geometry_element(
                     primitive_params,
                     indent_patterns
                 )
@@ -338,11 +337,16 @@ def convert_meshes_to_primitives(
                 if primitive_params['type'] in ['cylinder', 'capsule']:
                     axis_link = rotation_urdf @ primitive_params['axis']
                     primitive_rotation = rotation_matrix_z_to_axis(axis_link)
-                    combined_rotation = primitive_rotation
-                    ypr = matrix2ypr(combined_rotation)
-                    final_rpy = np.array([ypr[2], ypr[1], ypr[0]])
+                    final_rpy = matrix2rpy(primitive_rotation)
                 else:
-                    final_rpy = origin_rpy
+                    rotation_local = rpy_matrix(
+                        local_rpy[2], local_rpy[1], local_rpy[0])
+                    if np.allclose(rotation_local, np.eye(3)):
+                        # Axis-aligned box / sphere: preserve the element's
+                        # original URDF origin rpy exactly.
+                        final_rpy = origin_rpy
+                    else:
+                        final_rpy = matrix2rpy(rotation_urdf @ rotation_local)
 
                 original_order = []
                 material_elem = None

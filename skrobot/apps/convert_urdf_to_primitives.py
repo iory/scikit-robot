@@ -81,6 +81,16 @@ Examples:
     )
 
     parser.add_argument(
+        '--oriented',
+        type=str,
+        choices=['auto', 'true', 'false'],
+        default='auto',
+        help='Orientation policy for box/cylinder fits: auto (keep the '
+             'tighter of axis-aligned/oriented, default), true (force '
+             'oriented), false (force axis-aligned)'
+    )
+
+    parser.add_argument(
         '-v', '--verbose',
         action='store_true',
         help='Enable verbose output'
@@ -130,6 +140,8 @@ Examples:
 
     primitive_type = None if args.primitive_type == 'auto' else args.primitive_type
 
+    oriented = {'auto': None, 'true': True, 'false': False}[args.oriented]
+
     try:
         print(f"Loading URDF from: {input_path}")
         if args.preserve_visual:
@@ -149,7 +161,8 @@ Examples:
             str(output_path) if output_path else None,
             convert_visual=convert_visual,
             convert_collision=convert_collision,
-            primitive_type=primitive_type
+            primitive_type=primitive_type,
+            oriented=oriented
         )
 
         if modified_count > 0:
