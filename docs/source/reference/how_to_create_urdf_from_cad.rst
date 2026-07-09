@@ -19,6 +19,64 @@ This document explains how to create a URDF file from SolidWorks models by using
 - **scikit-robot ``convert-urdf-mesh``**
   A tool within the `scikit-robot <https://github.com/iory/scikit-robot>`_ library that can convert 3D model files (like ``.3dxml``, ``.obj``, ``.stl``, etc.) into a URDF or mesh files (e.g., ``.dae``) suitable for ROS.
 
+Recommended: sw2robot (solidworks_urdf_exporter2)
+-------------------------------------------------
+
+If you are starting a new project, we recommend using
+`sw2robot (solidworks_urdf_exporter2) <https://github.com/jsk-ros-pkg/solidworks_urdf_exporter2>`_
+together with scikit-robot. It is the modernized successor of the classic
+SolidWorks URDF Exporter and pairs well with ``convert-urdf-mesh``.
+
+Compared with the classic exporter, sw2robot:
+
+- **Infers the kinematic tree automatically** by reading the assembly's existing
+  mates (constraints), instead of asking you to lay out the link hierarchy and
+  set each joint origin/axis by hand inside SolidWorks.
+- **Ships a cross-platform browser editor** so that the *edit / build / export*
+  steps run natively on Windows, macOS, and Linux (only the *extract* step, which
+  drives SolidWorks over COM, needs Windows + SolidWorks). You can re-root the
+  tree, change joint types, edit frames, set materials/densities, and export a
+  ROS / robot-compiler package.
+- **Works on any URDF**, so you can also open a URDF produced by the classic
+  add-in and clean it up in the editor.
+
+**Exports URDF + meshes directly (no ``convert-urdf-mesh`` step needed).**
+sw2robot writes the URDF together with its mesh files for you, so with sw2robot
+you typically do *not* need to post-process the output with
+``convert-urdf-mesh``. In particular it can:
+
+- **Emit visual meshes directly as ``.glb`` (or ``.dae`` / ``.stl``)**, keeping
+  per-part materials/colors — no separate 3dxml→dae conversion pass.
+- **Generate collision geometry for you** instead of reusing the (heavy, concave)
+  visual mesh. You can choose per export:
+
+  - ``copy`` — reuse the visual mesh as-is,
+  - ``hull`` — a single convex hull per link,
+  - ``coacd`` — approximate **convex decomposition** into a set of convex parts
+    (great for physics engines; ``balanced`` / ``fine`` quality presets),
+  - ``primitive`` / ``box`` / ``cylinder`` / ``sphere`` — fit a native URDF
+    primitive shape per link (no mesh file at all; ``primitive`` auto-picks the
+    best-fitting shape).
+
+**Download from the release page.** Prebuilt editors for Windows, macOS
+(Apple Silicon), and Linux (x64) are available on the releases page — no
+Python or SolidWorks required just to edit:
+
+  `sw2robot releases (latest) <https://github.com/jsk-ros-pkg/solidworks_urdf_exporter2/releases/latest>`__
+
+Click the binary matching your OS on that page to grab the latest prebuilt
+editor, then pick the visual mesh format (``.glb`` recommended) and a collision
+mode (``coacd`` or ``primitive`` for physics) right in the export dialog. See the
+`project README <https://github.com/jsk-ros-pkg/solidworks_urdf_exporter2#readme>`_
+for the full workflow.
+
+.. note::
+
+   The ``convert-urdf-mesh`` workflow described below still applies when you are
+   using the **classic** SolidWorks URDF Exporter (which produces ``.3dxml``),
+   or when you have existing meshes to reconvert. If you use sw2robot, prefer its
+   built-in ``.glb`` + collision export instead.
+
 Coordinate Systems
 ------------------
 
@@ -48,13 +106,19 @@ or clone directly from GitHub if you need the latest updates:
    cd scikit-robot
    pip install -e .
 
-2. **Install SolidWorks URDF Exporter**
+2. **Install a SolidWorks URDF Exporter**
 
-- Obtain the plugin from the following link:
+- **Recommended: sw2robot (solidworks_urdf_exporter2).** Download the prebuilt
+  editor for your OS from the release page — no separate installation into
+  SolidWorks is required to edit / build / export:
+
+  `sw2robot releases (latest) <https://github.com/jsk-ros-pkg/solidworks_urdf_exporter2/releases/latest>`__
+
+- **Classic exporter (alternative).** Obtain the plugin from the following link:
 
   `SolidWorks URDF Exporter Plugin <https://drive.google.com/file/d/1iJ1jx8uAQsnmTtEBv4zEJnCgSbWJ3Ho2/view?usp=drive_link>`_
 
-- Follow the official instructions to install it into your SolidWorks environment.
+  Follow the official instructions to install it into your SolidWorks environment.
 
   `Installation Instructions <https://github.com/ros/solidworks_urdf_exporter>`_
 
