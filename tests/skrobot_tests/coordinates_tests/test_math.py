@@ -17,13 +17,16 @@ from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import invert_yaw_pitch_roll
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2rpy
+from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_conjugate
 from skrobot.coordinates.math import quaternion_distance
 from skrobot.coordinates.math import quaternion_from_axis_angle
+from skrobot.coordinates.math import quaternion_from_vectors
 from skrobot.coordinates.math import quaternion_inverse
 from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import quaternion_norm
@@ -40,14 +43,17 @@ from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rotation_vector_to_quaternion
+from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.coordinates.math import skew_symmetric_matrix
 from skrobot.coordinates.math import triple_product
 from skrobot.coordinates.math import wxyz2xyzw
+from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates.math import ypr2matrix
 
@@ -788,3 +794,83 @@ class TestMath(unittest.TestCase):
         rot = rpy2matrix(roll, pitch, yaw)
         recovered_rpy = matrix2rpy(rot)
         testing.assert_almost_equal(recovered_rpy, np.array([roll, pitch, yaw]))
+
+    def test_rotation_matrix_from_vectors(self):
+        # random directions: R maps a onto b exactly
+        rng = np.random.RandomState(0)
+        for _ in range(50):
+            a = rng.randn(3)
+            b = rng.randn(3)
+            rot = rotation_matrix_from_vectors(a, b)
+            # valid rotation
+            testing.assert_almost_equal(rot.T.dot(rot), np.eye(3))
+            testing.assert_almost_equal(np.linalg.det(rot), 1.0)
+            # a maps onto b (directions)
+            mapped = rot.dot(normalize_vector(a))
+            testing.assert_almost_equal(mapped, normalize_vector(b))
+
+        # already-aligned -> identity
+        testing.assert_almost_equal(
+            rotation_matrix_from_vectors([0, 0, 2], [0, 0, 5]), np.eye(3))
+
+        # anti-parallel -> 180 deg (maps a onto -a) and stays a valid rotation
+        for a in ([0, 0, 1], [1, 0, 0], [0, 1, 0], [1, 2, 3]):
+            a = np.array(a, dtype=np.float64)
+            rot = rotation_matrix_from_vectors(a, -a)
+            testing.assert_almost_equal(rot.T.dot(rot), np.eye(3))
+            testing.assert_almost_equal(np.linalg.det(rot), 1.0)
+            testing.assert_almost_equal(
+                rot.dot(normalize_vector(a)), -normalize_vector(a))
+
+    def test_quaternion_from_vectors(self):
+        rng = np.random.RandomState(1)
+        for _ in range(50):
+            a = rng.randn(3)
+            b = rng.randn(3)
+            q = quaternion_from_vectors(a, b)
+            testing.assert_almost_equal(np.linalg.norm(q), 1.0)
+            rot = quaternion2matrix(q)
+            testing.assert_almost_equal(
+                rot.dot(normalize_vector(a)), normalize_vector(b))
+
+    def test_rpy2homogeneous(self):
+        rng = np.random.RandomState(4)
+        for _ in range(50):
+            roll, pitch, yaw = rng.uniform(-pi, pi, 3)
+            mat = rpy2homogeneous(roll, pitch, yaw)
+            self.assertEqual(mat.shape, (4, 4))
+            # rotation-only: zero translation, bottom row [0, 0, 0, 1]
+            testing.assert_almost_equal(mat[:3, 3], np.zeros(3))
+            testing.assert_almost_equal(mat[3], np.array([0, 0, 0, 1]))
+            # rotation block matches rpy2matrix
+            testing.assert_almost_equal(mat[:3, :3], rpy2matrix(roll, pitch, yaw))
+            # consistent with xyzrpy2matrix at zero translation
+            testing.assert_almost_equal(
+                mat, xyzrpy2matrix([0, 0, 0], [roll, pitch, yaw]))
+
+    def test_xyzrpy_matrix_roundtrip(self):
+        rng = np.random.RandomState(2)
+        for _ in range(50):
+            xyz = rng.uniform(-5, 5, 3)
+            rpy = np.array([rng.uniform(-pi, pi),
+                            rng.uniform(-pi / 2 + 0.05, pi / 2 - 0.05),
+                            rng.uniform(-pi, pi)])
+            mat = xyzrpy2matrix(xyz, rpy)
+            self.assertEqual(mat.shape, (4, 4))
+            testing.assert_almost_equal(mat[:3, :3], rpy2matrix(*rpy))
+            r_xyz, r_rpy = matrix2xyzrpy(mat)
+            testing.assert_almost_equal(r_xyz, xyz)
+            testing.assert_almost_equal(r_rpy, rpy)
+
+    def test_matrix_relative(self):
+        rng = np.random.RandomState(3)
+        for _ in range(50):
+            parent = xyzrpy2matrix(rng.uniform(-3, 3, 3), rng.uniform(-1, 1, 3))
+            child = xyzrpy2matrix(rng.uniform(-3, 3, 3), rng.uniform(-1, 1, 3))
+            rel = matrix_relative(parent, child)
+            # matches the plain inverse, and parent @ rel reconstructs child
+            testing.assert_almost_equal(rel, np.linalg.inv(parent).dot(child))
+            testing.assert_almost_equal(parent.dot(rel), child)
+        # relative of a frame to itself is the identity
+        p = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+        testing.assert_almost_equal(matrix_relative(p, p), np.eye(4))

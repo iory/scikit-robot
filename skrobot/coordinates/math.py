@@ -1195,6 +1195,44 @@ def rpy2matrix(roll, pitch, yaw):
     return rpy_matrix(yaw, pitch, roll)
 
 
+def rpy2homogeneous(roll, pitch, yaw):
+    """Create a 4x4 homogeneous transform (rotation only) from roll/pitch/yaw.
+
+    Convenience wrapper that embeds :func:`rpy2matrix` in a 4x4 homogeneous
+    matrix with zero translation.  ``rpy`` is the extrinsic X-Y-Z (fixed-axis)
+    roll, pitch, yaw triple, i.e. ``R = Rz(yaw) @ Ry(pitch) @ Rx(roll)`` -- the
+    same convention as URDF ``<origin rpy="...">``.  Use :func:`xyzrpy2matrix`
+    when you also need a translation, and :func:`matrix2xyzrpy` to invert.
+
+    Parameters
+    ----------
+    roll : float
+        Rotation around the X-axis in radians.
+    pitch : float
+        Rotation around the Y-axis in radians.
+    yaw : float
+        Rotation around the Z-axis in radians.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rpy2homogeneous
+    >>> T = rpy2homogeneous(0.1, 0.2, 0.3)
+    >>> T.shape
+    (4, 4)
+    >>> np.allclose(T[:3, 3], 0)
+    True
+    """
+    matrix = np.eye(4)
+    matrix[:3, :3] = rpy2matrix(roll, pitch, yaw)
+    return matrix
+
+
 def normalize_vector(v, ord=2):
     """Return normalized vector
 
@@ -2899,6 +2937,161 @@ def look_at_rotation(camera_pos, target=None, up=None, return_matrix=True):
     if return_matrix:
         return R
     return rotation_matrix_to_axis_angle_vector(R)
+
+
+def rotation_matrix_from_vectors(a, b):
+    """Return the 3x3 rotation matrix that rotates direction ``a`` onto ``b``.
+
+    Computes the shortest-arc rotation about the axis ``a x b``.  The inputs
+    need not be unit vectors; only their directions matter.  Degenerate
+    directions are handled explicitly instead of producing ``nan``:
+
+    - ``a`` parallel to ``b``      -> identity
+    - ``a`` anti-parallel to ``b`` -> a 180 deg rotation about an arbitrary
+      axis perpendicular to ``a``
+
+    Parameters
+    ----------
+    a : list or tuple or numpy.ndarray
+        source direction, shape (3,), nonzero.
+    b : list or tuple or numpy.ndarray
+        target direction, shape (3,), nonzero.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        3x3 rotation matrix ``R`` such that
+        ``R.dot(a / norm(a))`` equals ``b / norm(b)``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rotation_matrix_from_vectors
+    >>> R = rotation_matrix_from_vectors([1, 0, 0], [0, 1, 0])
+    >>> np.allclose(R.dot([1, 0, 0]), [0, 1, 0])
+    True
+    """
+    a = normalize_vector(np.array(a, dtype=np.float64))
+    b = normalize_vector(np.array(b, dtype=np.float64))
+    axis = np.cross(a, b)
+    axis_norm = np.linalg.norm(axis)
+    dot = float(np.clip(np.dot(a, b), -1.0, 1.0))
+    if axis_norm < 1e-12:
+        if dot > 0.0:  # already aligned
+            return np.eye(3)
+        # anti-parallel: rotate 180 deg about any axis perpendicular to a
+        perp = np.cross(a, np.array([1.0, 0.0, 0.0]))
+        if np.linalg.norm(perp) < 1e-12:
+            perp = np.cross(a, np.array([0.0, 1.0, 0.0]))
+        return rotation_matrix(pi, normalize_vector(perp))
+    return rotation_matrix(acos(dot), axis / axis_norm,
+                           skip_normalization=True)
+
+
+def quaternion_from_vectors(a, b):
+    """Return the ``[w, x, y, z]`` quaternion rotating ``a`` onto ``b``.
+
+    Shortest-arc rotation; see :func:`rotation_matrix_from_vectors` for the
+    degenerate-direction handling.
+
+    Parameters
+    ----------
+    a : list or tuple or numpy.ndarray
+        source direction, shape (3,), nonzero.
+    b : list or tuple or numpy.ndarray
+        target direction, shape (3,), nonzero.
+
+    Returns
+    -------
+    quaternion : numpy.ndarray
+        quaternion ``[w, x, y, z]``.
+    """
+    return matrix2quaternion(rotation_matrix_from_vectors(a, b))
+
+
+def matrix2xyzrpy(matrix):
+    """Split a 4x4 homogeneous transform into translation and roll-pitch-yaw.
+
+    ``rpy`` uses the URDF convention (extrinsic X-Y-Z, ``R = Rz @ Ry @ Rx``),
+    matching :func:`matrix2rpy` and :func:`xyzrpy2matrix`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    xyz : numpy.ndarray
+        translation, shape (3,).
+    rpy : numpy.ndarray
+        ``[roll, pitch, yaw]`` in radians.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2xyzrpy, xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+    >>> xyz, rpy = matrix2xyzrpy(T)
+    >>> np.allclose(xyz, [1, 2, 3]) and np.allclose(rpy, [0.1, 0.2, 0.3])
+    True
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, 3].copy(), matrix2rpy(matrix[:3, :3])
+
+
+def xyzrpy2matrix(xyz, rpy):
+    """Build a 4x4 homogeneous transform from translation and roll-pitch-yaw.
+
+    Inverse of :func:`matrix2xyzrpy`; ``rpy`` is the URDF convention
+    (``R = Rz @ Ry @ Rx``).
+
+    Parameters
+    ----------
+    xyz : list or tuple or numpy.ndarray
+        translation, shape (3,).
+    rpy : list or tuple or numpy.ndarray
+        ``[roll, pitch, yaw]`` in radians.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+    """
+    roll, pitch, yaw = rpy
+    matrix = np.eye(4)
+    matrix[:3, :3] = rpy2matrix(roll, pitch, yaw)
+    matrix[:3, 3] = np.array(xyz, dtype=np.float64)
+    return matrix
+
+
+def matrix_relative(parent, child):
+    """Express one homogeneous transform relative to another.
+
+    Returns ``inv(parent) @ child`` -- the pose of ``child`` seen from the
+    ``parent`` frame, where both are 4x4 matrices in a common frame.  The
+    inverse is built from the rotation transpose + translation (assuming a
+    rigid transform), so no general ``np.linalg.inv`` on the 4x4 is needed.
+
+    Parameters
+    ----------
+    parent : numpy.ndarray
+        4x4 homogeneous transform of the reference frame.
+    child : numpy.ndarray
+        4x4 homogeneous transform to re-express.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transform of ``child`` in ``parent``'s frame.
+    """
+    parent = np.array(parent, dtype=np.float64)
+    child = np.array(child, dtype=np.float64)
+    rot = parent[:3, :3]
+    inv = np.eye(4)
+    inv[:3, :3] = rot.T
+    inv[:3, 3] = -rot.T.dot(parent[:3, 3])
+    return inv.dot(child)
 
 
 inverse_rodrigues = rotation_angle
