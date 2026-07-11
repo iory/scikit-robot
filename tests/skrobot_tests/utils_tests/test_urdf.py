@@ -362,3 +362,32 @@ class TestEnvPrefixResolver(unittest.TestCase):
              mock.patch.object(urdf_utils, '_try_rospkg', return_value=None):
             assert os.path.samefile(
                 urdf_utils.get_path_with_cache('my_robot'), share)
+
+
+class TestConfigureOrigin(unittest.TestCase):
+
+    def test_xyzrpy_6vector(self):
+        # xyz + rpy 6-vector -> 4x4 (this path used to overwrite the input
+        # with np.eye(4) before reading it and crashed on unpacking)
+        from skrobot.coordinates.math import rpy2matrix
+
+        xyz = [1.0, 2.0, 3.0]
+        rpy = [0.1, 0.2, 0.3]
+        matrix = urdf_utils.configure_origin(list(xyz) + list(rpy))
+        self.assertEqual(matrix.shape, (4, 4))
+        np.testing.assert_allclose(matrix[:3, 3], xyz)
+        np.testing.assert_allclose(matrix[:3, :3], rpy2matrix(*rpy))
+        np.testing.assert_allclose(matrix[3], [0, 0, 0, 1])
+
+    def test_none_and_4x4_passthrough(self):
+        np.testing.assert_allclose(
+            urdf_utils.configure_origin(None), np.eye(4))
+        m = np.eye(4)
+        m[:3, 3] = [4.0, 5.0, 6.0]
+        np.testing.assert_allclose(urdf_utils.configure_origin(m), m)
+
+    def test_invalid_shape_raises(self):
+        with pytest.raises(ValueError):
+            urdf_utils.configure_origin(np.zeros(5))
+        with pytest.raises(TypeError):
+            urdf_utils.configure_origin('not-a-matrix')
