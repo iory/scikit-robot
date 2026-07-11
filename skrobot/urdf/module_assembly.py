@@ -899,6 +899,16 @@ class RobotAssembly:
                             if "name" in material.attrib:
                                 material.attrib["name"] = \
                                     _prefixed(material.attrib["name"])
+            elif elem.tag == "transmission":
+                for part in ("joint", "actuator"):
+                    for sub in elem.findall(part):
+                        if "name" in sub.attrib:
+                            sub.attrib["name"] = _prefixed(sub.attrib["name"])
+            elif elem.tag == "gazebo":
+                # <gazebo reference="..."> names a link or joint
+                if "reference" in elem.attrib:
+                    elem.attrib["reference"] = \
+                        _prefixed(elem.attrib["reference"])
             yield elem
 
     def _compose_inline(self, temp_dir: str):

@@ -19,6 +19,11 @@ _MODULE_URDF = """<?xml version="1.0"?>
     <axis xyz="0 0 1"/>
     <limit lower="-1.0" upper="1.0" effort="1" velocity="1"/>
   </joint>
+  <transmission name="tr1">
+    <joint name="j1"><hardwareInterface>EffortJointInterface</hardwareInterface></joint>
+    <actuator name="motor1"><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <gazebo reference="dummy_link1"><selfCollide>false</selfCollide></gazebo>
 </robot>
 """
 
@@ -206,11 +211,29 @@ class TestV2Design(unittest.TestCase):
                 path = os.path.join(tmp, f'{engine}.urdf')
                 outputs[engine] = ET.parse(
                     assembly.build(output_path=path, engine=engine)).getroot()
+
+        def _transmission_key(el):
+            return (el.get('name'),
+                    tuple(sorted(sub.get('name')
+                                 for sub in el.findall('joint'))),
+                    tuple(sorted(sub.get('name')
+                                 for sub in el.findall('actuator'))))
+
         for tag, key in (('link', lambda el: el.get('name')),
-                         ('joint', _joint_key)):
+                         ('joint', _joint_key),
+                         ('transmission', _transmission_key),
+                         ('gazebo', lambda el: el.get('reference'))):
             inline_set = {key(el) for el in outputs['inline'].findall(tag)}
             xacro_set = {key(el) for el in outputs['xacro'].findall(tag)}
-            self.assertEqual(inline_set, xacro_set)
+            self.assertEqual(inline_set, xacro_set, tag)
+        # cross references inside transmission/gazebo carry the prefix
+        transmissions = outputs['inline'].findall('transmission')
+        self.assertIn('a1_j1',
+                      {sub.get('name') for tr in transmissions
+                       for sub in tr.findall('joint')})
+        self.assertIn('a1_dummy_link1',
+                      {el.get('reference')
+                       for el in outputs['inline'].findall('gazebo')})
 
     def test_cycle_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
