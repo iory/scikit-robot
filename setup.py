@@ -58,6 +58,9 @@ if (sys.version_info.major > 2):
         extra_all_requires.append('open3d')
     extra_all_requires.append('fast-simplification')
     extra_all_requires.append('DracoPy')
+    # CoACD approximate convex decomposition
+    # (skrobot.utils.convex_decomposition)
+    extra_all_requires.append('coacd')
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
@@ -123,6 +126,11 @@ setup(
     },
     extras_require={
         'docs': docs_install_requires,
+        # CoACD approximate convex decomposition
+        # (skrobot.utils.convex_decomposition).  Also part of 'all'; this
+        # dedicated extra allows a minimal install.  The API raises a clear
+        # error when coacd is not installed.
+        'coacd': ['coacd'],
         'all': extra_all_requires,
     },
 )
