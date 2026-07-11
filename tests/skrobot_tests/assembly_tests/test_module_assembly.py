@@ -412,3 +412,205 @@ class TestV4PortsAndMating(unittest.TestCase):
         with self.assertRaises(ValueError):
             assembly.connect('a1', 'dummy_link1', 'b1', 'base_link')
         assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1')
+
+
+_GROUND_URDF = """<?xml version="1.0"?>
+<robot name="ground">
+  <link name="base_link"/>
+  <link name="g1"/>
+  <link name="g2"/>
+  <joint name="fg1" type="fixed">
+    <parent link="base_link"/><child link="g1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="fg2" type="fixed">
+    <parent link="base_link"/><child link="g2"/>
+    <origin xyz="{g2_xyz}" rpy="0 0 0"/>
+  </joint>
+</robot>
+"""
+
+_BAR_URDF = """<?xml version="1.0"?>
+<robot name="bar">
+  <link name="base_link"/>
+  <link name="arm"/>
+  <link name="tip"/>
+  <joint name="hinge" type="revolute">
+    <parent link="base_link"/><child link="arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5" upper="1.5" effort="1" velocity="1"/>
+  </joint>
+  <joint name="tipj" type="fixed">
+    <parent link="arm"/><child link="tip"/>
+    <origin xyz="{tip_xyz}" rpy="{tip_rpy}"/>
+  </joint>
+</robot>
+"""
+
+
+class TestV5LoopClosures(unittest.TestCase):
+    """connect(loop=True): cut edges, the relay sidecar and exact mimic."""
+
+    @staticmethod
+    def _write(tmp, name, content):
+        path = os.path.join(tmp, name + '.urdf')
+        with open(path, 'w') as f:
+            f.write(content)
+        return RobotModule.from_urdf(name, path)
+
+    def _four_bar(self, tmp, g2_xyz='0.2 0 0', crank2_tip='0 0.1 0',
+                  coupler_tip_rpy='0 0 0'):
+        """Ground + two cranks + coupler, loop-closed at the coupler tip.
+
+        The defaults make the hinge quadrilateral a rectangle (a
+        parallelogram); pass a shifted ``g2_xyz``/``crank2_tip`` pair that
+        still closes at the zero pose for a non-parallelogram four-bar.
+        """
+        ground = self._write(tmp, 'ground',
+                             _GROUND_URDF.format(g2_xyz=g2_xyz))
+        crank = self._write(tmp, 'crank',
+                            _BAR_URDF.format(tip_xyz='0 0.1 0',
+                                             tip_rpy='0 0 0'))
+        crank2 = self._write(tmp, 'crank2',
+                             _BAR_URDF.format(tip_xyz=crank2_tip,
+                                              tip_rpy='0 0 0'))
+        coupler = self._write(tmp, 'coupler',
+                              _BAR_URDF.format(tip_xyz='0.2 0 0',
+                                               tip_rpy=coupler_tip_rpy))
+        assembly = RobotAssembly('fourbar')
+        assembly.add_module_instance('g', ground)
+        assembly.add_module_instance('c1', crank)
+        assembly.add_module_instance('c2', crank2)
+        assembly.add_module_instance('cp', coupler)
+        assembly.connect('g', 'g1', 'c1', 'base_link')
+        assembly.connect('g', 'g2', 'c2', 'base_link')
+        assembly.connect('c1', 'tip', 'cp', 'base_link')
+        assembly.connect('cp', 'tip', 'c2', 'tip', loop=True)
+        assembly.set_root('g', 'base_link')
+        return assembly
+
+    def test_loop_rejects_transform_mate_and_attach(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            for kwargs in ({'yaw': 0.5}, {'x': 0.1}, {'mate': True},
+                           {'attach': 'port'}):
+                with self.assertRaises(ValueError):
+                    assembly.connect('c1', 'arm', 'c2', 'arm',
+                                     loop=True, **kwargs)
+
+    def test_loop_builds_and_writes_relay_sidecar(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            path = assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))
+            sidecar = os.path.join(os.path.dirname(path),
+                                   'loop_closures.yaml')
+            self.assertTrue(os.path.exists(sidecar))
+            with open(sidecar) as f:
+                config = yaml.safe_load(f)
+        self.assertEqual(config['independent'], ['c1_hinge'])
+        self.assertEqual(config['dependent'], ['c2_hinge', 'cp_hinge'])
+        closure = config['closures'][0]
+        self.assertEqual(closure['link_a'], 'cp_tip')
+        self.assertEqual(closure['link_b'], 'c2_tip')
+        for got, want in zip(closure['point'], [0.2, 0.1, 0.0]):
+            self.assertAlmostEqual(got, want, places=8)
+        for got, want in zip(closure['axis'], [0.0, 0.0, 1.0]):
+            self.assertAlmostEqual(got, want, places=8)
+
+    def test_parallelogram_gets_exact_mimic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))).getroot()
+        mimics = {j.get('name'): j.find('mimic')
+                  for j in root.findall('joint')
+                  if j.find('mimic') is not None}
+        self.assertEqual(sorted(mimics), ['c2_hinge', 'cp_hinge'])
+        for name, multiplier in (('c2_hinge', 1.0), ('cp_hinge', -1.0)):
+            self.assertEqual(mimics[name].get('joint'), 'c1_hinge')
+            self.assertAlmostEqual(
+                float(mimics[name].get('multiplier')), multiplier)
+
+    def test_general_four_bar_gets_no_mimic(self):
+        # crank2 is shorter and its ground pivot shifted so the loop still
+        # closes at zero but the quadrilateral is not a parallelogram
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp, g2_xyz='0.2 0.05 0',
+                                      crank2_tip='0 0.05 0')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))).getroot()
+            sidecar = os.path.join(tmp, 'loop_closures.yaml')
+            self.assertTrue(os.path.exists(sidecar))
+        self.assertEqual([j.get('name') for j in root.findall('joint')
+                          if j.find('mimic') is not None], [])
+
+    def test_z_opposed_loop_ports_still_close(self):
+        # the keyed-mate convention seats ports Z-opposed; the hinge is a
+        # LINE, so an anti-parallel port Z must work like an aligned one
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(
+                tmp, coupler_tip_rpy='3.141592653589793 0 0')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))).getroot()
+        mimics = {j.get('name'): j.find('mimic')
+                  for j in root.findall('joint')
+                  if j.find('mimic') is not None}
+        self.assertEqual(sorted(mimics), ['c2_hinge', 'cp_hinge'])
+        for name, multiplier in (('c2_hinge', 1.0), ('cp_hinge', -1.0)):
+            self.assertEqual(mimics[name].get('joint'), 'c1_hinge')
+            self.assertAlmostEqual(
+                float(mimics[name].get('multiplier')), multiplier)
+
+    def test_unrelated_movable_joint_stays_independent(self):
+        # relay contract: independent = every movable joint the relay must
+        # take from the incoming joint states, loop-related or not
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            extra = self._write(tmp, 'extra',
+                                _BAR_URDF.format(tip_xyz='0 0.1 0',
+                                                 tip_rpy='0 0 0'))
+            assembly.add_module_instance('x1', extra)
+            assembly.connect('g', 'g2', 'x1', 'base_link', x=1.0)
+            assembly.build(output_path=os.path.join(tmp, 'fourbar.urdf'))
+            with open(os.path.join(tmp, 'loop_closures.yaml')) as f:
+                config = yaml.safe_load(f)
+        self.assertEqual(config['independent'], ['c1_hinge', 'x1_hinge'])
+        self.assertEqual(config['dependent'], ['c2_hinge', 'cp_hinge'])
+
+    def test_open_zero_pose_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # skip the coupler: the two crank tips sit 0.2 m apart at zero
+            ground = self._write(tmp, 'ground',
+                                 _GROUND_URDF.format(g2_xyz='0.2 0 0'))
+            crank = self._write(tmp, 'crank',
+                                _BAR_URDF.format(tip_xyz='0 0.1 0',
+                                                 tip_rpy='0 0 0'))
+            assembly = RobotAssembly('open')
+            assembly.add_module_instance('g', ground)
+            assembly.add_module_instance('c1', crank)
+            assembly.add_module_instance('c2', crank)
+            assembly.connect('g', 'g1', 'c1', 'base_link')
+            assembly.connect('g', 'g2', 'c2', 'base_link')
+            assembly.connect('c1', 'tip', 'c2', 'tip', loop=True)
+            assembly.set_root('g', 'base_link')
+            with self.assertRaisesRegex(ValueError, 'apart'):
+                assembly.build(output_path=os.path.join(tmp, 'x.urdf'))
+
+    def test_loop_round_trips_through_dict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            rebuilt = RobotAssembly.from_dict(assembly.to_dict())
+            self.assertEqual(rebuilt.to_dict(), assembly.to_dict())
+            loops = [c for c in rebuilt.connections if c.loop]
+            self.assertEqual(len(loops), 1)
+
+    def test_build_robot_model_with_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            robot = assembly.build_robot_model()
+        joint_names = {j.name for j in robot.joint_list}
+        self.assertIn('c1_hinge', joint_names)
