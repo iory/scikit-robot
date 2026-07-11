@@ -26,8 +26,10 @@ import xml.etree.ElementTree as ET
 from lxml import etree
 import numpy as np
 
+from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
@@ -58,6 +60,9 @@ class Port:
         The Z-axis direction of this port in the module's root frame.
         Used for automatic port alignment when connecting modules.
         Default is (0, 0, 1) meaning Z points "up".
+    xyz : Tuple[float, float, float], optional
+        The port position in the module's root frame (composed from the
+        joint origins along the root-to-port chain at the zero pose).
     """
 
     name: str
@@ -65,6 +70,7 @@ class Port:
     port_type: str = "bidirectional"  # "input", "output", "bidirectional"
     compatible_types: List[str] = field(default_factory=list)
     z_axis: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+    xyz: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -211,10 +217,15 @@ class RobotModule:
                 joint_graph[child.get("link")] = (parent.get("link"), joint)
 
         # Calculate Z-axis for each link
-        port_z_axes = cls._calculate_port_z_axes(root_link, links, joint_graph)
+        port_frames = cls._calculate_port_frames(root_link, links, joint_graph)
 
         # Identify ports (all links can potentially be ports)
-        ports = [Port(name=link, z_axis=port_z_axes.get(link, (0.0, 0.0, 1.0))) for link in links]
+        ports = [
+            Port(name=link,
+                 z_axis=port_frames.get(link, ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)))[1],
+                 xyz=port_frames.get(link, ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)))[0])
+            for link in links
+        ]
 
         module = cls(
             module_id=module_id,
@@ -235,9 +246,12 @@ class RobotModule:
         return module
 
     @staticmethod
-    def _calculate_port_z_axes(root_link, links, joint_graph):
+    def _calculate_port_frames(root_link, links, joint_graph):
         """
-        Calculate the Z-axis direction for each link in the module's root frame.
+        Calculate each link's frame (position + Z axis) in the root frame.
+
+        Composes the full joint-origin transforms (rotation and translation,
+        at the zero pose) along the root-to-link chain.
 
         Parameters
         ----------
@@ -250,14 +264,14 @@ class RobotModule:
 
         Returns
         -------
-        Dict[str, Tuple[float, float, float]]
-            Mapping from link name to Z-axis direction in root frame.
+        Dict[str, Tuple[Tuple[float, float, float], Tuple[float, float, float]]]
+            Mapping from link name to ``(xyz, z_axis)`` in the root frame.
         """
-        z_axes = {}
+        frames = {}
 
         for link in links:
             if link == root_link:
-                z_axes[link] = (0.0, 0.0, 1.0)
+                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
                 continue
 
             # Trace path from link to root
@@ -272,26 +286,25 @@ class RobotModule:
 
             if current != root_link:
                 # Link not connected to root
-                z_axes[link] = (0.0, 0.0, 1.0)
+                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
                 continue
 
-            # Compute cumulative rotation from root to link
-            # We need to compose rotations in reverse order (from root to link)
-            rotation = np.eye(3)
+            # Compose the full transforms from root to link
+            transform = np.eye(4)
             for joint in reversed(path):
                 origin = joint.find("origin")
-                if origin is not None:
-                    rpy_str = origin.get("rpy", "0 0 0")
-                    roll, pitch, yaw = [float(x) for x in rpy_str.split()]
-                    joint_rot = rpy2matrix(roll, pitch, yaw)
-                    rotation = rotation @ joint_rot
+                if origin is None:
+                    continue
+                xyz = [float(v) for v in origin.get("xyz", "0 0 0").split()]
+                rpy = [float(v) for v in origin.get("rpy", "0 0 0").split()]
+                transform = transform @ xyzrpy2matrix(xyz, rpy)
 
-            # Transform Z-axis by cumulative rotation
-            z_local = np.array([0.0, 0.0, 1.0])
-            z_transformed = rotation @ z_local
-            z_axes[link] = tuple(z_transformed.tolist())
+            frames[link] = (
+                tuple(float(v) for v in transform[:3, 3]),
+                tuple(float(v) for v in transform[:3, 2]),
+            )
 
-        return z_axes
+        return frames
 
     def get_port_names(self) -> List[str]:
         """Return list of all available port names."""
@@ -389,7 +402,6 @@ class TreeNode:
     connection_xyz: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     connection_rpy: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     children: List["TreeNode"] = field(default_factory=list)
-    is_reversed: bool = False  # True if module's root was changed
 
 
 class RobotAssembly:
@@ -485,6 +497,7 @@ class RobotAssembly:
         roll: float = 0.0,
         pitch: float = 0.0,
         yaw: float = 0.0,
+        mate: bool = False,
     ) -> None:
         """
         Create a connection between two module ports.
@@ -537,6 +550,15 @@ class RobotAssembly:
             raise ValueError(f"Port '{port_b}' not found on module '{module_b}'")
 
         # Check for duplicate connections
+        if mate:
+            if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
+                raise ValueError(
+                    'mate=True derives the connection transform from the '
+                    'port frames; only yaw (spin about the parent port Z '
+                    'axis) may be combined with it')
+            x, y, z, roll, pitch, yaw = self._mate_transform(
+                module_b, port_b, yaw)
+
         for conn in self.connections:
             if (
                 conn.module_a == module_a
@@ -556,6 +578,31 @@ class RobotAssembly:
         self.connections.append(
             Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw)
         )
+
+    def _mate_transform(self, module_b: str, port_b: str, yaw: float):
+        """Connection transform that mates the child port onto the parent port.
+
+        Places the child so its ``port_b`` frame coincides with the parent
+        port origin with its Z axis OPPOSED to the parent port Z axis (the
+        usual plug-into-socket convention), spun by ``yaw`` about the parent
+        port Z.  The returned transform is expressed for the child ROOT
+        frame, which is what the connection origin carries.
+        """
+        module = self.instances[module_b].module
+        port = next((p for p in module.ports if p.name == port_b), None)
+        if port is None:
+            raise ValueError(
+                f"Port '{port_b}' not found on module '{module_b}'")
+        port_xyz = np.asarray(port.xyz, dtype=float)
+        port_z = np.asarray(port.z_axis, dtype=float)
+        # child port Z must point along -Z of the parent port
+        align = rotation_matrix_from_vectors(port_z, (0.0, 0.0, -1.0))
+        rotation = rpy2matrix(0.0, 0.0, float(yaw)) @ align
+        translation = -rotation @ port_xyz
+        out_roll, out_pitch, out_yaw = matrix2rpy(rotation)
+        return (float(translation[0]), float(translation[1]),
+                float(translation[2]),
+                float(out_roll), float(out_pitch), float(out_yaw))
 
     def set_root(self, instance_id: str, port_name: str) -> None:
         """
@@ -685,26 +732,40 @@ class RobotAssembly:
                             node_map[neighbor_id] = child_node
                             queue.append(child_node)
 
+        # URDF is a tree: every connection must have been consumed as a
+        # forest edge.  Anything left over closes a cycle and would be
+        # silently dropped by the traversal -- refuse instead.
+        tree_edges = len(self.instances) - len(root_nodes)
+        if len(self.connections) > tree_edges:
+            raise ValueError(
+                f'assembly graph contains a cycle: {len(self.connections)} '
+                f'connections for {len(self.instances)} instance(s) in '
+                f'{len(root_nodes)} component(s); a URDF kinematic tree '
+                'cannot represent closed loops')
         return root_nodes, node_map
 
-    def build(self, output_path: Optional[str] = None) -> str:
+    def build(self, output_path: Optional[str] = None,
+              engine: str = "inline") -> str:
         """
         Build a combined URDF from the assembly.
 
-        This method:
-        1. Traverses all connected components (forest) in the graph
-        2. Uses modularize_urdf to add prefixes and create Xacro macros
-        3. Combines all macros into a single URDF with proper connections
-
-        Note: This method does NOT reverse kinematic chains. Each module
-        maintains its original structure (base_link -> ... -> dummy_link),
-        and modules are connected via fixed joints from parent's port to
-        child's base_link.
+        Traverses the connection graph as a forest rooted at
+        ``root_instance``, inserts a ``world`` link as the absolute root and
+        attaches every module through a fixed joint from its parent's port
+        to its own root link, with all element names prefixed by the
+        instance id.  Modules keep their original kinematic structure (no
+        chain reversal).
 
         Parameters
         ----------
         output_path : str, optional
             Path to save the combined URDF. If None, uses a temporary file.
+        engine : str
+            ``'inline'`` (default) composes the URDF in memory with no
+            external tools.  ``'xacro'`` goes through per-module xacro
+            macros expanded with the ``zacro`` command-line processor --
+            same output, useful when the intermediate macro files are
+            wanted as artifacts.
 
         Returns
         -------
@@ -714,11 +775,15 @@ class RobotAssembly:
         Raises
         ------
         ValueError
-            If assembly is empty.
+            If the assembly is empty, contains a cycle, or ``engine`` is
+            unknown.
         """
         # Step 0: Validation
         if not self.instances:
             raise ValueError("Assembly is empty - add module instances first")
+        if engine not in ("inline", "xacro"):
+            raise ValueError(f"unknown build engine: {engine!r} "
+                             "(expected 'inline' or 'xacro')")
 
         # Auto-set root if not set (use first instance)
         if self.root_instance is None:
@@ -727,6 +792,100 @@ class RobotAssembly:
             self.root_instance = first_instance_id
             self.root_port = first_instance.module.root_link
 
+        if engine == "inline":
+            return self._build_inline(output_path)
+        return self._build_xacro(output_path)
+
+    @staticmethod
+    def _prefixed_module_elements(urdf_path: str, prefix: str):
+        """Parse a module URDF and yield its top-level elements with every
+        name -- and the joint parent/child/mimic and material references --
+        prefixed, mirroring the rewrite ``transform_urdf_to_macro`` applies
+        inside the xacro engine."""
+        def _prefixed(name):
+            # xacro substitution variables are never prefixed, matching
+            # add_prefix_to_name in the xacro engine
+            if name.startswith("$"):
+                return name
+            return prefix + name
+
+        root = etree.parse(str(urdf_path)).getroot()
+        for elem in root:
+            if not isinstance(elem.tag, str):
+                continue  # skip comments / processing instructions
+            if "name" in elem.attrib:
+                elem.attrib["name"] = _prefixed(elem.attrib["name"])
+            if elem.tag == "joint":
+                for sub in elem.findall("parent"):
+                    sub.attrib["link"] = _prefixed(sub.attrib["link"])
+                for sub in elem.findall("child"):
+                    sub.attrib["link"] = _prefixed(sub.attrib["link"])
+                for sub in elem.findall("mimic"):
+                    if "joint" in sub.attrib:
+                        sub.attrib["joint"] = _prefixed(sub.attrib["joint"])
+            elif elem.tag == "link":
+                for part in ("visual", "collision"):
+                    for sub in elem.findall(part):
+                        for material in sub.findall("material"):
+                            if "name" in material.attrib:
+                                material.attrib["name"] = \
+                                    _prefixed(material.attrib["name"])
+            yield elem
+
+    def _build_inline(self, output_path: Optional[str] = None) -> str:
+        """Compose the combined URDF in memory (no xacro round-trip)."""
+        root_nodes, _node_map = self._build_forest_from_graph()
+
+        process_order = []
+        for root_node in root_nodes:
+            queue = deque([root_node])
+            while queue:
+                node = queue.popleft()
+                process_order.append(node)
+                for child in node.children:
+                    queue.append(child)
+
+        robot = etree.Element("robot")
+        robot.set("name", self.name)
+        etree.SubElement(robot, "link").set("name", "world")
+
+        for node in process_order:
+            instance = self.instances[node.instance_id]
+            module = instance.module
+            prefix = f"{node.instance_id}_" if node.instance_id else ""
+
+            if node.parent_instance is None:
+                parent_link = "world"
+            elif node.parent_instance:
+                parent_link = f"{node.parent_instance}_{node.parent_port}"
+            else:
+                parent_link = node.parent_port
+
+            child_link = prefix + module.root_link
+            joint = etree.SubElement(robot, "joint")
+            joint.set("name", f"{parent_link}_to_{child_link}_joint")
+            joint.set("type", "fixed")
+            etree.SubElement(joint, "parent").set("link", parent_link)
+            etree.SubElement(joint, "child").set("link", child_link)
+            origin = etree.SubElement(joint, "origin")
+            origin.set("xyz", " ".join(str(v) for v in node.connection_xyz))
+            origin.set("rpy", " ".join(str(v) for v in node.connection_rpy))
+
+            for elem in self._prefixed_module_elements(module.urdf_path,
+                                                       prefix):
+                robot.append(elem)
+
+        if output_path is None:
+            temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
+            output_path = os.path.join(temp_dir, f"{self.name}.urdf")
+        with open(output_path, "wb") as f:
+            f.write(etree.tostring(robot, pretty_print=True,
+                                   xml_declaration=True, encoding="UTF-8"))
+        return output_path
+
+    def _build_xacro(self, output_path: Optional[str] = None) -> str:
+        """Compose the combined URDF through per-module xacro macros
+        expanded with the ``zacro`` CLI."""
         # Create temp directory for intermediate files
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
 
@@ -760,9 +919,6 @@ class RobotAssembly:
 
             # Use original URDF directly (no kinematic chain reversal)
             urdf_to_process = str(module.urdf_path)
-
-            # No reversal needed
-            node.is_reversed = False
 
             # Transform to Xacro macro with prefix
             # Use module_id for macro if instance_id is empty
@@ -853,6 +1009,8 @@ class RobotAssembly:
         """
         return {
             "name": self.name,
+            "root_instance": self.root_instance,
+            "root_port": self.root_port,
             "instances": {
                 inst_id: {"module_id": inst.module.module_id, "urdf_path": str(inst.module.urdf_path)}
                 for inst_id, inst in self.instances.items()
@@ -866,6 +1024,30 @@ class RobotAssembly:
             ],
             "root": {"instance": self.root_instance, "port": self.root_port} if self.root_instance else None,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RobotAssembly":
+        """Rebuild an assembly from :meth:`to_dict` output.
+
+        Modules are re-parsed from the recorded ``urdf_path``s, so those
+        files must still exist.
+        """
+        assembly = cls(data["name"])
+        for inst_id, inst in data.get("instances", {}).items():
+            module = RobotModule.from_urdf(inst["module_id"],
+                                           inst["urdf_path"])
+            assembly.add_module_instance(inst_id, module)
+        for conn in data.get("connections", []):
+            assembly.connect(
+                conn["module_a"], conn["port_a"],
+                conn["module_b"], conn["port_b"],
+                x=conn.get("x", 0.0), y=conn.get("y", 0.0),
+                z=conn.get("z", 0.0),
+                roll=conn.get("roll", 0.0), pitch=conn.get("pitch", 0.0),
+                yaw=conn.get("yaw", 0.0))
+        if data.get("root_instance"):
+            assembly.set_root(data["root_instance"], data["root_port"])
+        return assembly
 
     def __repr__(self) -> str:
         return (

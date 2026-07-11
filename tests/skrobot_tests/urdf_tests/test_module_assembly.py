@@ -161,3 +161,123 @@ class TestRobotAssembly(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestV2Design(unittest.TestCase):
+
+    def test_port_frames_carry_translation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = RobotModule.from_urdf('m', _write_module(tmp, 'm'))
+        port = next(p for p in module.ports if p.name == 'dummy_link1')
+        self.assertEqual(tuple(round(v, 9) for v in port.xyz),
+                         (0.0, 0.0, 0.1))
+
+    @unittest.skipUnless(shutil.which('zacro') is not None,
+                         'zacro is not installed')
+    def test_inline_and_xacro_engines_are_equivalent(self):
+        import math
+
+        def _joint_key(joint):
+            origin = joint.find('origin')
+            xyz = tuple(round(float(v), 9) for v in
+                        (origin.get('xyz', '0 0 0').split()
+                         if origin is not None else '0 0 0'.split()))
+            rpy = tuple(round(float(v), 9) for v in
+                        (origin.get('rpy', '0 0 0').split()
+                         if origin is not None else '0 0 0'.split()))
+            return (joint.get('name'), joint.get('type'),
+                    joint.find('parent').get('link'),
+                    joint.find('child').get('link'), xyz, rpy)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = RobotModule.from_urdf('mod_a',
+                                             _write_module(tmp, 'mod_a'))
+            module_b = RobotModule.from_urdf('mod_b',
+                                             _write_module(tmp, 'mod_b'))
+            outputs = {}
+            for engine in ('inline', 'xacro'):
+                assembly = RobotAssembly('combo')
+                assembly.add_module_instance('a1', module_a)
+                assembly.add_module_instance('b1', module_b)
+                assembly.connect('a1', 'dummy_link1', 'b1', 'base_link',
+                                 x=0.1, y=0.2, z=0.3,
+                                 roll=0.1, pitch=0.2, yaw=math.pi / 6)
+                assembly.set_root('a1', 'base_link')
+                path = os.path.join(tmp, f'{engine}.urdf')
+                outputs[engine] = ET.parse(
+                    assembly.build(output_path=path, engine=engine)).getroot()
+        for tag, key in (('link', lambda el: el.get('name')),
+                         ('joint', _joint_key)):
+            inline_set = {key(el) for el in outputs['inline'].findall(tag)}
+            xacro_set = {key(el) for el in outputs['xacro'].findall(tag)}
+            self.assertEqual(inline_set, xacro_set)
+
+    def test_cycle_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            modules = [RobotModule.from_urdf(f'm{i}',
+                                             _write_module(tmp, f'm{i}'))
+                       for i in range(3)]
+            assembly = RobotAssembly('loop')
+            for i, module in enumerate(modules):
+                assembly.add_module_instance(f'i{i}', module)
+            assembly.connect('i0', 'dummy_link1', 'i1', 'base_link')
+            assembly.connect('i1', 'dummy_link1', 'i2', 'base_link')
+            assembly.connect('i2', 'dummy_link1', 'i0', 'base_link')
+            with self.assertRaises(ValueError):
+                assembly.build(output_path=os.path.join(tmp, 'x.urdf'))
+
+    def test_from_dict_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = RobotModule.from_urdf('mod_a',
+                                             _write_module(tmp, 'mod_a'))
+            module_b = RobotModule.from_urdf('mod_b',
+                                             _write_module(tmp, 'mod_b'))
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('a1', module_a)
+            assembly.add_module_instance('b1', module_b)
+            assembly.connect('a1', 'dummy_link1', 'b1', 'base_link',
+                             x=0.1, yaw=0.2)
+            assembly.set_root('a1', 'base_link')
+            data = assembly.to_dict()
+            rebuilt = RobotAssembly.from_dict(data)
+            self.assertEqual(rebuilt.to_dict(), data)
+        self.assertEqual(rebuilt.root_instance, 'a1')
+
+    def test_mate_places_child_port_onto_parent_port(self):
+        import numpy as np
+
+        from skrobot.coordinates.math import xyzrpy2matrix
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = RobotModule.from_urdf('mod_a',
+                                             _write_module(tmp, 'mod_a'))
+            module_b = RobotModule.from_urdf('mod_b',
+                                             _write_module(tmp, 'mod_b'))
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('a1', module_a)
+            assembly.add_module_instance('b1', module_b)
+            assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1',
+                             mate=True)
+            conn = assembly.connections[0]
+            port = next(p for p in module_b.ports
+                        if p.name == 'dummy_link1')
+        transform = xyzrpy2matrix(conn.xyz, conn.rpy)
+        # the child port frame, placed by the connection transform, must sit
+        # at the parent port origin with its Z axis opposed to the parent Z
+        placed_origin = transform @ np.append(np.asarray(port.xyz), 1.0)
+        np.testing.assert_allclose(placed_origin[:3], np.zeros(3),
+                                   atol=1e-12)
+        placed_z = transform[:3, :3] @ np.asarray(port.z_axis)
+        np.testing.assert_allclose(placed_z, [0.0, 0.0, -1.0], atol=1e-12)
+
+    def test_mate_rejects_explicit_offsets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = RobotModule.from_urdf('mod_a',
+                                             _write_module(tmp, 'mod_a'))
+            module_b = RobotModule.from_urdf('mod_b',
+                                             _write_module(tmp, 'mod_b'))
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('a1', module_a)
+            assembly.add_module_instance('b1', module_b)
+            with self.assertRaises(ValueError):
+                assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1',
+                                 x=0.5, mate=True)
