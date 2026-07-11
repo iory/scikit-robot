@@ -7,7 +7,7 @@ import numpy as np
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rotation_matrix_z_to_axis
-from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import rpy2matrix
 from skrobot.utils.urdf import get_filename
 from skrobot.utils.urdf import load_meshes
 
@@ -185,7 +185,7 @@ def convert_wheel_collisions_to_cylinders(urdf_file, output_file=None):
             origin_xyz = np.zeros(3)
             origin_rpy = np.zeros(3)
 
-        rotation_urdf = rpy_matrix(origin_rpy[2], origin_rpy[1], origin_rpy[0])
+        rotation_urdf = rpy2matrix(origin_rpy[0], origin_rpy[1], origin_rpy[2])
         radius, height, axis, mesh_center_offset = get_mesh_dimensions(mesh_file, scale, urdf_dir)
 
         if radius is None:
