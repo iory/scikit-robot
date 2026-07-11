@@ -281,3 +281,76 @@ class TestV2Design(unittest.TestCase):
             with self.assertRaises(ValueError):
                 assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1',
                                  x=0.5, mate=True)
+
+
+class TestV3Design(unittest.TestCase):
+
+    def _two_module_assembly(self, tmp, **connect_kwargs):
+        module_a = RobotModule.from_urdf('mod_a', _write_module(tmp, 'mod_a'))
+        module_b = RobotModule.from_urdf('mod_b', _write_module(tmp, 'mod_b'))
+        assembly = RobotAssembly('combo')
+        assembly.add_module_instance('a1', module_a)
+        assembly.add_module_instance('b1', module_b)
+        assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1',
+                         **connect_kwargs)
+        assembly.set_root('a1', 'base_link')
+        return assembly
+
+    def test_attach_port_reroots_child(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._two_module_assembly(tmp, attach='port')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'x.urdf'))).getroot()
+        joints = root.findall('joint')
+        # the connector now attaches b1 through its DECLARED port
+        connector = [j for j in joints if j.get('type') == 'fixed'
+                     and j.find('child').get('link') == 'b1_dummy_link1']
+        self.assertTrue(connector)
+        # the child chain was re-rooted: b1_base_link is now DOWNSTREAM of
+        # b1_dummy_link1 (it appears as a child link of some joint)
+        child_links = {j.find('child').get('link') for j in joints}
+        self.assertIn('b1_base_link', child_links)
+        # still a single tree rooted at world
+        link_names = {link.get('name') for link in root.findall('link')}
+        roots = link_names - child_links
+        self.assertEqual(roots, {'world'})
+
+    def test_attach_port_with_mate_is_pure_flip(self):
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._two_module_assembly(tmp, attach='port',
+                                                 mate=True)
+            conn = assembly.connections[0]
+        # re-rooted child: the port frame IS the child root frame, so the
+        # mate transform is a pure 180-degree flip with no translation
+        np.testing.assert_allclose(conn.xyz, np.zeros(3), atol=1e-12)
+        from skrobot.coordinates.math import rpy2matrix
+        rotation = rpy2matrix(*conn.rpy)
+        np.testing.assert_allclose(rotation @ [0, 0, 1], [0, 0, -1],
+                                   atol=1e-12)
+
+    def test_attach_round_trips_through_dict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._two_module_assembly(tmp, attach='port')
+            data = assembly.to_dict()
+            self.assertEqual(data['connections'][0]['attach'], 'port')
+            rebuilt = RobotAssembly.from_dict(data)
+            self.assertEqual(rebuilt.to_dict(), data)
+
+    def test_build_robot_model_directly(self):
+        from skrobot.model import RobotModel
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._two_module_assembly(tmp)
+            robot = assembly.build_robot_model()
+            # compare against loading the built URDF from disk
+            urdf_path = assembly.build(
+                output_path=os.path.join(tmp, 'x.urdf'))
+            disk_links = {link.get('name') for link in
+                          ET.parse(urdf_path).getroot().findall('link')}
+        self.assertIsInstance(robot, RobotModel)
+        model_links = {link.name for link in robot.link_list}
+        self.assertEqual(model_links, disk_links)
+        # prefixed joints exist and are actuable
+        joint_names = {j.name for j in robot.joint_list}
+        self.assertIn('a1_j1', joint_names)
+        self.assertIn('b1_j1', joint_names)

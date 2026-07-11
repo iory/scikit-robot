@@ -33,6 +33,7 @@ from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
+from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
 
 
 @dataclass
@@ -352,6 +353,15 @@ class Connection:
     roll: float = 0.0
     pitch: float = 0.0
     yaw: float = 0.0
+    # How the CHILD-side node attaches when the tree is built.  The
+    # connection is undirected: whichever endpoint ends up the child once
+    # the tree is rooted attaches via ITS declared port.
+    # "root" keeps that module's own root link as the attachment (the
+    # connection transform is expressed for the child root frame);
+    # "port" re-roots it so the declared port becomes the attachment link
+    # (transform expressed for the port frame -- under which the rigid
+    # inverse used for reverse traversal stays exact).
+    attach: str = "root"
 
     @property
     def xyz(self) -> Tuple[float, float, float]:
@@ -401,6 +411,7 @@ class TreeNode:
     child_port: Optional[str]  # Port on this module that connects to parent
     connection_xyz: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     connection_rpy: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    attach: str = "root"
     children: List["TreeNode"] = field(default_factory=list)
 
 
@@ -498,6 +509,7 @@ class RobotAssembly:
         pitch: float = 0.0,
         yaw: float = 0.0,
         mate: bool = False,
+        attach: str = "root",
     ) -> None:
         """
         Create a connection between two module ports.
@@ -534,6 +546,16 @@ class RobotAssembly:
         --------
         >>> assembly.connect('h1', 'dummy_link', 'p1', 'base_link')
         >>> assembly.connect('h1', 'dummy_link', 'p2', 'base_link', yaw=1.57)
+        mate : bool
+            Derive the transform so the child port seats onto the parent
+            port (Z axes opposed); only ``yaw`` may be combined with it.
+        attach : str
+            ``'root'`` (default) attaches the child-side module through its
+            own root link, treating its declared port as placement metadata.
+            ``'port'`` re-roots the child-side module at its declared port
+            during the build so that port becomes the real attachment link.
+            Applies to whichever endpoint becomes the child once the tree
+            is rooted.
         """
         # Validate module instances exist
         if module_a not in self.instances:
@@ -550,6 +572,9 @@ class RobotAssembly:
             raise ValueError(f"Port '{port_b}' not found on module '{module_b}'")
 
         # Check for duplicate connections
+        if attach not in ("root", "port"):
+            raise ValueError(f"unknown attach mode: {attach!r} "
+                             "(expected 'root' or 'port')")
         if mate:
             if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
                 raise ValueError(
@@ -557,7 +582,7 @@ class RobotAssembly:
                     'port frames; only yaw (spin about the parent port Z '
                     'axis) may be combined with it')
             x, y, z, roll, pitch, yaw = self._mate_transform(
-                module_b, port_b, yaw)
+                module_b, port_b, yaw, attach)
 
         for conn in self.connections:
             if (
@@ -576,10 +601,12 @@ class RobotAssembly:
                 raise ValueError("Connection already exists (reverse)")
 
         self.connections.append(
-            Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw)
+            Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z,
+                       roll=roll, pitch=pitch, yaw=yaw, attach=attach)
         )
 
-    def _mate_transform(self, module_b: str, port_b: str, yaw: float):
+    def _mate_transform(self, module_b: str, port_b: str, yaw: float,
+                        attach: str = "root"):
         """Connection transform that mates the child port onto the parent port.
 
         Places the child so its ``port_b`` frame coincides with the parent
@@ -593,8 +620,14 @@ class RobotAssembly:
         if port is None:
             raise ValueError(
                 f"Port '{port_b}' not found on module '{module_b}'")
-        port_xyz = np.asarray(port.xyz, dtype=float)
-        port_z = np.asarray(port.z_axis, dtype=float)
+        if attach == "port":
+            # the child is re-rooted at the port, whose frame is then the
+            # child root frame itself
+            port_xyz = np.zeros(3)
+            port_z = np.array([0.0, 0.0, 1.0])
+        else:
+            port_xyz = np.asarray(port.xyz, dtype=float)
+            port_z = np.asarray(port.z_axis, dtype=float)
         # child port Z must point along -Z of the parent port
         align = rotation_matrix_from_vectors(port_z, (0.0, 0.0, -1.0))
         rotation = rpy2matrix(0.0, 0.0, float(yaw)) @ align
@@ -639,18 +672,19 @@ class RobotAssembly:
             negation -- the latter is only correct for single-axis
             rotations).
         """
-        adj: Dict[str, List[Tuple[str, str, str, Tuple, Tuple]]] = {inst_id: [] for inst_id in self.instances}
+        adj: Dict[str, List[Tuple[str, str, str, Tuple, Tuple, str]]] = {inst_id: [] for inst_id in self.instances}
         identity = np.eye(4)
         for conn in self.connections:
             # Forward direction: module_a -> module_b uses original xyz/rpy
-            adj[conn.module_a].append((conn.module_b, conn.port_a, conn.port_b, conn.xyz, conn.rpy))
+            adj[conn.module_a].append((conn.module_b, conn.port_a, conn.port_b, conn.xyz, conn.rpy, conn.attach))
             # Reverse direction: module_b -> module_a uses the inverse transform
             transform = xyzrpy2matrix(conn.xyz, conn.rpy)
             inv_xyz, inv_rpy = matrix2xyzrpy(matrix_relative(transform, identity))
             adj[conn.module_b].append(
                 (conn.module_a, conn.port_b, conn.port_a,
                  tuple(float(v) for v in inv_xyz),
-                 tuple(float(v) for v in inv_rpy)))
+                 tuple(float(v) for v in inv_rpy),
+                 conn.attach))
         return adj
 
     def _build_forest_from_graph(self) -> Tuple[List[TreeNode], Dict[str, TreeNode]]:
@@ -683,7 +717,7 @@ class RobotAssembly:
             queue = deque([root_node])
             while queue:
                 current = queue.popleft()
-                for neighbor_id, my_port, neighbor_port, xyz, rpy in adj[current.instance_id]:
+                for neighbor_id, my_port, neighbor_port, xyz, rpy, attach in adj[current.instance_id]:
                     if neighbor_id not in visited:
                         visited.add(neighbor_id)
                         child_node = TreeNode(
@@ -693,6 +727,7 @@ class RobotAssembly:
                             child_port=neighbor_port,
                             connection_xyz=xyz,
                             connection_rpy=rpy,
+                            attach=attach,
                         )
                         current.children.append(child_node)
                         node_map[neighbor_id] = child_node
@@ -717,7 +752,7 @@ class RobotAssembly:
                 queue = deque([orphan_root])
                 while queue:
                     current = queue.popleft()
-                    for neighbor_id, my_port, neighbor_port, xyz, rpy in adj[current.instance_id]:
+                    for neighbor_id, my_port, neighbor_port, xyz, rpy, attach in adj[current.instance_id]:
                         if neighbor_id not in visited:
                             visited.add(neighbor_id)
                             child_node = TreeNode(
@@ -727,6 +762,7 @@ class RobotAssembly:
                                 child_port=neighbor_port,
                                 connection_xyz=xyz,
                                 connection_rpy=rpy,
+                                attach=attach,
                             )
                             current.children.append(child_node)
                             node_map[neighbor_id] = child_node
@@ -778,13 +814,17 @@ class RobotAssembly:
             If the assembly is empty, contains a cycle, or ``engine`` is
             unknown.
         """
-        # Step 0: Validation
-        if not self.instances:
-            raise ValueError("Assembly is empty - add module instances first")
         if engine not in ("inline", "xacro"):
             raise ValueError(f"unknown build engine: {engine!r} "
                              "(expected 'inline' or 'xacro')")
+        self._validate_and_default_root()
+        if engine == "inline":
+            return self._build_inline(output_path)
+        return self._build_xacro(output_path)
 
+    def _validate_and_default_root(self) -> None:
+        if not self.instances:
+            raise ValueError("Assembly is empty - add module instances first")
         # Auto-set root if not set (use first instance)
         if self.root_instance is None:
             first_instance_id = next(iter(self.instances))
@@ -792,9 +832,38 @@ class RobotAssembly:
             self.root_instance = first_instance_id
             self.root_port = first_instance.module.root_link
 
-        if engine == "inline":
-            return self._build_inline(output_path)
-        return self._build_xacro(output_path)
+    def _attachment_source(self, node, module, temp_dir):
+        """``(urdf_path, connector_link)`` for one tree node, re-rooting the
+        module URDF at the declared port when the connection was made with
+        ``attach='port'``."""
+        if node.attach == "port" and node.child_port \
+                and node.child_port != module.root_link:
+            rerooted = os.path.join(
+                temp_dir, f"{node.instance_id}_rerooted.urdf")
+            change_urdf_root_link(str(module.urdf_path), node.child_port,
+                                  rerooted, robot_name=module.module_id)
+            return rerooted, node.child_port
+        return str(module.urdf_path), module.root_link
+
+    def build_robot_model(self):
+        """Assemble directly into a :class:`skrobot.model.RobotModel`.
+
+        Composes the combined URDF in memory and loads it without writing
+        the result to disk (re-rooted modules still go through temporary
+        files).  Mesh resolution follows the same rules as loading the
+        built URDF file would.
+
+        Returns
+        -------
+        skrobot.model.RobotModel
+            The assembled robot.
+        """
+        from skrobot.models.urdf import RobotModelFromURDF
+        self._validate_and_default_root()
+        temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
+        robot = self._compose_inline(temp_dir)
+        return RobotModelFromURDF(
+            urdf=etree.tostring(robot, encoding="unicode"))
 
     @staticmethod
     def _prefixed_module_elements(urdf_path: str, prefix: str):
@@ -832,8 +901,8 @@ class RobotAssembly:
                                     _prefixed(material.attrib["name"])
             yield elem
 
-    def _build_inline(self, output_path: Optional[str] = None) -> str:
-        """Compose the combined URDF in memory (no xacro round-trip)."""
+    def _compose_inline(self, temp_dir: str):
+        """Compose the combined URDF in memory; returns the robot element."""
         root_nodes, _node_map = self._build_forest_from_graph()
 
         process_order = []
@@ -853,6 +922,8 @@ class RobotAssembly:
             instance = self.instances[node.instance_id]
             module = instance.module
             prefix = f"{node.instance_id}_" if node.instance_id else ""
+            urdf_source, connector = self._attachment_source(
+                node, module, temp_dir)
 
             if node.parent_instance is None:
                 parent_link = "world"
@@ -861,7 +932,7 @@ class RobotAssembly:
             else:
                 parent_link = node.parent_port
 
-            child_link = prefix + module.root_link
+            child_link = prefix + connector
             joint = etree.SubElement(robot, "joint")
             joint.set("name", f"{parent_link}_to_{child_link}_joint")
             joint.set("type", "fixed")
@@ -871,12 +942,16 @@ class RobotAssembly:
             origin.set("xyz", " ".join(str(v) for v in node.connection_xyz))
             origin.set("rpy", " ".join(str(v) for v in node.connection_rpy))
 
-            for elem in self._prefixed_module_elements(module.urdf_path,
-                                                       prefix):
+            for elem in self._prefixed_module_elements(urdf_source, prefix):
                 robot.append(elem)
 
+        return robot
+
+    def _build_inline(self, output_path: Optional[str] = None) -> str:
+        """Compose the combined URDF in memory (no xacro round-trip)."""
+        temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
+        robot = self._compose_inline(temp_dir)
         if output_path is None:
-            temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
             output_path = os.path.join(temp_dir, f"{self.name}.urdf")
         with open(output_path, "wb") as f:
             f.write(etree.tostring(robot, pretty_print=True,
@@ -909,16 +984,11 @@ class RobotAssembly:
             instance = self.instances[node.instance_id]
             module = instance.module
 
-            # Modules always attach through their root link (typically
-            # base_link) so each keeps its original kinematic structure.
-            # node.child_port records which child-side port the connection
-            # was declared with (callers use it for placement math); the
-            # attachment link is nevertheless the root, with the connection
-            # transform expressed for the child root frame.
-            connector_link = module.root_link
-
-            # Use original URDF directly (no kinematic chain reversal)
-            urdf_to_process = str(module.urdf_path)
+            # With the default attach='root' the module keeps its original
+            # kinematic structure and node.child_port is placement metadata
+            # only; attach='port' re-roots the module at that port first.
+            urdf_to_process, connector_link = self._attachment_source(
+                node, module, temp_dir)
 
             # Transform to Xacro macro with prefix
             # Use module_id for macro if instance_id is empty
@@ -1019,7 +1089,8 @@ class RobotAssembly:
                 {"module_a": c.module_a, "port_a": c.port_a,
                  "module_b": c.module_b, "port_b": c.port_b,
                  "x": c.x, "y": c.y, "z": c.z,
-                 "roll": c.roll, "pitch": c.pitch, "yaw": c.yaw}
+                 "roll": c.roll, "pitch": c.pitch, "yaw": c.yaw,
+                 "attach": c.attach}
                 for c in self.connections
             ],
             "root": {"instance": self.root_instance, "port": self.root_port} if self.root_instance else None,
@@ -1044,7 +1115,8 @@ class RobotAssembly:
                 x=conn.get("x", 0.0), y=conn.get("y", 0.0),
                 z=conn.get("z", 0.0),
                 roll=conn.get("roll", 0.0), pitch=conn.get("pitch", 0.0),
-                yaw=conn.get("yaw", 0.0))
+                yaw=conn.get("yaw", 0.0),
+                attach=conn.get("attach", "root"))
         if data.get("root_instance"):
             assembly.set_root(data["root_instance"], data["root_port"])
         return assembly
