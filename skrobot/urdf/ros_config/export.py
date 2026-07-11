@@ -93,7 +93,8 @@ def export_all_configs(
             gazebo_config = generate_gazebo_config(gazebo_physics, gazebo_plugins)
             zf.writestr(f"{robot_name}/config/gazebo.xml", gazebo_config)
 
-            ros2_control_xacro = generate_ros2_control_xacro(joints)
+            ros2_control_xacro = generate_ros2_control_xacro(
+                joints, package_name=robot_name)
             zf.writestr(f"{robot_name}/urdf/ros2_control.xacro", ros2_control_xacro)
 
         # Caller-provided extra files

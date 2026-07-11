@@ -54,9 +54,32 @@ class TestGenerators(unittest.TestCase):
 
     def test_controllers_yaml(self):
         yaml_text = generate_controllers_yaml(
-            [{'name': 'arm_controller', 'type': 'position', 'joints': ['shoulder']}])
-        self.assertIn('arm_controller', yaml_text)
+            [{'name': 'arm_controller',
+              'type': 'joint_trajectory_controller',
+              'joints': ['shoulder']}])
         self.assertIn('shoulder', yaml_text)
+        # ros2_control resolves controller types from the controller
+        # manager's parameter namespace: the type must be nested there.
+        self.assertIn(
+            '    arm_controller:\n'
+            '      type: joint_trajectory_controller/JointTrajectoryController',
+            yaml_text)
+        # the controller's own node section carries its joints
+        self.assertIn(
+            'arm_controller:\n'
+            '  ros__parameters:\n'
+            '    joints:\n'
+            '      - shoulder',
+            yaml_text)
+
+    def test_ros2_control_xacro_package_name(self):
+        from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
+        joints = [{'name': 'shoulder', 'type': 'revolute'}]
+        self.assertIn('$(find robot_config)/config/controllers.yaml',
+                      generate_ros2_control_xacro(joints))
+        self.assertIn('$(find my_bot)/config/controllers.yaml',
+                      generate_ros2_control_xacro(joints,
+                                                  package_name='my_bot'))
 
     def test_gazebo_config(self):
         text = generate_gazebo_config({'gravity': [0, 0, -9.81]}, [])
@@ -87,6 +110,11 @@ class TestExportAllConfigs(unittest.TestCase):
                             names)
             # caller-provided extra files are written verbatim
             self.assertIn('two_link/config/servo_mapping.yaml', names)
+            # the ros2_control plugin must point at THIS package, not a
+            # hard-coded one
+            xacro = archive.read(
+                'two_link/urdf/ros2_control.xacro').decode('utf-8')
+            self.assertIn('$(find two_link)/config/controllers.yaml', xacro)
 
 
 if __name__ == '__main__':

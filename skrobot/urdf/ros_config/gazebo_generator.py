@@ -72,6 +72,7 @@ def generate_gazebo_config(
 def generate_ros2_control_xacro(
     joints: list[dict[str, Any]],
     hardware_interface: str = "gazebo_ros2_control/GazeboSystem",
+    package_name: str = "robot_config",
 ) -> str:
     """
     Generate ros2_control URDF/Xacro snippet for Gazebo.
@@ -84,6 +85,9 @@ def generate_ros2_control_xacro(
         - type: Joint type (revolute, prismatic, etc.)
     hardware_interface : str
         Hardware interface plugin name.
+    package_name : str
+        ROS package the plugin loads ``config/controllers.yaml`` from
+        (``$(find <package_name>)``).  Pass the exported package's name.
 
     Returns
     -------
@@ -123,7 +127,7 @@ def generate_ros2_control_xacro(
     lines.append("")
     lines.append("<gazebo>")
     lines.append('  <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">')
-    lines.append("    <parameters>$(find robot_config)/config/controllers.yaml</parameters>")
+    lines.append(f"    <parameters>$(find {package_name})/config/controllers.yaml</parameters>")
     lines.append("  </plugin>")
     lines.append("</gazebo>")
 
