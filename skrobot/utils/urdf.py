@@ -29,6 +29,7 @@ from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rpy2matrix
+from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.pycompat import lru_cache
 
 
@@ -708,10 +709,7 @@ def configure_origin(value):
     elif isinstance(value, (list, tuple, np.ndarray)):
         value = np.asanyarray(value).astype(np.float64)
         if value.shape == (6,):
-            value = np.eye(4).astype(np.float64)
-            value[:3, 3] = value[:3]
-            roll, pitch, yaw = value[3:]
-            value[:3, :3] = rpy2matrix(roll, pitch, yaw)
+            value = xyzrpy2matrix(value[:3], value[3:])
         elif value.shape != (4, 4):
             raise ValueError('Origin must be specified as a 4x4 '
                              'homogenous transformation matrix')
