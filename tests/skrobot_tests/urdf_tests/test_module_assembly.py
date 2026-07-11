@@ -377,3 +377,101 @@ class TestV3Design(unittest.TestCase):
         joint_names = {j.name for j in robot.joint_list}
         self.assertIn('a1_j1', joint_names)
         self.assertIn('b1_j1', joint_names)
+
+
+class TestV4PortsAndMating(unittest.TestCase):
+
+    _ROTATED_MODULE = """<?xml version="1.0"?>
+<robot name="{name}">
+  <link name="base_link"/>
+  <link name="dummy_link1"/>
+  <joint name="j1" type="fixed">
+    <parent link="base_link"/>
+    <child link="dummy_link1"/>
+    <origin xyz="0.1 0.05 0.2" rpy="0.3 -0.2 0.5"/>
+  </joint>
+</robot>
+"""
+
+    def _rotated_module(self, tmp, name):
+        path = os.path.join(tmp, name + '.urdf')
+        with open(path, 'w') as f:
+            f.write(self._ROTATED_MODULE.format(name=name))
+        return RobotModule.from_urdf(name, path)
+
+    def test_ports_carry_full_orientation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = self._rotated_module(tmp, 'm')
+        port = next(p for p in module.ports if p.name == 'dummy_link1')
+        self.assertEqual(tuple(round(v, 9) for v in port.rpy),
+                         (0.3, -0.2, 0.5))
+        self.assertEqual(tuple(round(v, 9) for v in port.xyz),
+                         (0.1, 0.05, 0.2))
+
+    def test_keyed_mate_is_fully_determined(self):
+        import numpy as np
+
+        from skrobot.coordinates.math import rpy2homogeneous
+        from skrobot.coordinates.math import xyzrpy2matrix
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = self._rotated_module(tmp, 'a')
+            module_b = self._rotated_module(tmp, 'b')
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('a1', module_a)
+            assembly.add_module_instance('b1', module_b)
+            assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1',
+                             mate=True, yaw=0.4)
+            conn = assembly.connections[0]
+            port = next(p for p in module_b.ports
+                        if p.name == 'dummy_link1')
+        # the seated child-port frame must be EXACTLY Rz(yaw) @ Rx(pi) in
+        # parent-port coordinates: origins coincide, Z opposed, X keyed
+        transform = xyzrpy2matrix(conn.xyz, conn.rpy)
+        seated = transform @ xyzrpy2matrix(port.xyz, port.rpy)
+        expected = rpy2homogeneous(np.pi, 0.0, 0.4)
+        np.testing.assert_allclose(seated, expected, atol=1e-12)
+
+    def test_unknown_port_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = self._rotated_module(tmp, 'a')
+            module_b = self._rotated_module(tmp, 'b')
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('a1', module_a)
+            assembly.add_module_instance('b1', module_b)
+            with self.assertRaises(ValueError):
+                assembly.connect('a1', 'no_such_port', 'b1', 'base_link')
+
+    def test_port_type_compatibility_enforced(self):
+        from skrobot.urdf import Port
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = self._rotated_module(tmp, 'a')
+            module_b = self._rotated_module(tmp, 'b')
+        # curate the catalogs: both ports become outputs
+        for module in (module_a, module_b):
+            module.ports = [Port(name='dummy_link1', port_type='output'),
+                            Port(name='base_link', port_type='input')]
+        assembly = RobotAssembly('combo')
+        assembly.add_module_instance('a1', module_a)
+        assembly.add_module_instance('b1', module_b)
+        with self.assertRaises(ValueError):
+            assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1')
+        # output -> input is fine
+        assembly.connect('a1', 'dummy_link1', 'b1', 'base_link')
+
+    def test_compatible_types_whitelist(self):
+        from skrobot.urdf import Port
+        with tempfile.TemporaryDirectory() as tmp:
+            module_a = self._rotated_module(tmp, 'a')
+            module_b = self._rotated_module(tmp, 'b')
+        module_a.ports = [
+            Port(name='dummy_link1', port_type='output',
+                 compatible_types=['servo_flange'])]
+        module_b.ports = [
+            Port(name='base_link', port_type='input'),
+            Port(name='dummy_link1', port_type='servo_flange')]
+        assembly = RobotAssembly('combo')
+        assembly.add_module_instance('a1', module_a)
+        assembly.add_module_instance('b1', module_b)
+        with self.assertRaises(ValueError):
+            assembly.connect('a1', 'dummy_link1', 'b1', 'base_link')
+        assembly.connect('a1', 'dummy_link1', 'b1', 'dummy_link1')

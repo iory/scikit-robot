@@ -13,6 +13,7 @@ into the combined URDF.
 from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -26,11 +27,9 @@ import xml.etree.ElementTree as ET
 from lxml import etree
 import numpy as np
 
-from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
-from skrobot.coordinates.math import rotation_matrix_from_vectors
-from skrobot.coordinates.math import rpy2matrix
+from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
@@ -64,6 +63,10 @@ class Port:
     xyz : Tuple[float, float, float], optional
         The port position in the module's root frame (composed from the
         joint origins along the root-to-port chain at the zero pose).
+    rpy : Tuple[float, float, float], optional
+        The port orientation (URDF roll-pitch-yaw) in the module's root
+        frame, so a port is a full SE(3) frame -- like a keyed connector,
+        mating is then fully determined.
     """
 
     name: str
@@ -72,6 +75,7 @@ class Port:
     compatible_types: List[str] = field(default_factory=list)
     z_axis: Tuple[float, float, float] = (0.0, 0.0, 1.0)
     xyz: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rpy: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -221,10 +225,12 @@ class RobotModule:
         port_frames = cls._calculate_port_frames(root_link, links, joint_graph)
 
         # Identify ports (all links can potentially be ports)
+        default_frame = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 0.0))
         ports = [
             Port(name=link,
-                 z_axis=port_frames.get(link, ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)))[1],
-                 xyz=port_frames.get(link, ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)))[0])
+                 xyz=port_frames.get(link, default_frame)[0],
+                 z_axis=port_frames.get(link, default_frame)[1],
+                 rpy=port_frames.get(link, default_frame)[2])
             for link in links
         ]
 
@@ -265,14 +271,16 @@ class RobotModule:
 
         Returns
         -------
-        Dict[str, Tuple[Tuple[float, float, float], Tuple[float, float, float]]]
-            Mapping from link name to ``(xyz, z_axis)`` in the root frame.
+        Dict[str, Tuple]
+            Mapping from link name to ``(xyz, z_axis, rpy)`` in the root
+            frame.
         """
         frames = {}
 
         for link in links:
             if link == root_link:
-                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0),
+                                (0.0, 0.0, 0.0))
                 continue
 
             # Trace path from link to root
@@ -287,7 +295,8 @@ class RobotModule:
 
             if current != root_link:
                 # Link not connected to root
-                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+                frames[link] = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0),
+                                (0.0, 0.0, 0.0))
                 continue
 
             # Compose the full transforms from root to link
@@ -300,9 +309,11 @@ class RobotModule:
                 rpy = [float(v) for v in origin.get("rpy", "0 0 0").split()]
                 transform = transform @ xyzrpy2matrix(xyz, rpy)
 
+            xyz, rpy = matrix2xyzrpy(transform)
             frames[link] = (
-                tuple(float(v) for v in transform[:3, 3]),
+                tuple(float(v) for v in xyz),
                 tuple(float(v) for v in transform[:3, 2]),
+                tuple(float(v) for v in rpy),
             )
 
         return frames
@@ -575,6 +586,18 @@ class RobotAssembly:
         if attach not in ("root", "port"):
             raise ValueError(f"unknown attach mode: {attach!r} "
                              "(expected 'root' or 'port')")
+        port_obj_a = next((p for p in self.instances[module_a].module.ports
+                           if p.name == port_a), None)
+        port_obj_b = next((p for p in self.instances[module_b].module.ports
+                           if p.name == port_b), None)
+        if port_obj_a is None:
+            raise ValueError(
+                f"Port '{port_a}' not found on module '{module_a}'")
+        if port_obj_b is None:
+            raise ValueError(
+                f"Port '{port_b}' not found on module '{module_b}'")
+        self._check_port_compatibility(module_a, port_obj_a,
+                                       module_b, port_obj_b)
         if mate:
             if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
                 raise ValueError(
@@ -605,14 +628,44 @@ class RobotAssembly:
                        roll=roll, pitch=pitch, yaw=yaw, attach=attach)
         )
 
+    @staticmethod
+    def _check_port_compatibility(module_a, port_a, module_b, port_b):
+        """Reject connections the port metadata declares impossible.
+
+        Two ``input`` ports (or two ``output`` ports) cannot mate;
+        ``bidirectional`` mates with anything.  When a port lists
+        ``compatible_types``, the other port's ``port_type`` or name must
+        appear in it.  Ports created by :meth:`RobotModule.from_urdf` are
+        unrestricted, so this only constrains explicitly curated catalogs.
+        """
+        type_a = port_a.port_type or "bidirectional"
+        type_b = port_b.port_type or "bidirectional"
+        if type_a == type_b and type_a in ("input", "output"):
+            raise ValueError(
+                f"cannot connect two '{type_a}' ports "
+                f"({module_a}.{port_a.name} and {module_b}.{port_b.name})")
+        for near, near_mod, far, far_mod in (
+                (port_a, module_a, port_b, module_b),
+                (port_b, module_b, port_a, module_a)):
+            if near.compatible_types and \
+                    far.port_type not in near.compatible_types and \
+                    far.name not in near.compatible_types:
+                raise ValueError(
+                    f"port {near_mod}.{near.name} only accepts "
+                    f"{sorted(near.compatible_types)}; got "
+                    f"{far_mod}.{far.name} (type '{far.port_type}')")
+
     def _mate_transform(self, module_b: str, port_b: str, yaw: float,
                         attach: str = "root"):
         """Connection transform that mates the child port onto the parent port.
 
-        Places the child so its ``port_b`` frame coincides with the parent
-        port origin with its Z axis OPPOSED to the parent port Z axis (the
-        usual plug-into-socket convention), spun by ``yaw`` about the parent
-        port Z.  The returned transform is expressed for the child ROOT
+        Seats the child so its ``port_b`` frame coincides with the parent
+        port frame in the keyed-connector convention: origins coincide, Z
+        axes OPPOSED (plug into socket) and the child port X axis aligned
+        with the parent port X axis, spun by ``yaw`` about the parent port
+        Z.  Ports are full SE(3) frames, so the result is fully determined;
+        ``yaw`` is an optional extra spin, not a free parameter left to
+        guesswork.  The returned transform is expressed for the child ROOT
         frame, which is what the connection origin carries.
         """
         module = self.instances[module_b].module
@@ -623,19 +676,16 @@ class RobotAssembly:
         if attach == "port":
             # the child is re-rooted at the port, whose frame is then the
             # child root frame itself
-            port_xyz = np.zeros(3)
-            port_z = np.array([0.0, 0.0, 1.0])
+            port_frame = np.eye(4)
         else:
-            port_xyz = np.asarray(port.xyz, dtype=float)
-            port_z = np.asarray(port.z_axis, dtype=float)
-        # child port Z must point along -Z of the parent port
-        align = rotation_matrix_from_vectors(port_z, (0.0, 0.0, -1.0))
-        rotation = rpy2matrix(0.0, 0.0, float(yaw)) @ align
-        translation = -rotation @ port_xyz
-        out_roll, out_pitch, out_yaw = matrix2rpy(rotation)
-        return (float(translation[0]), float(translation[1]),
-                float(translation[2]),
-                float(out_roll), float(out_pitch), float(out_yaw))
+            port_frame = xyzrpy2matrix(port.xyz, port.rpy)
+        # desired child-port pose in parent-port coordinates:
+        # 180-degree flip about X (Z opposed, X aligned), then the spin
+        seat = rpy2homogeneous(math.pi, 0.0, float(yaw))
+        transform = seat @ matrix_relative(port_frame, np.eye(4))
+        out_xyz, out_rpy = matrix2xyzrpy(transform)
+        return (float(out_xyz[0]), float(out_xyz[1]), float(out_xyz[2]),
+                float(out_rpy[0]), float(out_rpy[1]), float(out_rpy[2]))
 
     def set_root(self, instance_id: str, port_name: str) -> None:
         """
