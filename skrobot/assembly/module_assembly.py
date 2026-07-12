@@ -362,6 +362,20 @@ class Connection:
         automatically: the movable joint nearest the root drives, the
         rest are solved.  A 1-DOF planar loop solves 2 joints; a 2-DOF
         loop (e.g. a five-bar) needs this made explicit.
+    joint_type : str
+        Type of the joint the connection becomes in the built URDF:
+        ``'fixed'`` (default), ``'revolute'``, ``'continuous'`` or
+        ``'prismatic'``.  A movable connection turns the mated port
+        pair itself into an articulation, so modules do not need an
+        internal joint to move relative to each other.
+    axis : Tuple[float, float, float]
+        Movable connections only: the joint axis, expressed in the
+        child attachment link's frame (= the URDF joint frame).
+        Default Z.
+    lower, upper : float, optional
+        Joint limits; required for ``'revolute'`` and ``'prismatic'``.
+    effort, velocity : float
+        Limit attributes the URDF requires alongside lower/upper.
     """
 
     module_a: str
@@ -376,6 +390,12 @@ class Connection:
     yaw: float = 0.0
     loop: bool = False
     dependent: Optional[Tuple[str, ...]] = None
+    joint_type: str = "fixed"
+    axis: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+    lower: Optional[float] = None
+    upper: Optional[float] = None
+    effort: float = 100.0
+    velocity: float = 1.0
     # How the CHILD-side node attaches when the tree is built.  The
     # connection is undirected: whichever endpoint ends up the child once
     # the tree is rooted attaches via ITS declared port.
@@ -541,6 +561,12 @@ class RobotAssembly:
         attach: str = "root",
         loop: bool = False,
         dependent: Optional[Tuple[str, ...]] = None,
+        joint_type: str = "fixed",
+        axis: Tuple[float, float, float] = (0.0, 0.0, 1.0),
+        lower: Optional[float] = None,
+        upper: Optional[float] = None,
+        effort: float = 100.0,
+        velocity: float = 1.0,
     ) -> None:
         """
         Create a connection between two module ports.
@@ -605,6 +631,26 @@ class RobotAssembly:
             nearest the root drives, the rest are solved -- right for a
             1-DOF loop, but a multi-DOF loop (five-bar and up) needs the
             solved joints named explicitly.
+        joint_type : str
+            ``'fixed'`` (default) welds the connection; ``'revolute'``,
+            ``'continuous'`` or ``'prismatic'`` turn the mated port pair
+            itself into an articulation.  A movable connection must be
+            declared parent-side first (``module_a`` ends up the parent
+            once the tree is rooted): reversing a movable joint would
+            relocate its frame, which the build refuses rather than
+            approximates.
+        axis : Tuple[float, float, float]
+            Joint axis of a movable connection, expressed in the child
+            attachment link's frame (in URDF the joint frame IS the
+            child frame): the module root frame under ``attach='root'``,
+            the declared port frame under ``attach='port'`` -- combine
+            with ``attach='port'``/``mate`` to hinge about the port Z
+            of the keyed-mate convention.  Default Z.
+        lower, upper : float, optional
+            Joint limits in radians / metres; required for
+            ``'revolute'`` and ``'prismatic'``.
+        effort, velocity : float
+            Limit attributes required by URDF alongside lower/upper.
         """
         # Validate module instances exist
         if module_a not in self.instances:
@@ -655,6 +701,32 @@ class RobotAssembly:
             raise ValueError(
                 'dependent only applies to a loop closure (loop=True): it '
                 'names the joints solved to keep the loop closed')
+        if joint_type not in ("fixed", "revolute", "continuous",
+                              "prismatic"):
+            raise ValueError(f"unknown joint_type: {joint_type!r} "
+                             "(expected 'fixed', 'revolute', 'continuous' "
+                             "or 'prismatic')")
+        if loop and joint_type != "fixed":
+            raise ValueError(
+                'a loop closure IS the passive cut hinge; it cannot carry '
+                'a joint_type -- make the tree connections movable instead')
+        if joint_type in ("fixed", "continuous") and \
+                (lower is not None or upper is not None):
+            raise ValueError(
+                f"lower/upper limits do not apply to a {joint_type} "
+                "connection joint (URDF only limits revolute/prismatic)")
+        if joint_type in ("revolute", "prismatic") and \
+                (lower is None or upper is None):
+            raise ValueError(
+                f"a {joint_type} connection needs explicit lower and "
+                "upper limits")
+        if joint_type != "fixed":
+            axis = tuple(float(v) for v in axis)
+            if len(axis) != 3 or not all(math.isfinite(v) for v in axis) \
+                    or math.hypot(*axis) < 1e-12:
+                raise ValueError(
+                    f"connection joint axis must be a nonzero finite "
+                    f"3-vector, got {axis!r}")
         if mate:
             if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
                 raise ValueError(
@@ -683,7 +755,11 @@ class RobotAssembly:
         self.connections.append(
             Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z,
                        roll=roll, pitch=pitch, yaw=yaw, attach=attach,
-                       loop=loop, dependent=dependent)
+                       loop=loop, dependent=dependent,
+                       joint_type=joint_type,
+                       axis=tuple(float(v) for v in axis),
+                       lower=lower, upper=upper,
+                       effort=effort, velocity=velocity)
         )
 
     @staticmethod
@@ -1017,6 +1093,7 @@ class RobotAssembly:
         self._validate_and_default_root()
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
+        self._apply_movable_connections(robot)
         # validates declared closures and injects parallelogram mimics;
         # the relay yaml sidecar only exists when building to a file
         self.loop_closures = self._apply_loop_closures(robot)
@@ -1178,6 +1255,61 @@ class RobotAssembly:
                 transforms[child] = transforms[link_name] @ transform
                 queue.append(child)
         return transforms
+
+    def _apply_movable_connections(self, robot):
+        """Turn movable connections into their declared joint type.
+
+        The composition emits every connection as a fixed joint with the
+        deterministic name ``{parent_link}_to_{child_link}_joint``; this
+        post-pass rewrites the type and adds ``<axis>``/``<limit>``.
+        Runs BEFORE the loop-closure pass, which then sees connection
+        joints as ordinary ring members.
+        """
+        movable = [c for c in self.connections
+                   if not c.loop and c.joint_type != "fixed"]
+        if not movable:
+            return
+        joints = {j.get("name"): j for j in robot.findall("joint")}
+
+        def link_name(instance_id, port):
+            return f"{instance_id}_{port}" if instance_id else port
+
+        def connector(instance_id, port, attach):
+            module = self.instances[instance_id].module
+            if attach == "port" and port != module.root_link:
+                return port
+            return module.root_link
+
+        for conn in movable:
+            child_fwd = connector(conn.module_b, conn.port_b, conn.attach)
+            child_rev = connector(conn.module_a, conn.port_a, conn.attach)
+            forward = (f"{link_name(conn.module_a, conn.port_a)}_to_"
+                       f"{link_name(conn.module_b, child_fwd)}_joint")
+            reverse = (f"{link_name(conn.module_b, conn.port_b)}_to_"
+                       f"{link_name(conn.module_a, child_rev)}_joint")
+            joint = joints.get(forward)
+            if joint is None:
+                if reverse in joints:
+                    raise ValueError(
+                        f"movable connection {conn.module_a}.{conn.port_a}"
+                        f" -> {conn.module_b}.{conn.port_b} was traversed "
+                        "in reverse when the tree was rooted; a reversed "
+                        "movable joint cannot keep its frame (only the "
+                        "new child's origin could carry the axis), so "
+                        "re-root the assembly or declare the connection "
+                        "parent-side first")
+                raise ValueError(
+                    f"internal error: connection joint '{forward}' not "
+                    "found in the composed URDF")
+            joint.set("type", conn.joint_type)
+            axis = etree.SubElement(joint, "axis")
+            axis.set("xyz", " ".join(str(v) for v in conn.axis))
+            if conn.joint_type in ("revolute", "prismatic"):
+                limit = etree.SubElement(joint, "limit")
+                limit.set("lower", str(conn.lower))
+                limit.set("upper", str(conn.upper))
+                limit.set("effort", str(conn.effort))
+                limit.set("velocity", str(conn.velocity))
 
     def _apply_loop_closures(self, robot):
         """Export the declared loop closures against the composed robot.
@@ -1515,6 +1647,7 @@ class RobotAssembly:
         """Compose the combined URDF and write it to disk."""
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
+        self._apply_movable_connections(robot)
         closures = self._apply_loop_closures(robot)
         self.loop_closures = closures
         if output_path is None:
@@ -1564,7 +1697,10 @@ class RobotAssembly:
                  "x": c.x, "y": c.y, "z": c.z,
                  "roll": c.roll, "pitch": c.pitch, "yaw": c.yaw,
                  "attach": c.attach, "loop": c.loop,
-                 "dependent": list(c.dependent) if c.dependent else None}
+                 "dependent": list(c.dependent) if c.dependent else None,
+                 "joint_type": c.joint_type, "axis": list(c.axis),
+                 "lower": c.lower, "upper": c.upper,
+                 "effort": c.effort, "velocity": c.velocity}
                 for c in self.connections
             ],
             "root": {"instance": self.root_instance, "port": self.root_port} if self.root_instance else None,
@@ -1608,7 +1744,12 @@ class RobotAssembly:
                 attach=conn.get("attach", "root"),
                 loop=conn.get("loop", False),
                 dependent=(tuple(conn["dependent"])
-                           if conn.get("dependent") else None))
+                           if conn.get("dependent") else None),
+                joint_type=conn.get("joint_type", "fixed"),
+                axis=tuple(conn.get("axis", (0.0, 0.0, 1.0))),
+                lower=conn.get("lower"), upper=conn.get("upper"),
+                effort=conn.get("effort", 100.0),
+                velocity=conn.get("velocity", 1.0))
         root = data.get("root") or {}
         root_instance = data.get("root_instance") or root.get("instance")
         root_port = data.get("root_port") or root.get("port")

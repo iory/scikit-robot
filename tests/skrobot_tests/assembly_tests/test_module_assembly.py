@@ -431,6 +431,181 @@ _GROUND_URDF = """<?xml version="1.0"?>
 """
 
 
+_PLATE_URDF = """<?xml version="1.0"?>
+<robot name="plate">
+  <link name="base_link"/>
+  <link name="tip"/>
+  <joint name="ext" type="fixed">
+    <parent link="base_link"/><child link="tip"/>
+    <origin xyz="{tip_xyz}" rpy="0 0 0"/>
+  </joint>
+</robot>
+"""
+
+
+class TestMovableConnections(unittest.TestCase):
+    """connect(joint_type=...) turns the mated port pair into a joint."""
+
+    @staticmethod
+    def _plate(tmp, name, tip_xyz):
+        path = os.path.join(tmp, name + '.urdf')
+        with open(path, 'w') as f:
+            f.write(_PLATE_URDF.format(tip_xyz=tip_xyz))
+        return RobotModule.from_urdf(name, path)
+
+    def test_revolute_connection_articulates(self):
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._plate(tmp, 'base', '0.1 0 0')
+            arm = self._plate(tmp, 'arm', '0.1 0 0')
+            assembly = RobotAssembly('linkage')
+            assembly.add_module_instance('b', base)
+            assembly.add_module_instance('a', arm)
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='revolute',
+                             lower=-2.0, upper=2.0)
+            assembly.set_root('b', 'base_link')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'x.urdf'))).getroot()
+            joint = next(j for j in root.findall('joint')
+                         if j.get('name') == 'b_tip_to_a_base_link_joint')
+            self.assertEqual(joint.get('type'), 'revolute')
+            self.assertEqual(joint.find('axis').get('xyz'), '0.0 0.0 1.0')
+            limit = joint.find('limit')
+            self.assertEqual((limit.get('lower'), limit.get('upper')),
+                             ('-2.0', '2.0'))
+            robot = assembly.build_robot_model()
+        robot.b_tip_to_a_base_link_joint.joint_angle(np.pi / 2)
+        # the arm tip swings from +X to +Y around the port Z axis
+        np.testing.assert_allclose(robot.a_tip.worldpos(),
+                                   [0.1, 0.1, 0.0], atol=1e-12)
+
+    def test_four_bar_from_bare_links(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            ground = self._write_ground(tmp)
+            crank = self._plate(tmp, 'crank', '0 0.1 0')
+            crank2 = self._plate(tmp, 'crank2', '0 0.1 0')
+            coupler = self._plate(tmp, 'coupler', '0.2 0 0')
+            assembly = RobotAssembly('fourbar')
+            assembly.add_module_instance('g', ground)
+            assembly.add_module_instance('b1', crank)
+            assembly.add_module_instance('b2', crank2)
+            assembly.add_module_instance('cp', coupler)
+            hinge = {'joint_type': 'revolute', 'lower': -3.0, 'upper': 3.0}
+            assembly.connect('g', 'g1', 'b1', 'base_link', **hinge)
+            assembly.connect('g', 'g2', 'b2', 'base_link', **hinge)
+            assembly.connect('b1', 'tip', 'cp', 'base_link', **hinge)
+            assembly.connect('cp', 'tip', 'b2', 'tip', loop=True)
+            assembly.set_root('g', 'base_link')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))).getroot()
+            with open(os.path.join(tmp, 'loop_closures.yaml')) as f:
+                config = yaml.safe_load(f)
+        # the loop machinery treats connection joints as ring members:
+        # no module-internal joint exists anywhere in this assembly
+        driver = 'g_g1_to_b1_base_link_joint'
+        self.assertEqual(config['independent'], [driver])
+        mimics = {j.get('name'): j.find('mimic')
+                  for j in root.findall('joint')
+                  if j.find('mimic') is not None}
+        expected = {'b1_tip_to_cp_base_link_joint': -1.0,
+                    'g_g2_to_b2_base_link_joint': 1.0}
+        self.assertEqual(sorted(mimics), sorted(expected))
+        for name, multiplier in expected.items():
+            self.assertEqual(mimics[name].get('joint'), driver)
+            self.assertAlmostEqual(
+                float(mimics[name].get('multiplier')), multiplier)
+
+    @staticmethod
+    def _write_ground(tmp):
+        path = os.path.join(tmp, 'ground.urdf')
+        with open(path, 'w') as f:
+            f.write(_GROUND_URDF.format(g2_xyz='0.2 0 0'))
+        return RobotModule.from_urdf('ground', path)
+
+    def test_reversed_movable_edge_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._plate(tmp, 'base', '0.1 0 0')
+            arm = self._plate(tmp, 'arm', '0.1 0 0')
+            assembly = RobotAssembly('linkage')
+            assembly.add_module_instance('b', base)
+            assembly.add_module_instance('a', arm)
+            # declared child-side first: rooting at 'b' traverses it in
+            # reverse, which cannot keep a movable joint's frame
+            assembly.connect('a', 'base_link', 'b', 'tip',
+                             joint_type='revolute',
+                             lower=-1.5, upper=1.5)
+            assembly.set_root('b', 'base_link')
+            with self.assertRaisesRegex(ValueError, 'reverse'):
+                assembly.build(output_path=os.path.join(tmp, 'x.urdf'))
+
+    def test_movable_connection_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._plate(tmp, 'base', '0.1 0 0')
+            arm = self._plate(tmp, 'arm', '0.1 0 0')
+        assembly = RobotAssembly('linkage')
+        assembly.add_module_instance('b', base)
+        assembly.add_module_instance('a', arm)
+        with self.assertRaisesRegex(ValueError, 'lower and upper'):
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='revolute')
+        with self.assertRaisesRegex(ValueError, 'unknown joint_type'):
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='floating')
+        with self.assertRaisesRegex(ValueError, 'do not apply'):
+            assembly.connect('b', 'tip', 'a', 'base_link', lower=-1.0,
+                             upper=1.0)
+        with self.assertRaisesRegex(ValueError, 'do not apply'):
+            # continuous would silently drop the bounds -- refuse instead
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='continuous', lower=-1.0,
+                             upper=1.0)
+        with self.assertRaisesRegex(ValueError, 'nonzero finite'):
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='continuous', axis=(0.0, 0.0, 0.0))
+        with self.assertRaisesRegex(ValueError, 'cut hinge'):
+            assembly.connect('b', 'tip', 'a', 'base_link', loop=True,
+                             joint_type='continuous')
+
+    def test_movable_connection_with_attach_port(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._plate(tmp, 'base', '0.1 0 0')
+            arm = self._plate(tmp, 'arm', '0.1 0 0')
+            assembly = RobotAssembly('linkage')
+            assembly.add_module_instance('b', base)
+            assembly.add_module_instance('a', arm)
+            # re-rooted at the declared port: the joint's child link is
+            # the port itself, and the axis hinges about the port frame
+            assembly.connect('b', 'tip', 'a', 'tip', attach='port',
+                             joint_type='revolute', lower=-2.0, upper=2.0)
+            assembly.set_root('b', 'base_link')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'x.urdf'))).getroot()
+        joint = next(j for j in root.findall('joint')
+                     if j.get('name') == 'b_tip_to_a_tip_joint')
+        self.assertEqual(joint.get('type'), 'revolute')
+        self.assertEqual(joint.find('child').get('link'), 'a_tip')
+
+    def test_joint_type_round_trips_through_dict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._plate(tmp, 'base', '0.1 0 0')
+            arm = self._plate(tmp, 'arm', '0.1 0 0')
+            assembly = RobotAssembly('linkage')
+            assembly.add_module_instance('b', base)
+            assembly.add_module_instance('a', arm)
+            assembly.connect('b', 'tip', 'a', 'base_link',
+                             joint_type='prismatic', axis=(1.0, 0.0, 0.0),
+                             lower=-0.05, upper=0.05, effort=10.0,
+                             velocity=0.2)
+            rebuilt = RobotAssembly.from_dict(assembly.to_dict())
+            self.assertEqual(rebuilt.to_dict(), assembly.to_dict())
+        conn = rebuilt.connections[0]
+        self.assertEqual(conn.joint_type, 'prismatic')
+        self.assertEqual(conn.axis, (1.0, 0.0, 0.0))
+        self.assertEqual((conn.lower, conn.upper), (-0.05, 0.05))
+
+
 class TestGraphEditingAndEmbed(unittest.TestCase):
     """disconnect / remove_module_instance / to_dict(embed=True)."""
 
