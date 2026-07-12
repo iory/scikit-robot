@@ -462,6 +462,11 @@ class RobotAssembly:
         The instance ID that will become the root of the final URDF tree.
     root_port : Optional[str]
         The port on root_instance that will become the root link.
+    loop_closures : Optional[dict]
+        After a build: the closure config the loop connections produced
+        (the ``loop_closures.yaml`` content), ready to hand to
+        :class:`skrobot.kinematics.LoopClosureSolver`; None when the
+        assembly declares no loop.
 
     Examples
     --------
@@ -498,6 +503,7 @@ class RobotAssembly:
         self.connections: List[Connection] = []
         self.root_instance: Optional[str] = None
         self.root_port: Optional[str] = None
+        self.loop_closures: Optional[dict] = None
 
     def add_module_instance(self, instance_id: str, module: RobotModule) -> None:
         """
@@ -966,7 +972,7 @@ class RobotAssembly:
         robot = self._compose_inline(temp_dir)
         # validates declared closures and injects parallelogram mimics;
         # the relay yaml sidecar only exists when building to a file
-        self._apply_loop_closures(robot)
+        self.loop_closures = self._apply_loop_closures(robot)
         return RobotModelFromURDF(
             urdf=etree.tostring(robot, encoding="unicode"))
 
@@ -1463,6 +1469,7 @@ class RobotAssembly:
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
         closures = self._apply_loop_closures(robot)
+        self.loop_closures = closures
         if output_path is None:
             output_path = os.path.join(temp_dir, f"{self.name}.urdf")
         with open(output_path, "wb") as f:
