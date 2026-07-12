@@ -430,6 +430,107 @@ _GROUND_URDF = """<?xml version="1.0"?>
 </robot>
 """
 
+
+class TestGraphEditingAndEmbed(unittest.TestCase):
+    """disconnect / remove_module_instance / to_dict(embed=True)."""
+
+    def _chain(self, tmp, n=3):
+        assembly = RobotAssembly('chain')
+        for i in range(n):
+            module = RobotModule.from_urdf(f'm{i}',
+                                           _write_module(tmp, f'm{i}'))
+            assembly.add_module_instance(f'i{i}', module)
+        for i in range(n - 1):
+            assembly.connect(f'i{i}', 'dummy_link1', f'i{i + 1}',
+                             'base_link')
+        assembly.set_root('i0', 'base_link')
+        return assembly
+
+    def test_disconnect_matches_either_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._chain(tmp)
+            assembly.disconnect('i2', 'base_link', 'i1', 'dummy_link1')
+            self.assertEqual(len(assembly.connections), 1)
+            with self.assertRaisesRegex(ValueError, 'no connection'):
+                assembly.disconnect('i1', 'dummy_link1', 'i2', 'base_link')
+            # a disconnected edge can be declared again without tripping
+            # the duplicate check
+            assembly.connect('i1', 'dummy_link1', 'i2', 'base_link')
+        self.assertEqual(len(assembly.connections), 2)
+
+    def test_disconnect_removes_loop_edges_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._chain(tmp)
+            assembly.connect('i2', 'dummy_link1', 'i0', 'base_link',
+                             loop=True)
+            assembly.disconnect('i0', 'base_link', 'i2', 'dummy_link1')
+        self.assertEqual(len(assembly.connections), 2)
+        self.assertFalse(any(c.loop for c in assembly.connections))
+
+    def test_remove_module_instance_drops_its_connections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._chain(tmp)
+            assembly.remove_module_instance('i1')
+        self.assertEqual(sorted(assembly.instances), ['i0', 'i2'])
+        self.assertEqual(assembly.connections, [])
+        # removing a non-root instance left the root untouched
+        self.assertEqual((assembly.root_instance, assembly.root_port),
+                         ('i0', 'base_link'))
+        # removing the root falls back to the first remaining instance
+        assembly.remove_module_instance('i0')
+        self.assertEqual(assembly.root_instance, 'i2')
+        assembly.remove_module_instance('i2')
+        self.assertIsNone(assembly.root_instance)
+        with self.assertRaises(ValueError):
+            assembly.remove_module_instance('i2')
+
+    def test_embed_round_trips_without_source_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._chain(tmp)
+            reference = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'ref.urdf'))).getroot()
+            data = assembly.to_dict(embed=True)
+        # the source directory is gone -- only the embedded content
+        # remains, and building from it still works
+        rebuilt = RobotAssembly.from_dict(data)
+        with tempfile.TemporaryDirectory() as out:
+            built = ET.parse(rebuilt.build(
+                output_path=os.path.join(out, 'x.urdf'))).getroot()
+        for tag in ('link', 'joint'):
+            self.assertEqual(
+                {el.get('name') for el in reference.findall(tag)},
+                {el.get('name') for el in built.findall(tag)})
+
+    def test_embed_requires_readable_module_file(self):
+        module = RobotModule.from_urdf_string(
+            'm', _MODULE_URDF.format(name='m'))
+        assembly = RobotAssembly('combo')
+        assembly.add_module_instance('a1', module)
+        with self.assertRaisesRegex(ValueError, 'not a readable file'):
+            assembly.to_dict(embed=True)
+
+    def test_embed_survives_pathological_instance_ids(self):
+        # instance ids are arbitrary strings and must never name the
+        # materialized module files
+        with tempfile.TemporaryDirectory() as tmp:
+            module = RobotModule.from_urdf('m', _write_module(tmp, 'm'))
+            assembly = RobotAssembly('combo')
+            assembly.add_module_instance('../escape', module)
+            data = assembly.to_dict(embed=True)
+        rebuilt = RobotAssembly.from_dict(data)
+        self.assertEqual(sorted(rebuilt.instances), ['../escape'])
+
+    def test_from_dict_accepts_root_dict_form(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._chain(tmp)
+            data = assembly.to_dict()
+            del data['root_instance']
+            del data['root_port']
+            rebuilt = RobotAssembly.from_dict(data)
+        self.assertEqual((rebuilt.root_instance, rebuilt.root_port),
+                         ('i0', 'base_link'))
+
+
 _GROUND3_URDF = """<?xml version="1.0"?>
 <robot name="ground3">
   <link name="base_link"/>

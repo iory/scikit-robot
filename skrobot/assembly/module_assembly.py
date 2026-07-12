@@ -745,6 +745,53 @@ class RobotAssembly:
         return (float(out_xyz[0]), float(out_xyz[1]), float(out_xyz[2]),
                 float(out_rpy[0]), float(out_rpy[1]), float(out_rpy[2]))
 
+    def disconnect(self, module_a: str, port_a: str,
+                   module_b: str, port_b: str) -> None:
+        """Remove the connection between two ports.
+
+        The connection is matched in either declaration order (the
+        graph is undirected).
+
+        Raises
+        ------
+        ValueError
+            If no such connection exists.
+        """
+        for i, conn in enumerate(self.connections):
+            forward = (conn.module_a == module_a and conn.port_a == port_a
+                       and conn.module_b == module_b
+                       and conn.port_b == port_b)
+            reverse = (conn.module_a == module_b and conn.port_a == port_b
+                       and conn.module_b == module_a
+                       and conn.port_b == port_a)
+            if forward or reverse:
+                del self.connections[i]
+                return
+        raise ValueError(
+            f"no connection between {module_a}.{port_a} and "
+            f"{module_b}.{port_b}")
+
+    def remove_module_instance(self, instance_id: str) -> None:
+        """Remove an instance and every connection that involves it.
+
+        When the removed instance was the root, the root falls back to
+        the first remaining instance (through its module's root link),
+        or clears entirely on an empty assembly.
+        """
+        if instance_id not in self.instances:
+            raise ValueError(f"Module instance '{instance_id}' not found")
+        del self.instances[instance_id]
+        self.connections = [c for c in self.connections
+                            if not c.involves(instance_id)]
+        if self.root_instance == instance_id:
+            if self.instances:
+                first_id = next(iter(self.instances))
+                self.set_root(first_id,
+                              self.instances[first_id].module.root_link)
+            else:
+                self.root_instance = None
+                self.root_port = None
+
     def set_root(self, instance_id: str, port_name: str) -> None:
         """
         Set the root link for the assembled robot.
@@ -1480,20 +1527,37 @@ class RobotAssembly:
                 closures, os.path.dirname(os.path.abspath(output_path)))
         return output_path
 
-    def to_dict(self) -> dict:
+    def to_dict(self, embed: bool = False) -> dict:
         """
         Serialize the assembly to a dictionary.
 
         Useful for saving/loading assembly state or sending to frontend.
+
+        Parameters
+        ----------
+        embed : bool
+            Also embed each module's URDF XML (``urdf_content``), so
+            :meth:`from_dict` can rebuild the assembly without the
+            original files -- e.g. across machines or through a
+            storage backend.
         """
+        instances = {}
+        for inst_id, inst in self.instances.items():
+            entry = {"module_id": inst.module.module_id,
+                     "urdf_path": str(inst.module.urdf_path)}
+            if embed:
+                path = Path(inst.module.urdf_path)
+                if not path.is_file():
+                    raise ValueError(
+                        f"cannot embed instance '{inst_id}': its module "
+                        f"URDF '{path}' is not a readable file")
+                entry["urdf_content"] = path.read_text(encoding="utf-8")
+            instances[inst_id] = entry
         return {
             "name": self.name,
             "root_instance": self.root_instance,
             "root_port": self.root_port,
-            "instances": {
-                inst_id: {"module_id": inst.module.module_id, "urdf_path": str(inst.module.urdf_path)}
-                for inst_id, inst in self.instances.items()
-            },
+            "instances": instances,
             "connections": [
                 {"module_a": c.module_a, "port_a": c.port_a,
                  "module_b": c.module_b, "port_b": c.port_b,
@@ -1511,12 +1575,27 @@ class RobotAssembly:
         """Rebuild an assembly from :meth:`to_dict` output.
 
         Modules are re-parsed from the recorded ``urdf_path``s, so those
-        files must still exist.
+        files must still exist -- unless the dict was made with
+        ``to_dict(embed=True)``, in which case the embedded URDF content
+        is materialized into a temporary directory (the builds read the
+        module files from disk) and the original paths are not needed.
         """
         assembly = cls(data["name"])
-        for inst_id, inst in data.get("instances", {}).items():
-            module = RobotModule.from_urdf(inst["module_id"],
-                                           inst["urdf_path"])
+        embed_dir = None
+        for index, (inst_id, inst) in enumerate(
+                data.get("instances", {}).items()):
+            if inst.get("urdf_content"):
+                if embed_dir is None:
+                    embed_dir = tempfile.mkdtemp(prefix="assembly_modules_")
+                # instance ids are arbitrary strings ('a/b', '..'), so
+                # never let them name the file
+                path = os.path.join(embed_dir, f"module_{index}.urdf")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(inst["urdf_content"])
+                module = RobotModule.from_urdf(inst["module_id"], path)
+            else:
+                module = RobotModule.from_urdf(inst["module_id"],
+                                               inst["urdf_path"])
             assembly.add_module_instance(inst_id, module)
         for conn in data.get("connections", []):
             assembly.connect(
@@ -1530,8 +1609,11 @@ class RobotAssembly:
                 loop=conn.get("loop", False),
                 dependent=(tuple(conn["dependent"])
                            if conn.get("dependent") else None))
-        if data.get("root_instance"):
-            assembly.set_root(data["root_instance"], data["root_port"])
+        root = data.get("root") or {}
+        root_instance = data.get("root_instance") or root.get("instance")
+        root_port = data.get("root_port") or root.get("port")
+        if root_instance:
+            assembly.set_root(root_instance, root_port)
         return assembly
 
     def __repr__(self) -> str:
