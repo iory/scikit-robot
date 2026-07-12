@@ -240,7 +240,11 @@ def _import_object_from_name(module_name, fullname):
     if obj is None:
         return None
     for comp in fullname.split('.'):
-        obj = getattr(obj, comp)
+        # tolerate names that are not class attributes, e.g. dataclass
+        # fields without defaults -- no source link for those
+        obj = getattr(obj, comp, None)
+        if obj is None:
+            return None
     return obj
 
 
@@ -294,8 +298,9 @@ def _get_sourcefile_and_linenumber(obj):
     # Get the source file name and line number at which obj is defined.
     try:
         filename = inspect.getsourcefile(obj)
-    except TypeError:
-        # obj is not a module, class, function, ..etc.
+    except (TypeError, OSError):
+        # obj is not a module, class, function, ..etc., or its source
+        # cannot be located
         return None, None
 
     # inspect can return None for cython objects
@@ -303,7 +308,10 @@ def _get_sourcefile_and_linenumber(obj):
         return None, None
 
     # Get the source line number
-    _, linenum = inspect.getsourcelines(obj)
+    try:
+        _, linenum = inspect.getsourcelines(obj)
+    except (TypeError, OSError):
+        return None, None
 
     return filename, linenum
 

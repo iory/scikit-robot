@@ -46,7 +46,7 @@ class Port:
     A port is a link in the URDF that can be connected to another module's port.
     Typically these are "dummy_link" elements in the URDF files.
 
-    Attributes
+    Parameters
     ----------
     name : str
         The link name in the URDF that serves as a connection point.
@@ -89,7 +89,7 @@ class RobotModule:
     This class does NOT hold parent-child relationships. It simply stores
     metadata about a single URDF file and its available connection ports.
 
-    Attributes
+    Parameters
     ----------
     module_id : str
         Unique identifier for this module type (e.g., "hinge_module", "branch_module").
@@ -327,7 +327,7 @@ class Connection:
 
     This is an edge in the undirected connection graph.
 
-    Attributes
+    Parameters
     ----------
     module_a : str
         Instance ID of the first module.
