@@ -430,6 +430,27 @@ _GROUND_URDF = """<?xml version="1.0"?>
 </robot>
 """
 
+_GROUND3_URDF = """<?xml version="1.0"?>
+<robot name="ground3">
+  <link name="base_link"/>
+  <link name="g1"/>
+  <link name="g2"/>
+  <link name="g3"/>
+  <joint name="fg1" type="fixed">
+    <parent link="base_link"/><child link="g1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="fg2" type="fixed">
+    <parent link="base_link"/><child link="g2"/>
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="fg3" type="fixed">
+    <parent link="base_link"/><child link="g3"/>
+    <origin xyz="0.4 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>
+"""
+
 _BAR_URDF = """<?xml version="1.0"?>
 <robot name="bar">
   <link name="base_link"/>
@@ -580,6 +601,137 @@ class TestV5LoopClosures(unittest.TestCase):
                 config = yaml.safe_load(f)
         self.assertEqual(config['independent'], ['c1_hinge', 'x1_hinge'])
         self.assertEqual(config['dependent'], ['c2_hinge', 'cp_hinge'])
+
+    def test_explicit_dependent_overrides_heuristic(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            loop = [c for c in assembly.connections if c.loop][0]
+            loop.dependent = ('c1_hinge', 'cp_hinge')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fourbar.urdf'))).getroot()
+            with open(os.path.join(tmp, 'loop_closures.yaml')) as f:
+                config = yaml.safe_load(f)
+        self.assertEqual(config['independent'], ['c2_hinge'])
+        self.assertEqual(config['dependent'], ['c1_hinge', 'cp_hinge'])
+        mimics = {j.get('name'): j.find('mimic')
+                  for j in root.findall('joint')
+                  if j.find('mimic') is not None}
+        for name, multiplier in (('c1_hinge', 1.0), ('cp_hinge', -1.0)):
+            self.assertEqual(mimics[name].get('joint'), 'c2_hinge')
+            self.assertAlmostEqual(
+                float(mimics[name].get('multiplier')), multiplier)
+
+    def test_explicit_dependent_is_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assembly = self._four_bar(tmp)
+            with self.assertRaises(ValueError):
+                assembly.connect('c1', 'arm', 'c2', 'arm',
+                                 dependent=('c1_hinge',))  # without loop
+            loop = [c for c in assembly.connections if c.loop][0]
+            loop.dependent = ('not_a_ring_joint',)
+            with self.assertRaisesRegex(ValueError, 'not movable joints'):
+                assembly.build(output_path=os.path.join(tmp, 'x.urdf'))
+
+    def test_chained_parallelograms_propagate_mimic(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            ground = self._write(tmp, 'ground3', _GROUND3_URDF)
+            crank = self._write(tmp, 'crank',
+                                _BAR_URDF.format(tip_xyz='0 0.1 0',
+                                                 tip_rpy='0 0 0'))
+            coupler = self._write(tmp, 'coupler',
+                                  _BAR_URDF.format(tip_xyz='0.2 0 0',
+                                                   tip_rpy='0 0 0'))
+            assembly = RobotAssembly('double')
+            assembly.add_module_instance('g', ground)
+            for cid in ('c1', 'c2', 'c3'):
+                assembly.add_module_instance(cid, crank)
+            for pid in ('cpA', 'cpB'):
+                assembly.add_module_instance(pid, coupler)
+            assembly.connect('g', 'g1', 'c1', 'base_link')
+            assembly.connect('g', 'g2', 'c2', 'base_link')
+            assembly.connect('g', 'g3', 'c3', 'base_link')
+            assembly.connect('c1', 'tip', 'cpA', 'base_link')
+            assembly.connect('c2', 'tip', 'cpB', 'base_link')
+            assembly.connect('cpA', 'tip', 'c2', 'tip', loop=True)
+            assembly.connect('cpB', 'tip', 'c3', 'tip', loop=True)
+            assembly.set_root('g', 'base_link')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'double.urdf'))).getroot()
+            with open(os.path.join(tmp, 'loop_closures.yaml')) as f:
+                config = yaml.safe_load(f)
+        # the whole chain has ONE degree of freedom: everything follows c1
+        self.assertEqual(config['independent'], ['c1_hinge'])
+        self.assertEqual(config['dependent'],
+                         ['c2_hinge', 'c3_hinge', 'cpA_hinge', 'cpB_hinge'])
+        mimics = {j.get('name'): j.find('mimic')
+                  for j in root.findall('joint')
+                  if j.find('mimic') is not None}
+        expected = {'c2_hinge': 1.0, 'cpA_hinge': -1.0,
+                    'c3_hinge': 1.0, 'cpB_hinge': -1.0}
+        self.assertEqual(sorted(mimics), sorted(expected))
+        for name, multiplier in expected.items():
+            self.assertEqual(mimics[name].get('joint'), 'c1_hinge')
+            self.assertAlmostEqual(
+                float(mimics[name].get('multiplier')), multiplier)
+
+    def test_five_bar_needs_and_takes_explicit_dependent(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            ground = self._write(tmp, 'ground',
+                                 _GROUND_URDF.format(g2_xyz='0.2 0 0'))
+            crank = self._write(tmp, 'crank',
+                                _BAR_URDF.format(tip_xyz='0 0.1 0',
+                                                 tip_rpy='0 0 0'))
+            fore_a = self._write(tmp, 'fore_a',
+                                 _BAR_URDF.format(tip_xyz='0.1 0 0',
+                                                  tip_rpy='0 0 0'))
+            fore_b = self._write(tmp, 'fore_b',
+                                 _BAR_URDF.format(tip_xyz='-0.1 0 0',
+                                                  tip_rpy='0 0 0'))
+            assembly = RobotAssembly('fivebar')
+            assembly.add_module_instance('g', ground)
+            assembly.add_module_instance('c1', crank)
+            assembly.add_module_instance('c2', crank)
+            assembly.add_module_instance('fa', fore_a)
+            assembly.add_module_instance('fb', fore_b)
+            assembly.connect('g', 'g1', 'c1', 'base_link')
+            assembly.connect('g', 'g2', 'c2', 'base_link')
+            assembly.connect('c1', 'tip', 'fa', 'base_link')
+            assembly.connect('c2', 'tip', 'fb', 'base_link')
+            assembly.connect('fa', 'tip', 'fb', 'tip', loop=True,
+                             dependent=('fa_hinge', 'fb_hinge'))
+            assembly.set_root('g', 'base_link')
+            root = ET.parse(assembly.build(
+                output_path=os.path.join(tmp, 'fivebar.urdf'))).getroot()
+            with open(os.path.join(tmp, 'loop_closures.yaml')) as f:
+                config = yaml.safe_load(f)
+        # 2-DOF loop: both cranks stay driven, both forearms are solved
+        self.assertEqual(config['independent'], ['c1_hinge', 'c2_hinge'])
+        self.assertEqual(config['dependent'], ['fa_hinge', 'fb_hinge'])
+        self.assertEqual([j.get('name') for j in root.findall('joint')
+                          if j.find('mimic') is not None], [])
+
+    def test_resolve_mimic_chain_composes_linearly(self):
+        from lxml import etree
+
+        robot = etree.fromstring(
+            '<robot name="r">'
+            '<joint name="a" type="revolute">'
+            '<parent link="w"/><child link="x"/>'
+            '<mimic joint="b" multiplier="2" offset="3"/></joint>'
+            '<joint name="b" type="revolute">'
+            '<parent link="x"/><child link="y"/>'
+            '<mimic joint="c" multiplier="5" offset="7"/></joint>'
+            '<joint name="c" type="revolute">'
+            '<parent link="y"/><child link="z"/></joint>'
+            '</robot>')
+        chain = RobotAssembly._resolve_mimic_chain(robot)
+        # a = 2*b + 3 and b = 5*c + 7  =>  a = 10*c + 17
+        self.assertEqual(chain['a'], ('c', 10.0, 17.0))
+        self.assertEqual(chain['b'], ('c', 5.0, 7.0))
+        self.assertNotIn('c', chain)
 
     def test_open_zero_pose_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

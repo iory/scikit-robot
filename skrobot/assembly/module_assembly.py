@@ -355,6 +355,13 @@ class Connection:
         loop connection never becomes a joint in the built URDF; instead
         it is exported as a runtime-IK closure constraint (the two port
         frames must stay coincident on their common hinge axis).
+    dependent : Tuple[str, ...], optional
+        For a loop closure: the final (prefixed) joint names this closure
+        SOLVES.  The remaining movable joints on the loop ring stay
+        independent (driven).  ``None`` (default) picks the split
+        automatically: the movable joint nearest the root drives, the
+        rest are solved.  A 1-DOF planar loop solves 2 joints; a 2-DOF
+        loop (e.g. a five-bar) needs this made explicit.
     """
 
     module_a: str
@@ -368,6 +375,7 @@ class Connection:
     pitch: float = 0.0
     yaw: float = 0.0
     loop: bool = False
+    dependent: Optional[Tuple[str, ...]] = None
     # How the CHILD-side node attaches when the tree is built.  The
     # connection is undirected: whichever endpoint ends up the child once
     # the tree is rooted attaches via ITS declared port.
@@ -526,6 +534,7 @@ class RobotAssembly:
         mate: bool = False,
         attach: str = "root",
         loop: bool = False,
+        dependent: Optional[Tuple[str, ...]] = None,
     ) -> None:
         """
         Create a connection between two module ports.
@@ -582,6 +591,14 @@ class RobotAssembly:
             for a parallelogram four-bar, writes exact ``<mimic>`` tags.
             A loop connection carries no transform, so the offset, ``mate``
             and ``attach`` arguments cannot be combined with it.
+        dependent : Tuple[str, ...], optional
+            Only with ``loop=True``: the final (prefixed, e.g.
+            ``'arm1_elbow'``) joint names this closure solves; the other
+            movable joints on the loop ring stay driven.  Validated at
+            build time against the actual ring.  Default: the ring joint
+            nearest the root drives, the rest are solved -- right for a
+            1-DOF loop, but a multi-DOF loop (five-bar and up) needs the
+            solved joints named explicitly.
         """
         # Validate module instances exist
         if module_a not in self.instances:
@@ -621,6 +638,17 @@ class RobotAssembly:
                     'where the two ports coincide at the zero pose, so '
                     'xyz/rpy offsets, mate and attach cannot be combined '
                     'with loop=True')
+            if dependent is not None:
+                dependent = tuple(dependent)
+                if not dependent:
+                    raise ValueError(
+                        'dependent must name at least one joint the '
+                        'closure solves (or be None for the automatic '
+                        'split)')
+        elif dependent is not None:
+            raise ValueError(
+                'dependent only applies to a loop closure (loop=True): it '
+                'names the joints solved to keep the loop closed')
         if mate:
             if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
                 raise ValueError(
@@ -649,7 +677,7 @@ class RobotAssembly:
         self.connections.append(
             Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z,
                        roll=roll, pitch=pitch, yaw=yaw, attach=attach,
-                       loop=loop)
+                       loop=loop, dependent=dependent)
         )
 
     @staticmethod
@@ -1185,24 +1213,8 @@ class RobotAssembly:
                     f"loop closure {label}: no movable joint on the loop "
                     "ring -- the closure would weld a rigid ring, which a "
                     "kinematic tree already represents without it")
-            # a joint that already mimics another, or that an earlier
-            # closure marked dependent, is solved -- it cannot drive
-            drivable = [j for j in ring if j.find("mimic") is None
-                        and j.get("name") not in dependent]
-            if not drivable:
-                raise ValueError(
-                    f"loop closure {label}: every movable joint on the "
-                    "loop ring is already solved (mimic or another "
-                    "closure's dependent), so nothing can drive the loop")
-            driver = min(
-                drivable,
-                key=lambda j: (len(links_up(j.find("child").get("link"))),
-                               j.get("name")))
-            drivers.add(driver.get("name"))
-            # never re-mark another closure's driver as dependent: a joint
-            # must end up on exactly one side of the split
-            deps = [j for j in ring if j is not driver
-                    and j.get("name") not in drivers]
+            driver_name, fixed, deps = self._split_loop_ring(
+                robot, conn, label, ring, links_up, dependent, drivers)
             dependent.update(j.get("name") for j in deps)
             point = t_a[:3, 3]
             closures.append({
@@ -1211,7 +1223,7 @@ class RobotAssembly:
                 "axis": [round(float(v), 8) for v in axis_a],
             })
             self._try_parallelogram_mimic(
-                robot, fk, ring, driver, deps, point, axis_a,
+                robot, fk, ring, driver_name, fixed, deps, point, axis_a,
                 link_a, link_b)
         return {
             "closures": closures,
@@ -1219,8 +1231,125 @@ class RobotAssembly:
             "independent": sorted(set(all_movable) - dependent),
         }
 
-    def _try_parallelogram_mimic(self, robot, fk, ring, driver, deps,
-                                 cut_point, cut_axis, link_a, link_b):
+    @staticmethod
+    def _resolve_mimic_chain(robot):
+        """Resolve every ``<mimic>`` tag to its transitive root driver.
+
+        Returns
+        -------
+        Dict[str, Tuple[str, float, float]]
+            Mapping from a mimicking joint name to ``(root_driver,
+            multiplier, offset)`` such that ``q_joint = multiplier *
+            q_root + offset``.  Joints on a mimic cycle are omitted.
+        """
+        specs = {}
+        for j in robot.findall("joint"):
+            mimic = j.find("mimic")
+            if mimic is not None and mimic.get("joint"):
+                specs[j.get("name")] = (
+                    mimic.get("joint"),
+                    float(mimic.get("multiplier", 1.0)),
+                    float(mimic.get("offset", 0.0)))
+        resolved = {}
+        for name in specs:
+            multiplier, offset = 1.0, 0.0
+            current = name
+            seen = set()
+            while current in specs:
+                if current in seen:
+                    break  # mimic cycle: unresolvable
+                seen.add(current)
+                target, m, o = specs[current]
+                offset += multiplier * o
+                multiplier *= m
+                current = target
+            else:
+                resolved[name] = (current, multiplier, offset)
+        return resolved
+
+    def _split_loop_ring(self, robot, conn, label, ring, links_up,
+                         dependent, drivers):
+        """Split one closure's ring joints into driven vs solved.
+
+        Three strategies, in priority order: the connection's explicit
+        ``dependent`` list; following an existing ``<mimic>`` on the ring
+        to its transitive root (so a chained loop never leaks a
+        kinematically coupled joint into ``independent``); else the
+        nearest-root heuristic (right for a 1-DOF loop).
+
+        Returns
+        -------
+        Tuple[Optional[str], Dict[str, float], List]
+            ``(driver_name, fixed, deps)``: the single driving joint the
+            parallelogram certification runs against (None when there is
+            no unique drivable one -- possibly a joint OUTSIDE the ring
+            for a chained loop), ``fixed`` mapping ring joints that
+            already mimic the driver to their known multiplier, and the
+            ring joint elements this closure marks dependent.
+        """
+        ring_names = [j.get("name") for j in ring]
+        if conn.dependent is not None:
+            missing = [n for n in conn.dependent if n not in ring_names]
+            if missing:
+                raise ValueError(
+                    f"loop closure {label}: dependent joint(s) {missing} "
+                    f"are not movable joints on the loop ring "
+                    f"{ring_names}")
+            conflict = sorted(set(conn.dependent) & drivers)
+            if conflict:
+                raise ValueError(
+                    f"loop closure {label}: {conflict} already drive "
+                    "another closure and cannot be re-marked dependent")
+            deps = [j for j in ring if j.get("name") in conn.dependent]
+            rest = [j for j in ring if j.get("name") not in conn.dependent]
+            drivers.update(j.get("name") for j in rest
+                           if j.get("name") not in dependent)
+            # certify only against a joint that really is independent
+            driver_name = rest[0].get("name") \
+                if len(rest) == 1 and rest[0].find("mimic") is None \
+                and rest[0].get("name") not in dependent \
+                else None
+            return driver_name, {}, deps
+
+        chain = self._resolve_mimic_chain(robot)
+        mimicking = [j for j in ring if j.get("name") in chain]
+        if mimicking:
+            roots = {chain[j.get("name")][0] for j in mimicking}
+            deps = [j for j in ring if j.get("name") not in roots
+                    and j.get("name") not in drivers]
+            # a root an earlier closure already solves is no driver: leave
+            # it dependent and let the relay solve this ring numerically
+            drivers.update(roots - dependent)
+            exact = len(roots) == 1 and not (roots & dependent) and all(
+                abs(chain[j.get("name")][2]) < 1e-12 for j in mimicking)
+            if not exact:
+                return None, {}, deps
+            fixed = {j.get("name"): chain[j.get("name")][1]
+                     for j in mimicking}
+            return next(iter(roots)), fixed, deps
+
+        # a joint an earlier closure marked dependent is solved --
+        # it cannot drive
+        drivable = [j for j in ring if j.get("name") not in dependent]
+        if not drivable:
+            raise ValueError(
+                f"loop closure {label}: every movable joint on the loop "
+                "ring is already solved by another closure, so nothing "
+                "can drive the loop")
+        driver = min(
+            drivable,
+            key=lambda j: (len(links_up(j.find("child").get("link"))),
+                           j.get("name")))
+        drivers.add(driver.get("name"))
+        # never re-mark another closure's driver as dependent: a joint
+        # must end up on exactly one side of the split
+        deps = [j for j in ring if j is not driver
+                and j.get("name") not in drivers]
+        return driver.get("name"), {}, deps
+
+    def _try_parallelogram_mimic(self, robot, fk, ring, driver_name,
+                                 fixed, deps, cut_point, cut_axis,
+                                 link_a, link_b):
         """Write exact ``<mimic>`` tags when the loop is a parallelogram.
 
         A four-bar whose hinge quadrilateral is a parallelogram (all four
@@ -1231,13 +1360,28 @@ class RobotAssembly:
         kinematics before anything is written: the cut-hinge witness
         points must still coincide at sampled nonzero driver angles.
         Silently does nothing when the ring is not such a loop.
+
+        For a chained loop, ``driver_name`` may be a joint OUTSIDE the
+        ring (the transitive root of an existing mimic) and ``fixed``
+        carries the known multipliers of the ring joints that already
+        follow it; only the remaining free dependents get new tags.
         """
-        if len(ring) != 3 or len(deps) != 2:
+        if driver_name is None or len(ring) != 3:
+            return
+        free = [j for j in deps if j.get("name") not in fixed]
+        if not free or len(free) > 2:
+            return
+        # every ring joint must have a determined value during the FK
+        # certification: the driver itself, a known follower, or a free
+        # candidate
+        covered = set(fixed) | {j.get("name") for j in free} | {driver_name}
+        if any(j.get("name") not in covered for j in ring):
             return
         if any(j.get("type") not in ("revolute", "continuous")
                for j in ring):
             return
-        if any(j.find("mimic") is not None for j in ring):
+        if any(j.find("mimic") is not None and j.get("name") not in fixed
+               for j in ring):
             return
         normal = cut_axis / np.linalg.norm(cut_axis)
         world_axes = []
@@ -1261,36 +1405,38 @@ class RobotAssembly:
                                 - (planar[2] - planar[3]))) > 1e-6:
             return
 
-        driver_name = driver.get("name")
         witness_local = []
         for w in (cut_point, cut_point + 0.03 * normal):
             w_h = np.append(w, 1.0)
             witness_local.append((np.linalg.solve(fk[link_a], w_h),
                                   np.linalg.solve(fk[link_b], w_h)))
-        for m0 in (1.0, -1.0):
-            for m1 in (1.0, -1.0):
-                multipliers = (m0, m1)
-                closed = True
-                for q in (0.3, -0.45):
-                    joint_values = {driver_name: q}
-                    for dep, m in zip(deps, multipliers):
-                        joint_values[dep.get("name")] = m * q
-                    fk_q = self._link_transforms(robot, joint_values)
-                    for local_a, local_b in witness_local:
-                        gap = np.linalg.norm(fk_q[link_a] @ local_a
-                                             - fk_q[link_b] @ local_b)
-                        if gap > 1e-9:
-                            closed = False
-                            break
-                    if not closed:
+        combos = [()]
+        for _ in free:
+            combos = [c + (m,) for c in combos for m in (1.0, -1.0)]
+        for multipliers in combos:
+            closed = True
+            for q in (0.3, -0.45):
+                joint_values = {driver_name: q}
+                joint_values.update(
+                    (name, m * q) for name, m in fixed.items())
+                for dep, m in zip(free, multipliers):
+                    joint_values[dep.get("name")] = m * q
+                fk_q = self._link_transforms(robot, joint_values)
+                for local_a, local_b in witness_local:
+                    gap = np.linalg.norm(fk_q[link_a] @ local_a
+                                         - fk_q[link_b] @ local_b)
+                    if gap > 1e-9:
+                        closed = False
                         break
-                if closed:
-                    for dep, m in zip(deps, multipliers):
-                        mimic = etree.SubElement(dep, "mimic")
-                        mimic.set("joint", driver_name)
-                        mimic.set("multiplier", str(m))
-                        mimic.set("offset", "0")
-                    return
+                if not closed:
+                    break
+            if closed:
+                for dep, m in zip(free, multipliers):
+                    mimic = etree.SubElement(dep, "mimic")
+                    mimic.set("joint", driver_name)
+                    mimic.set("multiplier", str(m))
+                    mimic.set("offset", "0")
+                return
 
     @staticmethod
     def _write_loop_closures_yaml(config, directory):
@@ -1346,7 +1492,8 @@ class RobotAssembly:
                  "module_b": c.module_b, "port_b": c.port_b,
                  "x": c.x, "y": c.y, "z": c.z,
                  "roll": c.roll, "pitch": c.pitch, "yaw": c.yaw,
-                 "attach": c.attach, "loop": c.loop}
+                 "attach": c.attach, "loop": c.loop,
+                 "dependent": list(c.dependent) if c.dependent else None}
                 for c in self.connections
             ],
             "root": {"instance": self.root_instance, "port": self.root_port} if self.root_instance else None,
@@ -1373,7 +1520,9 @@ class RobotAssembly:
                 roll=conn.get("roll", 0.0), pitch=conn.get("pitch", 0.0),
                 yaw=conn.get("yaw", 0.0),
                 attach=conn.get("attach", "root"),
-                loop=conn.get("loop", False))
+                loop=conn.get("loop", False),
+                dependent=(tuple(conn["dependent"])
+                           if conn.get("dependent") else None))
         if data.get("root_instance"):
             assembly.set_root(data["root_instance"], data["root_port"])
         return assembly
