@@ -4,8 +4,8 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
-from skrobot.urdf import RobotAssembly
-from skrobot.urdf import RobotModule
+from skrobot.assembly import RobotAssembly
+from skrobot.assembly import RobotModule
 
 
 _MODULE_URDF = """<?xml version="1.0"?>
@@ -442,7 +442,7 @@ class TestV4PortsAndMating(unittest.TestCase):
                 assembly.connect('a1', 'no_such_port', 'b1', 'base_link')
 
     def test_port_type_compatibility_enforced(self):
-        from skrobot.urdf import Port
+        from skrobot.assembly import Port
         with tempfile.TemporaryDirectory() as tmp:
             module_a = self._rotated_module(tmp, 'a')
             module_b = self._rotated_module(tmp, 'b')
@@ -459,7 +459,7 @@ class TestV4PortsAndMating(unittest.TestCase):
         assembly.connect('a1', 'dummy_link1', 'b1', 'base_link')
 
     def test_compatible_types_whitelist(self):
-        from skrobot.urdf import Port
+        from skrobot.assembly import Port
         with tempfile.TemporaryDirectory() as tmp:
             module_a = self._rotated_module(tmp, 'a')
             module_b = self._rotated_module(tmp, 'b')

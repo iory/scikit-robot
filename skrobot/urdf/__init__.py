@@ -6,11 +6,6 @@ from skrobot.urdf.llm_grouping import generate_groups_from_llm
 from skrobot.urdf.llm_grouping import parse_grouping_response
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
-from skrobot.urdf.module_assembly import Connection
-from skrobot.urdf.module_assembly import ModuleInstance
-from skrobot.urdf.module_assembly import Port
-from skrobot.urdf.module_assembly import RobotAssembly
-from skrobot.urdf.module_assembly import RobotModule
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
 from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
 from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometry
@@ -48,9 +43,4 @@ __all__ = [
     'build_grouping_prompt',
     'parse_grouping_response',
     'compute_jaw_gripper_frame',
-    'Port',
-    'RobotModule',
-    'Connection',
-    'ModuleInstance',
-    'RobotAssembly',
 ]
