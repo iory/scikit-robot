@@ -2903,18 +2903,19 @@ def look_at_rotation(camera_pos, target=None, up=None, return_matrix=True):
     # For OpenCV convention: camera looks along +Z, so R[2, :] = look_dir
     cam_z = look_dir
 
-    # If look direction is parallel to up vector, use alternative up
-    if abs(np.dot(cam_z, up)) > 0.99:
-        up = np.array([0.0, 1.0, 0.0])
-
     # Camera X axis (right) = look_dir × up (for right-hand system)
     cam_x = np.cross(cam_z, up)
     cam_x_norm = np.linalg.norm(cam_x)
-    if cam_x_norm < 1e-8:
-        # Fallback if cross product is zero
-        up = np.array([1.0, 0.0, 0.0])
-        cam_x = np.cross(cam_z, up)
-        cam_x_norm = np.linalg.norm(cam_x)
+    if cam_x_norm < _EPS:
+        # up is parallel to the view direction, so it cannot pin down the
+        # roll. Only then fall back to an up that can: a tolerance on the
+        # angle here would silently discard the caller's up.
+        for fallback_up in (np.array([0.0, 1.0, 0.0]),
+                            np.array([1.0, 0.0, 0.0])):
+            cam_x = np.cross(cam_z, fallback_up)
+            cam_x_norm = np.linalg.norm(cam_x)
+            if cam_x_norm >= _EPS:
+                break
     cam_x = cam_x / cam_x_norm
 
     # Camera Y axis (down in OpenCV) = cam_z × cam_x

@@ -15,6 +15,7 @@ from skrobot.coordinates.math import counter_clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import invert_yaw_pitch_roll
+from skrobot.coordinates.math import look_at_rotation
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import matrix2xyzrpy
@@ -967,6 +968,32 @@ class TestMath(unittest.TestCase):
         rot = rpy2matrix(roll, pitch, yaw)
         recovered_rpy = matrix2rpy(rot)
         testing.assert_almost_equal(recovered_rpy, np.array([roll, pitch, yaw]))
+
+    def test_look_at_rotation(self):
+        # The camera looks along +Z (OpenCV convention).
+        r = look_at_rotation(np.zeros(3), target=[0, 0, 1], up=[0, -1, 0])
+        _check_valid_rotation(r)
+        testing.assert_almost_equal(r[2], [0, 0, 1])
+
+        # A given up must be honoured however close it gets to the view
+        # direction; only an exactly parallel one leaves the roll undefined.
+        up = np.array([0.0, 0.0, 1.0])
+        for degree in (0.5, 3.0, 8.0, 8.2, 30.0, 90.0):
+            theta = np.deg2rad(degree)
+            target = np.array([np.sin(theta), 0.0, np.cos(theta)])
+            r = look_at_rotation(np.zeros(3), target=target, up=up)
+            _check_valid_rotation(r)
+            testing.assert_almost_equal(r[2], target)
+            # cam_x is built from cam_z x up, so it stays perpendicular to up.
+            testing.assert_almost_equal(
+                np.dot(r[0], up), 0.0,
+                err_msg='up was discarded at {} deg'.format(degree))
+
+        # up parallel to the view direction: fall back, but stay a rotation.
+        for up in ([0, 0, 1], [0, 0, -1]):
+            r = look_at_rotation(np.zeros(3), target=[0, 0, 1], up=up)
+            _check_valid_rotation(r)
+            testing.assert_almost_equal(r[2], [0, 0, 1])
 
     def test_rotation_matrix_from_vectors(self):
         # random directions: R maps a onto b exactly
