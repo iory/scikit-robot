@@ -1,5 +1,4 @@
 import os
-import warnings
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -15,19 +14,15 @@ class URDFXMLRootLinkChanger:
     to change the root link to any specified link, then writes the modified
     URDF back to a file.
 
-    .. warning::
-
-        This class assumes that all visual/collision elements have zero-offset
-        origins (xyz="0 0 0" rpy="0 0 0"). URDFs with non-zero visual/collision
-        offsets will not work correctly after root link change.
-
-        Use the ``convert-urdf-mesh`` command to preprocess URDFs with non-zero
-        offsets before using this class. See:
-        https://scikit-robot.readthedocs.io/en/latest/reference/how_to_create_urdf_from_cad.html#how-to-create-urdf-from-cad-software
-
-    .. todo::
-
-        Add support for URDFs with non-zero visual/collision offsets.
+    Re-rooting reverses the joints along the path from the new root to the
+    old root.  A reversed revolute/prismatic joint must rotate its new child
+    about an axis through that child's frame origin, so the frames of the
+    links along the path are relocated onto their former joint frames; the
+    visual, collision and inertial origins of those links are re-expressed
+    accordingly (composed with any existing offset, which is created when
+    absent), preserving the physical geometry exactly.  External references
+    to the frames of relocated links (everything on the path except the new
+    root) must be re-derived after the change.
     """
 
     def __init__(self, urdf_path, warn_non_zero_offsets=True):
@@ -38,8 +33,10 @@ class URDFXMLRootLinkChanger:
         urdf_path : str
             Path to the input URDF file
         warn_non_zero_offsets : bool
-            If True, emit a warning when URDF contains non-zero
-            visual/collision offsets. Default is True.
+            Deprecated and ignored.  Non-zero visual/collision offsets are
+            fully supported: the frame relocation composes with existing
+            origins, so there is nothing to warn about.  The parameter is
+            kept for backward compatibility.
 
         Raises
         ------
@@ -61,55 +58,11 @@ class URDFXMLRootLinkChanger:
         self.joints = self._parse_joints()
         self.joint_tree = self._build_joint_tree()
 
-        # Check for non-zero visual/collision offsets
-        if warn_non_zero_offsets:
-            self._warn_if_non_zero_offsets()
-
-    def _warn_if_non_zero_offsets(self):
-        """Check for non-zero visual/collision offsets and emit warning."""
-        non_zero_links = []
-        for link_name, link in self.links.items():
-            for elem_type in ['visual', 'collision']:
-                for elem in link.findall(elem_type):
-                    origin = elem.find('origin')
-                    if origin is not None:
-                        xyz_str = origin.get('xyz', '0 0 0')
-                        rpy_str = origin.get('rpy', '0 0 0')
-                        xyz = [float(x) for x in xyz_str.split()]
-                        rpy = [float(x) for x in rpy_str.split()]
-                        if any(abs(v) > 1e-6 for v in xyz + rpy):
-                            non_zero_links.append((link_name, elem_type))
-                            break
-
-        if non_zero_links:
-            # ANSI escape codes for orange/yellow color
-            orange = '\033[93m'
-            reset = '\033[0m'
-
-            link_list = '\n'.join(
-                '    - {} ({})'.format(name, typ)
-                for name, typ in non_zero_links[:5]
-            )
-            if len(non_zero_links) > 5:
-                link_list += '\n    ... and {} more'.format(
-                    len(non_zero_links) - 5
-                )
-
-            message = (
-                "\n{orange}"
-                "WARNING: URDF contains non-zero visual/collision offsets.\n"
-                "Root link change may produce incorrect results.\n"
-                "\n"
-                "Affected links:\n"
-                "{link_list}\n"
-                "\n"
-                "Solution: Use 'convert-urdf-mesh' command to preprocess the URDF.\n"
-                "See: https://scikit-robot.readthedocs.io/en/latest/reference/"
-                "how_to_create_urdf_from_cad.html#how-to-create-urdf-from-cad-software"
-                "{reset}"
-            ).format(orange=orange, link_list=link_list, reset=reset)
-
-            warnings.warn(message, UserWarning, stacklevel=3)
+        # Non-zero visual/collision offsets are fully supported now that
+        # frame relocation composes with existing origins, so the historical
+        # warning is gone; the parameter is accepted and ignored for
+        # backward compatibility.
+        del warn_non_zero_offsets
 
     def _parse_links(self):
         """Parse all links from the URDF.
@@ -399,7 +352,11 @@ class URDFXMLRootLinkChanger:
             inv_axis_xyz = [-float(x) for x in axis_xyz_str.split()]
             axis.set('xyz', ' '.join(map(str, inv_axis_xyz)))
 
-        # Adjust visual and collision origin
+        # The joint's old parent link frame is relocated onto this joint's
+        # frame; re-express everything attached to that link (visuals,
+        # collisions, inertials) by the inverse relocation.  The origin
+        # element is created when absent and the correction is COMPOSED
+        # with any existing offset.
         parent_elem = joint.find('parent')
         if parent_elem is None:
             return
@@ -407,18 +364,7 @@ class URDFXMLRootLinkChanger:
         if parent_name not in self.links:
             return
         parent = self.links[parent_name]
-        parent_visual = parent.find('visual')
-        if parent_visual is not None:
-            parent_visual_origin = parent_visual.find('origin')
-            if parent_visual_origin is not None:
-                parent_visual_origin.set('xyz', ' '.join(map(str, inv_current_xyz)))
-                parent_visual_origin.set('rpy', ' '.join(map(str, inv_current_rpy)))
-        parent_collision = parent.find('collision')
-        if parent_collision is not None:
-            parent_collision_origin = parent_collision.find('origin')
-            if parent_collision_origin is not None:
-                parent_collision_origin.set('xyz', ' '.join(map(str, inv_current_xyz)))
-                parent_collision_origin.set('rpy', ' '.join(map(str, inv_current_rpy)))
+        self._relocate_link_frame_elements(parent, inv_current_pose)
 
         # When the parent link of this joint is the current base_link
         base_link_name = path_to_current_root[-1][0]
@@ -462,6 +408,29 @@ class URDFXMLRootLinkChanger:
                 # Set new pose to child joint
                 child_origin.set('xyz', ' '.join(map(str, new_child_xyz)))
                 child_origin.set('rpy', ' '.join(map(str, new_child_rpy)))
+
+    def _relocate_link_frame_elements(self, link_elem, delta_inv_pose):
+        """Re-express a link's visual/collision/inertial origins after its
+        frame was relocated by ``delta`` (``delta_inv_pose`` = inv(delta)).
+
+        Creates the ``<origin>`` element when it is absent (URDF default =
+        identity) and COMPOSES the correction with the existing origin, so
+        non-zero offsets are fully supported.
+        """
+        for tag in ('visual', 'collision', 'inertial'):
+            for sub in link_elem.findall(tag):
+                origin = sub.find('origin')
+                if origin is None:
+                    origin = ET.SubElement(sub, 'origin')
+                    origin.set('xyz', '0 0 0')
+                    origin.set('rpy', '0 0 0')
+                xyz = [float(v) for v in origin.get('xyz', '0 0 0').split()]
+                rpy = [float(v) for v in origin.get('rpy', '0 0 0').split()]
+                old_pose = self._pose_to_matrix(xyz, rpy)
+                new_xyz, new_rpy = self._matrix_to_pose(
+                    np.dot(delta_inv_pose, old_pose))
+                origin.set('xyz', ' '.join(map(str, new_xyz)))
+                origin.set('rpy', ' '.join(map(str, new_rpy)))
 
     def _pose_to_matrix(self, xyz, rpy):
         rot = R.from_euler('xyz', rpy)
