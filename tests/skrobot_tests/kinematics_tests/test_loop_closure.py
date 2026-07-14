@@ -4,9 +4,9 @@ import unittest
 
 import numpy as np
 
+from skrobot.assembly import RobotAssembly
+from skrobot.assembly import RobotModule
 from skrobot.kinematics import LoopClosureSolver
-from skrobot.urdf import RobotAssembly
-from skrobot.urdf import RobotModule
 
 
 _GROUND_URDF = """<?xml version="1.0"?>

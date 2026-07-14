@@ -25,9 +25,9 @@ import time
 
 import numpy as np
 
+from skrobot.assembly import RobotAssembly
+from skrobot.assembly import RobotModule
 from skrobot.kinematics import LoopClosureSolver
-from skrobot.urdf import RobotAssembly
-from skrobot.urdf import RobotModule
 
 
 _GROUND_URDF = """<?xml version="1.0"?>
@@ -79,7 +79,7 @@ def write_bar(directory, name, length, along):
 
     Returns
     -------
-    skrobot.urdf.RobotModule
+    skrobot.assembly.RobotModule
         The parsed module.
     """
     if along == 'x':
@@ -116,7 +116,7 @@ def assemble_four_bar(directory, crank2_length, g2_xyz):
 
     Returns
     -------
-    skrobot.urdf.RobotAssembly
+    skrobot.assembly.RobotAssembly
         The assembled linkage.
     """
     ground_path = os.path.join(directory, 'ground.urdf')

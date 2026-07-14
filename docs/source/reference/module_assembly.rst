@@ -1,15 +1,15 @@
 Module Assembly
 ===============
 
-``skrobot.urdf.module_assembly`` composes robots out of reusable URDF
-modules: parse each part once into a :class:`~skrobot.urdf.RobotModule`
+``skrobot.assembly.module_assembly`` composes robots out of reusable URDF
+modules: parse each part once into a :class:`~skrobot.assembly.RobotModule`
 (its links become connection ports, each a full SE(3) frame), place
-instances in a :class:`~skrobot.urdf.RobotAssembly`, connect ports, and
+instances in a :class:`~skrobot.assembly.RobotAssembly`, connect ports, and
 build a combined URDF or a live :class:`~skrobot.model.RobotModel`.
 
 .. code-block:: python
 
-   from skrobot.urdf import RobotAssembly, RobotModule
+   from skrobot.assembly import RobotAssembly, RobotModule
 
    arm = RobotModule.from_urdf('arm', 'arm_module.urdf')
    gripper = RobotModule.from_urdf('gripper', 'gripper_module.urdf')
@@ -61,8 +61,8 @@ Classes
    :toctree: generated/
    :nosignatures:
 
-   skrobot.urdf.Port
-   skrobot.urdf.RobotModule
-   skrobot.urdf.Connection
-   skrobot.urdf.RobotAssembly
+   skrobot.assembly.Port
+   skrobot.assembly.RobotModule
+   skrobot.assembly.Connection
+   skrobot.assembly.RobotAssembly
    skrobot.kinematics.LoopClosureSolver

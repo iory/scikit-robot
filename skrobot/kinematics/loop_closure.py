@@ -2,7 +2,7 @@
 
 A URDF is a tree: building a closed linkage (four-bar, parallel
 mechanism) cuts every loop, and the cut is exported as a closure
-constraint -- :class:`skrobot.urdf.module_assembly.RobotAssembly`
+constraint -- :class:`skrobot.assembly.module_assembly.RobotAssembly`
 writes it to a ``loop_closures.yaml`` sidecar next to the built URDF.
 :class:`LoopClosureSolver` consumes that config and Gauss-Newton
 solves the DEPENDENT joints so each cut hinge's witness points
