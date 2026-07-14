@@ -41,6 +41,7 @@ from trimesh.scene import cameras
 
 from skrobot import model as model_module
 from skrobot.coordinates import Coordinates
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.model.skeleton import SkeletonModel
 from skrobot.viewers._base import _InteractiveViewerMixin
 
@@ -314,34 +315,11 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
 
                 # Update axis cylinder position and orientation
                 if axis_node is not None and axis is not None:
-                    # Calculate rotation matrix to align cylinder with axis
-                    # Default cylinder is along Z-axis, need to rotate to align with joint axis
-                    z_axis = np.array([0, 0, 1])
-                    axis_normalized = axis / np.linalg.norm(axis)
-
-                    # Calculate rotation axis and angle
-                    rotation_axis = np.cross(z_axis, axis_normalized)
-                    rotation_axis_norm = np.linalg.norm(rotation_axis)
-
-                    if rotation_axis_norm > 1e-6:
-                        rotation_axis = rotation_axis / rotation_axis_norm
-                        angle = np.arccos(np.clip(np.dot(z_axis, axis_normalized), -1.0, 1.0))
-                        # Create rotation matrix using Rodrigues' formula
-                        K = np.array([
-                            [0, -rotation_axis[2], rotation_axis[1]],
-                            [rotation_axis[2], 0, -rotation_axis[0]],
-                            [-rotation_axis[1], rotation_axis[0], 0]
-                        ])
-                        rotation_matrix = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-                    else:
-                        # Axis is already aligned with z-axis or opposite
-                        if np.dot(z_axis, axis_normalized) > 0:
-                            rotation_matrix = np.eye(3)
-                        else:
-                            rotation_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
-
+                    # The cylinder is modelled along +Z, so rotate that onto
+                    # the joint axis.
                     axis_transform = np.eye(4)
-                    axis_transform[:3, :3] = rotation_matrix
+                    axis_transform[:3, :3] = rotation_matrix_from_vectors(
+                        [0, 0, 1], axis)
                     axis_transform[:3, 3] = position
                     axis_node.matrix = axis_transform
 
@@ -577,30 +555,11 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
                 pyrender_cylinder = pyrender.Mesh.from_trimesh(
                     cylinder_mesh, smooth=False)
 
-                # Calculate rotation matrix to align cylinder with axis
-                z_axis = np.array([0, 0, 1])
-                axis_normalized = axis / np.linalg.norm(axis)
-
-                rotation_axis = np.cross(z_axis, axis_normalized)
-                rotation_axis_norm = np.linalg.norm(rotation_axis)
-
-                if rotation_axis_norm > 1e-6:
-                    rotation_axis = rotation_axis / rotation_axis_norm
-                    angle = np.arccos(np.clip(np.dot(z_axis, axis_normalized), -1.0, 1.0))
-                    K = np.array([
-                        [0, -rotation_axis[2], rotation_axis[1]],
-                        [rotation_axis[2], 0, -rotation_axis[0]],
-                        [-rotation_axis[1], rotation_axis[0], 0]
-                    ])
-                    rotation_matrix = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-                else:
-                    if np.dot(z_axis, axis_normalized) > 0:
-                        rotation_matrix = np.eye(3)
-                    else:
-                        rotation_matrix = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
-
+                # The cylinder is modelled along +Z, so rotate that onto the
+                # joint axis.
                 axis_transform = np.eye(4)
-                axis_transform[:3, :3] = rotation_matrix
+                axis_transform[:3, :3] = rotation_matrix_from_vectors(
+                    [0, 0, 1], axis)
                 axis_transform[:3, 3] = position
                 axis_node = self.scene.add(pyrender_cylinder, pose=axis_transform)
 
