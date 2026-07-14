@@ -96,10 +96,6 @@ class RobotModule:
         List of available connection ports (links that can connect to other modules).
     root_link : str
         The root link name in the original URDF (usually "base_link").
-    xacro_path : Path, optional
-        Path to the xacro macro file (if using existing xacro instead of URDF).
-    macro_name : str, optional
-        Name of the xacro macro to use.
 
     Examples
     --------
@@ -115,8 +111,6 @@ class RobotModule:
     urdf_path: Path
     ports: List[Port] = field(default_factory=list)
     root_link: str = "base_link"
-    xacro_path: Optional[Path] = None
-    macro_name: Optional[str] = None
 
     @classmethod
     def from_urdf(cls, module_id: str, urdf_path: str) -> "RobotModule":
