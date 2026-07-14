@@ -2,8 +2,6 @@ from __future__ import absolute_import
 
 import math
 from math import acos
-from math import asin
-from math import atan2
 from math import cos
 from math import pi
 from math import sin
@@ -1043,12 +1041,13 @@ def matrix2ypr(matrix):
     Parameters
     ----------
     matrix : numpy.ndarray
-        3x3 rotation matrix
+        3x3 rotation matrix, or (N, 3, 3) rotation matrices
 
     Returns
     -------
     angles : numpy.ndarray
-        Array of [yaw, pitch, roll] angles in radians
+        Array of [yaw, pitch, roll] angles in radians, or (N, 3) for a
+        batched input
         - yaw: rotation around Z-axis
         - pitch: rotation around Y-axis
         - roll: rotation around X-axis
@@ -1065,19 +1064,25 @@ def matrix2ypr(matrix):
     >>> print("Yaw: {:.3f}, Pitch: {:.3f}, Roll: {:.3f}".format(angles[0], angles[1], angles[2]))
     Yaw: 0.524, Pitch: 0.785, Roll: 1.047
     """
-    # Extract yaw, pitch, roll angles directly
-    if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
-        yaw = 0.0
-    else:
-        yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+    matrix = np.asarray(matrix, dtype=np.float64)
+    # Index the last two axes so the same expressions serve a single 3x3
+    # matrix and a stack of them.
+    m00, m01, m02 = matrix[..., 0, 0], matrix[..., 0, 1], matrix[..., 0, 2]
+    m10, m11, m12 = matrix[..., 1, 0], matrix[..., 1, 1], matrix[..., 1, 2]
+    m20 = matrix[..., 2, 0]
+
+    # At gimbal lock the yaw is arbitrary; pin it to 0 and let roll absorb
+    # the rotation, otherwise arctan2 would be fed two zeros.
+    yaw = np.where(np.sqrt(m10 ** 2 + m00 ** 2) < _EPS,
+                   0.0, np.arctan2(m10, m00))
 
     sin_yaw = np.sin(yaw)
     cos_yaw = np.cos(yaw)
-    pitch = np.arctan2(-matrix[2, 0], cos_yaw * matrix[0, 0] + sin_yaw * matrix[1, 0])
-    roll = np.arctan2(sin_yaw * matrix[0, 2] - cos_yaw * matrix[1, 2],
-                      -sin_yaw * matrix[0, 1] + cos_yaw * matrix[1, 1])
+    pitch = np.arctan2(-m20, cos_yaw * m00 + sin_yaw * m10)
+    roll = np.arctan2(sin_yaw * m02 - cos_yaw * m12,
+                      -sin_yaw * m01 + cos_yaw * m11)
 
-    return np.array([yaw, pitch, roll])
+    return np.stack([yaw, pitch, roll], axis=-1)
 
 
 def matrix2rpy(matrix):
@@ -1110,9 +1115,8 @@ def matrix2rpy(matrix):
     >>> print("Roll: {:.3f}, Pitch: {:.3f}, Yaw: {:.3f}".format(angles[0], angles[1], angles[2]))
     Roll: 1.047, Pitch: 0.785, Yaw: 0.524
     """
-    ypr_angles = matrix2ypr(matrix)
     # Convert from [yaw, pitch, roll] to [roll, pitch, yaw]
-    return np.array([ypr_angles[2], ypr_angles[1], ypr_angles[0]])
+    return matrix2ypr(matrix)[..., ::-1]
 
 
 def ypr2matrix(yaw, pitch, roll):
@@ -1783,27 +1787,10 @@ def quaternion2rpy(q):
      array([3.14159265, 3.14159265, 0.        ]))
     """
     q = to_numpy_array(q)
-    if q.ndim == 1:
-        roll = atan2(
-            2 * q[2] * q[3] + 2 * q[0] * q[1],
-            q[3] ** 2 - q[2] ** 2 - q[1] ** 2 + q[0] ** 2)
-        pitch = -asin(
-            2 * q[1] * q[3] - 2 * q[0] * q[2])
-        yaw = atan2(
-            2 * q[1] * q[2] + 2 * q[0] * q[3],
-            q[1] ** 2 + q[0] ** 2 - q[3] ** 2 - q[2] ** 2)
-        rpy = np.array([yaw, pitch, roll])
-    elif q.ndim == 2:
-        roll = np.arctan2(
-            2 * q[:, 2] * q[:, 3] + 2 * q[:, 0] * q[:, 1],
-            q[:, 3] ** 2 - q[:, 2] ** 2 - q[:, 1] ** 2 + q[:, 0] ** 2)
-        pitch = -np.sin(
-            2 * q[:, 1] * q[:, 3] - 2 * q[:, 0] * q[:, 2])
-        yaw = np.arctan2(
-            2 * q[:, 1] * q[:, 2] + 2 * q[:, 0] * q[:, 3],
-            q[:, 1] ** 2 + q[:, 0] ** 2 - q[:, 3] ** 2 - q[:, 2] ** 2)
-        rpy = np.concatenate([yaw[:, None], pitch[:, None], roll[:, None]],
-                             axis=1)
+    # Delegate to matrix2ypr: it stays well conditioned at gimbal lock
+    # (pitch = +/- pi/2), where extracting the angles straight from the
+    # quaternion degenerates into atan2(0, 0).
+    rpy = matrix2ypr(quaternion2matrix(q, normalize=True))
     return rpy, np.pi - rpy
 
 
@@ -2380,9 +2367,11 @@ def quaternion_distance(q1, q2, absolute=False):
     q1 = to_numpy_array(q1)
     q2 = to_numpy_array(q2)
     dot = np.clip(np.sum(q1 * q2, q1.ndim - 1), -1, 1)
-    diff_theta = 2 * np.arccos(dot)
     if absolute is True:
-        diff_theta = np.abs(diff_theta)
+        # q and -q are the same rotation, so fold the sign into the dot
+        # product to get the shortest angle in [0, pi].
+        dot = np.abs(dot)
+    diff_theta = 2 * np.arccos(dot)
     return diff_theta
 
 

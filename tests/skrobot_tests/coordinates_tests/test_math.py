@@ -23,6 +23,7 @@ from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
+from skrobot.coordinates.math import quaternion_absolute_distance
 from skrobot.coordinates.math import quaternion_conjugate
 from skrobot.coordinates.math import quaternion_distance
 from skrobot.coordinates.math import quaternion_from_axis_angle
@@ -540,6 +541,47 @@ class TestMath(unittest.TestCase):
         expected_rpy = np.array([0, 0, np.pi / 2])  # 90 degrees pitch
         rpy, _ = quaternion2rpy(q)
         testing.assert_almost_equal(rpy, expected_rpy, decimal=5)
+
+    def test_quaternion2rpy_batch_matches_scalar(self):
+        # The batched path must agree with the scalar one.  Pitch has to be
+        # non-zero here: at pitch 0 the two disagreeing formulas coincide.
+        qs = np.array([
+            rpy2quaternion([0.0, np.deg2rad(30), 0.0]),
+            rpy2quaternion([0.4, -0.9, 0.2]),
+            rpy2quaternion([-1.2, 0.7, 2.0]),
+        ])
+        expected = np.array([[0.0, np.deg2rad(30), 0.0],
+                             [0.4, -0.9, 0.2],
+                             [-1.2, 0.7, 2.0]])
+        batch, batch_second = quaternion2rpy(qs)
+        testing.assert_almost_equal(batch, expected)
+        for i, q in enumerate(qs):
+            scalar, second = quaternion2rpy(q)
+            testing.assert_almost_equal(scalar, expected[i])
+            testing.assert_almost_equal(batch[i], scalar)
+            testing.assert_almost_equal(batch_second[i], second)
+
+    def test_quaternion2rpy_at_gimbal_lock(self):
+        # pitch = +/- 90 deg makes the angles ambiguous but not the rotation,
+        # so the rebuilt matrix must still match.
+        for pitch in (np.pi / 2, -np.pi / 2):
+            m = rotation_matrix_from_rpy([0.0, pitch, 0.3])
+            rpy, _ = quaternion2rpy(matrix2quaternion(m))
+            testing.assert_almost_equal(
+                rpy_matrix(rpy[0], rpy[1], rpy[2]), m)
+
+    def test_quaternion_absolute_distance(self):
+        q = normalize_vector([0.3, -0.5, 0.7, 0.2])
+        # q and -q are the same rotation.
+        testing.assert_almost_equal(quaternion_absolute_distance(q, -q), 0.0)
+        testing.assert_almost_equal(quaternion_absolute_distance(q, q), 0.0)
+        testing.assert_almost_equal(
+            quaternion_absolute_distance(
+                [1, 0, 0, 0], [0, 1 / np.sqrt(2), 0, 1 / np.sqrt(2)]),
+            np.pi)
+        # Never exceeds pi, unlike the sign-sensitive variant.
+        self.assertLessEqual(
+            quaternion_absolute_distance([1, 0, 0, 0], [-1, 0, 0, 0]), np.pi)
 
     def test_rotation_vector_to_quaternion(self):
         testing.assert_almost_equal(
