@@ -1,7 +1,6 @@
 import unittest
 
 import numpy as np
-from numpy import pi
 from numpy import testing
 
 from skrobot.coordinates import make_coords
@@ -44,14 +43,17 @@ class TestGeo(unittest.TestCase):
             [0, 0, 0])
 
         # case of rot_angle_cos == -1.0
+        # Any half turn about an axis perpendicular to z sends z to -z, so
+        # assert where the axis ends up rather than picking one of them.
         target_coords = make_coords()
         orient_coords_to_axis(target_coords, [0, 0, -1])
 
         testing.assert_array_equal(target_coords.worldpos(),
                                    [0, 0, 0])
         testing.assert_array_almost_equal(
-            matrix2ypr(target_coords.rotation),
-            [0, 0, pi])
+            target_coords.rotation[:, 2], [0, 0, -1])
+        testing.assert_array_almost_equal(
+            np.linalg.det(target_coords.rotation), 1.0)
 
     def test_rotate_points(self):
         points = np.array([1, 0, 0])

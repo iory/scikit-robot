@@ -46,7 +46,7 @@ def midcoords(p, c1, c2):
     return c1.interpolate(c2, p)
 
 
-def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
+def orient_coords_to_axis(target_coords, v, axis='z', eps=None):
     """Orient axis to the direction
 
     .. deprecated::
@@ -105,7 +105,7 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
         DeprecationWarning,
         stacklevel=2
     )
-    return target_coords.align_axis_to_direction(v, axis=axis, eps=eps)
+    return target_coords.align_axis_to_direction(v, axis=axis)
 
 
 def rotate_points(points, a, b):
