@@ -20,6 +20,7 @@ from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rotate_matrix
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
@@ -1107,7 +1108,7 @@ class Coordinates(object):
         else:
             raise TypeError('wrt {} not supported'.format(wrt))
 
-    def align_axis_to_direction(self, direction, axis='z', wrt='world', eps=0.005):
+    def align_axis_to_direction(self, direction, axis='z', wrt='world', eps=None):
         """Align the specified axis of this coordinate to point in the given direction.
 
         Rotates this coordinate system so that the specified axis
@@ -1127,8 +1128,9 @@ class Coordinates(object):
             'local': direction is in this coordinate's local frame
             Coordinates: direction is in the given coordinate's frame
         eps : float, optional
-            Tolerance for detecting parallel/anti-parallel cases.
-            Default is 0.005.
+            Deprecated and ignored. The parallel and anti-parallel cases are
+            handled by
+            :func:`skrobot.coordinates.math.rotation_matrix_from_vectors`.
 
         Returns
         -------
@@ -1166,21 +1168,15 @@ class Coordinates(object):
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
 
-        normalized_direction = normalize_vector(direction)
-        axis_vector = convert_to_axis_vector(axis)
-        current_axis = self.rotate_vector(axis_vector)
-        rot_axis = np.cross(current_axis, normalized_direction)
-        rot_angle_cos = np.clip(
-            np.dot(normalized_direction, current_axis), -1.0, 1.0)
-        if np.isclose(rot_angle_cos, 1.0, atol=eps):
-            return self
-        elif np.isclose(rot_angle_cos, -1.0, atol=eps):
-            for candidate_axis in [np.array([1, 0, 0]), np.array([0, 1, 0])]:
-                candidate_cos = np.dot(current_axis, candidate_axis)
-                if not np.isclose(abs(candidate_cos), 1.0, atol=eps):
-                    rot_axis = candidate_axis - candidate_cos * current_axis
-                    break
-        self.rotate(np.arccos(rot_angle_cos), rot_axis, 'world')
+        if eps is not None:
+            warnings.warn(
+                'The eps argument is deprecated and ignored. The degenerate '
+                'cases are handled by rotation_matrix_from_vectors.',
+                DeprecationWarning,
+                stacklevel=2)
+        current_axis = self.rotate_vector(convert_to_axis_vector(axis))
+        self.rotate_with_matrix(
+            rotation_matrix_from_vectors(current_axis, direction), 'world')
         return self
 
     def slerp(self, other, ratio):

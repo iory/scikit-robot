@@ -9,6 +9,7 @@ from numpy import testing
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import Transform
+from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy_matrix
@@ -477,6 +478,23 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_array_almost_equal(coords.rotation, coords.rotation_matrix)
         coords.translate([1.0, 2.0, 3.0])
         testing.assert_array_almost_equal(coords.translation, coords.translation_vector)
+
+    def test_align_axis_to_direction_small_and_near_half_turn(self):
+        """Directions close to the current axis, or close to its opposite."""
+        axis_index = {'x': 0, 'y': 1, 'z': 2}
+        for degree in (0.0, 0.001, 1.0, 3.0, 5.0, 5.7, 90.0,
+                       175.0, 177.0, 179.0, 179.999, 180.0):
+            theta = np.deg2rad(degree)
+            direction = np.array([np.sin(theta), 0.0, np.cos(theta)])
+            for name, index in axis_index.items():
+                c = make_coords()
+                c.align_axis_to_direction(direction, axis=name, wrt='world')
+                aligned = c.rotation[:, index]
+                testing.assert_almost_equal(
+                    aligned, direction, decimal=5,
+                    err_msg='axis {} at {} deg -> {}'.format(
+                        name, degree, aligned))
+                _check_valid_rotation(c.rotation)
 
     def test_align_axis_to_direction(self):
         """Test align_axis_to_direction method."""
