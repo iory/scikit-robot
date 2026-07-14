@@ -345,6 +345,137 @@ class TestMath(unittest.TestCase):
             normalize_vector(np.array([4, 3, -1, -3])),
             decimal=5)
 
+    def test_quaternion2matrix_batch(self):
+        # Batched (N, 4) input must match the scalar path applied per element.
+        qs = np.array([
+            [1, 0, 0, 0],
+            [1.0 / np.sqrt(2), 1.0 / np.sqrt(2), 0, 0],
+            normalize_vector([1.0, 0.3, -0.5, 0.2]),
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ], dtype=np.float64)
+        mats = quaternion2matrix(qs)
+        self.assertEqual(mats.shape, (len(qs), 3, 3))
+        for i in range(len(qs)):
+            _check_valid_rotation(mats[i])
+            testing.assert_almost_equal(mats[i], quaternion2matrix(qs[i]))
+        # Absolute check on the batched arithmetic for the x/y/z 180 deg cases.
+        testing.assert_almost_equal(
+            quaternion2matrix(np.array([[0, 1, 0, 0],
+                                        [0, 0, 1, 0],
+                                        [0, 0, 0, 1]], dtype=np.float64)),
+            np.array([np.diag([1., -1., -1.]),
+                      np.diag([-1., 1., -1.]),
+                      np.diag([-1., -1., 1.])]))
+
+    def test_quaternion2matrix_normalize_and_validation(self):
+        # Default (normalize=False) rejects a non-unit quaternion, on both the
+        # scalar (ndim == 1) and the batched (ndim == 2) validation paths.
+        with self.assertRaises(ValueError):
+            quaternion2matrix([1, 1, 0, 0])
+        with self.assertRaises(ValueError):
+            quaternion2matrix(np.array([[1, 1, 0, 0],
+                                        [1, 0, 0, 0]], dtype=np.float64))
+        # normalize=True normalizes the input first instead of raising.
+        testing.assert_almost_equal(
+            quaternion2matrix([1, 1, 0, 0], normalize=True),
+            quaternion2matrix(normalize_vector([1, 1, 0, 0])))
+        # A unit quaternion within tolerance is accepted unchanged.
+        testing.assert_almost_equal(
+            quaternion2matrix([1, 0, 0, 0]), np.eye(3))
+
+    @staticmethod
+    def _diverse_rotations():
+        """A deterministic, non-degenerate set of rotation matrices.
+
+        Covers all four ``matrix2quaternion`` trace branches with non-zero
+        off-diagonal terms, both signs of every ``argmax`` selection, and the
+        ``tr == 0`` boundary (120 deg rotations), so the branch conditions and
+        per-term signs are all pinned down.  Uses a private ``RandomState`` so
+        it never depends on (or perturbs) the global numpy RNG.
+        """
+        rs = np.random.RandomState(42)
+        mats = []
+        for _ in range(150):
+            axis = rs.randn(3)
+            axis = axis / np.linalg.norm(axis)
+            mats.append(rotation_matrix(rs.uniform(-pi, pi), axis))
+        for a in ([1, 0, 0], [0, 1, 0], [0, 0, 1],
+                  [1, 1, 1], [1, -1, 2], [2, 1, 1]):
+            mats.append(rotation_matrix(2 * pi / 3, a))   # tr == 0
+            mats.append(rotation_matrix(-2 * pi / 3, a))
+        return np.array(mats)
+
+    def test_matrix2quaternion_branches(self):
+        # matrix2quaternion selects one of four arithmetic branches from the
+        # trace/diagonal; exercise each with a matrix that lands in it.
+        cases = [
+            (np.eye(3), [1, 0, 0, 0]),                       # tr > 0
+            (rotate_matrix(np.eye(3), pi, 'x'), [0, 1, 0, 0]),  # m00 largest
+            (rotate_matrix(np.eye(3), pi, 'y'), [0, 0, 1, 0]),  # m11 largest
+            (rotate_matrix(np.eye(3), pi, 'z'), [0, 0, 0, 1]),  # else (m22)
+        ]
+        for m, q in cases:
+            testing.assert_almost_equal(matrix2quaternion(m), q)
+            testing.assert_almost_equal(
+                quaternion2matrix(matrix2quaternion(m)), m)
+
+        # The 180 deg cases above are diagonal, so the off-diagonal terms of
+        # each branch stay zero and their signs are not pinned down.  General
+        # rotations that land in every branch with non-zero off-diagonals must
+        # round-trip exactly through the scalar path.
+        for m in self._diverse_rotations():
+            testing.assert_almost_equal(
+                quaternion2matrix(matrix2quaternion(m)), m)
+
+    def test_matrix2quaternion_batch(self):
+        # Batched (N, 3, 3) input uses a separate vectorized code path.
+        mats = np.array([
+            np.eye(3),
+            rotate_matrix(np.eye(3), pi, 'x'),
+            rotate_matrix(np.eye(3), pi, 'y'),
+            rotate_matrix(np.eye(3), pi, 'z'),
+            rotate_matrix(rotate_matrix(rotate_matrix(
+                np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
+        ])
+        quats = matrix2quaternion(mats)
+        self.assertEqual(quats.shape, (len(mats), 4))
+        testing.assert_almost_equal(
+            quats,
+            np.array([[1, 0, 0, 0],
+                      [0, 1, 0, 0],
+                      [0, 0, 1, 0],
+                      [0, 0, 0, 1],
+                      [0.925754, 0.151891, 0.159933, 0.307131]]),
+            decimal=5)
+        for i in range(len(mats)):
+            testing.assert_almost_equal(
+                quaternion2matrix(quats[i]), mats[i])
+
+        # The vectorized path selects a per-element sign/branch from the
+        # off-diagonal terms; diagonal-heavy matrices (identity, 180 deg)
+        # leave those terms zero and cannot exercise it.  Use a deterministic
+        # set of general rotations that collectively hit all four branches
+        # and cross-check the batch against the (separately tested) scalar
+        # path, up to the global sign ambiguity of quaternions.
+        general = self._diverse_rotations()
+        batch = matrix2quaternion(general)
+        self.assertEqual(batch.shape, (len(general), 4))
+        for i in range(len(general)):
+            scalar = matrix2quaternion(general[i])
+            self.assertTrue(
+                np.allclose(batch[i], scalar, atol=1e-7)
+                or np.allclose(batch[i], -scalar, atol=1e-7))
+            testing.assert_almost_equal(
+                quaternion2matrix(batch[i]), general[i])
+
+        # Unsupported input shapes raise a clear error.
+        with self.assertRaises(ValueError):
+            matrix2quaternion(np.zeros(3))
+        with self.assertRaises(ValueError):
+            matrix2quaternion(np.zeros((2, 3, 3, 3)))
+
     def test_rotation_matrix_from_rpy(self):
         testing.assert_almost_equal(
             rotation_matrix_from_rpy([-pi, 0, pi / 2]),
