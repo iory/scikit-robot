@@ -669,6 +669,11 @@ class Coordinates(object):
     def quaternion(self):
         """Property of quaternion in [w, x, y, z] format
 
+        .. deprecated::
+            The name does not say which order it returns. Use
+            :attr:`quaternion_wxyz` for [w, x, y, z] or
+            :attr:`quaternion_xyzw` for [x, y, z, w] instead.
+
         Returns
         -------
         q : numpy.ndarray
@@ -679,22 +684,43 @@ class Coordinates(object):
         >>> from numpy import pi
         >>> from skrobot.coordinates import make_coords
         >>> c = make_coords()
-        >>> c.quaternion
+        >>> c.quaternion_wxyz
         array([1., 0., 0., 0.])
         >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
-        >>> c.quaternion
+        >>> c.quaternion_wxyz
         array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
-        return matrix2quaternion(self._rotation)
+        warnings.warn(
+            "quaternion is deprecated because the name does not say which "
+            "order it returns. Use quaternion_wxyz for [w, x, y, z] or "
+            "quaternion_xyzw for [x, y, z, w] instead.",
+            DeprecationWarning,
+            stacklevel=2)
+        return self.quaternion_wxyz
 
     @property
     def quaternion_wxyz(self):
         """Property of quaternion in [w, x, y, z] format
 
+        This is the order skrobot uses everywhere else, so it is what
+        :attr:`quaternion` returns too. See :attr:`quaternion_xyzw` for the
+        other order, which ROS and pybullet use.
+
         Returns
         -------
         q : numpy.ndarray
             [w, x, y, z] quaternion
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.quaternion_wxyz
+        array([1., 0., 0., 0.])
+        >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        >>> c.quaternion_wxyz
+        array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
         return matrix2quaternion(self._rotation)
 
@@ -2230,8 +2256,8 @@ def slerp_coordinates(c1, c2, t):
     interpolated_pos = pos1 + t * (pos2 - pos1)
 
     # True spherical linear interpolation for rotation using quaternions
-    q1 = c1.quaternion
-    q2 = c2.quaternion
+    q1 = c1.quaternion_wxyz
+    q2 = c2.quaternion_wxyz
 
     # Ensure we take the shorter path for rotation
     if np.dot(q1, q2) < 0:
@@ -2294,8 +2320,8 @@ def lerp_coordinates(c1, c2, t):
     interpolated_pos = pos1 + t * (pos2 - pos1)
 
     # Linear interpolation for rotation using quaternions
-    q1 = c1.quaternion
-    q2 = c2.quaternion
+    q1 = c1.quaternion_wxyz
+    q2 = c2.quaternion_wxyz
 
     # Ensure we take the shorter path
     if np.dot(q1, q2) < 0:

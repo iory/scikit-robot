@@ -153,6 +153,27 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(coord.rotation,
                                     [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
 
+    def test_quaternion_is_deprecated_alias_of_wxyz(self):
+        c = make_coords().rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ambiguous = c.quaternion
+        self.assertTrue(
+            any(issubclass(w.category, DeprecationWarning) for w in caught))
+        # Same value as before, so callers keep working.
+        testing.assert_almost_equal(ambiguous, c.quaternion_wxyz)
+
+        # The explicit spellings stay quiet and disagree with each other,
+        # which is the whole reason the bare name is ambiguous.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            wxyz = c.quaternion_wxyz
+            xyzw = c.quaternion_xyzw
+        self.assertFalse(
+            any(issubclass(w.category, DeprecationWarning) for w in caught))
+        testing.assert_almost_equal(xyzw, wxyz2xyzw(wxyz))
+        self.assertFalse(np.allclose(wxyz, xyzw))
+
     def test_init_rotation_forms(self):
         # rot accepts a 3x3 matrix, a quaternion or rpy angles, and pos can
         # carry a whole 4x4 matrix.
@@ -305,7 +326,7 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             result.translation, (1, 2, 3))
         testing.assert_almost_equal(
-            result.quaternion, (0, 0, 1, 0))
+            result.quaternion_wxyz, (0, 0, 1, 0))
 
     def test_translate(self):
         c = make_coords()
@@ -405,13 +426,13 @@ class TestCoordinates(unittest.TestCase):
             coord_a.transformation(coord_b).worldpos(),
             [1, 0, -1])
         testing.assert_almost_equal(
-            coord_a.transformation(coord_b).quaternion,
+            coord_a.transformation(coord_b).quaternion_wxyz,
             [1, 0, 0, 0])
         testing.assert_almost_equal(
             coord_b.transformation(coord_a).worldpos(),
             [-1, 0, 1])
         testing.assert_almost_equal(
-            coord_b.transformation(coord_a).quaternion,
+            coord_b.transformation(coord_a).quaternion_wxyz,
             [1, 0, 0, 0])
 
         c = make_coords(rot=[deg2rad(10), 0, 0])
@@ -433,7 +454,7 @@ class TestCoordinates(unittest.TestCase):
             coord_b.inverse_transformation().worldpos(),
             [-0.41549991, -0.12132025, 0.83588229])
         testing.assert_almost_equal(
-            coord_b.inverse_transformation().quaternion,
+            coord_b.inverse_transformation().quaternion_wxyz,
             [0.20692513, 0.50841015, 0.82812527, 0.1136206])
 
         # check inverse of transformation(worldcoords)
@@ -454,10 +475,10 @@ class TestCoordinates(unittest.TestCase):
     def test_quaternion(self):
         c = make_coords()
         testing.assert_almost_equal(
-            c.quaternion, [1, 0, 0, 0])
+            c.quaternion_wxyz, [1, 0, 0, 0])
         c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
         testing.assert_almost_equal(
-            c.quaternion,
+            c.quaternion_wxyz,
             [0.8236391, 0.1545085, 0.47552826, 0.26761657])
 
     def test_difference_position(self):

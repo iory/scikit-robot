@@ -83,8 +83,8 @@ def main():
     print("Rotation type: {}".format('Simple' if args.simple_rotation else 'Complex'))
     print("Start position: {}".format(start_coords.translation))
     print("End position: {}".format(end_coords.translation))
-    print("Start quaternion: {}".format(start_coords.quaternion))
-    print("End quaternion: {}".format(end_coords.quaternion))
+    print("Start quaternion: {}".format(start_coords.quaternion_wxyz))
+    print("End quaternion: {}".format(end_coords.quaternion_wxyz))
 
     start_frame_objects = create_coordinate_frame(start_coords, "start", 0.15)
     end_frame_objects = create_coordinate_frame(end_coords, "end", 0.15)
