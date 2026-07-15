@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -111,8 +110,6 @@ class TestRobotAssembly(unittest.TestCase):
         reverse = xyzrpy2matrix(rev[3], rev[4])
         np.testing.assert_allclose(forward @ reverse, np.eye(4), atol=1e-12)
 
-    @unittest.skipUnless(shutil.which('zacro') is not None,
-                         'zacro is not installed')
     def test_non_root_child_port_still_attaches_via_root(self):
         # child_port records which port the connection was declared with;
         # the module nevertheless attaches through its root link (the
@@ -139,8 +136,6 @@ class TestRobotAssembly(unittest.TestCase):
             fixed[0].find('child').get('link').endswith('base_link'),
             fixed[0].find('child').get('link'))
 
-    @unittest.skipUnless(shutil.which('zacro') is not None,
-                         'zacro is not installed')
     def test_build_produces_connected_urdf(self):
         with tempfile.TemporaryDirectory() as tmp:
             assembly = self._make_assembly(tmp)
@@ -176,64 +171,6 @@ class TestV2Design(unittest.TestCase):
         port = next(p for p in module.ports if p.name == 'dummy_link1')
         self.assertEqual(tuple(round(v, 9) for v in port.xyz),
                          (0.0, 0.0, 0.1))
-
-    @unittest.skipUnless(shutil.which('zacro') is not None,
-                         'zacro is not installed')
-    def test_inline_and_xacro_engines_are_equivalent(self):
-        import math
-
-        def _joint_key(joint):
-            origin = joint.find('origin')
-            xyz = tuple(round(float(v), 9) for v in
-                        (origin.get('xyz', '0 0 0').split()
-                         if origin is not None else '0 0 0'.split()))
-            rpy = tuple(round(float(v), 9) for v in
-                        (origin.get('rpy', '0 0 0').split()
-                         if origin is not None else '0 0 0'.split()))
-            return (joint.get('name'), joint.get('type'),
-                    joint.find('parent').get('link'),
-                    joint.find('child').get('link'), xyz, rpy)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            module_a = RobotModule.from_urdf('mod_a',
-                                             _write_module(tmp, 'mod_a'))
-            module_b = RobotModule.from_urdf('mod_b',
-                                             _write_module(tmp, 'mod_b'))
-            outputs = {}
-            for engine in ('inline', 'xacro'):
-                assembly = RobotAssembly('combo')
-                assembly.add_module_instance('a1', module_a)
-                assembly.add_module_instance('b1', module_b)
-                assembly.connect('a1', 'dummy_link1', 'b1', 'base_link',
-                                 x=0.1, y=0.2, z=0.3,
-                                 roll=0.1, pitch=0.2, yaw=math.pi / 6)
-                assembly.set_root('a1', 'base_link')
-                path = os.path.join(tmp, f'{engine}.urdf')
-                outputs[engine] = ET.parse(
-                    assembly.build(output_path=path, engine=engine)).getroot()
-
-        def _transmission_key(el):
-            return (el.get('name'),
-                    tuple(sorted(sub.get('name')
-                                 for sub in el.findall('joint'))),
-                    tuple(sorted(sub.get('name')
-                                 for sub in el.findall('actuator'))))
-
-        for tag, key in (('link', lambda el: el.get('name')),
-                         ('joint', _joint_key),
-                         ('transmission', _transmission_key),
-                         ('gazebo', lambda el: el.get('reference'))):
-            inline_set = {key(el) for el in outputs['inline'].findall(tag)}
-            xacro_set = {key(el) for el in outputs['xacro'].findall(tag)}
-            self.assertEqual(inline_set, xacro_set, tag)
-        # cross references inside transmission/gazebo carry the prefix
-        transmissions = outputs['inline'].findall('transmission')
-        self.assertIn('a1_j1',
-                      {sub.get('name') for tr in transmissions
-                       for sub in tr.findall('joint')})
-        self.assertIn('a1_dummy_link1',
-                      {el.get('reference')
-                       for el in outputs['inline'].findall('gazebo')})
 
     def test_cycle_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

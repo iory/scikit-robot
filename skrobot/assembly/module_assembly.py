@@ -5,9 +5,8 @@ The architecture follows a 3-layer design:
 2. RobotAssembly: the undirected graph of module connections
 3. skrobot.model.RobotModel: the final assembled robot for FK computation
 
-``RobotAssembly.build()`` runs the ``zacro`` command-line tool (a pure-Python
-xacro processor, ``pip install zacro``) to expand the generated master xacro
-into the combined URDF.
+``RobotAssembly.build()`` composes the combined URDF purely in memory --
+no external tools are involved.
 """
 
 from collections import deque
@@ -16,7 +15,6 @@ from dataclasses import field
 import math
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 from typing import Dict
 from typing import List
@@ -31,7 +29,6 @@ from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import xyzrpy2matrix
-from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
 
 
@@ -824,8 +821,7 @@ class RobotAssembly:
                 'cannot represent closed loops')
         return root_nodes, node_map
 
-    def build(self, output_path: Optional[str] = None,
-              engine: str = "inline") -> str:
+    def build(self, output_path: Optional[str] = None) -> str:
         """
         Build a combined URDF from the assembly.
 
@@ -840,12 +836,6 @@ class RobotAssembly:
         ----------
         output_path : str, optional
             Path to save the combined URDF. If None, uses a temporary file.
-        engine : str
-            ``'inline'`` (default) composes the URDF in memory with no
-            external tools.  ``'xacro'`` goes through per-module xacro
-            macros expanded with the ``zacro`` command-line processor --
-            same output, useful when the intermediate macro files are
-            wanted as artifacts.
 
         Returns
         -------
@@ -855,16 +845,10 @@ class RobotAssembly:
         Raises
         ------
         ValueError
-            If the assembly is empty, contains a cycle, or ``engine`` is
-            unknown.
+            If the assembly is empty or contains a cycle.
         """
-        if engine not in ("inline", "xacro"):
-            raise ValueError(f"unknown build engine: {engine!r} "
-                             "(expected 'inline' or 'xacro')")
         self._validate_and_default_root()
-        if engine == "inline":
-            return self._build_inline(output_path)
-        return self._build_xacro(output_path)
+        return self._build_inline(output_path)
 
     def _validate_and_default_root(self) -> None:
         if not self.instances:
@@ -913,13 +897,8 @@ class RobotAssembly:
     def _prefixed_module_elements(urdf_path: str, prefix: str):
         """Parse a module URDF and yield its top-level elements with every
         name -- and the joint parent/child/mimic and material references --
-        prefixed, mirroring the rewrite ``transform_urdf_to_macro`` applies
-        inside the xacro engine."""
+        prefixed."""
         def _prefixed(name):
-            # xacro substitution variables are never prefixed, matching
-            # add_prefix_to_name in the xacro engine
-            if name.startswith("$"):
-                return name
             return prefix + name
 
         root = etree.parse(str(urdf_path)).getroot()
@@ -1002,7 +981,7 @@ class RobotAssembly:
         return robot
 
     def _build_inline(self, output_path: Optional[str] = None) -> str:
-        """Compose the combined URDF in memory (no xacro round-trip)."""
+        """Compose the combined URDF and write it to disk."""
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
         if output_path is None:
@@ -1010,119 +989,6 @@ class RobotAssembly:
         with open(output_path, "wb") as f:
             f.write(etree.tostring(robot, pretty_print=True,
                                    xml_declaration=True, encoding="UTF-8"))
-        return output_path
-
-    def _build_xacro(self, output_path: Optional[str] = None) -> str:
-        """Compose the combined URDF through per-module xacro macros
-        expanded with the ``zacro`` CLI."""
-        # Create temp directory for intermediate files
-        temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
-
-        # Step 1: Build forest (multiple trees) from graph
-        root_nodes, node_map = self._build_forest_from_graph()
-
-        # Step 2: Process each module - create Xacro macro (no root link changes)
-        xacro_files = {}  # instance_id -> (xacro_path, macro_name, connector_link)
-
-        # BFS order to process all modules from all trees
-        process_order = []
-        for root_node in root_nodes:
-            queue = deque([root_node])
-            while queue:
-                node = queue.popleft()
-                process_order.append(node)
-                for child in node.children:
-                    queue.append(child)
-
-        for node in process_order:
-            instance = self.instances[node.instance_id]
-            module = instance.module
-
-            # With the default attach='root' the module keeps its original
-            # kinematic structure and node.child_port is placement metadata
-            # only; attach='port' re-roots the module at that port first.
-            urdf_to_process, connector_link = self._attachment_source(
-                node, module, temp_dir)
-
-            # Transform to Xacro macro with prefix
-            # Use module_id for macro if instance_id is empty
-            macro_base = node.instance_id if node.instance_id else module.module_id
-            macro_name = f"{macro_base}_macro"
-            xacro_element, final_macro_name = transform_urdf_to_macro(
-                urdf_to_process, connector_link=connector_link, no_prefix=False, macro_name=macro_name
-            )
-
-            # Save Xacro file
-            xacro_path = os.path.join(temp_dir, f"{node.instance_id}.xacro")
-            with open(xacro_path, "wb") as f:
-                f.write(etree.tostring(xacro_element, pretty_print=True, xml_declaration=True, encoding="UTF-8"))
-
-            xacro_files[node.instance_id] = (xacro_path, final_macro_name, connector_link)
-
-        # Step 3: Create master Xacro that combines all modules
-        XACRO_NS = "http://ros.org/wiki/xacro"
-        NSMAP = {"xacro": XACRO_NS}
-
-        master_root = etree.Element("robot", nsmap=NSMAP)
-        master_root.set("name", self.name)
-
-        # Add world link as the absolute root
-        world_link = etree.SubElement(master_root, "link")
-        world_link.set("name", "world")
-
-        # Include all xacro files
-        for _, (xacro_path, _, _) in xacro_files.items():
-            include = etree.SubElement(master_root, f"{{{XACRO_NS}}}include")
-            include.set("filename", xacro_path)
-
-        # Instantiate macros in tree order
-        for node in process_order:
-            instance_id = node.instance_id
-            xacro_path, macro_name, connector_link = xacro_files[instance_id]
-
-            # Determine parent link for this macro
-            if node.parent_instance is None:
-                parent_link = "world"
-            else:
-                parent_inst_id = node.parent_instance
-                parent_port = node.parent_port
-                # Parent link is prefixed with parent's instance_id (if non-empty)
-                parent_link = f"{parent_inst_id}_{parent_port}" if parent_inst_id else parent_port
-
-            # Connection rpy
-            connection_rpy = list(node.connection_rpy)
-
-            # Create macro instantiation with connection offset
-            macro_call = etree.SubElement(master_root, f"{{{XACRO_NS}}}{macro_name}")
-            # Only add prefix with underscore if instance_id is non-empty
-            prefix_value = f"{instance_id}_" if instance_id else ""
-            macro_call.set("prefix", prefix_value)
-            macro_call.set("parent_link", parent_link)
-            xyz_str = " ".join(str(x) for x in node.connection_xyz)
-            rpy_str = " ".join(str(x) for x in connection_rpy)
-            macro_call.set("xyz", xyz_str)
-            macro_call.set("rpy", rpy_str)
-
-        # Save master xacro
-        master_xacro_path = os.path.join(temp_dir, f"{self.name}_master.xacro")
-        with open(master_xacro_path, "wb") as f:
-            f.write(etree.tostring(master_root, pretty_print=True, xml_declaration=True, encoding="UTF-8"))
-
-        # Step 4: Process Xacro to final URDF
-        if output_path is None:
-            output_path = os.path.join(temp_dir, f"{self.name}.urdf")
-
-        try:
-            result = subprocess.run(
-                ["zacro", master_xacro_path, "-o", output_path],
-                capture_output=True, text=True)
-        except FileNotFoundError:
-            raise RuntimeError(
-                "building an assembly needs the optional 'zacro' xacro "
-                "processor -- install it with: pip install zacro")
-        if result.returncode != 0:
-            raise RuntimeError(f"Zacro processing failed: {result.stderr}")
-
         return output_path
 
     def to_dict(self) -> dict:
