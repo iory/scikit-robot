@@ -1,5 +1,6 @@
 import pickle
 import unittest
+import warnings
 
 import numpy as np
 from numpy import deg2rad
@@ -782,6 +783,41 @@ class TestCoordinates(unittest.TestCase):
             with self.assertRaises(ValueError):
                 a.transformation(b, 'nonsense')
 
+    def test_newcoords_with_explicit_pos(self):
+        # newcoords(c, pos) takes c as a bare rotation and pos separately;
+        # nothing exercised that path.
+        rotation = rotation_matrix(0.3, 'z')
+        position = np.array([1.0, 2.0, 3.0])
+
+        c = make_coords()
+        c.newcoords(rotation, position)
+        testing.assert_almost_equal(c.rotation, rotation)
+        testing.assert_almost_equal(c.translation, position)
+
+        # A reference frame composes with both parts.
+        reference = make_coords(pos=[1, 0, 0])
+        c = make_coords(pos=[5, 5, 5])
+        c.newcoords(rotation, position, relative_coords=reference)
+        want = _homogeneous(reference).dot(
+            _homogeneous(make_coords(pos=position, rot=rotation)))
+        testing.assert_almost_equal(_homogeneous(c), want)
+
+        # The stored arrays must be copies of the caller's.
+        rotation = rotation_matrix(0.3, 'z')
+        position = np.array([1.0, 2.0, 3.0])
+        c = make_coords()
+        c.newcoords(rotation, position)
+        rotation[0, 0] = 99.0
+        position[0] = 99.0
+        testing.assert_almost_equal(c.rotation, rotation_matrix(0.3, 'z'))
+        testing.assert_almost_equal(c.translation, [1.0, 2.0, 3.0])
+
+    def test_newcoords_rejects_unknown_relative_coords(self):
+        for bad in ('bogus', 'localish', ''):
+            c = make_coords()
+            with self.assertRaises(ValueError):
+                c.newcoords(make_coords(), relative_coords=bad)
+
     def test_newcoords_relative_coords_variants(self):
         for a, b in _coords_pairs():
             hb = _homogeneous(b)
@@ -1218,6 +1254,55 @@ class TestCascadedCoordinates(unittest.TestCase):
         # Child's translation relative to parent should be [2, 2, 2]
         testing.assert_array_equal(child.translation, [2, 2, 2])
 
+    def test_newcoords_with_parent_and_explicit_pos(self):
+        # The parent branch of CascadedCoords.newcoords, with pos given
+        # separately, is a different code path from the pos=None one.
+        rotation = rotation_matrix(0.6, 'z')
+        position = np.array([2.0, 2.0, 2.0])
+
+        def attached():
+            parent = make_cascoords(pos=[1, 0, 0],
+                                    rot=rotation_matrix(0.4, 'y'))
+            child = make_cascoords(pos=[0, 1, 0])
+            parent.assoc(child, relative_coords='local')
+            return parent, child
+
+        # 'world' places the child at the target in world coordinates.
+        parent, child = attached()
+        child.newcoords(rotation, position.copy(), relative_coords='world')
+        testing.assert_almost_equal(
+            child.worldcoords().translation, position)
+        testing.assert_almost_equal(child.worldcoords().rotation, rotation)
+
+        # 'local' and 'parent' both mean parent-relative, so the world pose
+        # picks up the parent's transform.
+        want = _homogeneous(make_cascoords(
+            pos=[1, 0, 0], rot=rotation_matrix(0.4, 'y'))).dot(
+                _homogeneous(make_coords(pos=position, rot=rotation)))
+        for relative in ('local', 'parent'):
+            parent, child = attached()
+            child.newcoords(rotation, position.copy(),
+                            relative_coords=relative)
+            testing.assert_almost_equal(child.translation, position)
+            testing.assert_almost_equal(
+                _homogeneous(child.worldcoords()), want,
+                err_msg='relative_coords={}'.format(relative))
+
+        # A Coordinates frame composes with the target.
+        parent, child = attached()
+        reference = make_coords(pos=[3, 0, 0])
+        child.newcoords(rotation, position.copy(), relative_coords=reference)
+        testing.assert_almost_equal(
+            _homogeneous(make_coords(pos=child.translation,
+                                     rot=child.rotation)),
+            _homogeneous(reference.transformation(
+                make_coords(pos=position, rot=rotation))))
+
+        parent, child = attached()
+        with self.assertRaises(ValueError):
+            child.newcoords(rotation, position.copy(),
+                            relative_coords='bogus')
+
     def test_newcoords_relative_coords_with_parent(self):
         # With a parent attached, only 'world' reinterprets the target;
         # 'local', 'parent' and None all set the parent-relative pose.
@@ -1346,6 +1431,64 @@ class TestCascadedCoordinates(unittest.TestCase):
             want[:3, 3] = hc[:3, 3]
             testing.assert_almost_equal(
                 _homogeneous(child.worldcoords()), hp.dot(want))
+
+    def test_transformation_wrt_with_parent(self):
+        # With a parent attached, 'world', 'parent' and the parent object all
+        # mean the same frame, while 'local' and self mean this coordinate.
+        # Rotations are needed to tell them apart at all.
+        parent = make_cascoords(pos=[1, 0, 0], rot=rotation_matrix(0.7, 'z'))
+        child = make_cascoords(pos=[0, 1, 0], rot=rotation_matrix(-0.4, 'x'))
+        parent.assoc(child, relative_coords='local')
+        target = make_coords(pos=[2, 2, 2], rot=rotation_matrix(0.9, 'y'))
+
+        hc = _homogeneous(child.worldcoords())
+        ht = _homogeneous(target)
+        local = np.linalg.inv(hc).dot(ht)
+        world = ht.dot(np.linalg.inv(hc))
+
+        for wrt_frame in ('local', child):
+            testing.assert_almost_equal(
+                _homogeneous(child.transformation(target, wrt_frame)), local,
+                err_msg='wrt={}'.format(wrt_frame))
+        for wrt_frame in ('world', 'parent', parent):
+            testing.assert_almost_equal(
+                _homogeneous(child.transformation(target, wrt_frame)), world,
+                err_msg='wrt={}'.format(wrt_frame))
+        # The two really are different frames here.
+        self.assertFalse(np.allclose(local, world))
+
+    def test_assoc_rejects_self_and_stolen_children(self):
+        parent = make_cascoords(pos=[1, 0, 0])
+        with self.assertRaises(ValueError):
+            parent.assoc(parent)
+
+        other = make_cascoords(pos=[0, 1, 0])
+        child = make_cascoords(pos=[0, 0, 1])
+        parent.assoc(child)
+        # Re-parenting needs force; otherwise the existing link is protected.
+        with self.assertRaises(RuntimeError):
+            other.assoc(child)
+        self.assertIs(child.parent, parent)
+
+        world_before = _homogeneous(child.worldcoords())
+        other.assoc(child, force=True)
+        self.assertIs(child.parent, other)
+        self.assertIn(child, other.descendants)
+        # force still defaults to relative_coords='world', so it stays put.
+        testing.assert_almost_equal(
+            _homogeneous(child.worldcoords()), world_before)
+
+    def test_assoc_deprecated_c_argument(self):
+        parent = make_cascoords(pos=[2, 0, 0])
+        child = make_cascoords(pos=[0, 2, 0])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            parent.assoc(child, c='world')
+        self.assertTrue(
+            any(issubclass(w.category, DeprecationWarning) for w in caught))
+        # and it means the same as relative_coords='world'
+        testing.assert_almost_equal(
+            child.worldcoords().translation, [0, 2, 0])
 
     def test_assoc_and_dissoc_preserve_world_pose(self):
         for a, b in _coords_pairs():
