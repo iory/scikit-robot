@@ -1,6 +1,7 @@
 import math
 import sys
 import unittest
+import warnings
 
 import numpy as np
 from numpy import pi
@@ -39,7 +40,9 @@ from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rodrigues
 from skrobot.coordinates.math import rotate_matrix
+from skrobot.coordinates.math import rotate_matrix_by_axis_angle
 from skrobot.coordinates.math import rotate_vector
+from skrobot.coordinates.math import rotate_vector_by_axis_angle
 from skrobot.coordinates.math import rotation_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
@@ -108,7 +111,7 @@ class TestMath(unittest.TestCase):
         self.assertEqual(ret, 6)
 
     def test_midrot(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+        m1 = rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
             interpolate_rotation_matrices(0.5, m1, np.eye(3)),
@@ -184,6 +187,49 @@ class TestMath(unittest.TestCase):
                       [0.0, 0.0, 1.0]]),
             decimal=5)
 
+    def test_deprecated_rotate_helpers(self):
+        # The old names still work and still return the same values; they only
+        # gained a warning pointing at the unambiguous spelling.
+        vec = np.array([1.0, 0.0, 0.0])
+        matrix = rotation_matrix(0.3, 'x')
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            rotated_vec = rotate_vector(vec, 0.5, 'z')
+            rotated_matrix = rotate_matrix(matrix, 0.5, 'z')
+            world = rotate_matrix(matrix, 0.5, 'z', world=True)
+        deprecations = [w for w in caught
+                        if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(deprecations), 3)
+
+        testing.assert_almost_equal(
+            rotated_vec, rotate_vector_by_axis_angle(vec, 0.5, 'z'))
+        testing.assert_almost_equal(
+            rotated_matrix, rotate_matrix_by_axis_angle(matrix, 0.5, 'z'))
+        testing.assert_almost_equal(
+            world, rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=True))
+
+        # The new names stay quiet.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            rotate_vector_by_axis_angle(vec, 0.5, 'z')
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z')
+        self.assertFalse([w for w in caught
+                          if issubclass(w.category, DeprecationWarning)])
+
+    def test_rotate_matrix_by_axis_angle_world_flag(self):
+        # world picks which side the new rotation multiplies on.
+        matrix = rotation_matrix(0.3, 'x')
+        turn = rotation_matrix(0.5, 'z')
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z'), matrix.dot(turn))
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=False),
+            matrix.dot(turn))
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=True),
+            turn.dot(matrix))
+
     def test_rodrigues(self):
         mat = rpy_matrix(pi / 6, pi / 5, pi / 3)
         theta, axis = rotation_angle(mat)
@@ -227,13 +273,13 @@ class TestMath(unittest.TestCase):
 
     def test_rotate_vector(self):
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [1, 0, 0]),
             (1, 0, 0))
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 1, 0]),
             (0.8660254, 0, -0.5))
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 0, 1]),
             (0.8660254, 0.5, 0))
 
     def test_rotation_angle(self):
@@ -274,7 +320,7 @@ class TestMath(unittest.TestCase):
             [12, 0, -4])
 
     def test_matrix_exponent(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+        m1 = rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
             axis_angle_vector_to_rotation_matrix(rotation_matrix_to_axis_angle_vector(m1)), m1,
@@ -311,9 +357,9 @@ class TestMath(unittest.TestCase):
                       [-0.1656854, -0.9656854, 0.2000000]]))
         testing.assert_almost_equal(
             quaternion2matrix([0.925754, 0.151891, 0.159933, 0.307131]),
-            rotate_matrix(
-                rotate_matrix(
-                    rotate_matrix(
+            rotate_matrix_by_axis_angle(
+                rotate_matrix_by_axis_angle(
+                    rotate_matrix_by_axis_angle(
                         np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
             decimal=5)
 
@@ -330,9 +376,9 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(matrix2quaternion(np.eye(3)),
                                     np.array([1, 0, 0, 0]))
 
-        m = rotate_matrix(
-            rotate_matrix(
-                rotate_matrix(
+        m = rotate_matrix_by_axis_angle(
+            rotate_matrix_by_axis_angle(
+                rotate_matrix_by_axis_angle(
                     np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
 
         testing.assert_almost_equal(
@@ -413,9 +459,9 @@ class TestMath(unittest.TestCase):
         # trace/diagonal; exercise each with a matrix that lands in it.
         cases = [
             (np.eye(3), [1, 0, 0, 0]),                       # tr > 0
-            (rotate_matrix(np.eye(3), pi, 'x'), [0, 1, 0, 0]),  # m00 largest
-            (rotate_matrix(np.eye(3), pi, 'y'), [0, 0, 1, 0]),  # m11 largest
-            (rotate_matrix(np.eye(3), pi, 'z'), [0, 0, 0, 1]),  # else (m22)
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'x'), [0, 1, 0, 0]),  # m00 largest
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'y'), [0, 0, 1, 0]),  # m11 largest
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'z'), [0, 0, 0, 1]),  # else (m22)
         ]
         for m, q in cases:
             testing.assert_almost_equal(matrix2quaternion(m), q)
@@ -434,10 +480,10 @@ class TestMath(unittest.TestCase):
         # Batched (N, 3, 3) input uses a separate vectorized code path.
         mats = np.array([
             np.eye(3),
-            rotate_matrix(np.eye(3), pi, 'x'),
-            rotate_matrix(np.eye(3), pi, 'y'),
-            rotate_matrix(np.eye(3), pi, 'z'),
-            rotate_matrix(rotate_matrix(rotate_matrix(
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'x'),
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'y'),
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'z'),
+            rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
                 np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
         ])
         quats = matrix2quaternion(mats)

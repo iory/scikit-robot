@@ -891,17 +891,15 @@ def rotation_matrix(theta, axis, skip_normalization=False):
     return out
 
 
-def rotate_vector(vec, theta, axis):
-    """Rotate vector.
-
-    Rotate vec with respect to axis.
+def rotate_vector_by_axis_angle(vec, theta, axis):
+    """Rotate a vector around an axis by an angle.
 
     Parameters
     ----------
     vec : list or numpy.ndarray
         target vector
     theta : float
-        rotation angle
+        rotation angle in radian
     axis : list or numpy.ndarray or str
         axis of rotation.
 
@@ -910,15 +908,21 @@ def rotate_vector(vec, theta, axis):
     rotated_vec : numpy.ndarray
         rotated vector.
 
+    See Also
+    --------
+    skrobot.coordinates.Coordinates.rotate_vector :
+        rotate a vector by a coordinate's own rotation, rather than by an
+        axis and an angle.
+
     Examples
     --------
     >>> from numpy import pi
-    >>> from skrobot.coordinates.math import rotate_vector
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0])
+    >>> from skrobot.coordinates.math import rotate_vector_by_axis_angle
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [1, 0, 0])
     array([1., 0., 0.])
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0])
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 1, 0])
     array([ 0.8660254,  0.       , -0.5      ])
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1])
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 0, 1])
     array([0.8660254, 0.5      , 0.       ])
     """
     rot = rotation_matrix(theta, axis)
@@ -926,7 +930,63 @@ def rotate_vector(vec, theta, axis):
     return rotated_vec
 
 
-def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
+def rotate_vector(vec, theta, axis):
+    """Rotate a vector around an axis by an angle.
+
+    .. deprecated::
+        The name reads like
+        :meth:`skrobot.coordinates.Coordinates.rotate_vector`, which rotates
+        by a coordinate's own rotation instead. Use
+        :func:`rotate_vector_by_axis_angle`.
+
+    Parameters
+    ----------
+    vec : list or numpy.ndarray
+        target vector
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+
+    Returns
+    -------
+    rotated_vec : numpy.ndarray
+        rotated vector.
+    """
+    warnings.warn(
+        'rotate_vector is deprecated because the name reads like '
+        "Coordinates.rotate_vector, which rotates by a coordinate's own "
+        'rotation rather than by an axis and an angle. Use '
+        'rotate_vector_by_axis_angle instead.',
+        DeprecationWarning,
+        stacklevel=2)
+    return rotate_vector_by_axis_angle(vec, theta, axis)
+
+
+def rotate_matrix_by_axis_angle(matrix, theta, axis, world=None,
+                                skip_normalization=False):
+    """Rotate a rotation matrix around an axis by an angle.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix to rotate
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+    world : bool or None
+        if None or False, rotate about ``matrix``'s own axes, i.e. multiply
+        the new rotation from the right. Otherwise rotate about the world
+        axes, i.e. multiply from the left.
+    skip_normalization : bool
+        if True, skip normalization of ``axis``.
+
+    Returns
+    -------
+    rotated_matrix : numpy.ndarray
+        3x3 rotation matrix
+    """
     if world is False or world is None:
         return np.dot(
             matrix,
@@ -935,6 +995,42 @@ def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
     return np.dot(
         rotation_matrix(theta, axis, skip_normalization=skip_normalization),
         matrix)
+
+
+def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
+    """Rotate a rotation matrix around an axis by an angle.
+
+    .. deprecated::
+        Renamed for symmetry with :func:`rotate_vector_by_axis_angle`. Use
+        :func:`rotate_matrix_by_axis_angle`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix to rotate
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+    world : bool or None
+        if None or False, rotate about ``matrix``'s own axes. Otherwise
+        rotate about the world axes.
+    skip_normalization : bool
+        if True, skip normalization of ``axis``.
+
+    Returns
+    -------
+    rotated_matrix : numpy.ndarray
+        3x3 rotation matrix
+    """
+    warnings.warn(
+        'rotate_matrix is deprecated. Use rotate_matrix_by_axis_angle '
+        'instead.',
+        DeprecationWarning,
+        stacklevel=2)
+    return rotate_matrix_by_axis_angle(
+        matrix, theta, axis, world=world,
+        skip_normalization=skip_normalization)
 
 
 def rpy_matrix(az, ay, ax):
@@ -972,8 +1068,8 @@ def rpy_matrix(az, ay, ax):
            [-8.66025404e-01,  2.50000000e-01,  4.33012702e-01]])
     """
     r = rotation_matrix(ax, 'x')
-    r = rotate_matrix(r, ay, 'y', world=True)
-    r = rotate_matrix(r, az, 'z', world=True)
+    r = rotate_matrix_by_axis_angle(r, ay, 'y', world=True)
+    r = rotate_matrix_by_axis_angle(r, az, 'z', world=True)
     return r
 
 
