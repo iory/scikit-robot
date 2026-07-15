@@ -215,6 +215,18 @@ def transform_urdf_to_macro(input_path, connector_link, no_prefix, macro_name=No
             elif elem.tag == "material":
                 # Material definitions already have their names prefixed above
                 pass
+            elif elem.tag == "transmission":
+                # Update joint/actuator references inside the transmission
+                for sub in elem.findall("joint"):
+                    if "name" in sub.attrib:
+                        sub.attrib["name"] = add_prefix_to_name(sub.attrib["name"])
+                for sub in elem.findall("actuator"):
+                    if "name" in sub.attrib:
+                        sub.attrib["name"] = add_prefix_to_name(sub.attrib["name"])
+            elif elem.tag == "gazebo":
+                # <gazebo reference="..."> names a link or joint
+                if "reference" in elem.attrib:
+                    elem.attrib["reference"] = add_prefix_to_name(elem.attrib["reference"])
         macro.append(elem)
 
     indent_element(macro, level=1)
