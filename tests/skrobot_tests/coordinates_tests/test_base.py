@@ -6,6 +6,7 @@ from numpy import deg2rad
 from numpy import pi
 from numpy import testing
 
+from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import Transform
@@ -15,10 +16,12 @@ from skrobot.coordinates.base import slerp_coordinates
 from skrobot.coordinates.base import wrt as wrt_vector
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import wxyz2xyzw
 
 
 def _homogeneous(coords):
@@ -75,6 +78,33 @@ class TestTransform(unittest.TestCase):
         with self.assertRaises(AssertionError):
             tf.rotate_vector(np.zeros((100, 100, 3)))  # ng
 
+    def test_transform_vector_values_1d_and_2d(self):
+        # The existing batch checks pass np.zeros((100, 3)) and only assert
+        # that nothing raises; all-zero input cannot tell + from -, nor a
+        # rotation from its transpose. Pin actual values instead.
+        translation = np.array([1.0, 2.0, 3.0])
+        rotation = rotation_matrix(0.5, [0.3, -0.4, 0.5])
+        tf = Transform(translation, rotation)
+        points = np.array([[0.5, -1.5, 2.5], [0.0, 0.0, 0.0],
+                           [-3.0, 1.0, 0.25]])
+
+        batch = tf.transform_vector(points)
+        self.assertEqual(batch.shape, points.shape)
+        testing.assert_almost_equal(batch, points.dot(rotation.T) + translation)
+
+        rotated = tf.rotate_vector(points)
+        self.assertEqual(rotated.shape, points.shape)
+        testing.assert_almost_equal(rotated, points.dot(rotation.T))
+        # A zero vector is unmoved by a rotation.
+        testing.assert_almost_equal(rotated[1], [0, 0, 0])
+
+        # Each row must equal the 1-D call on that row.
+        for i, point in enumerate(points):
+            testing.assert_almost_equal(
+                tf.transform_vector(point), rotation.dot(point) + translation)
+            testing.assert_almost_equal(batch[i], tf.transform_vector(point))
+            testing.assert_almost_equal(rotated[i], tf.rotate_vector(point))
+
     def test__mull__(self):
         trans12 = np.array([0, 0, 1])
         rot12 = rpy_matrix(pi / 2.0, 0, 0)
@@ -121,6 +151,42 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_array_equal(coord.translation, [1, 0, -1])
         testing.assert_almost_equal(coord.rotation,
                                     [[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+
+    def test_init_rotation_forms(self):
+        # rot accepts a 3x3 matrix, a quaternion or rpy angles, and pos can
+        # carry a whole 4x4 matrix.
+        quaternion = np.array([0.9238795, 0.3826834, 0.0, 0.0])
+        want = quaternion2matrix(quaternion)
+
+        testing.assert_almost_equal(make_coords(rot=np.eye(3)).rotation, np.eye(3))
+        testing.assert_almost_equal(make_coords(rot=quaternion).rotation, want)
+        testing.assert_almost_equal(
+            make_coords(rot=[0.1, 0.2, 0.3]).rotation,
+            rpy_matrix(0.1, 0.2, 0.3))
+
+        matrix = np.eye(4)
+        matrix[:3, :3] = want
+        matrix[:3, 3] = [1, 2, 3]
+        from_matrix = make_coords(matrix)
+        testing.assert_almost_equal(from_matrix.rotation, want)
+        testing.assert_almost_equal(from_matrix.translation, [1, 2, 3])
+
+    def test_init_quaternion_order(self):
+        # The same rotation, spelled both ways round.
+        wxyz = np.array([0.9238795, 0.3826834, 0.0, 0.0])
+        want = quaternion2matrix(wxyz)
+
+        testing.assert_almost_equal(
+            make_coords(rot=wxyz, input_quaternion_order='wxyz').rotation, want)
+        testing.assert_almost_equal(
+            make_coords(rot=wxyz2xyzw(wxyz),
+                        input_quaternion_order='xyzw').rotation, want)
+        # Reading xyzw as wxyz must not silently give the same answer.
+        self.assertFalse(np.allclose(
+            make_coords(rot=wxyz2xyzw(wxyz),
+                        input_quaternion_order='wxyz').rotation, want))
+        with self.assertRaises(ValueError):
+            make_coords(rot=wxyz, input_quaternion_order='bogus')
 
     def test_pickling(self):
         coords = make_coords()
@@ -1151,6 +1217,87 @@ class TestCascadedCoordinates(unittest.TestCase):
         child.newcoords(parent_rel_coord, relative_coords='parent')
         # Child's translation relative to parent should be [2, 2, 2]
         testing.assert_array_equal(child.translation, [2, 2, 2])
+
+    def test_newcoords_relative_coords_with_parent(self):
+        # With a parent attached, only 'world' reinterprets the target;
+        # 'local', 'parent' and None all set the parent-relative pose.
+        target = make_cascoords(pos=[2, 2, 2])
+
+        for relative in ('local', 'parent', None, 'LOCAL'):
+            parent = make_cascoords(pos=[1, 0, 0])
+            child = make_cascoords(pos=[0, 1, 0])
+            parent.assoc(child, relative_coords='local')
+            child.newcoords(target, relative_coords=relative)
+            testing.assert_almost_equal(
+                child.translation, [2, 2, 2],
+                err_msg='relative_coords={}'.format(relative))
+            testing.assert_almost_equal(
+                child.worldcoords().translation, [3, 2, 2],
+                err_msg='relative_coords={}'.format(relative))
+
+        # 'world' places the child at the target in world coordinates, so its
+        # stored pose becomes parent^-1 * target.
+        parent = make_cascoords(pos=[1, 0, 0])
+        child = make_cascoords(pos=[0, 1, 0])
+        parent.assoc(child, relative_coords='local')
+        child.newcoords(target, relative_coords='world')
+        testing.assert_almost_equal(child.worldcoords().translation, [2, 2, 2])
+        testing.assert_almost_equal(child.translation, [1, 2, 2])
+
+    def test_rotate_fast_path_matches_fallback(self):
+        # CascadedCoords.rotate inlines rotate_with_matrix + newcoords +
+        # changed when wrt is 'local', there is no hook and nothing in the
+        # chain is overridden. Every guard must fall back to the same answer.
+        setup = dict(pos=[1, 2, 3],
+                     rot=rotation_matrix(0.4, [0.3, -0.5, 0.2]))
+        axis = np.array([0.0, 0.0, 1.0])
+
+        fast = CascadedCoords(**setup)
+        fast.rotate(0.7, axis, 'local')
+        want = _homogeneous(fast.worldcoords())
+
+        # A hook disables the fast path, and must still be called.
+        calls = []
+        hooked = CascadedCoords(hook=lambda: calls.append(1), **setup)
+        hooked.rotate(0.7, axis, 'local')
+        testing.assert_almost_equal(_homogeneous(hooked.worldcoords()), want)
+        self.assertTrue(calls)
+
+        # So does a subclass overriding any member of the chain.
+        class OverridesNewcoords(CascadedCoords):
+            def newcoords(self, *args, **kwargs):
+                return super(OverridesNewcoords, self).newcoords(
+                    *args, **kwargs)
+
+        subclassed = OverridesNewcoords(**setup)
+        subclassed.rotate(0.7, axis, 'local')
+        testing.assert_almost_equal(
+            _homogeneous(subclassed.worldcoords()), want)
+
+        # A named axis never takes the fast path but means the same rotation.
+        named = CascadedCoords(**setup)
+        named.rotate(0.7, 'z', 'local')
+        testing.assert_almost_equal(_homogeneous(named.worldcoords()), want)
+
+        # The fast path must still mark descendants as changed.
+        parent = CascadedCoords(**setup)
+        child = CascadedCoords(pos=[0, 1, 0])
+        parent.assoc(child, relative_coords='local')
+        child.worldcoords()
+        parent._changed = False
+        child._changed = False
+        parent.rotate(0.3, axis, 'local')
+        self.assertTrue(child._changed)
+
+    def test_check_validity_rejects_non_rotation(self):
+        not_a_rotation = np.array([[1.0, 0, 0], [0, 1.0, 0], [0, 0, 2.0]])
+        with self.assertRaises(ValueError):
+            make_coords(rot=not_a_rotation)
+        with self.assertRaises(ValueError):
+            make_coords(rot=not_a_rotation, check_validity=True)
+        # check_validity=False is the escape hatch and stores it as given.
+        loose = make_coords(rot=not_a_rotation, check_validity=False)
+        testing.assert_almost_equal(loose.rotation, not_a_rotation)
 
     def test_rotate_with_matrix_matches_coordinates(self):
         # CascadedCoords overrides rotate/rotate_with_matrix; an unattached
