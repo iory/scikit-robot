@@ -892,16 +892,20 @@ def rotation_matrix(theta, axis, skip_normalization=False):
 
 
 def rotate_vector(vec, theta, axis):
-    """Rotate vector.
+    """Rotate vector around an axis by an angle.
 
     Rotate vec with respect to axis.
+
+    This takes an axis and an angle. It is not the same operation as
+    :meth:`skrobot.coordinates.Coordinates.rotate_vector`, which shares the
+    name but rotates a vector by the coordinate's own rotation.
 
     Parameters
     ----------
     vec : list or numpy.ndarray
         target vector
     theta : float
-        rotation angle
+        rotation angle in radian
     axis : list or numpy.ndarray or str
         axis of rotation.
 

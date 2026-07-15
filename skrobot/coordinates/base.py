@@ -760,6 +760,11 @@ class Coordinates(object):
     def rotate_vector(self, v):
         """Rotate 3-dimensional vector using rotation of this coordinate
 
+        The rotation applied is this coordinate's own. To rotate a vector
+        around an arbitrary axis by an angle instead, use
+        :func:`skrobot.coordinates.math.rotate_vector`, which shares the name
+        but takes an axis and an angle.
+
         Parameters
         ----------
         v : numpy.ndarray
