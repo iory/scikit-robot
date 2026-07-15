@@ -17,7 +17,7 @@ from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
-from skrobot.coordinates.math import rotate_matrix
+from skrobot.coordinates.math import rotate_matrix_by_axis_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_vectors
@@ -1008,7 +1008,7 @@ class Coordinates(object):
         if rotation_mirror is not None:
             rot = coords.worldrot()
             if not need_mirror_for_nearest_axis(self, coords, rotation_mirror):
-                rot = rotate_matrix(rot, np.pi, rotation_mirror)
+                rot = rotate_matrix_by_axis_angle(rot, np.pi, rotation_mirror)
             dif_rot = rotation_matrix_to_axis_angle_vector(
                 np.matmul(self.worldrot().T, rot))
             dif_rot[mask_vec == 0] = 0.0
@@ -1100,11 +1100,11 @@ class Coordinates(object):
         elif axis is None or axis is False:
             self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
-            self._rotation = rotate_matrix(
+            self._rotation = rotate_matrix_by_axis_angle(
                 self._rotation, theta, axis,
                 skip_normalization=skip_normalization)
         elif wrt == 'parent' or wrt == 'world':
-            self._rotation = rotate_matrix(
+            self._rotation = rotate_matrix_by_axis_angle(
                 self._rotation, theta,
                 axis, True,
                 skip_normalization=skip_normalization)
@@ -2003,13 +2003,15 @@ class CascadedCoords(Coordinates):
             return self.rotate_with_matrix(theta, wrt)
 
         if wrt == 'local' or wrt == self:
-            rotation = rotate_matrix(self._rotation, theta, axis,
-                                     skip_normalization=skip_normalization)
+            rotation = rotate_matrix_by_axis_angle(
+                self._rotation, theta, axis,
+                skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
                                   check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent:
-            rotation = rotate_matrix(self._rotation, theta, axis,
-                                     skip_normalization=skip_normalization)
+            rotation = rotate_matrix_by_axis_angle(
+                self._rotation, theta, axis,
+                skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
                                   check_validity=False, relative_coords='local')
         else:
