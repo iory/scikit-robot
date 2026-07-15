@@ -9,10 +9,44 @@ from numpy import testing
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import Transform
+from skrobot.coordinates.base import coordinates_distance
+from skrobot.coordinates.base import lerp_coordinates
+from skrobot.coordinates.base import slerp_coordinates
+from skrobot.coordinates.base import wrt as wrt_vector
 from skrobot.coordinates.math import _check_valid_rotation
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy_matrix
+
+
+def _homogeneous(coords):
+    """Coordinates -> the 4x4 matrix it stands for."""
+    matrix = np.eye(4)
+    matrix[:3, :3] = coords.rotation
+    matrix[:3, 3] = coords.translation
+    return matrix
+
+
+def _coords_pairs():
+    """Deterministic, non-degenerate (a, b) pairs to check operations on.
+
+    Drawn from a private RandomState so the set never depends on (or
+    perturbs) the global numpy RNG.
+    """
+    rng = np.random.RandomState(0)
+    pairs = []
+    for _ in range(12):
+        made = []
+        for _ in range(2):
+            axis = rng.randn(3)
+            axis = axis / np.linalg.norm(axis)
+            made.append(make_coords(
+                pos=rng.uniform(-3, 3, 3),
+                rot=rotation_matrix(rng.uniform(-pi, pi), axis)))
+        pairs.append(tuple(made))
+    return pairs
 
 
 class TestTransform(unittest.TestCase):
@@ -662,6 +696,244 @@ class TestCoordinates(unittest.TestCase):
         testing.assert_almost_equal(c2.translation, [4, 5, 6])
         testing.assert_almost_equal(c_mid.translation, [2.5, 3.5, 4.5])
 
+    def test_transformation_wrt_variants(self):
+        # transformation() branches on wrt; cover every accepted spelling.
+        for a, b in _coords_pairs():
+            ha, hb = _homogeneous(a), _homogeneous(b)
+            local = np.linalg.inv(ha).dot(hb)
+            world = hb.dot(np.linalg.inv(ha))
+
+            testing.assert_almost_equal(
+                _homogeneous(a.transformation(b, 'local')), local)
+            # A Coordinates with no parent treats 'parent' as 'world'.
+            testing.assert_almost_equal(
+                _homogeneous(a.transformation(b, 'world')), world)
+            testing.assert_almost_equal(
+                _homogeneous(a.transformation(b, 'parent')), world)
+            # Passing self is the same as 'local'.
+            testing.assert_almost_equal(
+                _homogeneous(a.transformation(b, a)), local)
+            with self.assertRaises(ValueError):
+                a.transformation(b, 'nonsense')
+
+    def test_newcoords_relative_coords_variants(self):
+        for a, b in _coords_pairs():
+            hb = _homogeneous(b)
+
+            # local / world / None all set the pose outright with no parent.
+            for relative in ('local', 'world', None):
+                c = a.copy_worldcoords()
+                c.newcoords(b, relative_coords=relative)
+                testing.assert_almost_equal(_homogeneous(c), hb)
+
+            # Spelling is case-insensitive.
+            c = a.copy_worldcoords()
+            c.newcoords(b, relative_coords='LOCAL')
+            testing.assert_almost_equal(_homogeneous(c), hb)
+
+            # A Coordinates reference frame composes: ref * target.
+            ref = a.copy_worldcoords()
+            c = make_coords()
+            c.newcoords(b, relative_coords=ref)
+            testing.assert_almost_equal(
+                _homogeneous(c), _homogeneous(ref).dot(hb))
+
+            # 'parent' without a parent is an error, not a silent fallback.
+            c = a.copy_worldcoords()
+            with self.assertRaises(ValueError):
+                c.newcoords(b, relative_coords='parent')
+
+    def test_rotate_axis_forms(self):
+        # rotate() accepts an axis name or a vector; they must agree.
+        for a, _ in _coords_pairs():
+            for name, vector in (('x', [1, 0, 0]), ('y', [0, 1, 0]),
+                                 ('z', [0, 0, 1])):
+                by_name = a.copy_worldcoords().rotate(0.6, name, 'local')
+                by_vec = a.copy_worldcoords().rotate(0.6, vector, 'local')
+                by_arr = a.copy_worldcoords().rotate(
+                    0.6, np.array(vector, dtype=np.float64), 'local')
+                testing.assert_almost_equal(
+                    _homogeneous(by_name), _homogeneous(by_vec))
+                testing.assert_almost_equal(
+                    _homogeneous(by_name), _homogeneous(by_arr))
+
+            # A non-unit axis is normalized, not taken at face value.
+            testing.assert_almost_equal(
+                _homogeneous(a.copy_worldcoords().rotate(0.6, [0, 0, 5])),
+                _homogeneous(a.copy_worldcoords().rotate(0.6, [0, 0, 1])))
+
+            # Without an axis, rotate() reads theta as a matrix, so a scalar
+            # theta is rejected rather than silently ignored.
+            for missing_axis in (None, False):
+                with self.assertRaises(ValueError):
+                    a.copy_worldcoords().rotate(0.6, missing_axis)
+
+    def test_transform_vector_batch(self):
+        for a, _ in _coords_pairs():
+            ha = _homogeneous(a.copy_worldcoords())
+            points = np.array([[0.5, -1.5, 2.5], [0.0, 0.0, 0.0],
+                               [-3.0, 1.0, 0.25]])
+            # (N, 3) must equal applying the single-vector form row by row.
+            testing.assert_almost_equal(
+                a.transform_vector(points),
+                points.dot(ha[:3, :3].T) + ha[:3, 3])
+            testing.assert_almost_equal(
+                a.rotate_vector(points), points.dot(ha[:3, :3].T))
+            for point in points:
+                testing.assert_almost_equal(
+                    a.transform_vector(point),
+                    ha[:3, :3].dot(point) + ha[:3, 3])
+
+    def test_rotation_and_translation_setters_copy(self):
+        # The setters must store a copy; otherwise callers alias the internals.
+        rot = rotation_matrix(0.3, [0, 0, 1])
+        trans = np.array([1.0, 2.0, 3.0])
+        c = make_coords()
+        c.rotation = rot
+        c.translation = trans
+        rot[0, 0] = 99.0
+        trans[0] = 99.0
+        testing.assert_almost_equal(c.rotation, rotation_matrix(0.3, [0, 0, 1]))
+        testing.assert_almost_equal(c.translation, [1.0, 2.0, 3.0])
+
+    def test_matches_homogeneous_matrix_algebra(self):
+        # A Coordinates is a rigid transform, so pin every operation against
+        # plain 4x4 matrices rather than against skrobot itself.
+        for a, b in _coords_pairs():
+            ha, hb = _homogeneous(a), _homogeneous(b)
+
+            got = a.copy_worldcoords().transform(b, 'local')
+            testing.assert_almost_equal(_homogeneous(got), ha.dot(hb))
+
+            got = a.copy_worldcoords().transform(b, 'world')
+            testing.assert_almost_equal(_homogeneous(got), hb.dot(ha))
+
+            got = a.transformation(b, 'local')
+            testing.assert_almost_equal(
+                _homogeneous(got), np.linalg.inv(ha).dot(hb))
+
+            testing.assert_almost_equal(
+                _homogeneous(a.inverse_transformation()), np.linalg.inv(ha))
+
+            # The relative transform must land exactly on the target.
+            testing.assert_almost_equal(
+                _homogeneous(a.copy_worldcoords().transform(
+                    a.transformation(b, 'local'), 'local')), hb)
+
+            testing.assert_almost_equal(
+                _homogeneous(a.copy_worldcoords().transform(
+                    a.inverse_transformation(), 'local')), np.eye(4))
+
+    def test_rotate_and_translate_wrt(self):
+        for a, _ in _coords_pairs():
+            ha = _homogeneous(a)
+            for theta, axis in ((0.7, [1, 0, 0]), (-1.3, [0, 1, 0]),
+                                (2.1, [0, 0, 1]), (0.4, [1, -2, 3])):
+                hr = np.eye(4)
+                hr[:3, :3] = rotation_matrix(theta, axis)
+
+                # local: rotate about self's own axes
+                testing.assert_almost_equal(
+                    _homogeneous(a.copy_worldcoords().rotate(
+                        theta, axis, 'local')), ha.dot(hr))
+                # rotate_with_matrix must agree with rotate
+                testing.assert_almost_equal(
+                    _homogeneous(a.copy_worldcoords().rotate_with_matrix(
+                        hr[:3, :3], 'local')),
+                    _homogeneous(a.copy_worldcoords().rotate(
+                        theta, axis, 'local')))
+
+                # world: rotate about the world axes, origin stays put
+                want = hr.dot(ha)
+                want[:3, 3] = ha[:3, 3]
+                testing.assert_almost_equal(
+                    _homogeneous(a.copy_worldcoords().rotate(
+                        theta, axis, 'world')), want)
+
+            vec = np.array([0.3, -1.2, 2.0])
+            ht = np.eye(4)
+            ht[:3, 3] = vec
+            testing.assert_almost_equal(
+                _homogeneous(a.copy_worldcoords().translate(vec, 'local')),
+                ha.dot(ht))
+            want = ha.copy()
+            want[:3, 3] = ha[:3, 3] + vec
+            testing.assert_almost_equal(
+                _homogeneous(a.copy_worldcoords().translate(vec, 'world')),
+                want)
+
+    def test_newcoords_replaces_pose_without_aliasing(self):
+        for a, b in _coords_pairs():
+            hb = _homogeneous(b)
+            c = a.copy_worldcoords()
+            c.newcoords(b)
+            testing.assert_almost_equal(_homogeneous(c), hb)
+            # Mutating the source afterwards must not reach into c.
+            b.translate([1.0, 1.0, 1.0], 'world')
+            b.rotate(0.5, 'z', 'world')
+            testing.assert_almost_equal(_homogeneous(c), hb)
+
+    def test_homogeneous_and_vector_helpers(self):
+        for a, _ in _coords_pairs():
+            ha = _homogeneous(a)
+            testing.assert_almost_equal(a.T(), ha)
+            testing.assert_almost_equal(
+                _homogeneous(a ** -1), np.linalg.inv(ha))
+            with self.assertRaises(NotImplementedError):
+                a ** 2
+
+            v = np.array([0.5, -1.5, 2.5])
+            testing.assert_almost_equal(a.rotate_vector(v), ha[:3, :3].dot(v))
+            testing.assert_almost_equal(
+                a.inverse_rotate_vector(v), ha[:3, :3].T.dot(v))
+            testing.assert_almost_equal(
+                a.transform_vector(v), ha[:3, :3].dot(v) + ha[:3, 3])
+            testing.assert_almost_equal(
+                wrt_vector(a, v), a.transform_vector(v))
+
+            # rpy_angle must rebuild the rotation it came from.
+            rpy, _ = a.rpy_angle()
+            testing.assert_almost_equal(
+                rpy_matrix(rpy[0], rpy[1], rpy[2]), ha[:3, :3])
+
+    def test_difference_position_and_rotation(self):
+        for a, b in _coords_pairs():
+            ha, hb = _homogeneous(a), _homogeneous(b)
+            # difference_position is expressed in a's own frame.
+            testing.assert_almost_equal(
+                a.difference_position(b),
+                ha[:3, :3].T.dot(hb[:3, 3] - ha[:3, 3]))
+            # difference_rotation is the axis-angle taking a onto b.
+            want = np.linalg.norm(rotation_matrix_to_axis_angle_vector(
+                ha[:3, :3].T.dot(hb[:3, :3])))
+            testing.assert_almost_equal(
+                np.linalg.norm(a.difference_rotation(b)), want)
+            testing.assert_almost_equal(
+                a.difference_rotation(a), np.zeros(3), decimal=5)
+
+    def test_lerp_and_slerp_coordinates(self):
+        for a, b in _coords_pairs():
+            ha, hb = _homogeneous(a), _homogeneous(b)
+            for fn in (lerp_coordinates, slerp_coordinates):
+                testing.assert_almost_equal(_homogeneous(fn(a, b, 0.0)), ha)
+                testing.assert_almost_equal(_homogeneous(fn(a, b, 1.0)), hb)
+                mid = fn(a, b, 0.5)
+                # Translation is linear for both.
+                testing.assert_almost_equal(
+                    mid.translation, (ha[:3, 3] + hb[:3, 3]) / 2.0)
+                _check_valid_rotation(mid.rotation)
+
+    def test_coordinates_distance(self):
+        for a, b in _coords_pairs():
+            ha, hb = _homogeneous(a), _homogeneous(b)
+            dist = coordinates_distance(a, b)
+            testing.assert_almost_equal(
+                dist[0], np.linalg.norm(ha[:3, 3] - hb[:3, 3]))
+            testing.assert_almost_equal(
+                dist[1], rotation_distance(ha[:3, :3], hb[:3, :3]))
+            testing.assert_almost_equal(
+                np.asarray(coordinates_distance(a, a)), np.zeros(2), decimal=6)
+
 
 class TestCascadedCoordinates(unittest.TestCase):
 
@@ -879,3 +1151,101 @@ class TestCascadedCoordinates(unittest.TestCase):
         child.newcoords(parent_rel_coord, relative_coords='parent')
         # Child's translation relative to parent should be [2, 2, 2]
         testing.assert_array_equal(child.translation, [2, 2, 2])
+
+    def test_rotate_with_matrix_matches_coordinates(self):
+        # CascadedCoords overrides rotate/rotate_with_matrix; an unattached
+        # one must still behave exactly like a plain Coordinates.
+        for a, _ in _coords_pairs():
+            for theta, axis in ((0.7, [1, 0, 0]), (-1.3, [0, 1, 0]),
+                                (2.1, [1, -2, 3])):
+                matrix = rotation_matrix(theta, axis)
+                for wrt_frame in ('local', 'world'):
+                    plain = make_coords(pos=a.translation, rot=a.rotation)
+                    casc = make_cascoords(pos=a.translation, rot=a.rotation)
+                    plain.rotate_with_matrix(matrix, wrt_frame)
+                    casc.rotate_with_matrix(matrix, wrt_frame)
+                    testing.assert_almost_equal(
+                        _homogeneous(casc.worldcoords()), _homogeneous(plain),
+                        err_msg='wrt={}'.format(wrt_frame))
+                    # and it must agree with rotate() for the same rotation
+                    other = make_cascoords(pos=a.translation, rot=a.rotation)
+                    other.rotate(theta, axis, wrt_frame)
+                    testing.assert_almost_equal(
+                        _homogeneous(casc.worldcoords()),
+                        _homogeneous(other.worldcoords()))
+
+    def test_rotate_wrt_parent_and_world(self):
+        for a, b in _coords_pairs():
+            hp, hc = _homogeneous(a), _homogeneous(b)
+            theta, axis = 0.9, np.array([1.0, -2.0, 0.5])
+            axis = axis / np.linalg.norm(axis)
+            hr = np.eye(4)
+            hr[:3, :3] = rotation_matrix(theta, axis)
+
+            # 'local' turns the child about its own axes.
+            parent = make_cascoords(pos=a.translation, rot=a.rotation)
+            child = make_cascoords(pos=b.translation, rot=b.rotation)
+            parent.assoc(child, relative_coords='local')
+            child.rotate(theta, axis, 'local')
+            testing.assert_almost_equal(
+                _homogeneous(child.worldcoords()), hp.dot(hc).dot(hr))
+
+            # 'parent' turns it about the parent's axes, origin kept.
+            parent = make_cascoords(pos=a.translation, rot=a.rotation)
+            child = make_cascoords(pos=b.translation, rot=b.rotation)
+            parent.assoc(child, relative_coords='local')
+            child.rotate(theta, axis, 'parent')
+            want = hr.dot(hc)
+            want[:3, 3] = hc[:3, 3]
+            testing.assert_almost_equal(
+                _homogeneous(child.worldcoords()), hp.dot(want))
+
+    def test_assoc_and_dissoc_preserve_world_pose(self):
+        for a, b in _coords_pairs():
+            hp, hc = _homogeneous(a), _homogeneous(b)
+
+            # relative_coords='local': the child's pose is read as parent-local
+            parent = make_cascoords(pos=a.translation, rot=a.rotation)
+            child = make_cascoords(pos=b.translation, rot=b.rotation)
+            parent.assoc(child, relative_coords='local')
+            testing.assert_almost_equal(
+                _homogeneous(child.worldcoords()), hp.dot(hc))
+
+            # relative_coords='world': the child does not move
+            parent = make_cascoords(pos=a.translation, rot=a.rotation)
+            child = make_cascoords(pos=b.translation, rot=b.rotation)
+            parent.assoc(child, relative_coords='world')
+            testing.assert_almost_equal(_homogeneous(child.worldcoords()), hc)
+            # ... and its stored local pose is parent^-1 * child
+            testing.assert_almost_equal(
+                _homogeneous(make_coords(pos=child.translation,
+                                         rot=child.rotation)),
+                np.linalg.inv(hp).dot(hc))
+            self.assertIn(child, parent.descendants)
+            self.assertIs(child.parent, parent)
+
+            # dissoc leaves the child where it stands in the world
+            parent.dissoc(child)
+            testing.assert_almost_equal(_homogeneous(child.worldcoords()), hc)
+            self.assertNotIn(child, parent.descendants)
+            self.assertIsNone(child.parent)
+
+    def test_child_follows_parent(self):
+        for a, b in _coords_pairs():
+            hp, hc = _homogeneous(a), _homogeneous(b)
+            parent = make_cascoords(pos=a.translation, rot=a.rotation)
+            child = make_cascoords(pos=b.translation, rot=b.rotation)
+            parent.assoc(child, relative_coords='local')
+
+            theta, axis = 1.1, np.array([0.3, 0.4, -0.5])
+            axis = axis / np.linalg.norm(axis)
+            hr = np.eye(4)
+            hr[:3, :3] = rotation_matrix(theta, axis)
+            parent.rotate(theta, axis, 'local')
+
+            testing.assert_almost_equal(
+                _homogeneous(child.worldcoords()), hp.dot(hr).dot(hc))
+            # The parent moving must not touch the child's own pose.
+            testing.assert_almost_equal(
+                _homogeneous(make_coords(pos=child.translation,
+                                         rot=child.rotation)), hc)
