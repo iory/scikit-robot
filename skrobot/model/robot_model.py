@@ -29,6 +29,7 @@ from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import select_by_mask
+from skrobot.coordinates.math import skew_symmetric_matrix
 from skrobot.model.joint import calc_target_joint_dimension
 from skrobot.model.joint import calc_target_joint_dimension_from_link_list
 from skrobot.model.joint import FixedJoint
@@ -4476,9 +4477,7 @@ class RobotModel(CascadedLink):
 
                 # Parallel axis theorem
                 r = com_world - total_centroid
-                r_cross = np.array([[0, -r[2], r[1]],
-                                   [r[2], 0, -r[0]],
-                                   [-r[1], r[0], 0]])
+                r_cross = skew_symmetric_matrix(r)
                 total_inertia += link_inertia_world - link.mass * r_cross.dot(r_cross)
 
         return {
