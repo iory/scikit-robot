@@ -2281,9 +2281,9 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     Parameters
     ----------
     q0 : list or numpy.ndarray
-        start quaternion
+        start quaternion in [w, x, y, z] order
     q1 : list or numpy.ndarray
-        end quaternion
+        end quaternion in [w, x, y, z] order
     fraction : float
         ratio
     spin : int
@@ -2294,7 +2294,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     Returns
     -------
     quaternion : numpy.ndarray
-        spherical linear interpolated quaternion
+        spherical linear interpolated quaternion in [w, x, y, z] order
 
     Examples
     --------
@@ -2515,7 +2515,7 @@ def rotation_vector_to_quaternion(rvec):
     Returns
     -------
     q : numpy.ndarray
-        quaternion
+        quaternion in [w, x, y, z] order
     """
     rvec = np.array(rvec).reshape(-1)
     theta = np.linalg.norm(rvec)
