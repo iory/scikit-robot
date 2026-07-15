@@ -737,12 +737,12 @@ class Coordinates(object):
         Parameters
         ----------
         v : numpy.ndarray
-            vector shape of (3,)
+            vector shape of (3,) or (N, 3)
 
         Returns
         -------
-        np.matmul(self._rotation, v) : numpy.ndarray
-            rotated vector
+        rotated_vector : numpy.ndarray
+            rotated vector, of the same shape as ``v``
 
         Examples
         --------
@@ -752,6 +752,9 @@ class Coordinates(object):
         >>> c.rotate_vector([1, 2, 3])
         array([-1., -2.,  3.])
         """
+        v = np.array(v, dtype=np.float64)
+        if v.ndim == 2:
+            return np.matmul(self._rotation, v.T).T
         return np.matmul(self._rotation, v)
 
     def inverse_rotate_vector(self, v):

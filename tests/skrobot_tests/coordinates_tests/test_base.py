@@ -145,6 +145,24 @@ class TestCoordinates(unittest.TestCase):
         expected_pos = ref_coord.transform_vector([2, 2, 2])
         testing.assert_array_equal(coord.translation, expected_pos)
 
+    def test_rotate_vector_batch_matches_single(self):
+        # (N, 3) went through np.matmul(R, v) unbranched, which does not raise
+        # for N == 3 -- it silently computed something else.
+        c = make_coords(pos=[1, 2, 3], rot=rotation_matrix(0.5, [0.3, -0.4, 0.5]))
+        points = np.array([[0.5, -1.5, 2.5], [0.0, 0.0, 0.0], [-3.0, 1.0, 0.25]])
+
+        rotated = c.rotate_vector(points)
+        self.assertEqual(rotated.shape, points.shape)
+        # A zero vector stays zero under any rotation.
+        testing.assert_almost_equal(rotated[1], [0, 0, 0])
+        # Every row must equal the single-vector call.
+        for i, point in enumerate(points):
+            testing.assert_almost_equal(rotated[i], c.rotate_vector(point))
+        testing.assert_almost_equal(rotated, points.dot(c.rotation.T))
+        # Transform exposes the same API and was already correct.
+        testing.assert_almost_equal(
+            rotated, c.get_transform().rotate_vector(points))
+
     def test_transform(self):
         coord = make_coords()
         coord.transform(make_coords(pos=[1, 2, 3]))
