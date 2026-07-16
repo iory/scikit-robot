@@ -3057,8 +3057,18 @@ def rotation_matrix_from_vectors(a, b):
     >>> np.allclose(R.dot([1, 0, 0]), [0, 1, 0])
     True
     """
-    a = normalize_vector(np.array(a, dtype=np.float64))
-    b = normalize_vector(np.array(b, dtype=np.float64))
+    a = np.array(a, dtype=np.float64)
+    b = np.array(b, dtype=np.float64)
+    # pre-scale by the largest component so denormal (or huge) inputs
+    # survive normalization instead of underflowing to nan
+    scale_a = np.max(np.abs(a))
+    scale_b = np.max(np.abs(b))
+    if scale_a == 0.0 or scale_b == 0.0:
+        raise ValueError(
+            'rotation_matrix_from_vectors needs nonzero directions, '
+            f'got a={a.tolist()}, b={b.tolist()}')
+    a = normalize_vector(a / scale_a)
+    b = normalize_vector(b / scale_b)
     axis = np.cross(a, b)
     axis_norm = np.linalg.norm(axis)
     dot = float(np.clip(np.dot(a, b), -1.0, 1.0))
