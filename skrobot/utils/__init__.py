@@ -19,5 +19,11 @@ from skrobot.utils.blender_mesh import remesh_with_blender
 from skrobot.utils.convex_decomposition import convex_decomposition
 from skrobot.utils.convex_decomposition import is_coacd_available
 
+from skrobot.utils.inertia import link_inertial_from_mesh
+from skrobot.utils.inertia import mesh_mass_properties
+from skrobot.utils.inertia import rescale_inertial_to_mass
+from skrobot.utils.inertia import transform_inertial
+from skrobot.utils.inertia import validate_inertia
+
 from skrobot.utils.primitive_fitting import fit_primitive_to_mesh
 from skrobot.utils.primitive_fitting import primitive_params_to_origin
