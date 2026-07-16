@@ -53,6 +53,13 @@ from skrobot.collision.geometry import Sphere
 from skrobot.collision.robot_collision import LinkCollisionGeometry
 from skrobot.collision.robot_collision import RobotCollisionChecker
 
+# Mesh self-collision + joint-limit sweep (needs optional python-fcl)
+from skrobot.collision.self_collision import is_fcl_available
+from skrobot.collision.self_collision import link_meshes
+from skrobot.collision.self_collision import link_visual_mesh
+from skrobot.collision.self_collision import SelfCollision
+from skrobot.collision.self_collision import sweep_limits
+
 
 __all__ = [
     # Geometry primitives
@@ -75,4 +82,10 @@ __all__ = [
     # Robot collision
     'RobotCollisionChecker',
     'LinkCollisionGeometry',
+    # Mesh self-collision + joint-limit sweep
+    'SelfCollision',
+    'sweep_limits',
+    'link_meshes',
+    'link_visual_mesh',
+    'is_fcl_available',
 ]
