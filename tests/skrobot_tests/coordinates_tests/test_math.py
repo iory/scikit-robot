@@ -1078,6 +1078,21 @@ class TestMath(unittest.TestCase):
             testing.assert_almost_equal(
                 rot.dot(normalize_vector(a)), -normalize_vector(a))
 
+    def test_rotation_matrix_from_vectors_degenerate_magnitudes(self):
+        # denormal / huge magnitudes still describe a valid direction:
+        # normalization must not underflow or overflow to nan
+        for a, b in (([1e-300, 0, 0], [0, 1, 0]),
+                     ([1e300, 0, 0], [0, 1e-300, 0])):
+            rotation = rotation_matrix_from_vectors(a, b)
+            testing.assert_almost_equal(rotation @ [1, 0, 0], [0, 1, 0])
+            quat = quaternion_from_vectors(a, b)
+            self.assertTrue(np.all(np.isfinite(quat)))
+        # a zero vector has no direction: refuse instead of returning nan
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_vectors([0, 0, 0], [1, 0, 0])
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_vectors([1, 0, 0], [0, 0, 0])
+
     def test_quaternion_from_vectors(self):
         rng = np.random.RandomState(1)
         for _ in range(50):
