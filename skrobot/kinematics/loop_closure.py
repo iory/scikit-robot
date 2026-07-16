@@ -13,6 +13,8 @@ planners, analysis).
 
 import numpy as np
 
+from skrobot.coordinates.math import rotation_translation2matrix
+
 
 class LoopClosureSolver(object):
     """Solve a robot's declared loop closures in place.
@@ -132,14 +134,11 @@ class LoopClosureSolver(object):
             chain.append(current.joint)
             current = current.parent_link
         coords = current.worldcoords()
-        transform = np.eye(4)
-        transform[:3, :3] = coords.worldrot()
-        transform[:3, 3] = coords.worldpos()
+        transform = rotation_translation2matrix(coords.worldrot(), coords.worldpos())
         for joint in reversed(chain):
-            local = np.eye(4)
-            local[:3, :3] = joint.default_coords.rotation
-            local[:3, 3] = joint.default_coords.translation
-            transform = transform @ local
+            transform = transform @ rotation_translation2matrix(
+                joint.default_coords.rotation,
+                joint.default_coords.translation)
         return transform
 
     def _residual(self):

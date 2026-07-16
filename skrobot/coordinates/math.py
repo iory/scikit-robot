@@ -3151,6 +3151,80 @@ def xyzrpy2matrix(xyz, rpy):
     return matrix
 
 
+def rotation_translation2matrix(rotation, translation):
+    """Compose a 4x4 homogeneous transform from rotation and translation.
+
+    Inverse of :func:`matrix2rotation_translation`.
+
+    Parameters
+    ----------
+    rotation : list or tuple or numpy.ndarray
+        3x3 rotation matrix.
+    translation : list or tuple or numpy.ndarray
+        translation, shape (3,).
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rotation_translation2matrix
+    >>> rotation_translation2matrix(np.eye(3), [1.0, 2.0, 3.0])
+    array([[1., 0., 0., 1.],
+           [0., 1., 0., 2.],
+           [0., 0., 1., 3.],
+           [0., 0., 0., 1.]])
+    """
+    matrix = np.eye(4)
+    matrix[:3, :3] = np.array(rotation, dtype=np.float64)
+    matrix[:3, 3] = np.array(translation, dtype=np.float64)
+    return matrix
+
+
+def matrix2rotation_translation(matrix):
+    """Split a 4x4 homogeneous transform into rotation and translation.
+
+    Inverse of :func:`rotation_translation2matrix`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    rotation : numpy.ndarray
+        3x3 rotation matrix (a copy).
+    translation : numpy.ndarray
+        translation, shape (3,) (a copy).
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, :3], matrix[:3, 3]
+
+
+def transform_point(matrix, point):
+    """Apply a 4x4 homogeneous transform to a 3D point.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+    point : list or tuple or numpy.ndarray
+        point, shape (3,).
+
+    Returns
+    -------
+    point : numpy.ndarray
+        transformed point, shape (3,).
+    """
+    matrix = np.asarray(matrix, dtype=np.float64)
+    point = np.asarray(point, dtype=np.float64)
+    return matrix[:3, :3] @ point + matrix[:3, 3]
+
+
 def matrix_relative(parent, child):
     """Express one homogeneous transform relative to another.
 
