@@ -7,6 +7,11 @@ The architecture follows a 3-layer design:
 
 ``RobotAssembly.build()`` composes the combined URDF purely in memory --
 no external tools are involved.
+
+A closed linkage (four-bar, parallel mechanism) does not fit a URDF tree;
+declare its cut edge with ``connect(..., loop=True)`` and ``build()`` will
+export the closure as a ``loop_closures.yaml`` sidecar for runtime IK,
+plus exact ``<mimic>`` tags when the loop is a parallelogram.
 """
 
 from collections import deque
@@ -27,6 +32,7 @@ import numpy as np
 
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
+from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
@@ -40,7 +46,7 @@ class Port:
     A port is a link in the URDF that can be connected to another module's port.
     Typically these are "dummy_link" elements in the URDF files.
 
-    Attributes
+    Parameters
     ----------
     name : str
         The link name in the URDF that serves as a connection point.
@@ -83,7 +89,7 @@ class RobotModule:
     This class does NOT hold parent-child relationships. It simply stores
     metadata about a single URDF file and its available connection ports.
 
-    Attributes
+    Parameters
     ----------
     module_id : str
         Unique identifier for this module type (e.g., "hinge_module", "branch_module").
@@ -321,7 +327,7 @@ class Connection:
 
     This is an edge in the undirected connection graph.
 
-    Attributes
+    Parameters
     ----------
     module_a : str
         Instance ID of the first module.
@@ -343,6 +349,33 @@ class Connection:
         Pitch (rotation around Y axis) offset in radians.
     yaw : float
         Yaw (rotation around Z axis) offset in radians.
+    loop : bool
+        ``True`` marks this connection as a loop closure: the edge that a
+        kinematic tree cannot carry and that the assembly graph cuts.  A
+        loop connection never becomes a joint in the built URDF; instead
+        it is exported as a runtime-IK closure constraint (the two port
+        frames must stay coincident on their common hinge axis).
+    dependent : Tuple[str, ...], optional
+        For a loop closure: the final (prefixed) joint names this closure
+        SOLVES.  The remaining movable joints on the loop ring stay
+        independent (driven).  ``None`` (default) picks the split
+        automatically: the movable joint nearest the root drives, the
+        rest are solved.  A 1-DOF planar loop solves 2 joints; a 2-DOF
+        loop (e.g. a five-bar) needs this made explicit.
+    joint_type : str
+        Type of the joint the connection becomes in the built URDF:
+        ``'fixed'`` (default), ``'revolute'``, ``'continuous'`` or
+        ``'prismatic'``.  A movable connection turns the mated port
+        pair itself into an articulation, so modules do not need an
+        internal joint to move relative to each other.
+    axis : Tuple[float, float, float]
+        Movable connections only: the joint axis, expressed in the
+        child attachment link's frame (= the URDF joint frame).
+        Default Z.
+    lower, upper : float, optional
+        Joint limits; required for ``'revolute'`` and ``'prismatic'``.
+    effort, velocity : float
+        Limit attributes the URDF requires alongside lower/upper.
     """
 
     module_a: str
@@ -355,6 +388,14 @@ class Connection:
     roll: float = 0.0
     pitch: float = 0.0
     yaw: float = 0.0
+    loop: bool = False
+    dependent: Optional[Tuple[str, ...]] = None
+    joint_type: str = "fixed"
+    axis: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+    lower: Optional[float] = None
+    upper: Optional[float] = None
+    effort: float = 100.0
+    velocity: float = 1.0
     # How the CHILD-side node attaches when the tree is built.  The
     # connection is undirected: whichever endpoint ends up the child once
     # the tree is rooted attaches via ITS declared port.
@@ -441,6 +482,11 @@ class RobotAssembly:
         The instance ID that will become the root of the final URDF tree.
     root_port : Optional[str]
         The port on root_instance that will become the root link.
+    loop_closures : Optional[dict]
+        After a build: the closure config the loop connections produced
+        (the ``loop_closures.yaml`` content), ready to hand to
+        :class:`skrobot.kinematics.LoopClosureSolver`; None when the
+        assembly declares no loop.
 
     Examples
     --------
@@ -477,6 +523,7 @@ class RobotAssembly:
         self.connections: List[Connection] = []
         self.root_instance: Optional[str] = None
         self.root_port: Optional[str] = None
+        self.loop_closures: Optional[dict] = None
 
     def add_module_instance(self, instance_id: str, module: RobotModule) -> None:
         """
@@ -512,6 +559,14 @@ class RobotAssembly:
         yaw: float = 0.0,
         mate: bool = False,
         attach: str = "root",
+        loop: bool = False,
+        dependent: Optional[Tuple[str, ...]] = None,
+        joint_type: str = "fixed",
+        axis: Tuple[float, float, float] = (0.0, 0.0, 1.0),
+        lower: Optional[float] = None,
+        upper: Optional[float] = None,
+        effort: float = 100.0,
+        velocity: float = 1.0,
     ) -> None:
         """
         Create a connection between two module ports.
@@ -558,6 +613,44 @@ class RobotAssembly:
             during the build so that port becomes the real attachment link.
             Applies to whichever endpoint becomes the child once the tree
             is rooted.
+        loop : bool
+            ``True`` declares this connection as a loop closure -- the cut
+            edge of a closed linkage (e.g. a four-bar).  It never becomes a
+            joint in the built URDF; the two ports must already coincide at
+            the zero pose of the rest of the assembly, and their common Z
+            axis is the passive hinge axis.  ``build()`` exports the
+            closure to a ``loop_closures.yaml`` sidecar for runtime IK and,
+            for a parallelogram four-bar, writes exact ``<mimic>`` tags.
+            A loop connection carries no transform, so the offset, ``mate``
+            and ``attach`` arguments cannot be combined with it.
+        dependent : Tuple[str, ...], optional
+            Only with ``loop=True``: the final (prefixed, e.g.
+            ``'arm1_elbow'``) joint names this closure solves; the other
+            movable joints on the loop ring stay driven.  Validated at
+            build time against the actual ring.  Default: the ring joint
+            nearest the root drives, the rest are solved -- right for a
+            1-DOF loop, but a multi-DOF loop (five-bar and up) needs the
+            solved joints named explicitly.
+        joint_type : str
+            ``'fixed'`` (default) welds the connection; ``'revolute'``,
+            ``'continuous'`` or ``'prismatic'`` turn the mated port pair
+            itself into an articulation.  A movable connection must be
+            declared parent-side first (``module_a`` ends up the parent
+            once the tree is rooted): reversing a movable joint would
+            relocate its frame, which the build refuses rather than
+            approximates.
+        axis : Tuple[float, float, float]
+            Joint axis of a movable connection, expressed in the child
+            attachment link's frame (in URDF the joint frame IS the
+            child frame): the module root frame under ``attach='root'``,
+            the declared port frame under ``attach='port'`` -- combine
+            with ``attach='port'``/``mate`` to hinge about the port Z
+            of the keyed-mate convention.  Default Z.
+        lower, upper : float, optional
+            Joint limits in radians / metres; required for
+            ``'revolute'`` and ``'prismatic'``.
+        effort, velocity : float
+            Limit attributes required by URDF alongside lower/upper.
         """
         # Validate module instances exist
         if module_a not in self.instances:
@@ -589,6 +682,51 @@ class RobotAssembly:
                 f"Port '{port_b}' not found on module '{module_b}'")
         self._check_port_compatibility(module_a, port_obj_a,
                                        module_b, port_obj_b)
+        if loop:
+            if mate or attach != "root" or \
+                    any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch, yaw)):
+                raise ValueError(
+                    'a loop closure carries no transform: the cut hinge is '
+                    'where the two ports coincide at the zero pose, so '
+                    'xyz/rpy offsets, mate and attach cannot be combined '
+                    'with loop=True')
+            if dependent is not None:
+                dependent = tuple(dependent)
+                if not dependent:
+                    raise ValueError(
+                        'dependent must name at least one joint the '
+                        'closure solves (or be None for the automatic '
+                        'split)')
+        elif dependent is not None:
+            raise ValueError(
+                'dependent only applies to a loop closure (loop=True): it '
+                'names the joints solved to keep the loop closed')
+        if joint_type not in ("fixed", "revolute", "continuous",
+                              "prismatic"):
+            raise ValueError(f"unknown joint_type: {joint_type!r} "
+                             "(expected 'fixed', 'revolute', 'continuous' "
+                             "or 'prismatic')")
+        if loop and joint_type != "fixed":
+            raise ValueError(
+                'a loop closure IS the passive cut hinge; it cannot carry '
+                'a joint_type -- make the tree connections movable instead')
+        if joint_type in ("fixed", "continuous") and \
+                (lower is not None or upper is not None):
+            raise ValueError(
+                f"lower/upper limits do not apply to a {joint_type} "
+                "connection joint (URDF only limits revolute/prismatic)")
+        if joint_type in ("revolute", "prismatic") and \
+                (lower is None or upper is None):
+            raise ValueError(
+                f"a {joint_type} connection needs explicit lower and "
+                "upper limits")
+        if joint_type != "fixed":
+            axis = tuple(float(v) for v in axis)
+            if len(axis) != 3 or not all(math.isfinite(v) for v in axis) \
+                    or math.hypot(*axis) < 1e-12:
+                raise ValueError(
+                    f"connection joint axis must be a nonzero finite "
+                    f"3-vector, got {axis!r}")
         if mate:
             if any(abs(v) > 1e-12 for v in (x, y, z, roll, pitch)):
                 raise ValueError(
@@ -616,7 +754,12 @@ class RobotAssembly:
 
         self.connections.append(
             Connection(module_a, port_a, module_b, port_b, x=x, y=y, z=z,
-                       roll=roll, pitch=pitch, yaw=yaw, attach=attach)
+                       roll=roll, pitch=pitch, yaw=yaw, attach=attach,
+                       loop=loop, dependent=dependent,
+                       joint_type=joint_type,
+                       axis=tuple(float(v) for v in axis),
+                       lower=lower, upper=upper,
+                       effort=effort, velocity=velocity)
         )
 
     @staticmethod
@@ -678,6 +821,53 @@ class RobotAssembly:
         return (float(out_xyz[0]), float(out_xyz[1]), float(out_xyz[2]),
                 float(out_rpy[0]), float(out_rpy[1]), float(out_rpy[2]))
 
+    def disconnect(self, module_a: str, port_a: str,
+                   module_b: str, port_b: str) -> None:
+        """Remove the connection between two ports.
+
+        The connection is matched in either declaration order (the
+        graph is undirected).
+
+        Raises
+        ------
+        ValueError
+            If no such connection exists.
+        """
+        for i, conn in enumerate(self.connections):
+            forward = (conn.module_a == module_a and conn.port_a == port_a
+                       and conn.module_b == module_b
+                       and conn.port_b == port_b)
+            reverse = (conn.module_a == module_b and conn.port_a == port_b
+                       and conn.module_b == module_a
+                       and conn.port_b == port_a)
+            if forward or reverse:
+                del self.connections[i]
+                return
+        raise ValueError(
+            f"no connection between {module_a}.{port_a} and "
+            f"{module_b}.{port_b}")
+
+    def remove_module_instance(self, instance_id: str) -> None:
+        """Remove an instance and every connection that involves it.
+
+        When the removed instance was the root, the root falls back to
+        the first remaining instance (through its module's root link),
+        or clears entirely on an empty assembly.
+        """
+        if instance_id not in self.instances:
+            raise ValueError(f"Module instance '{instance_id}' not found")
+        del self.instances[instance_id]
+        self.connections = [c for c in self.connections
+                            if not c.involves(instance_id)]
+        if self.root_instance == instance_id:
+            if self.instances:
+                first_id = next(iter(self.instances))
+                self.set_root(first_id,
+                              self.instances[first_id].module.root_link)
+            else:
+                self.root_instance = None
+                self.root_port = None
+
     def set_root(self, instance_id: str, port_name: str) -> None:
         """
         Set the root link for the assembled robot.
@@ -711,11 +901,14 @@ class RobotAssembly:
             When traversed from module_b to module_a, the connection
             transform is inverted (rigid inverse, not a component-wise
             negation -- the latter is only correct for single-axis
-            rotations).
+            rotations).  Loop closures (``loop=True``) are cut edges, not
+            tree edges, so they do not appear here.
         """
         adj: Dict[str, List[Tuple[str, str, str, Tuple, Tuple, str]]] = {inst_id: [] for inst_id in self.instances}
         identity = np.eye(4)
         for conn in self.connections:
+            if conn.loop:
+                continue
             # Forward direction: module_a -> module_b uses original xyz/rpy
             adj[conn.module_a].append((conn.module_b, conn.port_a, conn.port_b, conn.xyz, conn.rpy, conn.attach))
             # Reverse direction: module_b -> module_a uses the inverse transform
@@ -809,16 +1002,20 @@ class RobotAssembly:
                             node_map[neighbor_id] = child_node
                             queue.append(child_node)
 
-        # URDF is a tree: every connection must have been consumed as a
-        # forest edge.  Anything left over closes a cycle and would be
-        # silently dropped by the traversal -- refuse instead.
+        # URDF is a tree: every non-loop connection must have been consumed
+        # as a forest edge.  Anything left over closes an UNDECLARED cycle
+        # and would be silently dropped by the traversal -- refuse instead.
+        # Declared closures (loop=True) are cut edges by construction.
+        n_tree_conns = sum(1 for c in self.connections if not c.loop)
         tree_edges = len(self.instances) - len(root_nodes)
-        if len(self.connections) > tree_edges:
+        if n_tree_conns > tree_edges:
             raise ValueError(
-                f'assembly graph contains a cycle: {len(self.connections)} '
-                f'connections for {len(self.instances)} instance(s) in '
+                f'assembly graph contains an undeclared cycle: '
+                f'{n_tree_conns} tree connections for '
+                f'{len(self.instances)} instance(s) in '
                 f'{len(root_nodes)} component(s); a URDF kinematic tree '
-                'cannot represent closed loops')
+                'cannot represent closed loops -- declare the cut edge '
+                'with connect(..., loop=True)')
         return root_nodes, node_map
 
     def build(self, output_path: Optional[str] = None) -> str:
@@ -831,6 +1028,12 @@ class RobotAssembly:
         to its own root link, with all element names prefixed by the
         instance id.  Modules keep their original kinematic structure (no
         chain reversal).
+
+        Connections declared with ``loop=True`` are cut edges: they never
+        become joints.  When any exist, a ``loop_closures.yaml`` sidecar
+        (the runtime-IK relay config) is written next to the output URDF,
+        and a parallelogram four-bar loop additionally gets exact
+        ``<mimic>`` tags on its dependent joints.
 
         Parameters
         ----------
@@ -890,6 +1093,10 @@ class RobotAssembly:
         self._validate_and_default_root()
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
+        self._apply_movable_connections(robot)
+        # validates declared closures and injects parallelogram mimics;
+        # the relay yaml sidecar only exists when building to a file
+        self.loop_closures = self._apply_loop_closures(robot)
         return RobotModelFromURDF(
             urdf=etree.tostring(robot, encoding="unicode"))
 
@@ -980,37 +1187,520 @@ class RobotAssembly:
 
         return robot
 
+    _MOVABLE_JOINT_TYPES = ("revolute", "continuous", "prismatic")
+
+    @staticmethod
+    def _link_transforms(robot, joint_values=None):
+        """World transform of every link in a composed robot element.
+
+        Walks the joint tree from the root link(s).  ``joint_values`` maps
+        joint names to positions; unlisted joints sit at zero, so with no
+        argument this is the zero-pose forward kinematics.
+
+        Parameters
+        ----------
+        robot : lxml.etree._Element
+            The ``<robot>`` element with top-level ``<link>``/``<joint>``
+            children.
+        joint_values : Dict[str, float], optional
+            Joint positions (radians / metres) for movable joints.
+
+        Returns
+        -------
+        Dict[str, numpy.ndarray]
+            Mapping from link name to its 4x4 world transform.
+        """
+        joint_values = joint_values or {}
+        children: Dict[str, list] = {}
+        child_links = set()
+        for j in robot.findall("joint"):
+            parent = j.find("parent").get("link")
+            child = j.find("child").get("link")
+            origin = j.find("origin")
+            if origin is not None:
+                xyz = [float(v) for v in
+                       origin.get("xyz", "0 0 0").split()]
+                rpy = [float(v) for v in
+                       origin.get("rpy", "0 0 0").split()]
+            else:
+                xyz = [0.0, 0.0, 0.0]
+                rpy = [0.0, 0.0, 0.0]
+            transform = xyzrpy2matrix(xyz, rpy)
+            q = float(joint_values.get(j.get("name"), 0.0))
+            if q != 0.0:
+                axis_elem = j.find("axis")
+                axis = np.array(
+                    [float(v) for v in axis_elem.get("xyz").split()]
+                ) if axis_elem is not None else np.array([0.0, 0.0, 1.0])
+                joint_type = j.get("type")
+                motion = np.eye(4)
+                if joint_type in ("revolute", "continuous"):
+                    motion[:3, :3] = rotation_matrix(q, axis)
+                elif joint_type == "prismatic":
+                    motion[:3, 3] = axis / np.linalg.norm(axis) * q
+                transform = transform @ motion
+            children.setdefault(parent, []).append((child, transform))
+            child_links.add(child)
+
+        transforms = {}
+        queue = deque()
+        for link in robot.findall("link"):
+            name = link.get("name")
+            if name not in child_links:
+                transforms[name] = np.eye(4)
+                queue.append(name)
+        while queue:
+            link_name = queue.popleft()
+            for child, transform in children.get(link_name, ()):
+                transforms[child] = transforms[link_name] @ transform
+                queue.append(child)
+        return transforms
+
+    def _apply_movable_connections(self, robot):
+        """Turn movable connections into their declared joint type.
+
+        The composition emits every connection as a fixed joint with the
+        deterministic name ``{parent_link}_to_{child_link}_joint``; this
+        post-pass rewrites the type and adds ``<axis>``/``<limit>``.
+        Runs BEFORE the loop-closure pass, which then sees connection
+        joints as ordinary ring members.
+        """
+        movable = [c for c in self.connections
+                   if not c.loop and c.joint_type != "fixed"]
+        if not movable:
+            return
+        joints = {j.get("name"): j for j in robot.findall("joint")}
+
+        def link_name(instance_id, port):
+            return f"{instance_id}_{port}" if instance_id else port
+
+        def connector(instance_id, port, attach):
+            module = self.instances[instance_id].module
+            if attach == "port" and port != module.root_link:
+                return port
+            return module.root_link
+
+        for conn in movable:
+            child_fwd = connector(conn.module_b, conn.port_b, conn.attach)
+            child_rev = connector(conn.module_a, conn.port_a, conn.attach)
+            forward = (f"{link_name(conn.module_a, conn.port_a)}_to_"
+                       f"{link_name(conn.module_b, child_fwd)}_joint")
+            reverse = (f"{link_name(conn.module_b, conn.port_b)}_to_"
+                       f"{link_name(conn.module_a, child_rev)}_joint")
+            joint = joints.get(forward)
+            if joint is None:
+                if reverse in joints:
+                    raise ValueError(
+                        f"movable connection {conn.module_a}.{conn.port_a}"
+                        f" -> {conn.module_b}.{conn.port_b} was traversed "
+                        "in reverse when the tree was rooted; a reversed "
+                        "movable joint cannot keep its frame (only the "
+                        "new child's origin could carry the axis), so "
+                        "re-root the assembly or declare the connection "
+                        "parent-side first")
+                raise ValueError(
+                    f"internal error: connection joint '{forward}' not "
+                    "found in the composed URDF")
+            joint.set("type", conn.joint_type)
+            axis = etree.SubElement(joint, "axis")
+            axis.set("xyz", " ".join(str(v) for v in conn.axis))
+            if conn.joint_type in ("revolute", "prismatic"):
+                limit = etree.SubElement(joint, "limit")
+                limit.set("lower", str(conn.lower))
+                limit.set("upper", str(conn.upper))
+                limit.set("effort", str(conn.effort))
+                limit.set("velocity", str(conn.velocity))
+
+    def _apply_loop_closures(self, robot):
+        """Export the declared loop closures against the composed robot.
+
+        For every ``loop=True`` connection: validate that the two port
+        links coincide at the zero pose and share a hinge axis (their port
+        Z), split the movable joints on the loop ring into one driver
+        (independent) and solved (dependent) joints, and -- when the ring
+        is a parallelogram four-bar, verified numerically -- write exact
+        linear ``<mimic>`` tags onto the dependent joints so even
+        mimic-only consumers (robot_state_publisher) stay on the loop.
+
+        Returns
+        -------
+        dict or None
+            The runtime-IK relay config ``{closures: [{link_a, link_b,
+            point, axis}], dependent: [...], independent: [...]}`` with
+            ``point``/``axis`` in the URDF root frame at the zero pose,
+            or None when no closure is declared.
+        """
+        loops = [c for c in self.connections if c.loop]
+        if not loops:
+            return None
+        fk = self._link_transforms(robot)
+        parent_joint = {j.find("child").get("link"): j
+                        for j in robot.findall("joint")}
+        all_movable = [j.get("name") for j in robot.findall("joint")
+                       if j.get("type") in self._MOVABLE_JOINT_TYPES]
+
+        def links_up(link):
+            out = [link]
+            while link in parent_joint:
+                link = parent_joint[link].find("parent").get("link")
+                out.append(link)
+            return out
+
+        def ring_side(link, stop):
+            """Joint elements from ``link`` up to (excluding) ``stop``."""
+            out = []
+            while link != stop:
+                joint = parent_joint[link]
+                out.append(joint)
+                link = joint.find("parent").get("link")
+            return out
+
+        closures = []
+        dependent = set()
+        drivers = set()
+        for conn in loops:
+            label = (f"{conn.module_a}.{conn.port_a} <-> "
+                     f"{conn.module_b}.{conn.port_b}")
+            link_a = (f"{conn.module_a}_{conn.port_a}"
+                      if conn.module_a else conn.port_a)
+            link_b = (f"{conn.module_b}_{conn.port_b}"
+                      if conn.module_b else conn.port_b)
+            t_a, t_b = fk[link_a], fk[link_b]
+            gap = float(np.linalg.norm(t_a[:3, 3] - t_b[:3, 3]))
+            if gap > 1e-6:
+                raise ValueError(
+                    f"loop closure {label}: the zero pose leaves the two "
+                    f"ports {gap:.3g} m apart; a closure is the cut hinge "
+                    "of an assembled loop, so the tree connections must "
+                    "already place the ports coincident (e.g. via "
+                    "mate=True) before the loop edge is declared")
+            # the hinge is the LINE through the port origin along port Z;
+            # the axis sign is irrelevant (the closure constrains witness
+            # POINTS on that line, not a direction), so mated Z-opposed
+            # ports are as valid as aligned ones
+            axis_a, axis_b = t_a[:3, 2], t_b[:3, 2]
+            if float(np.linalg.norm(np.cross(axis_a, axis_b))) > 1e-6:
+                raise ValueError(
+                    f"loop closure {label}: the two port Z axes are not "
+                    "collinear at the zero pose, so they do not define a "
+                    "common hinge axis")
+            ancestors_b = set(links_up(link_b))
+            lca = next(link for link in links_up(link_a)
+                       if link in ancestors_b)
+            side_a = ring_side(link_a, lca)
+            side_b = ring_side(link_b, lca)
+            ring = ([j for j in side_a
+                     if j.get("type") in self._MOVABLE_JOINT_TYPES]
+                    + [j for j in reversed(side_b)
+                       if j.get("type") in self._MOVABLE_JOINT_TYPES])
+            if not ring:
+                raise ValueError(
+                    f"loop closure {label}: no movable joint on the loop "
+                    "ring -- the closure would weld a rigid ring, which a "
+                    "kinematic tree already represents without it")
+            driver_name, fixed, deps = self._split_loop_ring(
+                robot, conn, label, ring, links_up, dependent, drivers)
+            dependent.update(j.get("name") for j in deps)
+            point = t_a[:3, 3]
+            closures.append({
+                "link_a": link_a, "link_b": link_b,
+                "point": [round(float(v), 8) for v in point],
+                "axis": [round(float(v), 8) for v in axis_a],
+            })
+            self._try_parallelogram_mimic(
+                robot, fk, ring, driver_name, fixed, deps, point, axis_a,
+                link_a, link_b)
+        return {
+            "closures": closures,
+            "dependent": sorted(dependent),
+            "independent": sorted(set(all_movable) - dependent),
+        }
+
+    @staticmethod
+    def _resolve_mimic_chain(robot):
+        """Resolve every ``<mimic>`` tag to its transitive root driver.
+
+        Returns
+        -------
+        Dict[str, Tuple[str, float, float]]
+            Mapping from a mimicking joint name to ``(root_driver,
+            multiplier, offset)`` such that ``q_joint = multiplier *
+            q_root + offset``.  Joints on a mimic cycle are omitted.
+        """
+        specs = {}
+        for j in robot.findall("joint"):
+            mimic = j.find("mimic")
+            if mimic is not None and mimic.get("joint"):
+                specs[j.get("name")] = (
+                    mimic.get("joint"),
+                    float(mimic.get("multiplier", 1.0)),
+                    float(mimic.get("offset", 0.0)))
+        resolved = {}
+        for name in specs:
+            multiplier, offset = 1.0, 0.0
+            current = name
+            seen = set()
+            while current in specs:
+                if current in seen:
+                    break  # mimic cycle: unresolvable
+                seen.add(current)
+                target, m, o = specs[current]
+                offset += multiplier * o
+                multiplier *= m
+                current = target
+            else:
+                resolved[name] = (current, multiplier, offset)
+        return resolved
+
+    def _split_loop_ring(self, robot, conn, label, ring, links_up,
+                         dependent, drivers):
+        """Split one closure's ring joints into driven vs solved.
+
+        Three strategies, in priority order: the connection's explicit
+        ``dependent`` list; following an existing ``<mimic>`` on the ring
+        to its transitive root (so a chained loop never leaks a
+        kinematically coupled joint into ``independent``); else the
+        nearest-root heuristic (right for a 1-DOF loop).
+
+        Returns
+        -------
+        Tuple[Optional[str], Dict[str, float], List]
+            ``(driver_name, fixed, deps)``: the single driving joint the
+            parallelogram certification runs against (None when there is
+            no unique drivable one -- possibly a joint OUTSIDE the ring
+            for a chained loop), ``fixed`` mapping ring joints that
+            already mimic the driver to their known multiplier, and the
+            ring joint elements this closure marks dependent.
+        """
+        ring_names = [j.get("name") for j in ring]
+        if conn.dependent is not None:
+            missing = [n for n in conn.dependent if n not in ring_names]
+            if missing:
+                raise ValueError(
+                    f"loop closure {label}: dependent joint(s) {missing} "
+                    f"are not movable joints on the loop ring "
+                    f"{ring_names}")
+            conflict = sorted(set(conn.dependent) & drivers)
+            if conflict:
+                raise ValueError(
+                    f"loop closure {label}: {conflict} already drive "
+                    "another closure and cannot be re-marked dependent")
+            deps = [j for j in ring if j.get("name") in conn.dependent]
+            rest = [j for j in ring if j.get("name") not in conn.dependent]
+            drivers.update(j.get("name") for j in rest
+                           if j.get("name") not in dependent)
+            # certify only against a joint that really is independent
+            driver_name = rest[0].get("name") \
+                if len(rest) == 1 and rest[0].find("mimic") is None \
+                and rest[0].get("name") not in dependent \
+                else None
+            return driver_name, {}, deps
+
+        chain = self._resolve_mimic_chain(robot)
+        mimicking = [j for j in ring if j.get("name") in chain]
+        if mimicking:
+            roots = {chain[j.get("name")][0] for j in mimicking}
+            deps = [j for j in ring if j.get("name") not in roots
+                    and j.get("name") not in drivers]
+            # a root an earlier closure already solves is no driver: leave
+            # it dependent and let the relay solve this ring numerically
+            drivers.update(roots - dependent)
+            exact = len(roots) == 1 and not (roots & dependent) and all(
+                abs(chain[j.get("name")][2]) < 1e-12 for j in mimicking)
+            if not exact:
+                return None, {}, deps
+            fixed = {j.get("name"): chain[j.get("name")][1]
+                     for j in mimicking}
+            return next(iter(roots)), fixed, deps
+
+        # a joint an earlier closure marked dependent is solved --
+        # it cannot drive
+        drivable = [j for j in ring if j.get("name") not in dependent]
+        if not drivable:
+            raise ValueError(
+                f"loop closure {label}: every movable joint on the loop "
+                "ring is already solved by another closure, so nothing "
+                "can drive the loop")
+        driver = min(
+            drivable,
+            key=lambda j: (len(links_up(j.find("child").get("link"))),
+                           j.get("name")))
+        drivers.add(driver.get("name"))
+        # never re-mark another closure's driver as dependent: a joint
+        # must end up on exactly one side of the split
+        deps = [j for j in ring if j is not driver
+                and j.get("name") not in drivers]
+        return driver.get("name"), {}, deps
+
+    def _try_parallelogram_mimic(self, robot, fk, ring, driver_name,
+                                 fixed, deps, cut_point, cut_axis,
+                                 link_a, link_b):
+        """Write exact ``<mimic>`` tags when the loop is a parallelogram.
+
+        A four-bar whose hinge quadrilateral is a parallelogram (all four
+        axes parallel) couples its joints LINEARLY (multipliers of exactly
+        +/-1), which the URDF ``<mimic>`` tag can represent -- unlike a
+        general four-bar, whose coupling is nonlinear and is left to the
+        runtime-IK relay.  Candidate multipliers are certified by forward
+        kinematics before anything is written: the cut-hinge witness
+        points must still coincide at sampled nonzero driver angles.
+        Silently does nothing when the ring is not such a loop.
+
+        For a chained loop, ``driver_name`` may be a joint OUTSIDE the
+        ring (the transitive root of an existing mimic) and ``fixed``
+        carries the known multipliers of the ring joints that already
+        follow it; only the remaining free dependents get new tags.
+        """
+        if driver_name is None or len(ring) != 3:
+            return
+        free = [j for j in deps if j.get("name") not in fixed]
+        if not free or len(free) > 2:
+            return
+        # every ring joint must have a determined value during the FK
+        # certification: the driver itself, a known follower, or a free
+        # candidate
+        covered = set(fixed) | {j.get("name") for j in free} | {driver_name}
+        if any(j.get("name") not in covered for j in ring):
+            return
+        if any(j.get("type") not in ("revolute", "continuous")
+               for j in ring):
+            return
+        if any(j.find("mimic") is not None and j.get("name") not in fixed
+               for j in ring):
+            return
+        normal = cut_axis / np.linalg.norm(cut_axis)
+        world_axes = []
+        hinge_points = [np.asarray(cut_point, dtype=float)]
+        for j in ring:
+            child = j.find("child").get("link")
+            axis_elem = j.find("axis")
+            axis = np.array(
+                [float(v) for v in axis_elem.get("xyz").split()]
+            ) if axis_elem is not None else np.array([0.0, 0.0, 1.0])
+            world_axes.append(fk[child][:3, :3] @ axis)
+            hinge_points.append(fk[child][:3, 3])
+        if any(float(np.linalg.norm(np.cross(normal, a)))
+               > 1e-8 * np.linalg.norm(a) for a in world_axes):
+            return
+        # ring order is cut -> side_a joints -> side_b joints, a cyclic
+        # quadrilateral; parallelogram iff one side pair matches (the
+        # other follows), checked in the plane normal to the hinge axis
+        planar = [p - np.dot(p, normal) * normal for p in hinge_points]
+        if float(np.linalg.norm((planar[1] - planar[0])
+                                - (planar[2] - planar[3]))) > 1e-6:
+            return
+
+        witness_local = []
+        for w in (cut_point, cut_point + 0.03 * normal):
+            w_h = np.append(w, 1.0)
+            witness_local.append((np.linalg.solve(fk[link_a], w_h),
+                                  np.linalg.solve(fk[link_b], w_h)))
+        combos = [()]
+        for _ in free:
+            combos = [c + (m,) for c in combos for m in (1.0, -1.0)]
+        for multipliers in combos:
+            closed = True
+            for q in (0.3, -0.45):
+                joint_values = {driver_name: q}
+                joint_values.update(
+                    (name, m * q) for name, m in fixed.items())
+                for dep, m in zip(free, multipliers):
+                    joint_values[dep.get("name")] = m * q
+                fk_q = self._link_transforms(robot, joint_values)
+                for local_a, local_b in witness_local:
+                    gap = np.linalg.norm(fk_q[link_a] @ local_a
+                                         - fk_q[link_b] @ local_b)
+                    if gap > 1e-9:
+                        closed = False
+                        break
+                if not closed:
+                    break
+            if closed:
+                for dep, m in zip(free, multipliers):
+                    mimic = etree.SubElement(dep, "mimic")
+                    mimic.set("joint", driver_name)
+                    mimic.set("multiplier", str(m))
+                    mimic.set("offset", "0")
+                return
+
+    @staticmethod
+    def _write_loop_closures_yaml(config, directory):
+        """Write the runtime-IK relay config next to the built URDF.
+
+        ``loop_closures.yaml`` is the contract consumed by downstream
+        loop-closure relay nodes: at every joint state they solve the
+        dependent joints so each closure's two link points coincide.
+        """
+        import yaml
+        head = ("# Closed-loop closures for a loop-closure relay "
+                "(runtime IK).\n"
+                "# independent = driven joints; dependent = solved so each "
+                "closure's\n"
+                "# two link points (the cut hinge) coincide.\n")
+        path = os.path.join(directory, "loop_closures.yaml")
+        with open(path, "w") as f:
+            f.write(head + yaml.safe_dump(config, sort_keys=False,
+                                          default_flow_style=None))
+        return path
+
     def _build_inline(self, output_path: Optional[str] = None) -> str:
         """Compose the combined URDF and write it to disk."""
         temp_dir = tempfile.mkdtemp(prefix=f"{self.name}_build_")
         robot = self._compose_inline(temp_dir)
+        self._apply_movable_connections(robot)
+        closures = self._apply_loop_closures(robot)
+        self.loop_closures = closures
         if output_path is None:
             output_path = os.path.join(temp_dir, f"{self.name}.urdf")
         with open(output_path, "wb") as f:
             f.write(etree.tostring(robot, pretty_print=True,
                                    xml_declaration=True, encoding="UTF-8"))
+        if closures is not None:
+            self._write_loop_closures_yaml(
+                closures, os.path.dirname(os.path.abspath(output_path)))
         return output_path
 
-    def to_dict(self) -> dict:
+    def to_dict(self, embed: bool = False) -> dict:
         """
         Serialize the assembly to a dictionary.
 
         Useful for saving/loading assembly state or sending to frontend.
+
+        Parameters
+        ----------
+        embed : bool
+            Also embed each module's URDF XML (``urdf_content``), so
+            :meth:`from_dict` can rebuild the assembly without the
+            original files -- e.g. across machines or through a
+            storage backend.
         """
+        instances = {}
+        for inst_id, inst in self.instances.items():
+            entry = {"module_id": inst.module.module_id,
+                     "urdf_path": str(inst.module.urdf_path)}
+            if embed:
+                path = Path(inst.module.urdf_path)
+                if not path.is_file():
+                    raise ValueError(
+                        f"cannot embed instance '{inst_id}': its module "
+                        f"URDF '{path}' is not a readable file")
+                entry["urdf_content"] = path.read_text(encoding="utf-8")
+            instances[inst_id] = entry
         return {
             "name": self.name,
             "root_instance": self.root_instance,
             "root_port": self.root_port,
-            "instances": {
-                inst_id: {"module_id": inst.module.module_id, "urdf_path": str(inst.module.urdf_path)}
-                for inst_id, inst in self.instances.items()
-            },
+            "instances": instances,
             "connections": [
                 {"module_a": c.module_a, "port_a": c.port_a,
                  "module_b": c.module_b, "port_b": c.port_b,
                  "x": c.x, "y": c.y, "z": c.z,
                  "roll": c.roll, "pitch": c.pitch, "yaw": c.yaw,
-                 "attach": c.attach}
+                 "attach": c.attach, "loop": c.loop,
+                 "dependent": list(c.dependent) if c.dependent else None,
+                 "joint_type": c.joint_type, "axis": list(c.axis),
+                 "lower": c.lower, "upper": c.upper,
+                 "effort": c.effort, "velocity": c.velocity}
                 for c in self.connections
             ],
             "root": {"instance": self.root_instance, "port": self.root_port} if self.root_instance else None,
@@ -1021,12 +1711,27 @@ class RobotAssembly:
         """Rebuild an assembly from :meth:`to_dict` output.
 
         Modules are re-parsed from the recorded ``urdf_path``s, so those
-        files must still exist.
+        files must still exist -- unless the dict was made with
+        ``to_dict(embed=True)``, in which case the embedded URDF content
+        is materialized into a temporary directory (the builds read the
+        module files from disk) and the original paths are not needed.
         """
         assembly = cls(data["name"])
-        for inst_id, inst in data.get("instances", {}).items():
-            module = RobotModule.from_urdf(inst["module_id"],
-                                           inst["urdf_path"])
+        embed_dir = None
+        for index, (inst_id, inst) in enumerate(
+                data.get("instances", {}).items()):
+            if inst.get("urdf_content"):
+                if embed_dir is None:
+                    embed_dir = tempfile.mkdtemp(prefix="assembly_modules_")
+                # instance ids are arbitrary strings ('a/b', '..'), so
+                # never let them name the file
+                path = os.path.join(embed_dir, f"module_{index}.urdf")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(inst["urdf_content"])
+                module = RobotModule.from_urdf(inst["module_id"], path)
+            else:
+                module = RobotModule.from_urdf(inst["module_id"],
+                                               inst["urdf_path"])
             assembly.add_module_instance(inst_id, module)
         for conn in data.get("connections", []):
             assembly.connect(
@@ -1036,9 +1741,20 @@ class RobotAssembly:
                 z=conn.get("z", 0.0),
                 roll=conn.get("roll", 0.0), pitch=conn.get("pitch", 0.0),
                 yaw=conn.get("yaw", 0.0),
-                attach=conn.get("attach", "root"))
-        if data.get("root_instance"):
-            assembly.set_root(data["root_instance"], data["root_port"])
+                attach=conn.get("attach", "root"),
+                loop=conn.get("loop", False),
+                dependent=(tuple(conn["dependent"])
+                           if conn.get("dependent") else None),
+                joint_type=conn.get("joint_type", "fixed"),
+                axis=tuple(conn.get("axis", (0.0, 0.0, 1.0))),
+                lower=conn.get("lower"), upper=conn.get("upper"),
+                effort=conn.get("effort", 100.0),
+                velocity=conn.get("velocity", 1.0))
+        root = data.get("root") or {}
+        root_instance = data.get("root_instance") or root.get("instance")
+        root_port = data.get("root_port") or root.get("port")
+        if root_instance:
+            assembly.set_root(root_instance, root_port)
         return assembly
 
     def __repr__(self) -> str:

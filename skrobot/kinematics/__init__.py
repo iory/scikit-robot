@@ -18,6 +18,9 @@ from skrobot.kinematics.differentiable import extract_fk_parameters
 from skrobot.kinematics.differentiable import forward_kinematics
 from skrobot.kinematics.differentiable import forward_kinematics_ee
 
+# Loop-closure solving for cut kinematic loops
+from skrobot.kinematics.loop_closure import LoopClosureSolver
+
 # Reachability map
 from skrobot.kinematics.reachability_map import ReachabilityMap
 
@@ -28,5 +31,6 @@ __all__ = [
     'forward_kinematics_ee',
     'create_batch_ik_solver',
     'create_dynamic_limit_mask',
+    'LoopClosureSolver',
     'ReachabilityMap',
 ]
