@@ -18,6 +18,7 @@ from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import invert_yaw_pitch_roll
 from skrobot.coordinates.math import look_at_rotation
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2rotation_translation
 from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
@@ -50,12 +51,14 @@ from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
 from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
+from skrobot.coordinates.math import rotation_translation2matrix
 from skrobot.coordinates.math import rotation_vector_to_quaternion
 from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.coordinates.math import skew_symmetric_matrix
+from skrobot.coordinates.math import transform_point
 from skrobot.coordinates.math import triple_product
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzrpy2matrix
@@ -1132,6 +1135,36 @@ class TestMath(unittest.TestCase):
             r_xyz, r_rpy = matrix2xyzrpy(mat)
             testing.assert_almost_equal(r_xyz, xyz)
             testing.assert_almost_equal(r_rpy, rpy)
+
+    def test_rt2matrix_matrix2rt_round_trip(self):
+        rng = np.random.RandomState(7)
+        for _ in range(50):
+            xyz = rng.uniform(-3, 3, 3)
+            rpy = rng.uniform(-1, 1, 3)
+            matrix = xyzrpy2matrix(xyz, rpy)
+            rotation, translation = matrix2rotation_translation(matrix)
+            testing.assert_almost_equal(
+                rotation_translation2matrix(rotation, translation), matrix)
+        # matrix2rotation_translation returns copies: mutating them must not touch the source
+        matrix = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+        rotation, translation = matrix2rotation_translation(matrix)
+        rotation[0, 0] = 99.0
+        translation[0] = 99.0
+        testing.assert_almost_equal(
+            matrix, xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3]))
+
+    def test_transform_point(self):
+        rng = np.random.RandomState(8)
+        for _ in range(50):
+            matrix = xyzrpy2matrix(rng.uniform(-3, 3, 3),
+                                   rng.uniform(-1, 1, 3))
+            point = rng.uniform(-2, 2, 3)
+            homogeneous = matrix @ np.append(point, 1.0)
+            testing.assert_almost_equal(
+                transform_point(matrix, point), homogeneous[:3])
+        # identity transform leaves the point untouched
+        testing.assert_almost_equal(
+            transform_point(np.eye(4), [1, 2, 3]), [1, 2, 3])
 
     def test_matrix_relative(self):
         rng = np.random.RandomState(3)
