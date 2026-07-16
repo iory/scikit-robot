@@ -643,6 +643,16 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
                                     2.0)
 
+    def test_quaternion_slerp_identical(self):
+        # dot(q, q) lands 1 ulp above 1.0 after normalization for many
+        # quaternions, which used to reach math.acos and raise.
+        rs = np.random.RandomState(0)
+        for _ in range(100):
+            q = random_quaternion()
+            for spin in (0, 1, -1):
+                out = quaternion_slerp(q, q.copy(), rs.rand(), spin=spin)
+                testing.assert_almost_equal(out, q)
+
     def test_quaternion_distance(self):
         q1 = rpy2quaternion([0, 0, 0])
         q2 = rpy2quaternion([0, 0, 0])

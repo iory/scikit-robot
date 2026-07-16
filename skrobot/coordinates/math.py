@@ -2415,7 +2415,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     elif fraction == 1.0:
         return q1
     d = np.dot(q0, q1)
-    if abs(abs(d) - 1.0) < 0.0:
+    if abs(abs(d) - 1.0) < _EPS:
         return q0
     if shortestpath and d < 0.0:
         # invert rotation
