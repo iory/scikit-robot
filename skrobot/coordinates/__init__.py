@@ -20,6 +20,8 @@ from skrobot.coordinates.math import make_matrix
 from skrobot.coordinates.math import manipulability
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2rotation_translation
+from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_mask
