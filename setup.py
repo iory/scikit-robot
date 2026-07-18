@@ -59,6 +59,8 @@ if (sys.version_info.major > 2):
     # CoACD approximate convex decomposition
     # (skrobot.utils.convex_decomposition)
     extra_all_requires.append('coacd')
+    # USD authoring for Isaac Sim (skrobot.export.usd)
+    extra_all_requires.append('usd-core')
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
@@ -130,6 +132,10 @@ setup(
         # dedicated extra allows a minimal install.  The API raises a clear
         # error when coacd is not installed.
         'coacd': ['coacd'],
+        # USD authoring for Isaac Sim (skrobot.export.usd imports `pxr`).
+        # Pair it with 'coacd': without CoACD the exporter can only author a
+        # single convex hull per link.
+        'usd': ['usd-core'],
         'all': extra_all_requires,
     },
 )
