@@ -41,6 +41,17 @@ Examples:
                         help='Proportional gain for position actuators')
     parser.add_argument('--no-ground', action='store_true',
                         help='Do not add a ground plane / light')
+    parser.add_argument('--self-collision', action='store_true',
+                        help='Keep full self-collision (default: robot collides '
+                             'with ground but not itself)')
+    parser.add_argument('--no-actuator-forcerange', action='store_true',
+                        help='Do not cap actuator torque to the URDF effort limit')
+    parser.add_argument('--convex-decompose-collision', action='store_true',
+                        help='CoACD-decompose collision meshes into convex parts '
+                             '(accurate but slow; needs the coacd package)')
+    parser.add_argument('--coacd-quality', choices=['balanced', 'fine'],
+                        default='balanced',
+                        help='CoACD preset for --convex-decompose-collision')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -57,6 +68,10 @@ Examples:
         add_position_actuators=not args.no_actuators,
         actuator_kp=args.actuator_kp,
         add_ground=not args.no_ground,
+        self_collision=args.self_collision,
+        add_actuator_forcerange=not args.no_actuator_forcerange,
+        convex_decompose_collision=args.convex_decompose_collision,
+        coacd_quality=args.coacd_quality,
     )
     print('wrote MJCF: {}'.format(out_path))
     if args.verbose:

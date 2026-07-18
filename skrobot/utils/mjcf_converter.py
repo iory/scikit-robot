@@ -44,6 +44,10 @@ class _MeshAssets:
         self.mesh_dir = mesh_dir
         self._by_id = {}      # id(trimesh) -> asset name
         self.entries = []     # (name, filename, scale)
+        # collision-only: run CoACD on collision meshes so MuJoCo gets accurate
+        # convex parts instead of one coarse convex hull. Set by urdf_to_mjcf.
+        self.convex_decompose = False
+        self.coacd_quality = 'balanced'
         os.makedirs(mesh_dir, exist_ok=True)
 
     def _decimate(self, mesh):
@@ -102,6 +106,48 @@ class _MeshAssets:
             out.append((name, scale, color))
         return out
 
+    def add_convex_parts(self, mesh_geometry):
+        """CoACD-decompose a collision mesh into convex parts and return one
+        ``(asset_name, scale, None)`` entry per part. Falls back to the plain
+        convex hull if CoACD is unavailable or fails. Results are cached by
+        sub-mesh id since CoACD is expensive."""
+        import trimesh
+        from trimesh.exchange.stl import export_stl
+
+        from skrobot.utils.convex_decomposition import convex_decomposition
+
+        submeshes = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
+                     if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
+        scale = getattr(mesh_geometry, "scale", None)
+        base = os.path.splitext(os.path.basename(
+            getattr(mesh_geometry, "filename", "") or "mesh"))[0]
+
+        out = []
+        for sub in submeshes:
+            key = ("coacd", id(sub))
+            if key in self._by_id:
+                for name in self._by_id[key]:
+                    out.append((name, scale, None))
+                continue
+            try:
+                parts = convex_decomposition(sub, quality=self.coacd_quality)
+            except Exception:
+                parts = [sub.convex_hull]
+            names = []
+            for part in parts:
+                if len(part.faces) == 0:
+                    continue
+                name = "{}_col{}".format(base or "mesh", len(self.entries))
+                fname = name + ".stl"
+                with open(os.path.join(self.mesh_dir, fname), "wb") as f:
+                    f.write(export_stl(part))  # MuJoCo needs BINARY STL
+                self.entries.append((name, fname, scale))
+                names.append(name)
+            self._by_id[key] = names
+            for name in names:
+                out.append((name, scale, None))
+        return out
+
 
 def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
     """Emit one <geom> for a Visual/Collision; return True if emitted."""
@@ -143,7 +189,10 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
         ET.SubElement(parent_el, "geom", a)
         return True
     if geom.mesh is not None:
-        subs = assets.add(geom.mesh)
+        if collision and getattr(assets, "convex_decompose", False):
+            subs = assets.add_convex_parts(geom.mesh)
+        else:
+            subs = assets.add(geom.mesh)
         if not subs:
             return False
         for name, scale, mesh_color in subs:
@@ -209,7 +258,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  joint_armature=0.0, joint_damping=0.0,
                  add_ground=True, gravity=(0, 0, -9.81),
                  self_collision=False, add_actuator_forcerange=True,
-                 home=None, home_base_height=0.0):
+                 home=None, home_base_height=0.0,
+                 convex_decompose_collision=False, coacd_quality='balanced'):
     """Convert a URDF to an MJCF file.
 
     Parameters
@@ -245,6 +295,15 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     home_base_height : float
         Base-link height (m) used for the free-joint part of the home keyframe
         when ``floating_base`` is True.
+    convex_decompose_collision : bool
+        If True, run CoACD on every *collision* mesh and emit its convex parts
+        as separate geoms, instead of letting MuJoCo collapse the mesh to a
+        single coarse convex hull. Off by default because CoACD is slow
+        (seconds to tens of seconds per mesh). Needs the optional ``coacd``
+        package; falls back to the plain convex hull per mesh if it fails.
+    coacd_quality : str
+        CoACD preset when ``convex_decompose_collision`` is True: ``'balanced'``
+        (default, faster) or ``'fine'`` (tighter fit).
 
     Returns
     -------
@@ -260,6 +319,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     if mesh_dir is None:
         mesh_dir = os.path.join(out_dir, "assets")
     assets = _MeshAssets(mesh_dir)
+    assets.convex_decompose = convex_decompose_collision
+    assets.coacd_quality = coacd_quality
 
     # children map: parent link name -> [joints]
     children_map = {}
