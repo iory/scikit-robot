@@ -165,7 +165,7 @@ def _visual_rgba(visual):
 
 
 def _emit_body(link, joint_from_parent, urdf, assets, children_map,
-               parent_el, actuated):
+               parent_el, actuated, qpos_layout):
     """Recursively emit <body> for `link` under `parent_el`."""
     body_attrib = {"name": link.name}
     if joint_from_parent is not None:
@@ -188,6 +188,9 @@ def _emit_body(link, joint_from_parent, urdf, assets, children_map,
                 limit.lower is not None and limit.upper is not None:
             j["range"] = _fmt([limit.lower, limit.upper])
         ET.SubElement(body, "joint", j)
+        # every movable joint (mimic included) contributes one qpos entry, in
+        # this creation order -- used to lay out the optional home keyframe.
+        qpos_layout.append(joint_from_parent.name)
         if joint_from_parent.mimic is None:
             actuated.append(joint_from_parent)
 
@@ -197,14 +200,16 @@ def _emit_body(link, joint_from_parent, urdf, assets, children_map,
     for child_joint in children_map.get(link.name, []):
         child_link = urdf.link_map[child_joint.child]
         _emit_body(child_link, child_joint, urdf, assets, children_map,
-                   body, actuated)
+                   body, actuated, qpos_layout)
 
 
 def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  add_position_actuators=True, actuator_kp=50.0,
                  actuator_type="position", actuator_kv=1.0,
                  joint_armature=0.0, joint_damping=0.0,
-                 add_ground=True, gravity=(0, 0, -9.81)):
+                 add_ground=True, gravity=(0, 0, -9.81),
+                 self_collision=False, add_actuator_forcerange=True,
+                 home=None, home_base_height=0.0):
     """Convert a URDF to an MJCF file.
 
     Parameters
@@ -222,6 +227,24 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         Proportional gain for the position actuators.
     add_ground : bool
         Add a ground plane + light for a usable scene.
+    self_collision : bool
+        If False (default) the robot's collision geoms are put on a
+        ``contype=2 conaffinity=1`` mask while the ground stays ``1/1``, so the
+        robot collides with the ground but *not with itself*. Legged-locomotion
+        training almost always wants this off unless an explicit adjacency
+        filter is provided -- self intersections of neighbouring links cause
+        spawn-time blow-ups. Set True to keep full self-collision.
+    add_actuator_forcerange : bool
+        If True (default) position/velocity actuators get a ``forcerange`` taken
+        from the URDF joint effort limit, so RL policies cannot command
+        physically impossible torques (a classic "the humanoid flies" exploit).
+    home : dict[str, float] or None
+        Optional joint-name -> angle (rad) map. When given, a ``<keyframe>``
+        named ``home`` is emitted so callers can reset to a known stable pose.
+        Joints absent from the map default to 0.
+    home_base_height : float
+        Base-link height (m) used for the free-joint part of the home keyframe
+        when ``floating_base`` is True.
 
     Returns
     -------
@@ -252,14 +275,22 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     # A little rotor inertia (armature) and damping on every joint models real
     # geared servos and keeps velocity/position actuators numerically stable --
     # bare URDF inertias are often too small for a stiff servo at these timesteps.
-    if joint_armature or joint_damping:
+    if joint_armature or joint_damping or not self_collision:
         default = ET.SubElement(root, "default")
-        jd = {}
-        if joint_armature:
-            jd["armature"] = "{:.9g}".format(joint_armature)
-        if joint_damping:
-            jd["damping"] = "{:.9g}".format(joint_damping)
-        ET.SubElement(default, "joint", jd)
+        if joint_armature or joint_damping:
+            jd = {}
+            if joint_armature:
+                jd["armature"] = "{:.9g}".format(joint_armature)
+            if joint_damping:
+                jd["damping"] = "{:.9g}".format(joint_damping)
+            ET.SubElement(default, "joint", jd)
+        if not self_collision:
+            # Default mask for every geom: contype=2 conaffinity=1. Collision
+            # geoms inherit it; the ground overrides to 1/1 below and visual
+            # geoms override to 0/0. Two robot geoms (2/1 vs 2/1) then never
+            # collide, while robot(2/1)-vs-ground(1/1) does.
+            ET.SubElement(default, "geom",
+                          {"contype": "2", "conaffinity": "1"})
 
     asset_el = ET.SubElement(root, "asset")
     worldbody = ET.SubElement(root, "worldbody")
@@ -267,9 +298,12 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         ET.SubElement(worldbody, "light", {"pos": "0 0 3", "dir": "0 0 -1",
                                            "directional": "true"})
         ET.SubElement(worldbody, "geom", {"name": "ground", "type": "plane",
-                                          "size": "5 5 0.1", "rgba": "0.8 0.8 0.8 1"})
+                                          "size": "5 5 0.1",
+                                          "contype": "1", "conaffinity": "1",
+                                          "rgba": "0.8 0.8 0.8 1"})
 
     base_link = urdf.base_link
+    has_free_joint = False
     if base_link.name == "world":
         # URDF virtual root: MuJoCo already has a built-in "world" body, so don't
         # create another (would collide); attach the base link's children to it.
@@ -279,12 +313,14 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                                   {"name": base_link.name, "pos": "0 0 0"})
         if floating_base:
             ET.SubElement(base_body, "freejoint", {"name": "floating_base"})
+            has_free_joint = True
         _emit_link_content(base_link, base_body, assets)
     actuated = []
+    qpos_layout = []  # ordered movable-joint names, for the home keyframe
     for child_joint in children_map.get(base_link.name, []):
         child_link = urdf.link_map[child_joint.child]
         _emit_body(child_link, child_joint, urdf, assets, children_map,
-                   base_body, actuated)
+                   base_body, actuated, qpos_layout)
 
     # mesh assets
     for name, fname, scale in assets.entries:
@@ -316,20 +352,39 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
             has_pos_range = (j.joint_type != "continuous" and limit is not None
                              and limit.lower is not None and limit.upper is not None)
             a = {"name": j.name + "_act", "joint": j.name}
+            effort = getattr(limit, "effort", None) if limit is not None else None
             if actuator_type == "velocity":
                 a["kv"] = "{:.9g}".format(actuator_kv)
                 if limit is not None and getattr(limit, "velocity", None):
                     a["ctrlrange"] = _fmt([-limit.velocity, limit.velocity])
+                if add_actuator_forcerange and effort:
+                    a["forcerange"] = _fmt([-effort, effort])
                 ET.SubElement(act, "velocity", a)
             elif actuator_type == "motor":
-                if limit is not None and getattr(limit, "effort", None):
-                    a["ctrlrange"] = _fmt([-limit.effort, limit.effort])
+                if effort:
+                    a["ctrlrange"] = _fmt([-effort, effort])
                 ET.SubElement(act, "motor", a)
             else:  # position
                 a["kp"] = "{:.9g}".format(actuator_kp)
                 if has_pos_range:
                     a["ctrlrange"] = _fmt([limit.lower, limit.upper])
+                # Cap the torque a position servo can apply to the real motor's
+                # effort limit, so an RL policy cannot exploit unbounded torque
+                # (the classic "small humanoid learns to fly" failure).
+                if add_actuator_forcerange and effort:
+                    a["forcerange"] = _fmt([-effort, effort])
                 ET.SubElement(act, "position", a)
+
+    # home keyframe: qpos = [free-joint (7)] + one entry per movable joint,
+    # in creation order (qpos_layout). Joints absent from `home` default to 0.
+    if home is not None:
+        qpos = []
+        if has_free_joint:
+            qpos += [0.0, 0.0, float(home_base_height), 1.0, 0.0, 0.0, 0.0]
+        for jname in qpos_layout:
+            qpos.append(float(home.get(jname, 0.0)))
+        key_el = ET.SubElement(root, "keyframe")
+        ET.SubElement(key_el, "key", {"name": "home", "qpos": _fmt(qpos)})
 
     _indent(root)
     tree = ET.ElementTree(root)
