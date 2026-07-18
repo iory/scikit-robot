@@ -130,6 +130,213 @@ class TestUrdfToUsd(unittest.TestCase):
 
 
 @unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
+class TestCoacdDecomposition(unittest.TestCase):
+
+    def test_decompose_links_emits_multiple_colliders(self):
+        try:
+            import coacd  # noqa: F401
+        except ImportError:
+            self.skipTest('coacd not installed')
+        tmpdir = tempfile.mkdtemp()
+        try:
+            stage = urdf_to_usd(KUKA_URDF, os.path.join(tmpdir, 'kuka.usdc'),
+                                decompose_links=['finger'])
+            parts = [p for p in stage.Traverse()
+                     if p.HasAPI(UsdPhysics.CollisionAPI)
+                     and '_part_' in p.GetName()]
+            # a decomposed link yields more than one convex collider
+            self.assertGreater(len(parts), 1)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_coacd_params_control_fidelity(self):
+        try:
+            import coacd  # noqa: F401
+        except ImportError:
+            self.skipTest('coacd not installed')
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # a coarse budget yields fewer parts than a generous one
+            coarse = urdf_to_usd(
+                KUKA_URDF, os.path.join(tmpdir, 'coarse.usdc'),
+                decompose_links=['finger'],
+                coacd_params={'quality': 'balanced'})
+            fine = urdf_to_usd(
+                KUKA_URDF, os.path.join(tmpdir, 'fine.usdc'),
+                decompose_links=['finger'],
+                coacd_params={'threshold': 0.05, 'max_convex_hull': 32})
+
+            def n_parts(stage):
+                return len([p for p in stage.Traverse()
+                            if p.HasAPI(UsdPhysics.CollisionAPI)
+                            and '_part_' in p.GetName()])
+            self.assertGreaterEqual(n_parts(fine), n_parts(coarse))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_hull_inflation_separates_convex_from_concave(self):
+        import trimesh
+
+        from skrobot.export.usd import _hull_inflation
+        box = trimesh.creation.box((0.1, 0.1, 0.1))
+        thin = trimesh.creation.annulus(r_min=0.045, r_max=0.05, height=0.02)
+        conv = _hull_inflation(box.vertices.tolist(),
+                               box.faces.flatten().tolist())
+        conc = _hull_inflation(thin.vertices.tolist(),
+                               thin.faces.flatten().tolist())
+        self.assertAlmostEqual(conv, 1.0, places=2)   # a box IS its hull
+        self.assertGreater(conc, 2.0)                  # a thin ring is not
+
+    def test_decompose_links_true_skips_convex_links(self):
+        try:
+            import coacd  # noqa: F401
+        except ImportError:
+            self.skipTest('coacd not installed')
+        # decompose_links=True decomposes a link iff its hull inflation exceeds
+        # the threshold, so a convex link must fall below it.
+        import trimesh
+
+        from skrobot.export.usd import _DECOMPOSE_RATIO
+        from skrobot.export.usd import _hull_inflation
+        box = trimesh.creation.box((0.1, 0.1, 0.1))
+        self.assertLess(
+            _hull_inflation(box.vertices.tolist(), box.faces.flatten().tolist()),
+            _DECOMPOSE_RATIO)
+
+
+class TestHullFallbackWarns(unittest.TestCase):
+    """A requested decomposition that degrades to a hull must say so.
+
+    A single convex hull fills every cavity, so a scanned room or a gripper
+    silently becomes a solid block. Nothing downstream can detect that, which
+    is why these paths warn instead of returning None quietly.
+    """
+
+    def setUp(self):
+        from skrobot.export import usd as usd_mod
+        self.usd_mod = usd_mod
+        usd_mod._COACD_CACHE.clear()
+        self.addCleanup(usd_mod._COACD_CACHE.clear)
+        import trimesh
+        box = trimesh.creation.box((0.1, 0.1, 0.1))
+        self.pts = box.vertices.tolist()
+        self.counts = [3] * len(box.faces)
+        self.idx = box.faces.flatten().tolist()
+
+    def test_warns_when_coacd_is_missing(self):
+        original = self.usd_mod.is_coacd_available
+        self.usd_mod.is_coacd_available = lambda: False
+        self.addCleanup(setattr, self.usd_mod, 'is_coacd_available', original)
+        with self.assertWarns(RuntimeWarning) as ctx:
+            parts = self.usd_mod._coacd_parts(
+                self.pts, self.counts, self.idx, None)
+        self.assertIsNone(parts)
+        self.assertIn('coacd', str(ctx.warning))
+        self.assertIn('CONVEX HULL', str(ctx.warning))
+
+    def test_warns_when_mesh_is_not_triangulated(self):
+        with self.assertWarns(RuntimeWarning):
+            parts = self.usd_mod._coacd_parts(
+                self.pts, [4] * 6, self.idx, None)
+        self.assertIsNone(parts)
+
+    def test_warns_again_on_a_cached_failure(self):
+        # the result is cached per mesh; a second link reusing the same mesh
+        # must not degrade silently just because the first one already warned
+        original = self.usd_mod.is_coacd_available
+        self.usd_mod.is_coacd_available = lambda: True
+        self.addCleanup(setattr, self.usd_mod, 'is_coacd_available', original)
+        original_decompose = self.usd_mod.convex_decomposition
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError('coacd exploded')
+
+        self.usd_mod.convex_decomposition = _boom
+        self.addCleanup(
+            setattr, self.usd_mod, 'convex_decomposition', original_decompose)
+        with self.assertWarns(RuntimeWarning) as first:
+            self.usd_mod._coacd_parts(self.pts, self.counts, self.idx, None)
+        self.assertIn('coacd exploded', str(first.warning))
+        with self.assertWarns(RuntimeWarning) as second:
+            parts = self.usd_mod._coacd_parts(
+                self.pts, self.counts, self.idx, None)
+        self.assertIsNone(parts)
+        self.assertIn('already failed', str(second.warning))
+
+
+class TestCoacdCacheKey(unittest.TestCase):
+
+    def setUp(self):
+        from skrobot.export import usd as usd_mod
+        self.usd_mod = usd_mod
+        usd_mod._COACD_CACHE.clear()
+        self.addCleanup(usd_mod._COACD_CACHE.clear)
+
+    def test_cache_key_includes_face_topology(self):
+        # Same vertices and same triangle count, but different face topology.
+        verts = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ]
+        faces_a = np.array([
+            [0, 1, 2], [0, 2, 3],
+            [4, 6, 5], [4, 7, 6],
+            [0, 4, 5], [0, 5, 1],
+            [1, 5, 6], [1, 6, 2],
+            [2, 6, 7], [2, 7, 3],
+            [3, 7, 4], [3, 4, 0],
+        ], dtype=int)
+        faces_b = faces_a.copy()
+        faces_b[0] = [0, 1, 3]
+        faces_b[1] = [1, 2, 3]
+        counts = [3] * len(faces_a)
+
+        original_available = self.usd_mod.is_coacd_available
+        self.usd_mod.is_coacd_available = lambda: True
+        self.addCleanup(
+            setattr, self.usd_mod, 'is_coacd_available', original_available)
+        original_decompose = self.usd_mod.convex_decomposition
+        calls = []
+
+        class _DummyPart(object):
+
+            def __init__(self, marker):
+                self.vertices = np.array(
+                    [[0.0 + marker, 0.0, 0.0],
+                     [1.0 + marker, 0.0, 0.0],
+                     [0.0 + marker, 1.0, 0.0],
+                     [0.0 + marker, 0.0, 1.0]], dtype=float)
+                self.faces = np.array(
+                    [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], dtype=int)
+                self.is_watertight = True
+
+        def _fake_decompose(mesh, **kwargs):
+            del kwargs
+            calls.append(np.asarray(mesh.faces, dtype=int).copy())
+            return [_DummyPart(float(len(calls)))]
+
+        self.usd_mod.convex_decomposition = _fake_decompose
+        self.addCleanup(
+            setattr, self.usd_mod, 'convex_decomposition', original_decompose)
+
+        out_a = self.usd_mod._coacd_parts(
+            verts, counts, faces_a.flatten().tolist(), None)
+        out_b = self.usd_mod._coacd_parts(
+            verts, counts, faces_b.flatten().tolist(), None)
+        self.assertIsNotNone(out_a)
+        self.assertIsNotNone(out_b)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(self.usd_mod._COACD_CACHE), 2)
+        self.assertNotEqual(out_a[0][0][0][0], out_b[0][0][0][0])
+
+
+@unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
 class TestSilentWrongSceneGuards(unittest.TestCase):
 
     def setUp(self):
@@ -195,7 +402,8 @@ class TestSilentWrongSceneGuards(unittest.TestCase):
             warnings.simplefilter('always')
             stage = urdf_to_usd(
                 self._write_urdf('primitive_shapes.urdf', urdf),
-                os.path.join(self.tmpdir, 'primitive_shapes.usdc'))
+                os.path.join(self.tmpdir, 'primitive_shapes.usdc'),
+                decompose_links=['base_link'])
         msgs = [str(w.message) for w in records]
         self.assertFalse(any('primitive' in m and 'omitted' in m for m in msgs))
 
@@ -212,6 +420,12 @@ class TestSilentWrongSceneGuards(unittest.TestCase):
             prim = stage.GetPrimAtPath('/robot/base_link/collision_{}'.format(i))
             self.assertTrue(prim.IsValid())
             self.assertTrue(prim.HasAPI(UsdPhysics.CollisionAPI))
+        self.assertEqual(
+            len([p for p in stage.Traverse()
+                 if p.HasAPI(UsdPhysics.CollisionAPI)
+                 and '_part_' in p.GetName()]),
+            0)
+
         np.testing.assert_allclose(
             _world_extent(stage, '/robot/base_link/collision_0'),
             np.array([0.2, 0.4, 0.6]), atol=1e-6, rtol=0.0)
@@ -325,9 +539,6 @@ class TestSilentWrongSceneGuards(unittest.TestCase):
         msgs = [str(w.message) for w in records]
         self.assertFalse(any('recompute_inertia=True' in m for m in msgs))
 
-
-if __name__ == '__main__':
-    unittest.main()
 
 if __name__ == '__main__':
     unittest.main()
