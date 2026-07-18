@@ -17,6 +17,8 @@ import warnings
 import numpy as np
 
 from skrobot.urdf.sanitize import sanitize_name
+from skrobot.utils.convex_decomposition import convex_decomposition
+from skrobot.utils.convex_decomposition import is_coacd_available
 
 
 # Floors for massless URDF frame links (see urdf_to_usd). A rigid body with no
@@ -24,6 +26,11 @@ from skrobot.urdf.sanitize import sanitize_name
 # articulation dynamics; these tiny positive values keep such frames valid.
 _MASSLESS_FLOOR_KG = 1e-5
 _MASSLESS_INERTIA_FLOOR = 1e-6
+
+# decompose_links=True auto-decomposes a link only when its single convex hull
+# is at least this many times the true mesh volume, i.e. the link is measurably
+# concave. Near-convex links (ratio ~1) keep the cheap single hull.
+_DECOMPOSE_RATIO = 2.0
 
 _NO_MESH_INERTIA_REASON = 'no collision or visual mesh geometry was found'
 
@@ -361,7 +368,8 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
                 self_collision=False, home_positions=None, mobile_base=False,
                 base_drive_stiffness=1e5, base_drive_damping=1e4,
                 auto_gain=True, gain_max_scale=25.0, gain_ref_percentile=35.0,
-                recompute_inertia=True, armature=0.0, inertia_floor=0.0):
+                recompute_inertia=True, armature=0.0, inertia_floor=0.0,
+                decompose_links=None, coacd_params=None):
     """Convert a URDF to a USD physics articulation written to ``out_path``
     (.usd/.usda). Returns the USD stage.
 
@@ -382,6 +390,25 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         of many robots self-collides, and although self-collision is disabled in
         PhysX the links still visibly interpenetrate at zero. Driving to a
         reset pose gives a clean, collision-free resting posture.
+    decompose_links : bool, list[str], or None
+        Which links get their collision mesh convex-DECOMPOSED with CoACD
+        instead of reduced to a single convex hull. ``None`` (default) decomposes
+        nothing; ``True`` decomposes every link whose single hull is measurably
+        concave (hull volume >= _DECOMPOSE_RATIO x the mesh); a list of names (or
+        substrings) decomposes exactly those links. Requires the ``coacd``
+        package; falls back to a single hull if it is missing.
+
+        A single hull fills in a concave part, so a cavity becomes solid and
+        nothing fits into it (this is what stops a gripper from closing on an
+        object). Decomposition costs seconds per unique mesh (cached across links
+        that share it) and adds many PhysX shapes, so ``None`` is the default and
+        near-convex links are skipped even under ``True``.
+    coacd_params : dict or None
+        Parameters forwarded to
+        :func:`skrobot.utils.convex_decomposition.convex_decomposition`
+        (``threshold``, ``max_convex_hull``, ``quality``, ...) for the
+        decomposed links. Defaults to a tight fit suitable for gripper cups;
+        pass ``{'quality': 'balanced'}`` for a coarser, faster result.
     """
     from pxr import Gf
     from pxr import Sdf
@@ -393,6 +420,11 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
     from skrobot.utils.urdf import URDF
 
     home_positions = dict(home_positions or {})
+    if coacd_params is None:
+        # tight enough that a gripper's concave cup is not filled in
+        coacd_params = {'threshold': 0.05, 'max_convex_hull': 32,
+                                    'preprocess_resolution': 50,
+                                    'mcts_iterations': 150}
 
     if isinstance(urdf, str):
         urdf = URDF.load(urdf)
@@ -471,7 +503,15 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
             mapi.CreateDiagonalInertiaAttr(Gf.Vec3f(_mif, _mif, _mif))
             mapi.CreatePrincipalAxesAttr(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
 
-        _emit_geoms(stage, UsdGeom, UsdPhysics, Gf, Vt, path, link)
+        if decompose_links is True:
+            _decompose = "auto"      # decide per link by concavity (in _emit_one)
+        elif decompose_links:
+            _decompose = "force" if any(pat in link.name
+                                        for pat in decompose_links) else False
+        else:
+            _decompose = False
+        _emit_geoms(stage, UsdGeom, UsdPhysics, Gf, Vt, path, link,
+                    decompose=_decompose, coacd_params=coacd_params)
 
     base = link_path[urdf.base_link.name]
     if mobile_base and not floating_base:
@@ -547,13 +587,112 @@ def _srgb_to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-def _emit_geoms(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, link):
+_COACD_CACHE = {}
+
+
+def _hull_inflation(all_pts, all_idx):
+    """Ratio of a mesh's single convex hull volume to its own volume.
+
+    ~1 for a convex link; large for a concave one (a cup, a C-shape). Used by
+    decompose="auto" to decompose only the links that are actually concave.
+    Returns 1.0 if trimesh is unavailable or the mesh is degenerate.
+    """
+    try:
+        import trimesh as _tm
+        m = _tm.Trimesh(vertices=np.asarray(all_pts, dtype=float),
+                        faces=np.asarray(all_idx, dtype=int).reshape(-1, 3),
+                        process=False)
+        if m.volume <= 1e-12:
+            return 1.0
+        return float(m.convex_hull.volume / m.volume)
+    except Exception:  # noqa: BLE001
+        return 1.0
+
+
+def _warn_hull_fallback(reason):
+    """Warn that a requested convex decomposition silently degraded to a hull.
+
+    Parameters
+    ----------
+    reason : str
+        Why the decomposition did not run, phrased for the caller.
+    """
+    warnings.warn(
+        'convex decomposition was requested for this link but did not run '
+        '({}); the collider falls back to a SINGLE CONVEX HULL. A hull fills '
+        'every cavity, so a room, shell or gripper becomes a solid block that '
+        'nothing can enter or grasp.'.format(reason),
+        RuntimeWarning, stacklevel=3)
+
+
+def _coacd_parts(all_pts, all_counts, all_idx, coacd_params):
+    """Convex-decompose a collision mesh with CoACD via
+    :func:`skrobot.utils.convex_decomposition.convex_decomposition`; return each
+    part as (points, faces) ready to author as a convex collider.
+
+    A single convex hull fills in a concave part, so any cavity becomes solid.
+
+    Returns None (caller falls back to a single hull) if the mesh is not
+    triangles or CoACD is unavailable. Every such path warns first: silently
+    authoring a hull where a decomposition was asked for produces a collider
+    that is wrong in a way nothing downstream can detect. Results are cached on
+    the mesh contents and parameters, since one mesh file is often reused
+    across links.
+    """
+    import hashlib
+
+    if any(int(c) != 3 for c in all_counts):
+        # convex_decomposition needs a triangle mesh
+        _warn_hull_fallback('the collision mesh is not triangulated')
+        return None
+    if not is_coacd_available():
+        _warn_hull_fallback(
+            "the optional 'coacd' package is not installed -- "
+            'install it with: pip install coacd')
+        return None
+    import trimesh as _tm
+
+    verts = np.asarray(all_pts, dtype=float)
+    faces = np.asarray(all_idx, dtype=int).reshape(-1, 3)
+    key = (hashlib.md5(verts.tobytes()).hexdigest(),
+           hashlib.md5(faces.tobytes()).hexdigest(),
+           tuple(sorted((coacd_params or {}).items())))
+    if key in _COACD_CACHE:
+        cached = _COACD_CACHE[key]
+        if cached is None:
+            _warn_hull_fallback('CoACD already failed on this mesh')
+        return cached
+
+    try:
+        parts = convex_decomposition(
+            _tm.Trimesh(vertices=verts, faces=faces, process=False),
+            **(coacd_params or {}))
+    except Exception as e:  # noqa: BLE001
+        _COACD_CACHE[key] = None
+        _warn_hull_fallback('CoACD raised {}: {}'.format(
+            type(e).__name__, e))
+        return None
+
+    # convex_decomposition already returns watertight convex hulls
+    out = [(p.vertices.tolist(), np.asarray(p.faces, dtype=int))
+           for p in parts if p.is_watertight and len(p.vertices) >= 4]
+    if not out:
+        _warn_hull_fallback(
+            'CoACD returned no usable watertight convex parts')
+        out = None
+    _COACD_CACHE[key] = out
+    return out
+
+
+def _emit_geoms(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, link,
+                decompose=False, coacd_params=None):
     for i, vis in enumerate(getattr(link, "visuals", []) or []):
         _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vis, i,
                   collision=False, link_name=link.name)
     for i, col in enumerate(getattr(link, "collisions", []) or []):
         _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, col, i,
-                  collision=True, link_name=link.name)
+                  collision=True, decompose=decompose,
+                  coacd_params=coacd_params, link_name=link.name)
 
 
 def _visual_rgb(vc):
@@ -566,7 +705,7 @@ def _visual_rgb(vc):
 
 
 def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collision,
-              link_name=None):
+              decompose=False, coacd_params=None, link_name=None):
     geom = getattr(vc, "geometry", None)
     if geom is None:
         return
@@ -653,6 +792,33 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         if len(all_pts) < 4:
             return  # cannot form a 3D convex hull
 
+        def _emit_convex(path_name, pts, counts, idx):
+            p = link_path.AppendChild(path_name)
+            mesh = UsdGeom.Mesh.Define(stage, p)
+            mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in pts]))
+            mesh.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
+            mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(idx))
+            mesh.AddTransformOp().Set(_mat_to_gf(None, origin))
+            UsdGeom.Imageable(mesh).MakeInvisible()  # collider is not rendered
+            UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+            mc = UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim())
+            mc.CreateApproximationAttr(UsdPhysics.Tokens.convexHull)
+
+        # Each part becomes its own convexHull collider; PhysX unions the
+        # shapes on the link. Under decompose="auto", only decompose when the
+        # single hull is measurably bigger than the true mesh (i.e. concave).
+        _do_decompose = decompose == "force" or (
+            decompose == "auto" and _hull_inflation(all_pts, all_idx)
+            >= _DECOMPOSE_RATIO)
+        if _do_decompose:
+            parts = _coacd_parts(all_pts, all_counts, all_idx, coacd_params)
+            if parts:
+                for k, (pts_k, faces_k) in enumerate(parts):
+                    _emit_convex("collision_{}_part_{}".format(index, k),
+                                 pts_k, [3] * len(faces_k),
+                                 faces_k.flatten().tolist())
+                return
+
         # Reduce to an ACTUAL convex hull (a few clean vertices) instead of
         # handing PhysX the raw, dense, non-watertight point soup: dense or
         # degenerate input cooks into a bad hull that destabilises the
@@ -667,16 +833,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
                 all_idx = _hf.flatten().tolist()
         except Exception:  # noqa: BLE001
             pass
-        p = link_path.AppendChild("collision_{}".format(index))
-        mesh = UsdGeom.Mesh.Define(stage, p)
-        mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in all_pts]))
-        mesh.CreateFaceVertexCountsAttr(Vt.IntArray(all_counts))
-        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(all_idx))
-        mesh.AddTransformOp().Set(_mat_to_gf(None, origin))
-        UsdGeom.Imageable(mesh).MakeInvisible()  # collider is not rendered
-        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-        mc = UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim())
-        mc.CreateApproximationAttr(UsdPhysics.Tokens.convexHull)
+        _emit_convex("collision_{}".format(index), all_pts, all_counts, all_idx)
         return
 
     # The URDF's <material> on a visual OVERRIDES the colour baked into the mesh
