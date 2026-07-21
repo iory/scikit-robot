@@ -23,7 +23,6 @@ from lxml import etree as ET
 import networkx as nx
 import numpy as np
 import PIL.Image
-import six
 
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import normalize_vector
@@ -1256,7 +1255,7 @@ class Mesh(URDFType):
 
     @meshes.setter
     def meshes(self, value):
-        if isinstance(value, six.string_types):
+        if isinstance(value, str):
             value = load_meshes(value)
             self._meshes = value
             return
@@ -1946,7 +1945,7 @@ class Material(URDFType):
     @texture.setter
     def texture(self, value):
         if value is not None:
-            if isinstance(value, six.string_types):
+            if isinstance(value, str):
                 image = PIL.Image.open(value)
                 value = Texture(filename=value, image=image)
             elif not isinstance(value, Texture):
@@ -3715,7 +3714,7 @@ class URDF(URDFType):
         urdf : :class:`.URDF`
             The parsed URDF.
         """
-        if isinstance(file_obj, six.string_types):
+        if isinstance(file_obj, str):
             path, _ = os.path.split(file_obj)
         else:
             path, _ = os.path.split(os.path.realpath(file_obj.name))
@@ -3792,7 +3791,7 @@ class URDF(URDFType):
         urdf : :class:`.URDF`
             The parsed URDF.
         """
-        if isinstance(file_obj, six.string_types):
+        if isinstance(file_obj, str):
             # Handle package:// URLs
             if file_obj.startswith('package://'):
                 resolved_path = resolve_filepath(os.getcwd(), file_obj)

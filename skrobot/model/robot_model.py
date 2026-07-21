@@ -10,7 +10,6 @@ import warnings
 import numpy as np
 import numpy.linalg as LA
 from ordered_set import OrderedSet
-import six
 
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import CascadedCoords
@@ -3236,7 +3235,7 @@ class RobotModel(CascadedLink):
             although their mimic definitions are still processed and applied
             to the joints they mimic.
         """
-        if isinstance(file_obj, six.string_types):
+        if isinstance(file_obj, str):
             self.urdf_path = file_obj
         else:
             self.urdf_path = getattr(file_obj, 'name', None)

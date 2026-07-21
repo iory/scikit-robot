@@ -1,5 +1,3 @@
-from __future__ import division
-
 from logging import getLogger
 from math import floor
 import os
