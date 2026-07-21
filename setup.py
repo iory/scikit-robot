@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import os
 import re
 import sys
@@ -108,14 +106,14 @@ setup(
         'Natural Language :: English',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: Python :: Implementation :: CPython',
     ],
+    python_requires='>=3.10',
     packages=find_packages(),
     package_data={'skrobot': listup_package_data()},
     zip_safe=False,

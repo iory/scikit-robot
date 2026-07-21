@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import math
 from math import acos
 from math import cos
