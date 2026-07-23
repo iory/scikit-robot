@@ -149,8 +149,17 @@ class _MeshAssets:
         return out
 
 
-def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
-    """Emit one <geom> for a Visual/Collision; return True if emitted."""
+def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
+              name_prefix=None, name_counter=None):
+    """Emit one <geom> for a Visual/Collision; return True if emitted.
+
+    ``name_prefix`` (normally the link name) makes every geom addressable by
+    name, following the MuJoCo convention ``<link>_collision<N>`` /
+    ``<link>_visual<N>``. Tools commonly select geoms by name (e.g. to enable
+    contact only on the feet, or to attach a contact sensor), and such filtering
+    silently breaks down on a model whose geoms are all unnamed. Emitting a
+    unique name for each geom keeps the model addressable.
+    """
     geom = getattr(visual_or_collision, "geometry", None)
     if geom is None:
         return False
@@ -160,6 +169,17 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
     pos, quat = matrix2translation_quaternion_wxyz(origin)
 
     base_attrib = {"pos": _fmt(pos), "quat": _fmt(quat)}
+
+    def _named(attrib):
+        """Attach a unique ``<link>_collision<N>`` / ``<link>_visual<N>`` name."""
+        if name_prefix is None:
+            return attrib
+        kind = "collision" if collision else "visual"
+        index = 0 if name_counter is None else name_counter[kind]
+        if name_counter is not None:
+            name_counter[kind] += 1
+        return dict(attrib, name="{}_{}{}".format(name_prefix, kind, index))
+
     if collision:
         base_attrib["group"] = "3"
     else:
@@ -173,20 +193,20 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
                  size=_fmt(np.asarray(geom.box.size, dtype=float) / 2.0))
         if rgba is not None:
             a["rgba"] = _fmt(rgba)
-        ET.SubElement(parent_el, "geom", a)
+        ET.SubElement(parent_el, "geom", _named(a))
         return True
     if geom.cylinder is not None:
         a = dict(base_attrib, type="cylinder",
                  size=_fmt([geom.cylinder.radius, geom.cylinder.length / 2.0]))
         if rgba is not None:
             a["rgba"] = _fmt(rgba)
-        ET.SubElement(parent_el, "geom", a)
+        ET.SubElement(parent_el, "geom", _named(a))
         return True
     if geom.sphere is not None:
         a = dict(base_attrib, type="sphere", size=_fmt([geom.sphere.radius]))
         if rgba is not None:
             a["rgba"] = _fmt(rgba)
-        ET.SubElement(parent_el, "geom", a)
+        ET.SubElement(parent_el, "geom", _named(a))
         return True
     if geom.mesh is not None:
         if collision and getattr(assets, "convex_decompose", False):
@@ -201,7 +221,7 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None):
             eff = rgba if rgba is not None else mesh_color
             if eff is not None:
                 a["rgba"] = _fmt(eff)
-            ET.SubElement(parent_el, "geom", a)
+            ET.SubElement(parent_el, "geom", _named(a))
         return True
     return False
 
@@ -214,14 +234,24 @@ def _visual_rgba(visual):
 
 
 def _emit_body(link, joint_from_parent, urdf, assets, children_map,
-               parent_el, actuated, qpos_layout):
-    """Recursively emit <body> for `link` under `parent_el`."""
+               parent_el, actuated, qpos_layout, add_free_joint=False):
+    """Recursively emit <body> for `link` under `parent_el`.
+
+    When ``add_free_joint`` is True a ``<freejoint>`` is emitted on this body,
+    turning it into a floating base. This is used when the URDF root is a
+    virtual ``world`` link whose single child (the real base, e.g. a torso) is
+    attached by a fixed joint: with ``floating_base`` the weld must become a
+    free joint instead. Recursive children always default to False.
+    """
     body_attrib = {"name": link.name}
     if joint_from_parent is not None:
         pos, quat = matrix2translation_quaternion_wxyz(joint_from_parent.origin)
         body_attrib["pos"] = _fmt(pos)
         body_attrib["quat"] = _fmt(quat)
     body = ET.SubElement(parent_el, "body", body_attrib)
+
+    if add_free_joint:
+        ET.SubElement(body, "freejoint", {"name": "floating_base"})
 
     # joint (movable only; fixed joint -> no <joint> element = weld)
     if joint_from_parent is not None and joint_from_parent.joint_type != "fixed":
@@ -365,10 +395,24 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
 
     base_link = urdf.base_link
     has_free_joint = False
+    free_world_children = False
     if base_link.name == "world":
         # URDF virtual root: MuJoCo already has a built-in "world" body, so don't
         # create another (would collide); attach the base link's children to it.
         base_body = worldbody
+        if floating_base:
+            world_children = children_map.get(base_link.name, [])
+            if len(world_children) == 1:
+                # The single real base (torso) is welded to `world` by a fixed
+                # joint; with floating_base that weld must become a free joint.
+                free_world_children = True
+                has_free_joint = True
+            else:
+                import warnings
+                warnings.warn(
+                    "floating_base requested but URDF root 'world' has "
+                    "{} children; leaving the base welded (a single floating "
+                    "base is ambiguous).".format(len(world_children)))
     else:
         base_body = ET.SubElement(worldbody, "body",
                                   {"name": base_link.name, "pos": "0 0 0"})
@@ -381,7 +425,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     for child_joint in children_map.get(base_link.name, []):
         child_link = urdf.link_map[child_joint.child]
         _emit_body(child_link, child_joint, urdf, assets, children_map,
-                   base_body, actuated, qpos_layout)
+                   base_body, actuated, qpos_layout,
+                   add_free_joint=free_world_children)
 
     # mesh assets
     for name, fname, scale in assets.entries:
@@ -487,10 +532,15 @@ def _emit_link_content(link, body_el, assets):
             ET.SubElement(body_el, "inertial", _inertial_attrib(inertial))
         except Exception:
             pass  # degenerate inertial -> let MuJoCo infer from geoms
+    # One counter per link so names are unique and stable across sub-meshes.
+    counter = {"visual": 0, "collision": 0}
+    link_name = getattr(link, "name", None)
     for vis in getattr(link, "visuals", []) or []:
-        _add_geom(body_el, vis, assets, collision=False, rgba=_visual_rgba(vis))
+        _add_geom(body_el, vis, assets, collision=False, rgba=_visual_rgba(vis),
+                  name_prefix=link_name, name_counter=counter)
     for col in getattr(link, "collisions", []) or []:
-        _add_geom(body_el, col, assets, collision=True)
+        _add_geom(body_el, col, assets, collision=True,
+                  name_prefix=link_name, name_counter=counter)
 
 
 def _indent(elem, level=0):
