@@ -3159,6 +3159,77 @@ def xyzrpy2matrix(xyz, rpy):
     return matrix
 
 
+def matrix2translation_quaternion_wxyz(matrix):
+    """Split a 4x4 homogeneous transform into translation and quaternion.
+
+    Same split as :func:`matrix2xyzrpy`, but the rotation is returned as a
+    quaternion in ``[w, x, y, z]`` order (the convention of
+    :func:`matrix2quaternion`, and the one MuJoCo/MJCF uses). Use
+    :func:`matrix2translation_quaternion_xyzw` for the ``[x, y, z, w]`` order
+    used by ROS and SciPy.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    translation : numpy.ndarray
+        translation, shape (3,).
+    quaternion : numpy.ndarray
+        quaternion ``[w, x, y, z]``, shape (4,).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+    >>> from skrobot.coordinates.math import xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0, 0, 0])
+    >>> translation, quaternion = matrix2translation_quaternion_wxyz(T)
+    >>> np.allclose(translation, [1, 2, 3])
+    True
+    >>> np.allclose(quaternion, [1, 0, 0, 0])
+    True
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, 3].copy(), matrix2quaternion(matrix[:3, :3])
+
+
+def matrix2translation_quaternion_xyzw(matrix):
+    """Split a 4x4 homogeneous transform into translation and quaternion.
+
+    Same as :func:`matrix2translation_quaternion_wxyz`, but the quaternion is
+    returned in ``[x, y, z, w]`` order (the convention used by ROS and SciPy).
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    translation : numpy.ndarray
+        translation, shape (3,).
+    quaternion : numpy.ndarray
+        quaternion ``[x, y, z, w]``, shape (4,).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
+    >>> from skrobot.coordinates.math import xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0, 0, 0])
+    >>> translation, quaternion = matrix2translation_quaternion_xyzw(T)
+    >>> np.allclose(translation, [1, 2, 3])
+    True
+    >>> np.allclose(quaternion, [0, 0, 0, 1])
+    True
+    """
+    translation, quaternion = matrix2translation_quaternion_wxyz(matrix)
+    return translation, wxyz2xyzw(quaternion)
+
+
 def rotation_translation2matrix(rotation, translation):
     """Compose a 4x4 homogeneous transform from rotation and translation.
 

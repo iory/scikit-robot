@@ -197,6 +197,40 @@ def jaxon_urdfpath():
     return path
 
 
+def g1_urdfpath(dof=23):
+    """Path to the Unitree G1 humanoid URDF.
+
+    Downloads a pinned snapshot of
+    `isri-aist/g1_description
+    <https://github.com/isri-aist/g1_description>`_ (URDF + STL meshes
+    derived from Unitree's official ``g1_description``), licensed under
+    BSD-3-Clause. The same archive also ships reference MJCF files under
+    ``mjcf/`` which are handy for cross-checking our URDF->MJCF converter.
+
+    Parameters
+    ----------
+    dof : int
+        Which G1 variant to load. ``23`` (default: 12 leg + waist_yaw + 10 arm
+        joints, the standard locomotion model) or ``29`` (adds waist
+        roll/pitch and wrist pitch/yaw).
+    """
+    if dof not in (23, 29):
+        raise ValueError('g1 dof must be 23 or 29, got {}'.format(dof))
+    sha = 'e4fa30ffcd239fe405ec3942a58b554131598615'
+    base = 'g1_description-{}'.format(sha)
+    path = osp.join(get_cache_dir(), base, 'urdf', 'g1_{}dof.urdf'.format(dof))
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url=('https://github.com/isri-aist/g1_description'
+             '/archive/{}.tar.gz'.format(sha)),
+        fname='{}.tar.gz'.format(base),
+        md5='849dc7df75eab91509e345c554e926b2',
+        extract=True,
+    )
+    return path
+
+
 def jedy_urdfpath():
     path = osp.join(get_cache_dir(),
                     'jedy_description', 'urdf', 'jedy.urdf')

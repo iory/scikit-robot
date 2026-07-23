@@ -21,6 +21,7 @@ from skrobot.urdf.wheel_collision_converter import convert_wheel_collisions_to_c
 from skrobot.urdf.wheel_collision_converter import get_mesh_dimensions
 from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
 from skrobot.urdf.xml_root_link_changer import URDFXMLRootLinkChanger
+from skrobot.utils.mjcf_converter import urdf_to_mjcf
 
 
 __all__ = [
@@ -47,4 +48,5 @@ __all__ = [
     'compute_jaw_gripper_frame',
     'sanitize_name',
     'sanitize_urdf_names',
+    'urdf_to_mjcf',
 ]

@@ -20,6 +20,8 @@ from skrobot.coordinates.math import look_at_rotation
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import matrix2rotation_translation
 from skrobot.coordinates.math import matrix2rpy
+from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import matrix_relative
@@ -1135,6 +1137,23 @@ class TestMath(unittest.TestCase):
             r_xyz, r_rpy = matrix2xyzrpy(mat)
             testing.assert_almost_equal(r_xyz, xyz)
             testing.assert_almost_equal(r_rpy, rpy)
+
+    def test_matrix2translation_quaternion(self):
+        rng = np.random.RandomState(3)
+        for _ in range(50):
+            xyz = rng.uniform(-5, 5, 3)
+            rpy = rng.uniform(-1, 1, 3)
+            mat = xyzrpy2matrix(xyz, rpy)
+
+            translation, quat_wxyz = matrix2translation_quaternion_wxyz(mat)
+            testing.assert_almost_equal(translation, xyz)
+            self.assertEqual(quat_wxyz.shape, (4,))
+            testing.assert_almost_equal(
+                quaternion2matrix(quat_wxyz), mat[:3, :3])
+
+            translation, quat_xyzw = matrix2translation_quaternion_xyzw(mat)
+            testing.assert_almost_equal(translation, xyz)
+            testing.assert_almost_equal(quat_xyzw, wxyz2xyzw(quat_wxyz))
 
     def test_rt2matrix_matrix2rt_round_trip(self):
         rng = np.random.RandomState(7)
