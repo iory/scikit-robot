@@ -536,3 +536,30 @@ def replace_package_references(content, old_package, new_package):
     content = re.sub(r'\$\(find {}\)'.format(escaped),
                      '$(find {})'.format(new_package), content)
     return content
+
+
+def rewrite_mesh_package_references(urdf_content, package_name):
+    """Rewrite mesh ``package://`` references to a target package name.
+
+    Replaces the package portion of every
+    ``package://<any>/meshes/...`` reference with ``package_name``,
+    regardless of the original package name.  Unlike
+    :func:`replace_package_references`, the original name does not need
+    to be known -- this is useful when bundling a URDF into a freshly
+    named package whose meshes live under ``<package_name>/meshes/``.
+
+    Parameters
+    ----------
+    urdf_content : str
+        URDF XML content.
+    package_name : str
+        Target ROS package name.
+
+    Returns
+    -------
+    str
+        URDF with rewritten mesh package references.
+    """
+    return re.sub(r'package://[^/]+/meshes/',
+                  'package://{}/meshes/'.format(package_name),
+                  urdf_content)

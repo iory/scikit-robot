@@ -116,6 +116,33 @@ class TestExportAllConfigs(unittest.TestCase):
                 'two_link/urdf/ros2_control.xacro').decode('utf-8')
             self.assertIn('$(find two_link)/config/controllers.yaml', xacro)
 
+    def test_zip_bundle_rewrites_mesh_package(self):
+        # mesh references to a foreign package must be rewritten to the
+        # bundle's own package name so the archive is self-contained
+        urdf = (
+            '<?xml version="1.0"?>\n'
+            '<robot name="two_link">\n'
+            '  <link name="base_link">\n'
+            '    <visual><geometry>'
+            '<mesh filename="package://foreign_pkg/meshes/base.stl"/>'
+            '</geometry></visual>\n'
+            '  </link>\n'
+            '</robot>\n')
+        blob = export_all_configs(
+            urdf_content=urdf,
+            joints=[],
+            planning_groups=[],
+            controllers=[],
+            disabled_collision_pairs=[],
+            gazebo_physics={'gravity': [0, 0, -9.81]},
+            gazebo_plugins=[],
+            robot_name='two_link')
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            urdf_out = archive.read(
+                'two_link/urdf/two_link.urdf').decode('utf-8')
+            self.assertIn('package://two_link/meshes/base.stl', urdf_out)
+            self.assertNotIn('foreign_pkg', urdf_out)
+
 
 if __name__ == '__main__':
     unittest.main()

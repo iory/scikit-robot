@@ -15,6 +15,7 @@ from skrobot.urdf.ros_config.gazebo_generator import generate_gazebo_config
 from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
 from skrobot.urdf.ros_config.moveit_generator import generate_controllers_yaml
 from skrobot.urdf.ros_config.moveit_generator import generate_srdf
+from skrobot.urdf.ros_package import rewrite_mesh_package_references
 
 
 def export_all_configs(
@@ -72,9 +73,13 @@ def export_all_configs(
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        # URDF (original)
+        # URDF (mesh package references rewritten to this package name so
+        # the bundle is self-contained under ``{robot_name}/``)
         if export_options.get("includeUrdf", True):
-            zf.writestr(f"{robot_name}/urdf/{robot_name}.urdf", urdf_content)
+            zf.writestr(
+                f"{robot_name}/urdf/{robot_name}.urdf",
+                rewrite_mesh_package_references(urdf_content, robot_name),
+            )
 
         # MoveIt SRDF and controllers
         if export_options.get("includeMoveIt", True):
