@@ -12,6 +12,7 @@ from skrobot.urdf.ros_package import generate_ros1_display_launch
 from skrobot.urdf.ros_package import generate_ros1_display_package_xml
 from skrobot.urdf.ros_package import generate_ros1_rviz_config
 from skrobot.urdf.ros_package import replace_package_references
+from skrobot.urdf.ros_package import rewrite_mesh_package_references
 
 
 class TestPackageSkeleton(unittest.TestCase):
@@ -107,6 +108,24 @@ class TestResourceReferences(unittest.TestCase):
         self.assertIn('package://not_old_pkg/m.stl', out)
         self.assertIn('package://new_pkg/m.stl', out)
         self.assertTrue(out.endswith(' old_pkg'))
+
+    def test_rewrite_mesh_package_references(self):
+        # every mesh reference must point at the target package, regardless
+        # of the (possibly differing) original package names
+        content = ('a="package://foo/meshes/x.stl" '
+                   'b="package://bar/meshes/sub/y.dae"')
+        out = rewrite_mesh_package_references(content, 'robot')
+        self.assertIn('package://robot/meshes/x.stl', out)
+        self.assertIn('package://robot/meshes/sub/y.dae', out)
+        self.assertNotIn('package://foo/', out)
+        self.assertNotIn('package://bar/', out)
+
+    def test_rewrite_mesh_package_references_leaves_non_meshes(self):
+        # references outside meshes/ (e.g. textures) are left untouched
+        content = 'package://foo/materials/t.png package://foo/meshes/a.stl'
+        out = rewrite_mesh_package_references(content, 'robot')
+        self.assertIn('package://foo/materials/t.png', out)
+        self.assertIn('package://robot/meshes/a.stl', out)
 
 
 if __name__ == '__main__':
