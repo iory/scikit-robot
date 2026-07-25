@@ -1,0 +1,9 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: $package_name
+    relative_path: config/${robot_name}.urdf
+  srdf:
+    relative_path: config/${robot_name}.srdf
+  package_settings:
+    author_name: ""
+    author_email: ""
