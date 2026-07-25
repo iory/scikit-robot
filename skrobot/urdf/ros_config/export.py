@@ -64,9 +64,9 @@ def export_all_configs(
     # Default export options if not provided
     if export_options is None:
         export_options = {
-            "includeUrdf": True,
-            "includeMoveIt": True,
-            "includeGazebo": True,
+            "include_urdf": True,
+            "include_moveit": True,
+            "include_gazebo": True,
         }
 
     # Create in-memory ZIP file
@@ -75,14 +75,14 @@ def export_all_configs(
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         # URDF (mesh package references rewritten to this package name so
         # the bundle is self-contained under ``{robot_name}/``)
-        if export_options.get("includeUrdf", True):
+        if export_options.get("include_urdf", True):
             zf.writestr(
                 f"{robot_name}/urdf/{robot_name}.urdf",
                 rewrite_mesh_package_references(urdf_content, robot_name),
             )
 
         # MoveIt SRDF and controllers
-        if export_options.get("includeMoveIt", True):
+        if export_options.get("include_moveit", True):
             srdf_content = generate_srdf(
                 robot_name=robot_name,
                 planning_groups=planning_groups,
@@ -94,7 +94,7 @@ def export_all_configs(
             zf.writestr(f"{robot_name}/config/controllers.yaml", controllers_yaml)
 
         # Gazebo config
-        if export_options.get("includeGazebo", True):
+        if export_options.get("include_gazebo", True):
             gazebo_config = generate_gazebo_config(gazebo_physics, gazebo_plugins)
             zf.writestr(f"{robot_name}/config/gazebo.xml", gazebo_config)
 
@@ -124,10 +124,10 @@ def _generate_readme(
     contents = []
     usage_sections = []
 
-    if export_options.get("includeUrdf", True):
+    if export_options.get("include_urdf", True):
         contents.append(f"- `urdf/{robot_name}.urdf` - Robot URDF description")
 
-    if export_options.get("includeGazebo", True):
+    if export_options.get("include_gazebo", True):
         contents.append("- `urdf/ros2_control.xacro` - ros2_control hardware interface configuration")
         contents.append("- `config/gazebo.xml` - Gazebo physics and plugin configuration")
         usage_sections.append(f"""### Gazebo
@@ -138,7 +138,7 @@ Include the ros2_control xacro in your robot description:
 <xacro:include filename="$(find {robot_name})/urdf/ros2_control.xacro" />
 ```""")
 
-    if export_options.get("includeMoveIt", True):
+    if export_options.get("include_moveit", True):
         contents.append(f"- `config/{robot_name}.srdf` - MoveIt2 SRDF (semantic robot description)")
         contents.append("- `config/controllers.yaml` - ros2_control controller configuration")
         usage_sections.append(f"""### MoveIt2
