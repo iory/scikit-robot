@@ -117,6 +117,17 @@ class TestGenerators(unittest.TestCase):
                       generate_ros2_control_xacro(joints,
                                                   package_name='my_bot'))
 
+    def test_ros2_control_xacro_targets_gazebo_sim(self):
+        from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
+        xacro = generate_ros2_control_xacro(
+            [{'name': 'shoulder', 'type': 'revolute'}])
+        self.assertIn('gz_ros2_control/GazeboSimSystem', xacro)
+        self.assertIn('libgz_ros2_control-system.so', xacro)
+        # Gazebo Classic and its gazebo_ros2_control plugin reached end
+        # of life in January 2025; only gz_ros2_control is emitted.
+        self.assertNotIn('gazebo_ros2_control/GazeboSystem', xacro)
+        self.assertNotIn('libgazebo_ros2_control.so', xacro)
+
     def test_srdf_end_effector_link(self):
         srdf = generate_srdf(
             'two_link',

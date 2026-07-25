@@ -8,6 +8,17 @@ Generates world and plugin configuration files.
 from __future__ import annotations
 
 from typing import Any
+from typing import Iterable
+from typing import Sequence
+import xml.etree.ElementTree as ET
+
+
+# gz_ros2_control, the ros2_control integration for Gazebo (formerly
+# "Ignition").  Gazebo Classic and its gazebo_ros2_control plugin reached
+# end of life in January 2025 and are not supported here.
+GZ_HARDWARE_PLUGIN = "gz_ros2_control/GazeboSimSystem"
+GZ_SYSTEM_PLUGIN_FILENAME = "libgz_ros2_control-system.so"
+GZ_SYSTEM_PLUGIN_NAME = "gz_ros2_control::GazeboSimROS2ControlPlugin"
 
 
 def generate_gazebo_config(
@@ -69,13 +80,75 @@ def generate_gazebo_config(
     return "\n".join(lines)
 
 
+def build_ros2_control_elements(
+    joint_names: Iterable[str],
+    package_name: str,
+    controllers_file: str = "controllers.yaml",
+    name: str = "GazeboSimSystem",
+    command_interfaces: Sequence[str] = ("position",),
+    state_interfaces: Sequence[str] = ("position", "velocity"),
+) -> tuple[ET.Element, ET.Element]:
+    """
+    Build the ``<ros2_control>`` and ``<gazebo>`` elements for gz_ros2_control.
+
+    Callers either serialize these into a standalone xacro snippet (see
+    :func:`generate_ros2_control_xacro`) or append them to a URDF tree.
+
+    Parameters
+    ----------
+    joint_names : iterable of str
+        Joints to expose. Fixed and mimic joints must already be filtered
+        out: a mimic joint is constrained by the URDF ``<mimic>`` tag,
+        which gz_ros2_control enforces itself, so commanding it too would
+        fight that constraint.
+    package_name : str
+        ROS package the plugin loads its controller config from
+        (``$(find <package_name>)/config/<controllers_file>``).
+    controllers_file : str
+        Controller config filename inside that package's ``config/``.
+    name : str
+        Name attribute of the ``<ros2_control>`` element.
+    command_interfaces : sequence of str
+        Command interfaces to declare per joint.
+    state_interfaces : sequence of str
+        State interfaces to declare per joint.
+
+    Returns
+    -------
+    tuple of xml.etree.ElementTree.Element
+        The ``<ros2_control>`` and ``<gazebo>`` elements.
+    """
+    ros2_control = ET.Element("ros2_control", attrib={"name": name,
+                                                      "type": "system"})
+    hardware = ET.SubElement(ros2_control, "hardware")
+    ET.SubElement(hardware, "plugin").text = GZ_HARDWARE_PLUGIN
+
+    for joint_name in joint_names:
+        joint_el = ET.SubElement(ros2_control, "joint",
+                                 attrib={"name": joint_name})
+        for interface in command_interfaces:
+            ET.SubElement(joint_el, "command_interface",
+                          attrib={"name": interface})
+        for interface in state_interfaces:
+            ET.SubElement(joint_el, "state_interface",
+                          attrib={"name": interface})
+
+    gazebo = ET.Element("gazebo")
+    plugin = ET.SubElement(gazebo, "plugin",
+                           attrib={"filename": GZ_SYSTEM_PLUGIN_FILENAME,
+                                   "name": GZ_SYSTEM_PLUGIN_NAME})
+    ET.SubElement(plugin, "parameters").text = (
+        "$(find {})/config/{}".format(package_name, controllers_file))
+    return ros2_control, gazebo
+
+
 def generate_ros2_control_xacro(
     joints: list[dict[str, Any]],
-    hardware_interface: str = "gazebo_ros2_control/GazeboSystem",
     package_name: str = "robot_config",
+    controllers_file: str = "controllers.yaml",
 ) -> str:
     """
-    Generate ros2_control URDF/Xacro snippet for Gazebo.
+    Generate a ros2_control URDF/Xacro snippet for Gazebo.
 
     Parameters
     ----------
@@ -83,52 +156,37 @@ def generate_ros2_control_xacro(
         List of joint configurations with:
         - name: Joint name
         - type: Joint type (revolute, prismatic, etc.)
-    hardware_interface : str
-        Hardware interface plugin name.
+        - is_mimic: Whether the joint is passively driven by another
     package_name : str
-        ROS package the plugin loads ``config/controllers.yaml`` from
+        ROS package the plugin loads its controller config from
         (``$(find <package_name>)``).  Pass the exported package's name.
+    controllers_file : str
+        Controller config filename inside that package's ``config/``.
 
     Returns
     -------
     str
         ros2_control Xacro snippet.
     """
-    lines = [
+    joint_names = [joint["name"] for joint in joints
+                   if joint.get("type") != "fixed"
+                   and not joint.get("is_mimic")]
+    ros2_control, gazebo = build_ros2_control_elements(
+        joint_names,
+        package_name=package_name,
+        controllers_file=controllers_file,
+        command_interfaces=("position", "velocity"),
+        state_interfaces=("position", "velocity", "effort"))
+
+    for element in (ros2_control, gazebo):
+        if hasattr(ET, "indent"):
+            ET.indent(element, space="  ", level=0)
+
+    return "\n".join([
         "<!-- ros2_control Configuration for Gazebo -->",
         "<!-- Generated by scikit-robot -->",
         "",
-        '<ros2_control name="GazeboSystem" type="system">',
-        "  <hardware>",
-        f"    <plugin>{hardware_interface}</plugin>",
-        "  </hardware>",
-    ]
-
-    for joint in joints:
-        if joint.get("type") == "fixed":
-            continue
-
-        # Mimic joints are passively driven through the URDF <mimic> tag,
-        # which gz_ros2_control enforces directly. Giving them a command
-        # interface would conflict with that constraint, so skip them.
-        if joint.get("is_mimic"):
-            continue
-
-        name = joint["name"]
-        lines.append(f'  <joint name="{name}">')
-        lines.append('    <command_interface name="position"/>')
-        lines.append('    <command_interface name="velocity"/>')
-        lines.append('    <state_interface name="position"/>')
-        lines.append('    <state_interface name="velocity"/>')
-        lines.append('    <state_interface name="effort"/>')
-        lines.append("  </joint>")
-
-    lines.append("</ros2_control>")
-    lines.append("")
-    lines.append("<gazebo>")
-    lines.append('  <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">')
-    lines.append(f"    <parameters>$(find {package_name})/config/controllers.yaml</parameters>")
-    lines.append("  </plugin>")
-    lines.append("</gazebo>")
-
-    return "\n".join(lines)
+        ET.tostring(ros2_control, encoding="unicode"),
+        "",
+        ET.tostring(gazebo, encoding="unicode"),
+    ])

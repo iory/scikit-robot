@@ -155,6 +155,31 @@ def apply_scale(scale_factor):
     _CONFIGURABLE_VALUES['scale_factor'] = 1.0
 
 
+@contextlib.contextmanager
+def source_urdf_path(path):
+    """Resolve mesh filenames against ``path`` while saving a URDF.
+
+    ``URDF.save`` normally resolves relative mesh paths against the
+    output location; inside this context it resolves them against the
+    directory the URDF was loaded from instead.
+
+    The previous value is restored on exit. Leaving it set leaks into
+    every later export in the same process -- meshes then resolve
+    against a stale directory.
+
+    Parameters
+    ----------
+    path : str
+        Directory the URDF was loaded from.
+    """
+    previous = _CONFIGURABLE_VALUES.get('_source_urdf_path')
+    _CONFIGURABLE_VALUES['_source_urdf_path'] = path
+    try:
+        yield
+    finally:
+        _CONFIGURABLE_VALUES['_source_urdf_path'] = previous
+
+
 def get_transparency(mesh):
     if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
         material = mesh.visual.material

@@ -19,6 +19,7 @@ from skrobot.utils.package import is_package_installed
 from skrobot.utils.urdf import apply_scale
 from skrobot.utils.urdf import export_mesh_format
 from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
+from skrobot.utils.urdf import source_urdf_path
 
 
 def main():
@@ -159,6 +160,13 @@ resulting in less simplification. Default is None."""
 
 def process_urdf(urdf_file, args):
     """Process a single URDF file."""
+    # Scoped so that converting several URDFs in one run does not resolve
+    # the second one's meshes against the first one's directory.
+    with source_urdf_path(str(Path(urdf_file).resolve().parent)):
+        _process_urdf(urdf_file, args)
+
+
+def _process_urdf(urdf_file, args):
     urdf_path = Path(urdf_file)
 
     if args.output is None:
@@ -186,12 +194,8 @@ def process_urdf(urdf_file, args):
                 yield enter_result
         force_visual_mesh_origin_to_zero_or_not = nullcontext
 
-    # Store source URDF path for mesh resolution
-    from skrobot.utils.urdf import _CONFIGURABLE_VALUES
     # Convert to absolute path to ensure correct mesh resolution
     urdf_path_abs = urdf_path.resolve()
-    source_urdf_dir = str(urdf_path_abs.parent)
-    _CONFIGURABLE_VALUES['_source_urdf_path'] = source_urdf_dir
 
     with force_visual_mesh_origin_to_zero_or_not():
         print(f"Loading URDF from: {urdf_path}")

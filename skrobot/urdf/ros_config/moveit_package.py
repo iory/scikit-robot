@@ -7,17 +7,19 @@ metadata (package.xml, CMakeLists.txt).
 """
 
 from collections import defaultdict
-import contextlib
+from itertools import combinations
 import logging
 from pathlib import Path
 import re
 from string import Template
-import xml.dom.minidom
 import xml.etree.ElementTree as ET
 
 import yaml
 
 from skrobot.data import data_dir
+from skrobot.urdf.ros_config.gazebo_generator import build_ros2_control_elements
+from skrobot.urdf.ros_config.moveit_generator import generate_srdf
+from skrobot.urdf.ros_config.urdf_parser import parse_urdf_content
 from skrobot.urdf.ros_package import rewrite_mesh_package_references
 
 
@@ -92,23 +94,12 @@ def _parse_non_fixed_joints(urdf_string):
     list of dict
         Sorted list of dicts with 'name' and 'max_velocity' keys.
     """
-    root = ET.fromstring(urdf_string)
-    joints_data = []
-    for joint in root.findall("joint"):
-        if joint.get("type") == "fixed":
-            continue
-        name = joint.get("name")
-        if not name:
-            continue
-        max_velocity = 0.0
-        limit_el = joint.find("limit")
-        if limit_el is not None:
-            vel_str = limit_el.get("velocity")
-            if vel_str:
-                with contextlib.suppress(ValueError, TypeError):
-                    max_velocity = float(vel_str)
-        joints_data.append({"name": name, "max_velocity": max_velocity})
-    return sorted(joints_data, key=lambda x: x["name"])
+    joints = parse_urdf_content(urdf_string)["joints"]
+    return sorted(
+        ({"name": joint["name"],
+          "max_velocity": joint["velocity_limit"]}
+         for joint in joints if joint["type"] != "fixed"),
+        key=lambda joint: joint["name"])
 
 
 def _get_kinematic_chains(root):
@@ -193,18 +184,23 @@ def _get_kinematic_chains(root):
 
 
 def _generate_srdf(robot_name, base_link_name, chains, connected_links, all_link_names=None):
-    """Generate SRDF XML string.
+    """Generate SRDF XML string for a set of kinematic chains.
+
+    Thin wrapper over :func:`~skrobot.urdf.ros_config.moveit_generator.generate_srdf`
+    that turns detected chains into planning groups and gives every group
+    a zeroed ``home`` state.
 
     Parameters
     ----------
     robot_name : str
         Robot name.
     base_link_name : str
-        Name of the base link.
+        Name of the base link, anchored to the ``world`` frame by a
+        fixed virtual joint.
     chains : dict
         Kinematic chain mapping.
     connected_links : list of tuple
-        Adjacent link pairs.
+        Adjacent link pairs, used when ``all_link_names`` is not given.
     all_link_names : list of str, optional
         All link names in the URDF.  When provided, collisions are
         disabled for every pair (modular robots have many links in
@@ -213,40 +209,28 @@ def _generate_srdf(robot_name, base_link_name, chains, connected_links, all_link
     Returns
     -------
     str
-        Pretty-printed SRDF XML.
+        SRDF XML.
     """
-    from itertools import combinations
-
-    root = ET.Element("robot", name=robot_name)
-
-    for group_name, joint_names in chains.items():
-        group_el = ET.SubElement(root, "group", name=group_name)
-        for jn in joint_names:
-            ET.SubElement(group_el, "joint", name=jn)
-
-    ET.SubElement(
-        root,
-        "virtual_joint",
-        name="world_virtual_joint",
-        type="fixed",
-        parent_frame="world",
-        child_link=base_link_name,
-    )
-
-    for group_name, joint_names in chains.items():
-        state_el = ET.SubElement(root, "group_state", name="home", group=group_name)
-        for jn in joint_names:
-            ET.SubElement(state_el, "joint", name=jn, value="0.0")
-
-    # Disable collisions for all link pairs — modular robots have
-    # many links in close proximity that cause false positives.
+    planning_groups = [{"name": group_name, "joints": joint_names}
+                       for group_name, joint_names in chains.items()]
+    group_states = [{"name": "home", "group": group_name,
+                     "joint_values": {jn: "0.0" for jn in joint_names}}
+                    for group_name, joint_names in chains.items()]
     if all_link_names:
-        for link1, link2 in combinations(all_link_names, 2):
-            ET.SubElement(root, "disable_collisions", link1=link1, link2=link2, reason="Default")
+        disabled_pairs = list(combinations(all_link_names, 2))
+    else:
+        disabled_pairs = list(connected_links)
 
-    xml_str = ET.tostring(root, "utf-8")
-    dom = xml.dom.minidom.parseString(xml_str)
-    return dom.toprettyxml(indent="  ")
+    return generate_srdf(
+        robot_name,
+        planning_groups,
+        disabled_pairs,
+        virtual_joint={"name": "world_virtual_joint",
+                       "type": "fixed",
+                       "parent_frame": "world",
+                       "child_link": base_link_name},
+        group_states=group_states,
+        disabled_collision_reason="Default")
 
 
 def _generate_ros2_control_xacro(robot_name, chains):
@@ -308,37 +292,21 @@ def _generate_ros2_urdf(urdf_string, package_name):
                 limit_el.set("upper", str(float(upper) + LIMIT_MARGIN))
 
     if non_fixed:
-        ros2_ctrl = ET.Element("ros2_control", attrib={"name": "ModularRobotHardware", "type": "system"})
-        hw = ET.SubElement(ros2_ctrl, "hardware")
-        plugin = ET.SubElement(hw, "plugin")
-        plugin.text = "gz_ros2_control/GazeboSimSystem"
-
-        for joint in non_fixed:
-            jname = joint.get("name")
-            if not jname:
-                continue
-            # Mimic joints are passive: their motion is constrained to a
-            # driving joint via the URDF <mimic> tag, which gz_ros2_control
-            # enforces directly. Declaring a command interface for them would
-            # double-control the joint and conflict with the mimic constraint.
-            if joint.find("mimic") is not None:
-                continue
-            jel = ET.SubElement(ros2_ctrl, "joint", attrib={"name": jname})
-            ET.SubElement(jel, "command_interface", attrib={"name": "position"})
-            ET.SubElement(jel, "state_interface", attrib={"name": "position"})
-            ET.SubElement(jel, "state_interface", attrib={"name": "velocity"})
-
-        gazebo_el = ET.Element("gazebo")
-        gz_plugin = ET.SubElement(
-            gazebo_el,
-            "plugin",
-            attrib={
-                "filename": "libgz_ros2_control-system.so",
-                "name": "gz_ros2_control::GazeboSimROS2ControlPlugin",
-            },
+        # Mimic joints are passive: their motion is constrained to a driving
+        # joint via the URDF <mimic> tag, which gz_ros2_control enforces
+        # directly. Declaring a command interface for them would
+        # double-control the joint and conflict with the mimic constraint.
+        joint_names = [
+            joint.get("name")
+            for joint in non_fixed
+            if joint.get("name") and joint.find("mimic") is None
+        ]
+        ros2_ctrl, gazebo_el = build_ros2_control_elements(
+            joint_names,
+            package_name=package_name,
+            controllers_file="ros2_controllers.yaml",
+            name="ModularRobotHardware",
         )
-        params = ET.SubElement(gz_plugin, "parameters")
-        params.text = f"$(find {package_name})/config/ros2_controllers.yaml"
 
         root.append(gazebo_el)
         root.append(ros2_ctrl)
@@ -393,24 +361,24 @@ def _convert_urdf_meshes(urdf_path, output_path, visual_format="stl", collision_
         from skrobot.model import RobotModel
         from skrobot.utils.draco import is_dracopy_available
         from skrobot.utils.draco import register_dracopy_handlers
-        from skrobot.utils.urdf import _CONFIGURABLE_VALUES
         from skrobot.utils.urdf import apply_scale
         from skrobot.utils.urdf import export_mesh_format
+        from skrobot.utils.urdf import source_urdf_path
 
         if is_dracopy_available():
             register_dracopy_handlers()
 
         urdf_path = str(Path(urdf_path).resolve())
-        _CONFIGURABLE_VALUES["_source_urdf_path"] = str(Path(urdf_path).parent)
 
-        r = RobotModel.from_urdf(urdf_path)
+        with source_urdf_path(str(Path(urdf_path).parent)):
+            r = RobotModel.from_urdf(urdf_path)
 
-        with export_mesh_format(
-            "." + visual_format,
-            collision_mesh_format="." + collision_format,
-            overwrite_mesh=True,
-        ), apply_scale(1.0):
-            r.urdf_robot_model.save(str(output_path))
+            with export_mesh_format(
+                "." + visual_format,
+                collision_mesh_format="." + collision_format,
+                overwrite_mesh=True,
+            ), apply_scale(1.0):
+                r.urdf_robot_model.save(str(output_path))
 
         # Fix DAE up_axis: trimesh always writes Y_UP but mesh data is
         # in Z_UP (ROS convention).  Gazebo would apply an unwanted
