@@ -68,6 +68,15 @@ ARC_SUBSTEPS = 20
 END1_START_XZ = np.array([0.10, 0.00])   # (x, z)
 END2_START_XZ = np.array([-0.10, 0.00])
 
+# How far below the wall contacts the base starts before the initial IK.
+# Two 4-DoF arms plus a 6-DoF base give 14 DoF against 12 constraints, so
+# the initial pose is not unique: the base can hang below the contacts or
+# sit above them, and the upper solution self-collides.  The default base
+# pose sits on the watershed between the two, which lets rounding decide
+# -- a different BLAS kernel or NumPy build then picks the colliding one.
+# Starting below the contacts commits to the hanging solution.
+BASE_START_DROP = 0.05
+
 _FULL_MASK_PAIR = [np.array([1, 1, 1]), np.array([1, 1, 1])]
 
 
@@ -141,9 +150,14 @@ def solve_initial_pose(robot, end1, end2):
     Seeds the yaw joints with ±90° so each gripper already faces the wall
     (+X → +Y) before the solver runs; without this seed the solver tends
     to stall in a local minimum with both arms extended sideways (±X).
+
+    Also drops the base below the contacts by ``BASE_START_DROP`` so the
+    solver commits to the hanging solution rather than the self-colliding
+    one above them.
     """
     robot.yaw_1.joint_angle(-np.pi / 2)
     robot.yaw_2.joint_angle(np.pi / 2)
+    robot.translate(np.array([0.0, 0.0, -BASE_START_DROP]), wrt='world')
 
     t1 = wall_contact_coords(END1_START_XZ)
     t2 = wall_contact_coords(END2_START_XZ)
