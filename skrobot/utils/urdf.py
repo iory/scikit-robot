@@ -180,6 +180,79 @@ def source_urdf_path(path):
         _CONFIGURABLE_VALUES['_source_urdf_path'] = previous
 
 
+def convert_urdf_meshes(urdf_path, output_path, mesh_format,
+                        collision_mesh_format=None, scale=1.0,
+                        force_zero_visual_origin=False, **export_options):
+    """Re-save a URDF with every mesh converted to another format.
+
+    Loads ``urdf_path`` and writes it to ``output_path`` inside an
+    :func:`export_mesh_format` context, so each referenced mesh is
+    written out in the requested format next to the new URDF. Mesh
+    filenames resolve against the input URDF's directory
+    (:func:`source_urdf_path`), which is what makes a URDF whose meshes
+    live beside it convertible to a different directory.
+
+    Parameters
+    ----------
+    urdf_path : str or pathlib.Path
+        Input URDF path.
+    output_path : str or pathlib.Path
+        Output URDF path. Parent directories are created.
+    mesh_format : str
+        Target format for visual meshes, with the leading dot
+        (``'.dae'``, ``'.stl'``, ``'.glb'``).
+    collision_mesh_format : str, optional
+        Target format for collision meshes, with the leading dot.
+        Defaults to ``mesh_format``.
+    scale : float
+        Scale applied while saving.
+    force_zero_visual_origin : bool
+        Move every visual mesh origin to zero while loading.
+    export_options : dict
+        Passed through to :func:`export_mesh_format` -- decimation,
+        remeshing, Draco compression and so on.
+
+    Returns
+    -------
+    str
+        ``output_path``, as a string.
+
+    Raises
+    ------
+    ValueError
+        If the URDF contains no links.
+    """
+    from skrobot.model import RobotModel
+
+    urdf_path = os.path.abspath(str(urdf_path))
+    output_path = str(output_path)
+
+    with source_urdf_path(os.path.dirname(urdf_path)):
+        origin_context = (force_visual_mesh_origin_to_zero()
+                          if force_zero_visual_origin
+                          else contextlib.nullcontext())
+        with origin_context:
+            robot = RobotModel.from_urdf(urdf_path)
+
+        urdf_robot_model = robot.urdf_robot_model
+        if urdf_robot_model is None or not getattr(
+                urdf_robot_model, 'links', None):
+            raise ValueError(
+                'URDF contains no links: {}'.format(urdf_path))
+
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        with export_mesh_format(
+                mesh_format,
+                collision_mesh_format=collision_mesh_format,
+                **export_options), apply_scale(scale):
+            urdf_robot_model.save(output_path)
+
+    return output_path
+
+
 def get_transparency(mesh):
     if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
         material = mesh.visual.material
