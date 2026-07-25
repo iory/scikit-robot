@@ -14,6 +14,9 @@ def generate_srdf(
     robot_name: str,
     planning_groups: list[dict[str, Any]],
     disabled_collision_pairs: list[tuple[str, str]],
+    virtual_joint: dict[str, str] | None = None,
+    group_states: list[dict[str, Any]] | None = None,
+    disabled_collision_reason: str = "User defined",
 ) -> str:
     """
     Generate SRDF (Semantic Robot Description Format) content.
@@ -30,6 +33,16 @@ def generate_srdf(
         - base_link: Optional base link name
     disabled_collision_pairs : list
         List of (link1, link2) tuples for disabled collisions.
+    virtual_joint : dict, optional
+        Virtual joint anchoring the robot to a fixed frame, with keys
+        ``name``, ``type``, ``parent_frame`` and ``child_link``. MoveIt
+        needs one to plan against a world frame.
+    group_states : list, optional
+        Named poses. Each entry has ``name``, ``group`` and
+        ``joint_values`` (a joint name to value mapping).
+    disabled_collision_reason : str
+        ``reason`` attribute written on every ``disable_collisions``
+        entry.
 
     Returns
     -------
@@ -58,12 +71,31 @@ def generate_srdf(
             parent = ee_link
             lines.append(f'  <end_effector name="{ee_name}" parent_link="{parent}" group="{group["name"]}" />')
 
+    if virtual_joint:
+        lines.append("")
+        lines.append(
+            '  <virtual_joint name="{}" type="{}" parent_frame="{}" '
+            'child_link="{}" />'.format(
+                virtual_joint["name"], virtual_joint.get("type", "fixed"),
+                virtual_joint["parent_frame"], virtual_joint["child_link"]))
+
+    for state in group_states or []:
+        lines.append("")
+        lines.append('  <group_state name="{}" group="{}">'.format(
+            state["name"], state["group"]))
+        for joint, value in state.get("joint_values", {}).items():
+            lines.append('    <joint name="{}" value="{}" />'.format(
+                joint, value))
+        lines.append("  </group_state>")
+
     lines.append("")
     lines.append("  <!-- Disabled Collisions -->")
 
     # Disabled collision pairs
     for link1, link2 in disabled_collision_pairs:
-        lines.append(f'  <disable_collisions link1="{link1}" link2="{link2}" reason="User defined" />')
+        lines.append(
+            '  <disable_collisions link1="{}" link2="{}" reason="{}" />'.format(
+                link1, link2, disabled_collision_reason))
 
     lines.append("</robot>")
 

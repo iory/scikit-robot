@@ -1053,6 +1053,78 @@ class RobotAssembly:
         self._validate_and_default_root()
         return self._build_inline(output_path)
 
+    def export_ros_package(
+        self,
+        package_name: Optional[str] = None,
+        output_path: Optional[str] = None,
+        source_assets_dir: Optional[str] = None,
+        as_zip: bool = True,
+        with_moveit_config: bool = False,
+        ros1: bool = False,
+    ) -> str:
+        """
+        Export the assembly as a ROS package.
+
+        Builds the assembly URDF and exports it as a complete ROS
+        package with the usual directory structure and manifest files.
+
+        Parameters
+        ----------
+        package_name : str, optional
+            Name for the ROS package. If None, uses the assembly name.
+        output_path : str, optional
+            Path for output. If ``as_zip`` is True this is the ZIP file
+            path, otherwise the directory path.
+        source_assets_dir : str, optional
+            Directory containing source assets (meshes). Required if
+            mesh files need to be included.
+        as_zip : bool
+            If True, export as a ZIP file, otherwise as a directory.
+        with_moveit_config : bool
+            If True, generate a MoveIt 2 package with launch files,
+            SRDF, controllers and ROS 2 package metadata.
+        ros1 : bool
+            If True, generate a ROS 1 catkin package with a minimal
+            ``display.launch`` and meshes converted from GLB to
+            DAE/STL. Mutually exclusive with ``with_moveit_config``.
+
+        Returns
+        -------
+        str
+            Path to the exported package (ZIP file or directory).
+
+        Examples
+        --------
+        >>> assembly = RobotAssembly("my_robot")
+        >>> # ... add modules and connections ...
+        >>> assembly.set_root("base", "base_link")
+        >>> zip_path = assembly.export_ros_package(as_zip=True)
+        """
+        from pathlib import Path
+
+        from skrobot.urdf.ros_package_exporter import ROSPackageExporter
+
+        urdf_path = self.build()
+
+        if package_name is None:
+            package_name = self.name
+
+        exporter = ROSPackageExporter(
+            package_name=package_name,
+            source_assets_dir=(
+                Path(source_assets_dir) if source_assets_dir else None))
+        exporter.set_urdf(urdf_path)
+
+        if as_zip:
+            return exporter.export_zip(
+                output_path,
+                with_moveit_config=with_moveit_config,
+                ros1=ros1)
+        return str(exporter.build_package(
+            output_path,
+            with_moveit_config=with_moveit_config,
+            ros1=ros1))
+
     def _validate_and_default_root(self) -> None:
         if not self.instances:
             raise ValueError("Assembly is empty - add module instances first")

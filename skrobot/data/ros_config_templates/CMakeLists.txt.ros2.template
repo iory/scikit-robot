@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.8)
+project($package_name)
+
+find_package(ament_cmake REQUIRED)
+
+# Install directories that exist in this package.
+foreach(dir config launch meshes urdf xacro)
+  if(EXISTS "$${CMAKE_CURRENT_SOURCE_DIR}/$${dir}")
+    install(DIRECTORY $${dir} DESTINATION share/$${PROJECT_NAME})
+  endif()
+endforeach()
+
+if(EXISTS "$${CMAKE_CURRENT_SOURCE_DIR}/.setup_assistant")
+  install(
+    FILES .setup_assistant
+    DESTINATION share/$${PROJECT_NAME}
+  )
+endif()
+
+ament_package()

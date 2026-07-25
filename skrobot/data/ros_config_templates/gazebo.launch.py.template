@@ -1,0 +1,134 @@
+import os
+import re
+from launch import LaunchDescription
+from launch.actions import (
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    TimerAction,
+)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
+
+
+def _resolve_find_directives(urdf_text):
+    """Replace ``$$(find pkg)`` with the actual install path."""
+    def _replace(m):
+        try:
+            return get_package_share_directory(m.group(1))
+        except Exception:
+            return m.group(0)
+    return re.sub(r'\$$\(find\s+([^)]+)\)', _replace, urdf_text)
+
+
+def generate_launch_description():
+    package_name = '${package_name}'
+    robot_name = '${robot_name}'
+
+    pkg_share = get_package_share_directory(package_name)
+
+    # Gazebo resolves package:// URIs by searching GZ_SIM_RESOURCE_PATH
+    # for a directory matching the package name.
+    resource_paths = [os.path.dirname(pkg_share)]
+    existing = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
+    if existing:
+        resource_paths.append(existing)
+    gz_resource_path = ':'.join(resource_paths)
+
+    urdf_path = os.path.join(pkg_share, 'config', robot_name + '.urdf')
+    with open(urdf_path, 'r') as f:
+        robot_description = _resolve_find_directives(f.read())
+
+    # --- Gazebo sim ---
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            FindPackageShare('ros_gz_sim'),
+            '/launch/gz_sim.launch.py'
+        ]),
+        launch_arguments={
+            'gz_args': '-r -v 4 empty.sdf',
+            'on_exit_shutdown': 'true',
+        }.items()
+    )
+
+    # --- Robot State Publisher (standalone, no moveit dependency) ---
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        parameters=[{
+            'robot_description': robot_description,
+            'use_sim_time': True,
+        }],
+        output='screen',
+    )
+
+    # --- Spawn robot in Gazebo ---
+    spawn_entity = Node(
+        package='ros_gz_sim',
+        executable='create',
+        arguments=[
+            '-topic', 'robot_description',
+            '-name', robot_name,
+            '-allow_renaming', 'true',
+        ],
+        output='screen',
+    )
+
+    # --- Clock bridge ---
+    clock_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
+        output='screen',
+    )
+
+    # gz_ros2_control plugin (embedded in the URDF) spawns its own
+    # controller_manager inside Gazebo.  We just need to load and
+    # activate the controllers after Gazebo is ready.
+    controllers_yaml = os.path.join(pkg_share, 'config', 'ros2_controllers.yaml')
+
+    actions = [
+        SetEnvironmentVariable(name='GZ_SIM_RESOURCE_PATH', value=gz_resource_path),
+        gazebo,
+        clock_bridge,
+        robot_state_publisher,
+        spawn_entity,
+    ]
+
+    if os.path.exists(controllers_yaml):
+        joint_state_broadcaster_spawner = Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=['joint_state_broadcaster',
+                       '--controller-manager', '/controller_manager'],
+            output='screen',
+        )
+
+        controller_spawner = Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=['all_joints_controller',
+                       '--controller-manager', '/controller_manager'],
+            output='screen',
+        )
+
+        # Delay controller spawners to ensure gz_ros2_control is ready
+        actions.append(TimerAction(period=5.0, actions=[joint_state_broadcaster_spawner]))
+        actions.append(TimerAction(period=7.0, actions=[controller_spawner]))
+
+    # --- RViz ---
+    rviz_config = os.path.join(pkg_share, 'config', 'moveit.rviz')
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        arguments=['-d', rviz_config] if os.path.exists(rviz_config) else [],
+        parameters=[{
+            'robot_description': robot_description,
+            'use_sim_time': True,
+        }],
+        output='screen',
+    )
+    actions.append(TimerAction(period=10.0, actions=[rviz]))
+
+    return LaunchDescription(actions)
