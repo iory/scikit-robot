@@ -11,6 +11,7 @@ from skrobot.assembly.module_assembly import ModuleInstance
 from skrobot.assembly.module_assembly import Port
 from skrobot.assembly.module_assembly import RobotAssembly
 from skrobot.assembly.module_assembly import RobotModule
+from skrobot.assembly.module_registry import ModuleRegistry
 
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     'Connection',
     'ModuleInstance',
     'RobotAssembly',
+    'ModuleRegistry',
 ]
