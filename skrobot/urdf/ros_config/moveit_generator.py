@@ -26,8 +26,8 @@ def generate_srdf(
         List of planning group definitions. Each group should have:
         - name: Group name
         - joints: List of joint names
-        - endEffectorLink: Optional end effector link name
-        - baseLink: Optional base link name
+        - end_effector_link: Optional end effector link name
+        - base_link: Optional base link name
     disabled_collision_pairs : list
         List of (link1, link2) tuples for disabled collisions.
 
@@ -52,7 +52,7 @@ def generate_srdf(
 
     # End effectors
     for group in planning_groups:
-        ee_link = group.get("endEffectorLink")
+        ee_link = group.get("end_effector_link")
         if ee_link:
             ee_name = f"{group['name']}_eef"
             parent = ee_link

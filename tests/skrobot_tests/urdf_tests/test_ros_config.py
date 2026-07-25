@@ -40,6 +40,42 @@ class TestParseUrdfContent(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_urdf_content('not xml at all <<<')
 
+    def test_joint_keys_are_snake_case(self):
+        joint = parse_urdf_content(_URDF)['joints'][0]
+        self.assertEqual(
+            sorted(joint),
+            ['axis', 'child_link', 'effort_limit', 'is_mimic', 'lower_limit',
+             'mimic_joint', 'name', 'parent_link', 'type', 'upper_limit',
+             'velocity_limit'])
+        self.assertEqual(joint['parent_link'], 'base_link')
+        self.assertEqual(joint['child_link'], 'arm_link')
+        self.assertEqual(joint['lower_limit'], -1.5)
+        self.assertEqual(joint['upper_limit'], 1.5)
+        self.assertEqual(joint['velocity_limit'], 1.0)
+        self.assertEqual(joint['effort_limit'], 10.0)
+        self.assertFalse(joint['is_mimic'])
+        self.assertIsNone(joint['mimic_joint'])
+
+    def test_link_keys_are_snake_case(self):
+        link = parse_urdf_content(_URDF)['links'][0]
+        self.assertEqual(
+            sorted(link),
+            ['has_collision', 'has_inertial', 'has_visual', 'name'])
+
+    def test_mimic_joint_is_reported(self):
+        urdf = _URDF.replace(
+            '</robot>',
+            '  <joint name="follower" type="revolute">\n'
+            '    <parent link="arm_link"/>\n'
+            '    <child link="tip_link"/>\n'
+            '    <mimic joint="shoulder" multiplier="1" offset="0"/>\n'
+            '  </joint>\n'
+            '  <link name="tip_link"/>\n'
+            '</robot>')
+        joints = {j['name']: j for j in parse_urdf_content(urdf)['joints']}
+        self.assertTrue(joints['follower']['is_mimic'])
+        self.assertEqual(joints['follower']['mimic_joint'], 'shoulder')
+
 
 class TestGenerators(unittest.TestCase):
 
@@ -81,9 +117,44 @@ class TestGenerators(unittest.TestCase):
                       generate_ros2_control_xacro(joints,
                                                   package_name='my_bot'))
 
+    def test_srdf_end_effector_link(self):
+        srdf = generate_srdf(
+            'two_link',
+            [{'name': 'arm', 'joints': ['shoulder'],
+              'end_effector_link': 'arm_link'}],
+            [])
+        self.assertIn(
+            '<end_effector name="arm_eef" parent_link="arm_link" '
+            'group="arm" />',
+            srdf)
+
+    def test_ros2_control_xacro_skips_mimic_joints(self):
+        from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
+        xacro = generate_ros2_control_xacro([
+            {'name': 'shoulder', 'type': 'revolute'},
+            {'name': 'follower', 'type': 'revolute', 'is_mimic': True},
+            {'name': 'weld', 'type': 'fixed'},
+        ])
+        self.assertIn('<joint name="shoulder">', xacro)
+        # a mimic joint is constrained by the URDF <mimic> tag; giving it
+        # a command interface would fight that constraint
+        self.assertNotIn('follower', xacro)
+        self.assertNotIn('weld', xacro)
+
     def test_gazebo_config(self):
         text = generate_gazebo_config({'gravity': [0, 0, -9.81]}, [])
         self.assertTrue(text.strip())
+
+    def test_gazebo_physics_settings(self):
+        text = generate_gazebo_config(
+            {'solver': 'bullet', 'step_size': 0.002,
+             'real_time_factor': 0.5},
+            [])
+        self.assertIn('<physics name="default_physics" type="bullet">', text)
+        self.assertIn('<max_step_size>0.002</max_step_size>', text)
+        self.assertIn('<real_time_factor>0.5</real_time_factor>', text)
+        self.assertIn('<real_time_update_rate>500</real_time_update_rate>',
+                      text)
 
 
 class TestExportAllConfigs(unittest.TestCase):
@@ -115,6 +186,26 @@ class TestExportAllConfigs(unittest.TestCase):
             xacro = archive.read(
                 'two_link/urdf/ros2_control.xacro').decode('utf-8')
             self.assertIn('$(find two_link)/config/controllers.yaml', xacro)
+
+    def test_export_options_select_sections(self):
+        parsed = parse_urdf_content(_URDF)
+        blob = export_all_configs(
+            urdf_content=_URDF,
+            joints=parsed['joints'],
+            planning_groups=[{'name': 'arm', 'joints': ['shoulder']}],
+            controllers=[],
+            disabled_collision_pairs=[],
+            gazebo_physics={},
+            gazebo_plugins=[],
+            robot_name='two_link',
+            export_options={'include_urdf': True,
+                            'include_moveit': False,
+                            'include_gazebo': False})
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            names = archive.namelist()
+            self.assertIn('two_link/urdf/two_link.urdf', names)
+            self.assertNotIn('two_link/config/two_link.srdf', names)
+            self.assertNotIn('two_link/urdf/ros2_control.xacro', names)
 
     def test_zip_bundle_rewrites_mesh_package(self):
         # mesh references to a foreign package must be rewritten to the

@@ -54,7 +54,7 @@ def parse_urdf_content(urdf_content: str) -> dict[str, Any]:
         links.append(link_info)
 
     # Find root link (link that is not a child of any joint)
-    child_links = {j["childLink"] for j in joints}
+    child_links = {j["child_link"] for j in joints}
     link_names = {link["name"] for link in links}
     root_links = link_names - child_links
 
@@ -63,7 +63,7 @@ def parse_urdf_content(urdf_content: str) -> dict[str, Any]:
         root_link = root_links.pop()
     elif len(root_links) > 1:
         # If multiple root candidates, pick the one that's a parent
-        parent_links = {j["parentLink"] for j in joints}
+        parent_links = {j["parent_link"] for j in joints}
         candidates = root_links & parent_links
         if candidates:
             root_link = candidates.pop()
@@ -115,15 +115,15 @@ def _parse_joint(joint_elem: ET.Element) -> dict[str, Any]:
     return {
         "name": joint_name,
         "type": joint_type,
-        "parentLink": parent_link,
-        "childLink": child_link,
+        "parent_link": parent_link,
+        "child_link": child_link,
         "axis": axis,
-        "lowerLimit": lower_limit,
-        "upperLimit": upper_limit,
-        "velocityLimit": velocity_limit,
-        "effortLimit": effort_limit,
-        "isMimic": is_mimic,
-        "mimicJoint": mimic_joint,
+        "lower_limit": lower_limit,
+        "upper_limit": upper_limit,
+        "velocity_limit": velocity_limit,
+        "effort_limit": effort_limit,
+        "is_mimic": is_mimic,
+        "mimic_joint": mimic_joint,
     }
 
 
@@ -137,7 +137,7 @@ def _parse_link(link_elem: ET.Element) -> dict[str, Any]:
 
     return {
         "name": link_name,
-        "hasVisual": has_visual,
-        "hasCollision": has_collision,
-        "hasInertial": has_inertial,
+        "has_visual": has_visual,
+        "has_collision": has_collision,
+        "has_inertial": has_inertial,
     }
