@@ -363,27 +363,23 @@ def _convert_urdf_meshes(urdf_path, output_path, visual_format="stl", collision_
         True if conversion succeeded.
     """
     try:
-        from skrobot.model import RobotModel
         from skrobot.utils.draco import is_dracopy_available
         from skrobot.utils.draco import register_dracopy_handlers
-        from skrobot.utils.urdf import apply_scale
-        from skrobot.utils.urdf import export_mesh_format
-        from skrobot.utils.urdf import source_urdf_path
+        from skrobot.utils.urdf import convert_urdf_meshes
 
+        # Registered globally so a .drc mesh referenced by the URDF can be
+        # read back while saving.
         if is_dracopy_available():
             register_dracopy_handlers()
 
         urdf_path = str(Path(urdf_path).resolve())
-
-        with source_urdf_path(str(Path(urdf_path).parent)):
-            r = RobotModel.from_urdf(urdf_path)
-
-            with export_mesh_format(
-                "." + visual_format,
-                collision_mesh_format="." + collision_format,
-                overwrite_mesh=True,
-            ), apply_scale(1.0):
-                r.urdf_robot_model.save(str(output_path))
+        convert_urdf_meshes(
+            urdf_path,
+            output_path,
+            "." + visual_format,
+            collision_mesh_format="." + collision_format,
+            overwrite_mesh=True,
+        )
 
         # Fix DAE up_axis: trimesh always writes Y_UP but mesh data is
         # in Z_UP (ROS convention).  Gazebo would apply an unwanted
