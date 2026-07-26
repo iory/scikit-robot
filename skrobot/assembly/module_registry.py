@@ -65,16 +65,52 @@ class ModuleRegistry:
 
         for urdf_path in urdf_files:
             try:
-                self._register_urdf(urdf_path)
+                self.register_urdf(urdf_path)
             except Exception as e:
                 logger.warning("Failed to register %s: %s", urdf_path, e)
 
         return len(self._modules)
 
-    def _register_urdf(self, urdf_path: Path) -> None:
-        """Register a single URDF file."""
+    def register_urdf(self, urdf_path: Union[str, Path]) -> str:
+        """
+        Register a single URDF file.
+
+        Any module already registered under the same ID is replaced.
+
+        Parameters
+        ----------
+        urdf_path : str or Path
+            Path to the URDF file. Its filename stem becomes the module ID.
+
+        Returns
+        -------
+        str
+            The ID the module was registered under.
+        """
+        urdf_path = Path(urdf_path)
         module_id = urdf_path.stem
         self._modules[module_id] = RobotModule.from_urdf(module_id, str(urdf_path))
+        return module_id
+
+    def remove_module(self, module_id: str) -> bool:
+        """
+        Remove a module from the registry.
+
+        Parameters
+        ----------
+        module_id : str
+            The module identifier.
+
+        Returns
+        -------
+        bool
+            True if the module was registered, False otherwise.
+        """
+        return self._modules.pop(module_id, None) is not None
+
+    def _register_urdf(self, urdf_path: Path) -> None:
+        """Deprecated alias for :meth:`register_urdf`."""
+        self.register_urdf(urdf_path)
 
     def get_module(self, module_id: str) -> Optional[RobotModule]:
         """
