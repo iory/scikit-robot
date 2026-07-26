@@ -6,7 +6,6 @@ files, config files (SRDF, kinematics, controllers) and ROS 2 package
 metadata (package.xml, CMakeLists.txt).
 """
 
-from collections import defaultdict
 from itertools import combinations
 import logging
 from pathlib import Path
@@ -21,6 +20,11 @@ from skrobot.urdf.ros_config.gazebo_generator import build_ros2_control_elements
 from skrobot.urdf.ros_config.moveit_generator import generate_srdf
 from skrobot.urdf.ros_config.urdf_parser import parse_urdf_content
 from skrobot.urdf.ros_package import rewrite_mesh_package_references
+
+# _load_structure is private to skrobot.urdf.structure but is the
+# single place that turns a URDF into a link/joint graph; re-deriving
+# the parent/child maps here would be a second copy of it.
+from skrobot.urdf.structure import _load_structure
 
 
 logger = logging.getLogger(__name__)
@@ -102,13 +106,13 @@ def _parse_non_fixed_joints(urdf_string):
         key=lambda joint: joint["name"])
 
 
-def _get_kinematic_chains(root):
-    """Detect kinematic chains (limbs) from URDF element tree.
+def _get_kinematic_chains(structure):
+    """Detect kinematic chains (limbs) from a parsed URDF structure.
 
     Parameters
     ----------
-    root : xml.etree.ElementTree.Element
-        Root element of the URDF.
+    structure : skrobot.urdf.structure._UrdfStructure
+        Parsed URDF, as returned by ``_load_structure``.
 
     Returns
     -------
@@ -116,30 +120,34 @@ def _get_kinematic_chains(root):
         (base_link_name, chains_dict, connected_links_list)
         chains_dict maps group names to lists of non-fixed joint names.
     """
-    joints = {j.get("name"): j for j in root.findall("joint")}
+    joints = list({joint.name: joint for joint in structure.joints}.values())
+    for joint in joints:
+        if joint.parent is None or joint.child is None:
+            raise ValueError(
+                "joint '{}' is missing its <parent> or <child> link".format(
+                    joint.name))
 
-    parent_to_child = defaultdict(list)
-    child_to_parent = {}
-    connected_links = []
+    # Indexed by parent link, not by child: two joints declaring the same
+    # child is malformed, but indexing by child would silently attribute
+    # one parent's joint to the other and produce an inconsistent walk.
+    joints_below = {}
+    for joint in joints:
+        joints_below.setdefault(joint.parent, []).append(joint)
+    child_links = {joint.child for joint in joints}
+    connected_links = [(joint.parent, joint.child) for joint in joints]
 
-    for joint in joints.values():
-        parent_link = joint.find("parent").get("link")
-        child_link = joint.find("child").get("link")
-        connected_links.append((parent_link, child_link))
-        parent_to_child[parent_link].append(joint)
-        child_to_parent[child_link] = joint
+    # Ordered by first appearance among the joints rather than taken from a
+    # set, so a URDF with several roots always picks the same one -- string
+    # hashing is salted per process, and set iteration order follows it.
+    parent_links = list(dict.fromkeys(joint.parent for joint in joints))
+    base_links = [link for link in parent_links if link not in child_links]
 
-    parent_links = set(parent_to_child.keys())
-    child_links = set(child_to_parent.keys())
-    base_links = parent_links - child_links
-
-    if not base_links:
-        if parent_links:
-            base_link_name = next(iter(parent_links))
-        else:
-            return None, {}, []
+    if base_links:
+        base_link_name = base_links[0]
+    elif parent_links:
+        base_link_name = parent_links[0]
     else:
-        base_link_name = next(iter(base_links))
+        return None, {}, []
 
     chains = {}
     group_count = 1
@@ -147,21 +155,18 @@ def _get_kinematic_chains(root):
     # Collect chains starting from each branch off the base link.
     # Use a queue so we can traverse through fixed-joint-only segments
     # to reach the actual branching point (e.g. world -> base_link -> limbs).
-    queue = list(parent_to_child.get(base_link_name, []))
+    queue = list(joints_below.get(base_link_name, []))
     while queue:
-        start_joint = queue.pop(0)
+        current_joint = queue.pop(0)
         chain = []
-        current_joint = start_joint
-        # An Element's truth value reflects its child count, not its
-        # existence, so compare against None explicitly.
-        while current_joint is not None:
-            if current_joint.get("type") != "fixed":
-                chain.append(current_joint.get("name"))
-            child_el = current_joint.find("child")
-            if child_el is None:
-                break
-            child_link = child_el.get("link")
-            next_joints = parent_to_child.get(child_link, [])
+        # A URDF kinematic tree cannot contain a loop, but nothing here
+        # validates that; without this the walk would spin forever on one.
+        walked = set()
+        while current_joint is not None and current_joint.name not in walked:
+            walked.add(current_joint.name)
+            if current_joint.joint_type != "fixed":
+                chain.append(current_joint.name)
+            next_joints = joints_below.get(current_joint.child, [])
             if len(next_joints) == 1:
                 current_joint = next_joints[0]
             elif len(next_joints) > 1:
@@ -419,7 +424,10 @@ def build_moveit_package(
 
     try:
         urdf_root = ET.fromstring(urdf_content)
-    except ET.ParseError as e:
+        # Raises ValueError on a link or joint without a name, which no
+        # amount of downstream config generation could recover from.
+        structure = _load_structure(urdf_content)
+    except (ET.ParseError, ValueError) as e:
         logger.error("Error parsing URDF: %s", e)
         return
 
@@ -499,11 +507,11 @@ def build_moveit_package(
     )
 
     # Kinematic chains
-    base_link_name, chains, connected_links = _get_kinematic_chains(urdf_root)
+    base_link_name, chains, connected_links = _get_kinematic_chains(structure)
 
     if chains:
         # SRDF
-        all_link_names = [link.get("name") for link in urdf_root.findall("link")]
+        all_link_names = structure.links
         srdf_content = _generate_srdf(
             robot_name,
             base_link_name,
