@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import os
 import re
 import sys
@@ -8,7 +6,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.3.17'
+version = '0.3.24'
 
 
 def listup_package_data():
@@ -58,6 +56,11 @@ if (sys.version_info.major > 2):
         extra_all_requires.append('open3d')
     extra_all_requires.append('fast-simplification')
     extra_all_requires.append('DracoPy')
+    # CoACD approximate convex decomposition
+    # (skrobot.utils.convex_decomposition)
+    extra_all_requires.append('coacd')
+    # USD authoring for Isaac Sim (skrobot.export.usd)
+    extra_all_requires.append('usd-core')
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
@@ -87,6 +90,7 @@ console_scripts.append("visualize-mesh=skrobot.apps.visualize_mesh:main")
 console_scripts.append("urdf-hash=skrobot.apps.urdf_hash:main")
 console_scripts.append("convert-wheel-collision=skrobot.apps.convert_wheel_collision:main")
 console_scripts.append("urdf-tree=skrobot.apps.urdf_tree:main")
+console_scripts.append("convert-urdf-to-mjcf=skrobot.apps.convert_urdf_to_mjcf:main")
 
 
 setup(
@@ -105,14 +109,14 @@ setup(
         'Natural Language :: English',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: Python :: Implementation :: CPython',
     ],
+    python_requires='>=3.10',
     packages=find_packages(),
     package_data={'skrobot': listup_package_data()},
     zip_safe=False,
@@ -123,6 +127,15 @@ setup(
     },
     extras_require={
         'docs': docs_install_requires,
+        # CoACD approximate convex decomposition
+        # (skrobot.utils.convex_decomposition).  Also part of 'all'; this
+        # dedicated extra allows a minimal install.  The API raises a clear
+        # error when coacd is not installed.
+        'coacd': ['coacd'],
+        # USD authoring for Isaac Sim (skrobot.export.usd imports `pxr`).
+        # Pair it with 'coacd': without CoACD the exporter can only author a
+        # single convex hull per link.
+        'usd': ['usd-core'],
         'all': extra_all_requires,
     },
 )

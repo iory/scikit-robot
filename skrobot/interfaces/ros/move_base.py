@@ -12,7 +12,7 @@ import std_srvs.srv
 import trajectory_msgs.msg
 
 from skrobot.coordinates import Coordinates
-from skrobot.coordinates.math import rotate_vector
+from skrobot.coordinates.math import rotate_vector_by_axis_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.interfaces.ros.base import ROSRobotInterfaceBase
 from skrobot.interfaces.ros.tf_utils import coords_to_geometry_pose
@@ -369,7 +369,7 @@ class ROSRobotMoveBaseInterface(ROSRobotInterfaceBase):
             odom_angle = odom.rpy_angle()[0][0]
             diff_position = goal_position - (
                 odom_pos + np.array((0, 0, odom_angle)))
-            v = rotate_vector(
+            v = rotate_vector_by_axis_angle(
                 np.array((diff_position[0], diff_position[1], 0.0)),
                 -odom_angle, 'z') - np.array((0, 0, odom_angle))
             x = v[0]

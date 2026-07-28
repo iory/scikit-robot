@@ -9,6 +9,9 @@ from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
 from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
 from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometry
+from skrobot.urdf.ros_package_exporter import ROSPackageExporter
+from skrobot.urdf.sanitize import sanitize_name
+from skrobot.urdf.sanitize import sanitize_urdf_names
 from skrobot.urdf.scale_urdf import scale_urdf
 from skrobot.urdf.structure import kinematic_tree
 from skrobot.urdf.structure import print_urdf_tree
@@ -19,9 +22,11 @@ from skrobot.urdf.wheel_collision_converter import convert_wheel_collisions_to_c
 from skrobot.urdf.wheel_collision_converter import get_mesh_dimensions
 from skrobot.urdf.xml_root_link_changer import change_urdf_root_link
 from skrobot.urdf.xml_root_link_changer import URDFXMLRootLinkChanger
+from skrobot.utils.mjcf_converter import urdf_to_mjcf
 
 
 __all__ = [
+    'ROSPackageExporter',
     'change_urdf_root_link',
     'URDFXMLRootLinkChanger',
     'find_root_link',
@@ -43,4 +48,7 @@ __all__ = [
     'build_grouping_prompt',
     'parse_grouping_response',
     'compute_jaw_gripper_frame',
+    'sanitize_name',
+    'sanitize_urdf_names',
+    'urdf_to_mjcf',
 ]

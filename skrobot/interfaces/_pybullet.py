@@ -6,6 +6,7 @@ import numpy as np
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
+from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 
 
@@ -331,9 +332,8 @@ class PybulletRobotInterface(Coordinates):
             joint_state = p.getJointState(self.robot_id,
                                           idx)
             joint.joint_angle(joint_state[0])
-        pos, orientation = p.getBasePositionAndOrientation(self.robot_id)
-        rpy, _ = quaternion2rpy([orientation[3], orientation[0],
-                                 orientation[1], orientation[2]])
+        pos, orientation_xyzw = p.getBasePositionAndOrientation(self.robot_id)
+        rpy, _ = quaternion2rpy(xyzw2wxyz(orientation_xyzw))
         self.robot.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
                                        pos=pos)
         return self.angle_vector()
@@ -364,13 +364,9 @@ def draw(c,
         remove_body_indices.append(idx)
         return
     coord = c.copy_worldcoords()
-    orientation = matrix2quaternion(coord.worldrot())
-    orientation = np.array([orientation[1],
-                            orientation[2],
-                            orientation[3],
-                            orientation[0]])
+    orientation_xyzw = wxyz2xyzw(matrix2quaternion(coord.worldrot()))
     create_pose_marker(c.worldpos(),
-                       orientation,
+                       orientation_xyzw,
                        text=text,
                        lineWidth=line_width,
                        lineLength=line_length,

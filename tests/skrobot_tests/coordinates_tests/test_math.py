@@ -1,6 +1,7 @@
 import math
 import sys
 import unittest
+import warnings
 
 import numpy as np
 from numpy import pi
@@ -15,15 +16,23 @@ from skrobot.coordinates.math import counter_clockwise_angle_between_vectors
 from skrobot.coordinates.math import cross_product
 from skrobot.coordinates.math import interpolate_rotation_matrices
 from skrobot.coordinates.math import invert_yaw_pitch_roll
+from skrobot.coordinates.math import look_at_rotation
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import matrix2rotation_translation
 from skrobot.coordinates.math import matrix2rpy
+from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
+from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
+from skrobot.coordinates.math import quaternion_absolute_distance
 from skrobot.coordinates.math import quaternion_conjugate
 from skrobot.coordinates.math import quaternion_distance
 from skrobot.coordinates.math import quaternion_from_axis_angle
+from skrobot.coordinates.math import quaternion_from_vectors
 from skrobot.coordinates.math import quaternion_inverse
 from skrobot.coordinates.math import quaternion_multiply
 from skrobot.coordinates.math import quaternion_norm
@@ -34,20 +43,27 @@ from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
 from skrobot.coordinates.math import rodrigues
 from skrobot.coordinates.math import rotate_matrix
+from skrobot.coordinates.math import rotate_matrix_by_axis_angle
 from skrobot.coordinates.math import rotate_vector
+from skrobot.coordinates.math import rotate_vector_by_axis_angle
 from skrobot.coordinates.math import rotation_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import rotation_matrix_from_axis
 from skrobot.coordinates.math import rotation_matrix_from_rpy
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
+from skrobot.coordinates.math import rotation_translation2matrix
 from skrobot.coordinates.math import rotation_vector_to_quaternion
+from skrobot.coordinates.math import rpy2homogeneous
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_matrix
 from skrobot.coordinates.math import skew_symmetric_matrix
+from skrobot.coordinates.math import transform_point
 from skrobot.coordinates.math import triple_product
 from skrobot.coordinates.math import wxyz2xyzw
+from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates.math import ypr2matrix
 
@@ -100,7 +116,7 @@ class TestMath(unittest.TestCase):
         self.assertEqual(ret, 6)
 
     def test_midrot(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+        m1 = rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
             interpolate_rotation_matrices(0.5, m1, np.eye(3)),
@@ -176,6 +192,49 @@ class TestMath(unittest.TestCase):
                       [0.0, 0.0, 1.0]]),
             decimal=5)
 
+    def test_deprecated_rotate_helpers(self):
+        # The old names still work and still return the same values; they only
+        # gained a warning pointing at the unambiguous spelling.
+        vec = np.array([1.0, 0.0, 0.0])
+        matrix = rotation_matrix(0.3, 'x')
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            rotated_vec = rotate_vector(vec, 0.5, 'z')
+            rotated_matrix = rotate_matrix(matrix, 0.5, 'z')
+            world = rotate_matrix(matrix, 0.5, 'z', world=True)
+        deprecations = [w for w in caught
+                        if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(deprecations), 3)
+
+        testing.assert_almost_equal(
+            rotated_vec, rotate_vector_by_axis_angle(vec, 0.5, 'z'))
+        testing.assert_almost_equal(
+            rotated_matrix, rotate_matrix_by_axis_angle(matrix, 0.5, 'z'))
+        testing.assert_almost_equal(
+            world, rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=True))
+
+        # The new names stay quiet.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            rotate_vector_by_axis_angle(vec, 0.5, 'z')
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z')
+        self.assertFalse([w for w in caught
+                          if issubclass(w.category, DeprecationWarning)])
+
+    def test_rotate_matrix_by_axis_angle_world_flag(self):
+        # world picks which side the new rotation multiplies on.
+        matrix = rotation_matrix(0.3, 'x')
+        turn = rotation_matrix(0.5, 'z')
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z'), matrix.dot(turn))
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=False),
+            matrix.dot(turn))
+        testing.assert_almost_equal(
+            rotate_matrix_by_axis_angle(matrix, 0.5, 'z', world=True),
+            turn.dot(matrix))
+
     def test_rodrigues(self):
         mat = rpy_matrix(pi / 6, pi / 5, pi / 3)
         theta, axis = rotation_angle(mat)
@@ -219,13 +278,13 @@ class TestMath(unittest.TestCase):
 
     def test_rotate_vector(self):
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [1, 0, 0]),
             (1, 0, 0))
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 1, 0]),
             (0.8660254, 0, -0.5))
         testing.assert_array_almost_equal(
-            rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1]),
+            rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 0, 1]),
             (0.8660254, 0.5, 0))
 
     def test_rotation_angle(self):
@@ -266,7 +325,7 @@ class TestMath(unittest.TestCase):
             [12, 0, -4])
 
     def test_matrix_exponent(self):
-        m1 = rotate_matrix(rotate_matrix(rotate_matrix(
+        m1 = rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
             np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
         testing.assert_almost_equal(
             axis_angle_vector_to_rotation_matrix(rotation_matrix_to_axis_angle_vector(m1)), m1,
@@ -303,9 +362,9 @@ class TestMath(unittest.TestCase):
                       [-0.1656854, -0.9656854, 0.2000000]]))
         testing.assert_almost_equal(
             quaternion2matrix([0.925754, 0.151891, 0.159933, 0.307131]),
-            rotate_matrix(
-                rotate_matrix(
-                    rotate_matrix(
+            rotate_matrix_by_axis_angle(
+                rotate_matrix_by_axis_angle(
+                    rotate_matrix_by_axis_angle(
                         np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
             decimal=5)
 
@@ -322,9 +381,9 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(matrix2quaternion(np.eye(3)),
                                     np.array([1, 0, 0, 0]))
 
-        m = rotate_matrix(
-            rotate_matrix(
-                rotate_matrix(
+        m = rotate_matrix_by_axis_angle(
+            rotate_matrix_by_axis_angle(
+                rotate_matrix_by_axis_angle(
                     np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z')
 
         testing.assert_almost_equal(
@@ -337,6 +396,137 @@ class TestMath(unittest.TestCase):
                                         [-0.285714, 0.857143, 0.428571]])),
             normalize_vector(np.array([4, 3, -1, -3])),
             decimal=5)
+
+    def test_quaternion2matrix_batch(self):
+        # Batched (N, 4) input must match the scalar path applied per element.
+        qs = np.array([
+            [1, 0, 0, 0],
+            [1.0 / np.sqrt(2), 1.0 / np.sqrt(2), 0, 0],
+            normalize_vector([1.0, 0.3, -0.5, 0.2]),
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ], dtype=np.float64)
+        mats = quaternion2matrix(qs)
+        self.assertEqual(mats.shape, (len(qs), 3, 3))
+        for i in range(len(qs)):
+            _check_valid_rotation(mats[i])
+            testing.assert_almost_equal(mats[i], quaternion2matrix(qs[i]))
+        # Absolute check on the batched arithmetic for the x/y/z 180 deg cases.
+        testing.assert_almost_equal(
+            quaternion2matrix(np.array([[0, 1, 0, 0],
+                                        [0, 0, 1, 0],
+                                        [0, 0, 0, 1]], dtype=np.float64)),
+            np.array([np.diag([1., -1., -1.]),
+                      np.diag([-1., 1., -1.]),
+                      np.diag([-1., -1., 1.])]))
+
+    def test_quaternion2matrix_normalize_and_validation(self):
+        # Default (normalize=False) rejects a non-unit quaternion, on both the
+        # scalar (ndim == 1) and the batched (ndim == 2) validation paths.
+        with self.assertRaises(ValueError):
+            quaternion2matrix([1, 1, 0, 0])
+        with self.assertRaises(ValueError):
+            quaternion2matrix(np.array([[1, 1, 0, 0],
+                                        [1, 0, 0, 0]], dtype=np.float64))
+        # normalize=True normalizes the input first instead of raising.
+        testing.assert_almost_equal(
+            quaternion2matrix([1, 1, 0, 0], normalize=True),
+            quaternion2matrix(normalize_vector([1, 1, 0, 0])))
+        # A unit quaternion within tolerance is accepted unchanged.
+        testing.assert_almost_equal(
+            quaternion2matrix([1, 0, 0, 0]), np.eye(3))
+
+    @staticmethod
+    def _diverse_rotations():
+        """A deterministic, non-degenerate set of rotation matrices.
+
+        Covers all four ``matrix2quaternion`` trace branches with non-zero
+        off-diagonal terms, both signs of every ``argmax`` selection, and the
+        ``tr == 0`` boundary (120 deg rotations), so the branch conditions and
+        per-term signs are all pinned down.  Uses a private ``RandomState`` so
+        it never depends on (or perturbs) the global numpy RNG.
+        """
+        rs = np.random.RandomState(42)
+        mats = []
+        for _ in range(150):
+            axis = rs.randn(3)
+            axis = axis / np.linalg.norm(axis)
+            mats.append(rotation_matrix(rs.uniform(-pi, pi), axis))
+        for a in ([1, 0, 0], [0, 1, 0], [0, 0, 1],
+                  [1, 1, 1], [1, -1, 2], [2, 1, 1]):
+            mats.append(rotation_matrix(2 * pi / 3, a))   # tr == 0
+            mats.append(rotation_matrix(-2 * pi / 3, a))
+        return np.array(mats)
+
+    def test_matrix2quaternion_branches(self):
+        # matrix2quaternion selects one of four arithmetic branches from the
+        # trace/diagonal; exercise each with a matrix that lands in it.
+        cases = [
+            (np.eye(3), [1, 0, 0, 0]),                       # tr > 0
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'x'), [0, 1, 0, 0]),  # m00 largest
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'y'), [0, 0, 1, 0]),  # m11 largest
+            (rotate_matrix_by_axis_angle(np.eye(3), pi, 'z'), [0, 0, 0, 1]),  # else (m22)
+        ]
+        for m, q in cases:
+            testing.assert_almost_equal(matrix2quaternion(m), q)
+            testing.assert_almost_equal(
+                quaternion2matrix(matrix2quaternion(m)), m)
+
+        # The 180 deg cases above are diagonal, so the off-diagonal terms of
+        # each branch stay zero and their signs are not pinned down.  General
+        # rotations that land in every branch with non-zero off-diagonals must
+        # round-trip exactly through the scalar path.
+        for m in self._diverse_rotations():
+            testing.assert_almost_equal(
+                quaternion2matrix(matrix2quaternion(m)), m)
+
+    def test_matrix2quaternion_batch(self):
+        # Batched (N, 3, 3) input uses a separate vectorized code path.
+        mats = np.array([
+            np.eye(3),
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'x'),
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'y'),
+            rotate_matrix_by_axis_angle(np.eye(3), pi, 'z'),
+            rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(rotate_matrix_by_axis_angle(
+                np.eye(3), 0.2, 'x'), 0.4, 'y'), 0.6, 'z'),
+        ])
+        quats = matrix2quaternion(mats)
+        self.assertEqual(quats.shape, (len(mats), 4))
+        testing.assert_almost_equal(
+            quats,
+            np.array([[1, 0, 0, 0],
+                      [0, 1, 0, 0],
+                      [0, 0, 1, 0],
+                      [0, 0, 0, 1],
+                      [0.925754, 0.151891, 0.159933, 0.307131]]),
+            decimal=5)
+        for i in range(len(mats)):
+            testing.assert_almost_equal(
+                quaternion2matrix(quats[i]), mats[i])
+
+        # The vectorized path selects a per-element sign/branch from the
+        # off-diagonal terms; diagonal-heavy matrices (identity, 180 deg)
+        # leave those terms zero and cannot exercise it.  Use a deterministic
+        # set of general rotations that collectively hit all four branches
+        # and cross-check the batch against the (separately tested) scalar
+        # path, up to the global sign ambiguity of quaternions.
+        general = self._diverse_rotations()
+        batch = matrix2quaternion(general)
+        self.assertEqual(batch.shape, (len(general), 4))
+        for i in range(len(general)):
+            scalar = matrix2quaternion(general[i])
+            self.assertTrue(
+                np.allclose(batch[i], scalar, atol=1e-7)
+                or np.allclose(batch[i], -scalar, atol=1e-7))
+            testing.assert_almost_equal(
+                quaternion2matrix(batch[i]), general[i])
+
+        # Unsupported input shapes raise a clear error.
+        with self.assertRaises(ValueError):
+            matrix2quaternion(np.zeros(3))
+        with self.assertRaises(ValueError):
+            matrix2quaternion(np.zeros((2, 3, 3, 3)))
 
     def test_rotation_matrix_from_rpy(self):
         testing.assert_almost_equal(
@@ -458,6 +648,16 @@ class TestMath(unittest.TestCase):
         testing.assert_almost_equal(math.acos(-np.dot(q0, q1)) / angle,
                                     2.0)
 
+    def test_quaternion_slerp_identical(self):
+        # dot(q, q) lands 1 ulp above 1.0 after normalization for many
+        # quaternions, which used to reach math.acos and raise.
+        rs = np.random.RandomState(0)
+        for _ in range(100):
+            q = random_quaternion()
+            for spin in (0, 1, -1):
+                out = quaternion_slerp(q, q.copy(), rs.rand(), spin=spin)
+                testing.assert_almost_equal(out, q)
+
     def test_quaternion_distance(self):
         q1 = rpy2quaternion([0, 0, 0])
         q2 = rpy2quaternion([0, 0, 0])
@@ -534,6 +734,47 @@ class TestMath(unittest.TestCase):
         expected_rpy = np.array([0, 0, np.pi / 2])  # 90 degrees pitch
         rpy, _ = quaternion2rpy(q)
         testing.assert_almost_equal(rpy, expected_rpy, decimal=5)
+
+    def test_quaternion2rpy_batch_matches_scalar(self):
+        # The batched path must agree with the scalar one.  Pitch has to be
+        # non-zero here: at pitch 0 the two disagreeing formulas coincide.
+        qs = np.array([
+            rpy2quaternion([0.0, np.deg2rad(30), 0.0]),
+            rpy2quaternion([0.4, -0.9, 0.2]),
+            rpy2quaternion([-1.2, 0.7, 2.0]),
+        ])
+        expected = np.array([[0.0, np.deg2rad(30), 0.0],
+                             [0.4, -0.9, 0.2],
+                             [-1.2, 0.7, 2.0]])
+        batch, batch_second = quaternion2rpy(qs)
+        testing.assert_almost_equal(batch, expected)
+        for i, q in enumerate(qs):
+            scalar, second = quaternion2rpy(q)
+            testing.assert_almost_equal(scalar, expected[i])
+            testing.assert_almost_equal(batch[i], scalar)
+            testing.assert_almost_equal(batch_second[i], second)
+
+    def test_quaternion2rpy_at_gimbal_lock(self):
+        # pitch = +/- 90 deg makes the angles ambiguous but not the rotation,
+        # so the rebuilt matrix must still match.
+        for pitch in (np.pi / 2, -np.pi / 2):
+            m = rotation_matrix_from_rpy([0.0, pitch, 0.3])
+            rpy, _ = quaternion2rpy(matrix2quaternion(m))
+            testing.assert_almost_equal(
+                rpy_matrix(rpy[0], rpy[1], rpy[2]), m)
+
+    def test_quaternion_absolute_distance(self):
+        q = normalize_vector([0.3, -0.5, 0.7, 0.2])
+        # q and -q are the same rotation.
+        testing.assert_almost_equal(quaternion_absolute_distance(q, -q), 0.0)
+        testing.assert_almost_equal(quaternion_absolute_distance(q, q), 0.0)
+        testing.assert_almost_equal(
+            quaternion_absolute_distance(
+                [1, 0, 0, 0], [0, 1 / np.sqrt(2), 0, 1 / np.sqrt(2)]),
+            np.pi)
+        # Never exceeds pi, unlike the sign-sensitive variant.
+        self.assertLessEqual(
+            quaternion_absolute_distance([1, 0, 0, 0], [-1, 0, 0, 0]), np.pi)
 
     def test_rotation_vector_to_quaternion(self):
         testing.assert_almost_equal(
@@ -788,3 +1029,171 @@ class TestMath(unittest.TestCase):
         rot = rpy2matrix(roll, pitch, yaw)
         recovered_rpy = matrix2rpy(rot)
         testing.assert_almost_equal(recovered_rpy, np.array([roll, pitch, yaw]))
+
+    def test_look_at_rotation(self):
+        # The camera looks along +Z (OpenCV convention).
+        r = look_at_rotation(np.zeros(3), target=[0, 0, 1], up=[0, -1, 0])
+        _check_valid_rotation(r)
+        testing.assert_almost_equal(r[2], [0, 0, 1])
+
+        # A given up must be honoured however close it gets to the view
+        # direction; only an exactly parallel one leaves the roll undefined.
+        up = np.array([0.0, 0.0, 1.0])
+        for degree in (0.5, 3.0, 8.0, 8.2, 30.0, 90.0):
+            theta = np.deg2rad(degree)
+            target = np.array([np.sin(theta), 0.0, np.cos(theta)])
+            r = look_at_rotation(np.zeros(3), target=target, up=up)
+            _check_valid_rotation(r)
+            testing.assert_almost_equal(r[2], target)
+            # cam_x is built from cam_z x up, so it stays perpendicular to up.
+            testing.assert_almost_equal(
+                np.dot(r[0], up), 0.0,
+                err_msg='up was discarded at {} deg'.format(degree))
+
+        # up parallel to the view direction: fall back, but stay a rotation.
+        for up in ([0, 0, 1], [0, 0, -1]):
+            r = look_at_rotation(np.zeros(3), target=[0, 0, 1], up=up)
+            _check_valid_rotation(r)
+            testing.assert_almost_equal(r[2], [0, 0, 1])
+
+    def test_rotation_matrix_from_vectors(self):
+        # random directions: R maps a onto b exactly
+        rng = np.random.RandomState(0)
+        for _ in range(50):
+            a = rng.randn(3)
+            b = rng.randn(3)
+            rot = rotation_matrix_from_vectors(a, b)
+            # valid rotation
+            testing.assert_almost_equal(rot.T.dot(rot), np.eye(3))
+            testing.assert_almost_equal(np.linalg.det(rot), 1.0)
+            # a maps onto b (directions)
+            mapped = rot.dot(normalize_vector(a))
+            testing.assert_almost_equal(mapped, normalize_vector(b))
+
+        # already-aligned -> identity
+        testing.assert_almost_equal(
+            rotation_matrix_from_vectors([0, 0, 2], [0, 0, 5]), np.eye(3))
+
+        # anti-parallel -> 180 deg (maps a onto -a) and stays a valid rotation
+        for a in ([0, 0, 1], [1, 0, 0], [0, 1, 0], [1, 2, 3]):
+            a = np.array(a, dtype=np.float64)
+            rot = rotation_matrix_from_vectors(a, -a)
+            testing.assert_almost_equal(rot.T.dot(rot), np.eye(3))
+            testing.assert_almost_equal(np.linalg.det(rot), 1.0)
+            testing.assert_almost_equal(
+                rot.dot(normalize_vector(a)), -normalize_vector(a))
+
+    def test_rotation_matrix_from_vectors_degenerate_magnitudes(self):
+        # denormal / huge magnitudes still describe a valid direction:
+        # normalization must not underflow or overflow to nan
+        for a, b in (([1e-300, 0, 0], [0, 1, 0]),
+                     ([1e300, 0, 0], [0, 1e-300, 0])):
+            rotation = rotation_matrix_from_vectors(a, b)
+            testing.assert_almost_equal(rotation @ [1, 0, 0], [0, 1, 0])
+            quat = quaternion_from_vectors(a, b)
+            self.assertTrue(np.all(np.isfinite(quat)))
+        # a zero vector has no direction: refuse instead of returning nan
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_vectors([0, 0, 0], [1, 0, 0])
+        with self.assertRaises(ValueError):
+            rotation_matrix_from_vectors([1, 0, 0], [0, 0, 0])
+
+    def test_quaternion_from_vectors(self):
+        rng = np.random.RandomState(1)
+        for _ in range(50):
+            a = rng.randn(3)
+            b = rng.randn(3)
+            q = quaternion_from_vectors(a, b)
+            testing.assert_almost_equal(np.linalg.norm(q), 1.0)
+            rot = quaternion2matrix(q)
+            testing.assert_almost_equal(
+                rot.dot(normalize_vector(a)), normalize_vector(b))
+
+    def test_rpy2homogeneous(self):
+        rng = np.random.RandomState(4)
+        for _ in range(50):
+            roll, pitch, yaw = rng.uniform(-pi, pi, 3)
+            mat = rpy2homogeneous(roll, pitch, yaw)
+            self.assertEqual(mat.shape, (4, 4))
+            # rotation-only: zero translation, bottom row [0, 0, 0, 1]
+            testing.assert_almost_equal(mat[:3, 3], np.zeros(3))
+            testing.assert_almost_equal(mat[3], np.array([0, 0, 0, 1]))
+            # rotation block matches rpy2matrix
+            testing.assert_almost_equal(mat[:3, :3], rpy2matrix(roll, pitch, yaw))
+            # consistent with xyzrpy2matrix at zero translation
+            testing.assert_almost_equal(
+                mat, xyzrpy2matrix([0, 0, 0], [roll, pitch, yaw]))
+
+    def test_xyzrpy_matrix_roundtrip(self):
+        rng = np.random.RandomState(2)
+        for _ in range(50):
+            xyz = rng.uniform(-5, 5, 3)
+            rpy = np.array([rng.uniform(-pi, pi),
+                            rng.uniform(-pi / 2 + 0.05, pi / 2 - 0.05),
+                            rng.uniform(-pi, pi)])
+            mat = xyzrpy2matrix(xyz, rpy)
+            self.assertEqual(mat.shape, (4, 4))
+            testing.assert_almost_equal(mat[:3, :3], rpy2matrix(*rpy))
+            r_xyz, r_rpy = matrix2xyzrpy(mat)
+            testing.assert_almost_equal(r_xyz, xyz)
+            testing.assert_almost_equal(r_rpy, rpy)
+
+    def test_matrix2translation_quaternion(self):
+        rng = np.random.RandomState(3)
+        for _ in range(50):
+            xyz = rng.uniform(-5, 5, 3)
+            rpy = rng.uniform(-1, 1, 3)
+            mat = xyzrpy2matrix(xyz, rpy)
+
+            translation, quat_wxyz = matrix2translation_quaternion_wxyz(mat)
+            testing.assert_almost_equal(translation, xyz)
+            self.assertEqual(quat_wxyz.shape, (4,))
+            testing.assert_almost_equal(
+                quaternion2matrix(quat_wxyz), mat[:3, :3])
+
+            translation, quat_xyzw = matrix2translation_quaternion_xyzw(mat)
+            testing.assert_almost_equal(translation, xyz)
+            testing.assert_almost_equal(quat_xyzw, wxyz2xyzw(quat_wxyz))
+
+    def test_rt2matrix_matrix2rt_round_trip(self):
+        rng = np.random.RandomState(7)
+        for _ in range(50):
+            xyz = rng.uniform(-3, 3, 3)
+            rpy = rng.uniform(-1, 1, 3)
+            matrix = xyzrpy2matrix(xyz, rpy)
+            rotation, translation = matrix2rotation_translation(matrix)
+            testing.assert_almost_equal(
+                rotation_translation2matrix(rotation, translation), matrix)
+        # matrix2rotation_translation returns copies: mutating them must not touch the source
+        matrix = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+        rotation, translation = matrix2rotation_translation(matrix)
+        rotation[0, 0] = 99.0
+        translation[0] = 99.0
+        testing.assert_almost_equal(
+            matrix, xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3]))
+
+    def test_transform_point(self):
+        rng = np.random.RandomState(8)
+        for _ in range(50):
+            matrix = xyzrpy2matrix(rng.uniform(-3, 3, 3),
+                                   rng.uniform(-1, 1, 3))
+            point = rng.uniform(-2, 2, 3)
+            homogeneous = matrix @ np.append(point, 1.0)
+            testing.assert_almost_equal(
+                transform_point(matrix, point), homogeneous[:3])
+        # identity transform leaves the point untouched
+        testing.assert_almost_equal(
+            transform_point(np.eye(4), [1, 2, 3]), [1, 2, 3])
+
+    def test_matrix_relative(self):
+        rng = np.random.RandomState(3)
+        for _ in range(50):
+            parent = xyzrpy2matrix(rng.uniform(-3, 3, 3), rng.uniform(-1, 1, 3))
+            child = xyzrpy2matrix(rng.uniform(-3, 3, 3), rng.uniform(-1, 1, 3))
+            rel = matrix_relative(parent, child)
+            # matches the plain inverse, and parent @ rel reconstructs child
+            testing.assert_almost_equal(rel, np.linalg.inv(parent).dot(child))
+            testing.assert_almost_equal(parent.dot(rel), child)
+        # relative of a frame to itself is the identity
+        p = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+        testing.assert_almost_equal(matrix_relative(p, p), np.eye(4))

@@ -3,6 +3,7 @@
 from skrobot.models.aero import Aero
 from skrobot.models.differential_wrist_sample import DifferentialWristSample
 from skrobot.models.fetch import Fetch
+from skrobot.models.g1 import G1
 from skrobot.models.griphis import Griphis
 from skrobot.models.hydrus import Hydrus
 from skrobot.models.jaxon_jvrc import JaxonJVRC

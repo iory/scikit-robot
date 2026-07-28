@@ -17,9 +17,10 @@ from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import random_rotation
 from skrobot.coordinates.math import random_translation
-from skrobot.coordinates.math import rotate_matrix
+from skrobot.coordinates.math import rotate_matrix_by_axis_angle
 from skrobot.coordinates.math import rotation_distance
 from skrobot.coordinates.math import rotation_matrix
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 from skrobot.coordinates.math import rotation_matrix_to_axis_angle_vector
 from skrobot.coordinates.math import rpy2quaternion
 from skrobot.coordinates.math import rpy_angle
@@ -668,6 +669,11 @@ class Coordinates(object):
     def quaternion(self):
         """Property of quaternion in [w, x, y, z] format
 
+        .. deprecated::
+            The name does not say which order it returns. Use
+            :attr:`quaternion_wxyz` for [w, x, y, z] or
+            :attr:`quaternion_xyzw` for [x, y, z, w] instead.
+
         Returns
         -------
         q : numpy.ndarray
@@ -678,22 +684,43 @@ class Coordinates(object):
         >>> from numpy import pi
         >>> from skrobot.coordinates import make_coords
         >>> c = make_coords()
-        >>> c.quaternion
+        >>> c.quaternion_wxyz
         array([1., 0., 0., 0.])
         >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
-        >>> c.quaternion
+        >>> c.quaternion_wxyz
         array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
-        return matrix2quaternion(self._rotation)
+        warnings.warn(
+            "quaternion is deprecated because the name does not say which "
+            "order it returns. Use quaternion_wxyz for [w, x, y, z] or "
+            "quaternion_xyzw for [x, y, z, w] instead.",
+            DeprecationWarning,
+            stacklevel=2)
+        return self.quaternion_wxyz
 
     @property
     def quaternion_wxyz(self):
         """Property of quaternion in [w, x, y, z] format
 
+        This is the order skrobot uses everywhere else, so it is what
+        :attr:`quaternion` returns too. See :attr:`quaternion_xyzw` for the
+        other order, which ROS and pybullet use.
+
         Returns
         -------
         q : numpy.ndarray
             [w, x, y, z] quaternion
+
+        Examples
+        --------
+        >>> from numpy import pi
+        >>> from skrobot.coordinates import make_coords
+        >>> c = make_coords()
+        >>> c.quaternion_wxyz
+        array([1., 0., 0., 0.])
+        >>> c.rotate(pi / 3, 'y').rotate(pi / 5, 'z')
+        >>> c.quaternion_wxyz
+        array([0.8236391 , 0.1545085 , 0.47552826, 0.26761657])
         """
         return matrix2quaternion(self._rotation)
 
@@ -736,12 +763,12 @@ class Coordinates(object):
         Parameters
         ----------
         v : numpy.ndarray
-            vector shape of (3,)
+            vector shape of (3,) or (N, 3)
 
         Returns
         -------
-        np.matmul(self._rotation, v) : numpy.ndarray
-            rotated vector
+        rotated_vector : numpy.ndarray
+            rotated vector, of the same shape as ``v``
 
         Examples
         --------
@@ -751,6 +778,9 @@ class Coordinates(object):
         >>> c.rotate_vector([1, 2, 3])
         array([-1., -2.,  3.])
         """
+        v = np.array(v, dtype=np.float64)
+        if v.ndim == 2:
+            return np.matmul(self._rotation, v.T).T
         return np.matmul(self._rotation, v)
 
     def inverse_rotate_vector(self, v):
@@ -978,7 +1008,7 @@ class Coordinates(object):
         if rotation_mirror is not None:
             rot = coords.worldrot()
             if not need_mirror_for_nearest_axis(self, coords, rotation_mirror):
-                rot = rotate_matrix(rot, np.pi, rotation_mirror)
+                rot = rotate_matrix_by_axis_angle(rot, np.pi, rotation_mirror)
             dif_rot = rotation_matrix_to_axis_angle_vector(
                 np.matmul(self.worldrot().T, rot))
             dif_rot[mask_vec == 0] = 0.0
@@ -1070,11 +1100,11 @@ class Coordinates(object):
         elif axis is None or axis is False:
             self.rotate_with_matrix(theta, wrt)
         elif wrt == 'local' or wrt == self:
-            self._rotation = rotate_matrix(
+            self._rotation = rotate_matrix_by_axis_angle(
                 self._rotation, theta, axis,
                 skip_normalization=skip_normalization)
         elif wrt == 'parent' or wrt == 'world':
-            self._rotation = rotate_matrix(
+            self._rotation = rotate_matrix_by_axis_angle(
                 self._rotation, theta,
                 axis, True,
                 skip_normalization=skip_normalization)
@@ -1107,7 +1137,7 @@ class Coordinates(object):
         else:
             raise TypeError('wrt {} not supported'.format(wrt))
 
-    def align_axis_to_direction(self, direction, axis='z', wrt='world', eps=0.005):
+    def align_axis_to_direction(self, direction, axis='z', wrt='world', eps=None):
         """Align the specified axis of this coordinate to point in the given direction.
 
         Rotates this coordinate system so that the specified axis
@@ -1127,8 +1157,9 @@ class Coordinates(object):
             'local': direction is in this coordinate's local frame
             Coordinates: direction is in the given coordinate's frame
         eps : float, optional
-            Tolerance for detecting parallel/anti-parallel cases.
-            Default is 0.005.
+            Deprecated and ignored. The parallel and anti-parallel cases are
+            handled by
+            :func:`skrobot.coordinates.math.rotation_matrix_from_vectors`.
 
         Returns
         -------
@@ -1166,21 +1197,15 @@ class Coordinates(object):
         else:
             raise ValueError('wrt {} not supported'.format(wrt))
 
-        normalized_direction = normalize_vector(direction)
-        axis_vector = convert_to_axis_vector(axis)
-        current_axis = self.rotate_vector(axis_vector)
-        rot_axis = np.cross(current_axis, normalized_direction)
-        rot_angle_cos = np.clip(
-            np.dot(normalized_direction, current_axis), -1.0, 1.0)
-        if np.isclose(rot_angle_cos, 1.0, atol=eps):
-            return self
-        elif np.isclose(rot_angle_cos, -1.0, atol=eps):
-            for candidate_axis in [np.array([1, 0, 0]), np.array([0, 1, 0])]:
-                candidate_cos = np.dot(current_axis, candidate_axis)
-                if not np.isclose(abs(candidate_cos), 1.0, atol=eps):
-                    rot_axis = candidate_axis - candidate_cos * current_axis
-                    break
-        self.rotate(np.arccos(rot_angle_cos), rot_axis, 'world')
+        if eps is not None:
+            warnings.warn(
+                'The eps argument is deprecated and ignored. The degenerate '
+                'cases are handled by rotation_matrix_from_vectors.',
+                DeprecationWarning,
+                stacklevel=2)
+        current_axis = self.rotate_vector(convert_to_axis_vector(axis))
+        self.rotate_with_matrix(
+            rotation_matrix_from_vectors(current_axis, direction), 'world')
         return self
 
     def slerp(self, other, ratio):
@@ -1978,13 +2003,15 @@ class CascadedCoords(Coordinates):
             return self.rotate_with_matrix(theta, wrt)
 
         if wrt == 'local' or wrt == self:
-            rotation = rotate_matrix(self._rotation, theta, axis,
-                                     skip_normalization=skip_normalization)
+            rotation = rotate_matrix_by_axis_angle(
+                self._rotation, theta, axis,
+                skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
                                   check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent:
-            rotation = rotate_matrix(self._rotation, theta, axis,
-                                     skip_normalization=skip_normalization)
+            rotation = rotate_matrix_by_axis_angle(
+                self._rotation, theta, axis,
+                skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
                                   check_validity=False, relative_coords='local')
         else:
@@ -2231,8 +2258,8 @@ def slerp_coordinates(c1, c2, t):
     interpolated_pos = pos1 + t * (pos2 - pos1)
 
     # True spherical linear interpolation for rotation using quaternions
-    q1 = c1.quaternion
-    q2 = c2.quaternion
+    q1 = c1.quaternion_wxyz
+    q2 = c2.quaternion_wxyz
 
     # Ensure we take the shorter path for rotation
     if np.dot(q1, q2) < 0:
@@ -2295,8 +2322,8 @@ def lerp_coordinates(c1, c2, t):
     interpolated_pos = pos1 + t * (pos2 - pos1)
 
     # Linear interpolation for rotation using quaternions
-    q1 = c1.quaternion
-    q2 = c2.quaternion
+    q1 = c1.quaternion_wxyz
+    q2 = c2.quaternion_wxyz
 
     # Ensure we take the shorter path
     if np.dot(q1, q2) < 0:

@@ -1,13 +1,6 @@
-import functools
+from functools import lru_cache  # noqa: F401  re-exported for backward compatibility
 import os
 import platform
-
-
-if hasattr(functools, 'lru_cache'):
-    lru_cache = functools.lru_cache
-else:
-    import repoze.lru
-    lru_cache = repoze.lru.lru_cache
 
 
 # Ensure CPU backend on Mac before JAX imports

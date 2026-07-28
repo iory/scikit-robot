@@ -20,6 +20,7 @@ from skrobot.collision.distance import collision_distance
 from skrobot.collision.geometry import Capsule
 from skrobot.collision.geometry import HalfSpace
 from skrobot.collision.geometry import Sphere
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 
 
 class LinkCollisionGeometry:
@@ -739,22 +740,8 @@ class RobotCollisionChecker:
                 # Compute rotation to align Z-axis with capsule axis
                 rot_matrix = np.eye(3)
                 if height > 1e-6:
-                    axis_local_normalized = axis_local / height
-                    z_axis = np.array([0.0, 0.0, 1.0])
-                    # Rotation from Z to capsule axis
-                    v = np.cross(z_axis, axis_local_normalized)
-                    c = np.dot(z_axis, axis_local_normalized)
-                    if np.linalg.norm(v) > 1e-6:
-                        # Rodrigues' rotation formula
-                        vx = np.array([
-                            [0, -v[2], v[1]],
-                            [v[2], 0, -v[0]],
-                            [-v[1], v[0], 0]
-                        ])
-                        rot_matrix = np.eye(3) + vx + vx @ vx * (1 / (1 + c))
-                    elif c < 0:
-                        # 180 degree rotation around X
-                        rot_matrix = np.diag([1, -1, -1])
+                    rot_matrix = rotation_matrix_from_vectors(
+                        [0.0, 0.0, 1.0], axis_local)
 
                 # Create coords at capsule center with proper rotation
                 link_pos = link.copy_worldcoords()

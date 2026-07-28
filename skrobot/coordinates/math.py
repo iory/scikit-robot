@@ -1,9 +1,5 @@
-from __future__ import absolute_import
-
 import math
 from math import acos
-from math import asin
-from math import atan2
 from math import cos
 from math import pi
 from math import sin
@@ -893,17 +889,15 @@ def rotation_matrix(theta, axis, skip_normalization=False):
     return out
 
 
-def rotate_vector(vec, theta, axis):
-    """Rotate vector.
-
-    Rotate vec with respect to axis.
+def rotate_vector_by_axis_angle(vec, theta, axis):
+    """Rotate a vector around an axis by an angle.
 
     Parameters
     ----------
     vec : list or numpy.ndarray
         target vector
     theta : float
-        rotation angle
+        rotation angle in radian
     axis : list or numpy.ndarray or str
         axis of rotation.
 
@@ -912,15 +906,21 @@ def rotate_vector(vec, theta, axis):
     rotated_vec : numpy.ndarray
         rotated vector.
 
+    See Also
+    --------
+    skrobot.coordinates.Coordinates.rotate_vector :
+        rotate a vector by a coordinate's own rotation, rather than by an
+        axis and an angle.
+
     Examples
     --------
     >>> from numpy import pi
-    >>> from skrobot.coordinates.math import rotate_vector
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [1, 0, 0])
+    >>> from skrobot.coordinates.math import rotate_vector_by_axis_angle
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [1, 0, 0])
     array([1., 0., 0.])
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 1, 0])
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 1, 0])
     array([ 0.8660254,  0.       , -0.5      ])
-    >>> rotate_vector([1, 0, 0], pi / 6.0, [0, 0, 1])
+    >>> rotate_vector_by_axis_angle([1, 0, 0], pi / 6.0, [0, 0, 1])
     array([0.8660254, 0.5      , 0.       ])
     """
     rot = rotation_matrix(theta, axis)
@@ -928,7 +928,63 @@ def rotate_vector(vec, theta, axis):
     return rotated_vec
 
 
-def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
+def rotate_vector(vec, theta, axis):
+    """Rotate a vector around an axis by an angle.
+
+    .. deprecated::
+        The name reads like
+        :meth:`skrobot.coordinates.Coordinates.rotate_vector`, which rotates
+        by a coordinate's own rotation instead. Use
+        :func:`rotate_vector_by_axis_angle`.
+
+    Parameters
+    ----------
+    vec : list or numpy.ndarray
+        target vector
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+
+    Returns
+    -------
+    rotated_vec : numpy.ndarray
+        rotated vector.
+    """
+    warnings.warn(
+        'rotate_vector is deprecated because the name reads like '
+        "Coordinates.rotate_vector, which rotates by a coordinate's own "
+        'rotation rather than by an axis and an angle. Use '
+        'rotate_vector_by_axis_angle instead.',
+        DeprecationWarning,
+        stacklevel=2)
+    return rotate_vector_by_axis_angle(vec, theta, axis)
+
+
+def rotate_matrix_by_axis_angle(matrix, theta, axis, world=None,
+                                skip_normalization=False):
+    """Rotate a rotation matrix around an axis by an angle.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix to rotate
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+    world : bool or None
+        if None or False, rotate about ``matrix``'s own axes, i.e. multiply
+        the new rotation from the right. Otherwise rotate about the world
+        axes, i.e. multiply from the left.
+    skip_normalization : bool
+        if True, skip normalization of ``axis``.
+
+    Returns
+    -------
+    rotated_matrix : numpy.ndarray
+        3x3 rotation matrix
+    """
     if world is False or world is None:
         return np.dot(
             matrix,
@@ -937,6 +993,42 @@ def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
     return np.dot(
         rotation_matrix(theta, axis, skip_normalization=skip_normalization),
         matrix)
+
+
+def rotate_matrix(matrix, theta, axis, world=None, skip_normalization=False):
+    """Rotate a rotation matrix around an axis by an angle.
+
+    .. deprecated::
+        Renamed for symmetry with :func:`rotate_vector_by_axis_angle`. Use
+        :func:`rotate_matrix_by_axis_angle`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        3x3 rotation matrix to rotate
+    theta : float
+        rotation angle in radian
+    axis : list or numpy.ndarray or str
+        axis of rotation.
+    world : bool or None
+        if None or False, rotate about ``matrix``'s own axes. Otherwise
+        rotate about the world axes.
+    skip_normalization : bool
+        if True, skip normalization of ``axis``.
+
+    Returns
+    -------
+    rotated_matrix : numpy.ndarray
+        3x3 rotation matrix
+    """
+    warnings.warn(
+        'rotate_matrix is deprecated. Use rotate_matrix_by_axis_angle '
+        'instead.',
+        DeprecationWarning,
+        stacklevel=2)
+    return rotate_matrix_by_axis_angle(
+        matrix, theta, axis, world=world,
+        skip_normalization=skip_normalization)
 
 
 def rpy_matrix(az, ay, ax):
@@ -974,8 +1066,8 @@ def rpy_matrix(az, ay, ax):
            [-8.66025404e-01,  2.50000000e-01,  4.33012702e-01]])
     """
     r = rotation_matrix(ax, 'x')
-    r = rotate_matrix(r, ay, 'y', world=True)
-    r = rotate_matrix(r, az, 'z', world=True)
+    r = rotate_matrix_by_axis_angle(r, ay, 'y', world=True)
+    r = rotate_matrix_by_axis_angle(r, az, 'z', world=True)
     return r
 
 
@@ -1043,12 +1135,13 @@ def matrix2ypr(matrix):
     Parameters
     ----------
     matrix : numpy.ndarray
-        3x3 rotation matrix
+        3x3 rotation matrix, or (N, 3, 3) rotation matrices
 
     Returns
     -------
     angles : numpy.ndarray
-        Array of [yaw, pitch, roll] angles in radians
+        Array of [yaw, pitch, roll] angles in radians, or (N, 3) for a
+        batched input
         - yaw: rotation around Z-axis
         - pitch: rotation around Y-axis
         - roll: rotation around X-axis
@@ -1065,19 +1158,25 @@ def matrix2ypr(matrix):
     >>> print("Yaw: {:.3f}, Pitch: {:.3f}, Roll: {:.3f}".format(angles[0], angles[1], angles[2]))
     Yaw: 0.524, Pitch: 0.785, Roll: 1.047
     """
-    # Extract yaw, pitch, roll angles directly
-    if np.sqrt(matrix[1, 0] ** 2 + matrix[0, 0] ** 2) < _EPS:
-        yaw = 0.0
-    else:
-        yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+    matrix = np.asarray(matrix, dtype=np.float64)
+    # Index the last two axes so the same expressions serve a single 3x3
+    # matrix and a stack of them.
+    m00, m01, m02 = matrix[..., 0, 0], matrix[..., 0, 1], matrix[..., 0, 2]
+    m10, m11, m12 = matrix[..., 1, 0], matrix[..., 1, 1], matrix[..., 1, 2]
+    m20 = matrix[..., 2, 0]
+
+    # At gimbal lock the yaw is arbitrary; pin it to 0 and let roll absorb
+    # the rotation, otherwise arctan2 would be fed two zeros.
+    yaw = np.where(np.sqrt(m10 ** 2 + m00 ** 2) < _EPS,
+                   0.0, np.arctan2(m10, m00))
 
     sin_yaw = np.sin(yaw)
     cos_yaw = np.cos(yaw)
-    pitch = np.arctan2(-matrix[2, 0], cos_yaw * matrix[0, 0] + sin_yaw * matrix[1, 0])
-    roll = np.arctan2(sin_yaw * matrix[0, 2] - cos_yaw * matrix[1, 2],
-                      -sin_yaw * matrix[0, 1] + cos_yaw * matrix[1, 1])
+    pitch = np.arctan2(-m20, cos_yaw * m00 + sin_yaw * m10)
+    roll = np.arctan2(sin_yaw * m02 - cos_yaw * m12,
+                      -sin_yaw * m01 + cos_yaw * m11)
 
-    return np.array([yaw, pitch, roll])
+    return np.stack([yaw, pitch, roll], axis=-1)
 
 
 def matrix2rpy(matrix):
@@ -1110,9 +1209,8 @@ def matrix2rpy(matrix):
     >>> print("Roll: {:.3f}, Pitch: {:.3f}, Yaw: {:.3f}".format(angles[0], angles[1], angles[2]))
     Roll: 1.047, Pitch: 0.785, Yaw: 0.524
     """
-    ypr_angles = matrix2ypr(matrix)
     # Convert from [yaw, pitch, roll] to [roll, pitch, yaw]
-    return np.array([ypr_angles[2], ypr_angles[1], ypr_angles[0]])
+    return matrix2ypr(matrix)[..., ::-1]
 
 
 def ypr2matrix(yaw, pitch, roll):
@@ -1193,6 +1291,44 @@ def rpy2matrix(roll, pitch, yaw):
     >>> rot_z = rpy2matrix(0, 0, np.pi/2)
     """
     return rpy_matrix(yaw, pitch, roll)
+
+
+def rpy2homogeneous(roll, pitch, yaw):
+    """Create a 4x4 homogeneous transform (rotation only) from roll/pitch/yaw.
+
+    Convenience wrapper that embeds :func:`rpy2matrix` in a 4x4 homogeneous
+    matrix with zero translation.  ``rpy`` is the extrinsic X-Y-Z (fixed-axis)
+    roll, pitch, yaw triple, i.e. ``R = Rz(yaw) @ Ry(pitch) @ Rx(roll)`` -- the
+    same convention as URDF ``<origin rpy="...">``.  Use :func:`xyzrpy2matrix`
+    when you also need a translation, and :func:`matrix2xyzrpy` to invert.
+
+    Parameters
+    ----------
+    roll : float
+        Rotation around the X-axis in radians.
+    pitch : float
+        Rotation around the Y-axis in radians.
+    yaw : float
+        Rotation around the Z-axis in radians.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rpy2homogeneous
+    >>> T = rpy2homogeneous(0.1, 0.2, 0.3)
+    >>> T.shape
+    (4, 4)
+    >>> np.allclose(T[:3, 3], 0)
+    True
+    """
+    matrix = np.eye(4)
+    matrix[:3, :3] = rpy2matrix(roll, pitch, yaw)
+    return matrix
 
 
 def normalize_vector(v, ord=2):
@@ -1745,27 +1881,10 @@ def quaternion2rpy(q):
      array([3.14159265, 3.14159265, 0.        ]))
     """
     q = to_numpy_array(q)
-    if q.ndim == 1:
-        roll = atan2(
-            2 * q[2] * q[3] + 2 * q[0] * q[1],
-            q[3] ** 2 - q[2] ** 2 - q[1] ** 2 + q[0] ** 2)
-        pitch = -asin(
-            2 * q[1] * q[3] - 2 * q[0] * q[2])
-        yaw = atan2(
-            2 * q[1] * q[2] + 2 * q[0] * q[3],
-            q[1] ** 2 + q[0] ** 2 - q[3] ** 2 - q[2] ** 2)
-        rpy = np.array([yaw, pitch, roll])
-    elif q.ndim == 2:
-        roll = np.arctan2(
-            2 * q[:, 2] * q[:, 3] + 2 * q[:, 0] * q[:, 1],
-            q[:, 3] ** 2 - q[:, 2] ** 2 - q[:, 1] ** 2 + q[:, 0] ** 2)
-        pitch = -np.sin(
-            2 * q[:, 1] * q[:, 3] - 2 * q[:, 0] * q[:, 2])
-        yaw = np.arctan2(
-            2 * q[:, 1] * q[:, 2] + 2 * q[:, 0] * q[:, 3],
-            q[:, 1] ** 2 + q[:, 0] ** 2 - q[:, 3] ** 2 - q[:, 2] ** 2)
-        rpy = np.concatenate([yaw[:, None], pitch[:, None], roll[:, None]],
-                             axis=1)
+    # Delegate to matrix2ypr: it stays well conditioned at gimbal lock
+    # (pitch = +/- pi/2), where extracting the angles straight from the
+    # quaternion degenerates into atan2(0, 0).
+    rpy = matrix2ypr(quaternion2matrix(q, normalize=True))
     return rpy, np.pi - rpy
 
 
@@ -2256,9 +2375,9 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     Parameters
     ----------
     q0 : list or numpy.ndarray
-        start quaternion
+        start quaternion in [w, x, y, z] order
     q1 : list or numpy.ndarray
-        end quaternion
+        end quaternion in [w, x, y, z] order
     fraction : float
         ratio
     spin : int
@@ -2269,7 +2388,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     Returns
     -------
     quaternion : numpy.ndarray
-        spherical linear interpolated quaternion
+        spherical linear interpolated quaternion in [w, x, y, z] order
 
     Examples
     --------
@@ -2294,7 +2413,7 @@ def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
     elif fraction == 1.0:
         return q1
     d = np.dot(q0, q1)
-    if abs(abs(d) - 1.0) < 0.0:
+    if abs(abs(d) - 1.0) < _EPS:
         return q0
     if shortestpath and d < 0.0:
         # invert rotation
@@ -2342,9 +2461,11 @@ def quaternion_distance(q1, q2, absolute=False):
     q1 = to_numpy_array(q1)
     q2 = to_numpy_array(q2)
     dot = np.clip(np.sum(q1 * q2, q1.ndim - 1), -1, 1)
-    diff_theta = 2 * np.arccos(dot)
     if absolute is True:
-        diff_theta = np.abs(diff_theta)
+        # q and -q are the same rotation, so fold the sign into the dot
+        # product to get the shortest angle in [0, pi].
+        dot = np.abs(dot)
+    diff_theta = 2 * np.arccos(dot)
     return diff_theta
 
 
@@ -2488,7 +2609,7 @@ def rotation_vector_to_quaternion(rvec):
     Returns
     -------
     q : numpy.ndarray
-        quaternion
+        quaternion in [w, x, y, z] order
     """
     rvec = np.array(rvec).reshape(-1)
     theta = np.linalg.norm(rvec)
@@ -2876,18 +2997,19 @@ def look_at_rotation(camera_pos, target=None, up=None, return_matrix=True):
     # For OpenCV convention: camera looks along +Z, so R[2, :] = look_dir
     cam_z = look_dir
 
-    # If look direction is parallel to up vector, use alternative up
-    if abs(np.dot(cam_z, up)) > 0.99:
-        up = np.array([0.0, 1.0, 0.0])
-
     # Camera X axis (right) = look_dir × up (for right-hand system)
     cam_x = np.cross(cam_z, up)
     cam_x_norm = np.linalg.norm(cam_x)
-    if cam_x_norm < 1e-8:
-        # Fallback if cross product is zero
-        up = np.array([1.0, 0.0, 0.0])
-        cam_x = np.cross(cam_z, up)
-        cam_x_norm = np.linalg.norm(cam_x)
+    if cam_x_norm < _EPS:
+        # up is parallel to the view direction, so it cannot pin down the
+        # roll. Only then fall back to an up that can: a tolerance on the
+        # angle here would silently discard the caller's up.
+        for fallback_up in (np.array([0.0, 1.0, 0.0]),
+                            np.array([1.0, 0.0, 0.0])):
+            cam_x = np.cross(cam_z, fallback_up)
+            cam_x_norm = np.linalg.norm(cam_x)
+            if cam_x_norm >= _EPS:
+                break
     cam_x = cam_x / cam_x_norm
 
     # Camera Y axis (down in OpenCV) = cam_z × cam_x
@@ -2899,6 +3021,316 @@ def look_at_rotation(camera_pos, target=None, up=None, return_matrix=True):
     if return_matrix:
         return R
     return rotation_matrix_to_axis_angle_vector(R)
+
+
+def rotation_matrix_from_vectors(a, b):
+    """Return the 3x3 rotation matrix that rotates direction ``a`` onto ``b``.
+
+    Computes the shortest-arc rotation about the axis ``a x b``.  The inputs
+    need not be unit vectors; only their directions matter.  Degenerate
+    directions are handled explicitly instead of producing ``nan``:
+
+    - ``a`` parallel to ``b``      -> identity
+    - ``a`` anti-parallel to ``b`` -> a 180 deg rotation about an arbitrary
+      axis perpendicular to ``a``
+
+    Parameters
+    ----------
+    a : list or tuple or numpy.ndarray
+        source direction, shape (3,), nonzero.
+    b : list or tuple or numpy.ndarray
+        target direction, shape (3,), nonzero.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        3x3 rotation matrix ``R`` such that
+        ``R.dot(a / norm(a))`` equals ``b / norm(b)``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rotation_matrix_from_vectors
+    >>> R = rotation_matrix_from_vectors([1, 0, 0], [0, 1, 0])
+    >>> np.allclose(R.dot([1, 0, 0]), [0, 1, 0])
+    True
+    """
+    a = np.array(a, dtype=np.float64)
+    b = np.array(b, dtype=np.float64)
+    # pre-scale by the largest component so denormal (or huge) inputs
+    # survive normalization instead of underflowing to nan
+    scale_a = np.max(np.abs(a))
+    scale_b = np.max(np.abs(b))
+    if scale_a == 0.0 or scale_b == 0.0:
+        raise ValueError(
+            'rotation_matrix_from_vectors needs nonzero directions, '
+            f'got a={a.tolist()}, b={b.tolist()}')
+    a = normalize_vector(a / scale_a)
+    b = normalize_vector(b / scale_b)
+    axis = np.cross(a, b)
+    axis_norm = np.linalg.norm(axis)
+    dot = float(np.clip(np.dot(a, b), -1.0, 1.0))
+    if axis_norm < 1e-12:
+        if dot > 0.0:  # already aligned
+            return np.eye(3)
+        # anti-parallel: rotate 180 deg about any axis perpendicular to a
+        perp = np.cross(a, np.array([1.0, 0.0, 0.0]))
+        if np.linalg.norm(perp) < 1e-12:
+            perp = np.cross(a, np.array([0.0, 1.0, 0.0]))
+        return rotation_matrix(pi, normalize_vector(perp))
+    return rotation_matrix(acos(dot), axis / axis_norm,
+                           skip_normalization=True)
+
+
+def quaternion_from_vectors(a, b):
+    """Return the ``[w, x, y, z]`` quaternion rotating ``a`` onto ``b``.
+
+    Shortest-arc rotation; see :func:`rotation_matrix_from_vectors` for the
+    degenerate-direction handling.
+
+    Parameters
+    ----------
+    a : list or tuple or numpy.ndarray
+        source direction, shape (3,), nonzero.
+    b : list or tuple or numpy.ndarray
+        target direction, shape (3,), nonzero.
+
+    Returns
+    -------
+    quaternion : numpy.ndarray
+        quaternion ``[w, x, y, z]``.
+    """
+    return matrix2quaternion(rotation_matrix_from_vectors(a, b))
+
+
+def matrix2xyzrpy(matrix):
+    """Split a 4x4 homogeneous transform into translation and roll-pitch-yaw.
+
+    ``rpy`` uses the URDF convention (extrinsic X-Y-Z, ``R = Rz @ Ry @ Rx``),
+    matching :func:`matrix2rpy` and :func:`xyzrpy2matrix`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    xyz : numpy.ndarray
+        translation, shape (3,).
+    rpy : numpy.ndarray
+        ``[roll, pitch, yaw]`` in radians.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2xyzrpy, xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0.1, 0.2, 0.3])
+    >>> xyz, rpy = matrix2xyzrpy(T)
+    >>> np.allclose(xyz, [1, 2, 3]) and np.allclose(rpy, [0.1, 0.2, 0.3])
+    True
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, 3].copy(), matrix2rpy(matrix[:3, :3])
+
+
+def xyzrpy2matrix(xyz, rpy):
+    """Build a 4x4 homogeneous transform from translation and roll-pitch-yaw.
+
+    Inverse of :func:`matrix2xyzrpy`; ``rpy`` is the URDF convention
+    (``R = Rz @ Ry @ Rx``).
+
+    Parameters
+    ----------
+    xyz : list or tuple or numpy.ndarray
+        translation, shape (3,).
+    rpy : list or tuple or numpy.ndarray
+        ``[roll, pitch, yaw]`` in radians.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+    """
+    roll, pitch, yaw = rpy
+    matrix = np.eye(4)
+    matrix[:3, :3] = rpy2matrix(roll, pitch, yaw)
+    matrix[:3, 3] = np.array(xyz, dtype=np.float64)
+    return matrix
+
+
+def matrix2translation_quaternion_wxyz(matrix):
+    """Split a 4x4 homogeneous transform into translation and quaternion.
+
+    Same split as :func:`matrix2xyzrpy`, but the rotation is returned as a
+    quaternion in ``[w, x, y, z]`` order (the convention of
+    :func:`matrix2quaternion`, and the one MuJoCo/MJCF uses). Use
+    :func:`matrix2translation_quaternion_xyzw` for the ``[x, y, z, w]`` order
+    used by ROS and SciPy.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    translation : numpy.ndarray
+        translation, shape (3,).
+    quaternion : numpy.ndarray
+        quaternion ``[w, x, y, z]``, shape (4,).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+    >>> from skrobot.coordinates.math import xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0, 0, 0])
+    >>> translation, quaternion = matrix2translation_quaternion_wxyz(T)
+    >>> np.allclose(translation, [1, 2, 3])
+    True
+    >>> np.allclose(quaternion, [1, 0, 0, 0])
+    True
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, 3].copy(), matrix2quaternion(matrix[:3, :3])
+
+
+def matrix2translation_quaternion_xyzw(matrix):
+    """Split a 4x4 homogeneous transform into translation and quaternion.
+
+    Same as :func:`matrix2translation_quaternion_wxyz`, but the quaternion is
+    returned in ``[x, y, z, w]`` order (the convention used by ROS and SciPy).
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    translation : numpy.ndarray
+        translation, shape (3,).
+    quaternion : numpy.ndarray
+        quaternion ``[x, y, z, w]``, shape (4,).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
+    >>> from skrobot.coordinates.math import xyzrpy2matrix
+    >>> T = xyzrpy2matrix([1, 2, 3], [0, 0, 0])
+    >>> translation, quaternion = matrix2translation_quaternion_xyzw(T)
+    >>> np.allclose(translation, [1, 2, 3])
+    True
+    >>> np.allclose(quaternion, [0, 0, 0, 1])
+    True
+    """
+    translation, quaternion = matrix2translation_quaternion_wxyz(matrix)
+    return translation, wxyz2xyzw(quaternion)
+
+
+def rotation_translation2matrix(rotation, translation):
+    """Compose a 4x4 homogeneous transform from rotation and translation.
+
+    Inverse of :func:`matrix2rotation_translation`.
+
+    Parameters
+    ----------
+    rotation : list or tuple or numpy.ndarray
+        3x3 rotation matrix.
+    translation : list or tuple or numpy.ndarray
+        translation, shape (3,).
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import rotation_translation2matrix
+    >>> rotation_translation2matrix(np.eye(3), [1.0, 2.0, 3.0])
+    array([[1., 0., 0., 1.],
+           [0., 1., 0., 2.],
+           [0., 0., 1., 3.],
+           [0., 0., 0., 1.]])
+    """
+    matrix = np.eye(4)
+    matrix[:3, :3] = np.array(rotation, dtype=np.float64)
+    matrix[:3, 3] = np.array(translation, dtype=np.float64)
+    return matrix
+
+
+def matrix2rotation_translation(matrix):
+    """Split a 4x4 homogeneous transform into rotation and translation.
+
+    Inverse of :func:`rotation_translation2matrix`.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    rotation : numpy.ndarray
+        3x3 rotation matrix (a copy).
+    translation : numpy.ndarray
+        translation, shape (3,) (a copy).
+    """
+    matrix = np.array(matrix, dtype=np.float64)
+    return matrix[:3, :3], matrix[:3, 3]
+
+
+def transform_point(matrix, point):
+    """Apply a 4x4 homogeneous transform to a 3D point.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        4x4 homogeneous transformation matrix.
+    point : list or tuple or numpy.ndarray
+        point, shape (3,).
+
+    Returns
+    -------
+    point : numpy.ndarray
+        transformed point, shape (3,).
+    """
+    matrix = np.asarray(matrix, dtype=np.float64)
+    point = np.asarray(point, dtype=np.float64)
+    return matrix[:3, :3] @ point + matrix[:3, 3]
+
+
+def matrix_relative(parent, child):
+    """Express one homogeneous transform relative to another.
+
+    Returns ``inv(parent) @ child`` -- the pose of ``child`` seen from the
+    ``parent`` frame, where both are 4x4 matrices in a common frame.  The
+    inverse is built from the rotation transpose + translation (assuming a
+    rigid transform), so no general ``np.linalg.inv`` on the 4x4 is needed.
+
+    Parameters
+    ----------
+    parent : numpy.ndarray
+        4x4 homogeneous transform of the reference frame.
+    child : numpy.ndarray
+        4x4 homogeneous transform to re-express.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        4x4 homogeneous transform of ``child`` in ``parent``'s frame.
+    """
+    parent = np.array(parent, dtype=np.float64)
+    child = np.array(child, dtype=np.float64)
+    rot = parent[:3, :3]
+    inv = np.eye(4)
+    inv[:3, :3] = rot.T
+    inv[:3, 3] = -rot.T.dot(parent[:3, 3])
+    return inv.dot(child)
 
 
 inverse_rodrigues = rotation_angle

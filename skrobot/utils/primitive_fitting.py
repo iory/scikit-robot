@@ -5,6 +5,7 @@ from logging import getLogger
 import numpy as np
 
 from skrobot._lazy_imports import _lazy_trimesh
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 
 
 logger = getLogger(__name__)
@@ -287,21 +288,9 @@ def create_primitive_mesh(primitive_params):
 
         mesh = trimesh.creation.cylinder(radius=radius, height=height)
 
-        z_axis = np.array([0, 0, 1])
-        axis = axis / np.linalg.norm(axis)
-
-        if not np.allclose(axis, z_axis):
-            from skrobot.coordinates.math import rotation_matrix
-            if np.allclose(axis, -z_axis):
-                rot_matrix = rotation_matrix(np.pi, [1, 0, 0])
-            else:
-                rotation_axis = np.cross(z_axis, axis)
-                angle = np.arccos(np.clip(np.dot(z_axis, axis), -1.0, 1.0))
-                rot_matrix = rotation_matrix(angle, rotation_axis)
-
-            transform = np.eye(4)
-            transform[:3, :3] = rot_matrix
-            mesh.apply_transform(transform)
+        transform = np.eye(4)
+        transform[:3, :3] = rotation_matrix_from_vectors([0, 0, 1], axis)
+        mesh.apply_transform(transform)
 
         mesh.apply_translation(center)
         return mesh

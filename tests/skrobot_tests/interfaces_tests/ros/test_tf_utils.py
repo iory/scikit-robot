@@ -49,21 +49,21 @@ class TestTFUtils(unittest.TestCase):
         pose = geometry_msgs.msg.Transform()
         c = tf_pose_to_coords(pose)
         testing.assert_equal(c.translation, (0, 0, 0))
-        testing.assert_equal(c.quaternion, (1, 0, 0, 0))
+        testing.assert_equal(c.quaternion_wxyz, (1, 0, 0, 0))
 
         pose_stamped = geometry_msgs.msg.TransformStamped()
         c = tf_pose_to_coords(pose_stamped)
         testing.assert_equal(c.translation, (0, 0, 0))
-        testing.assert_equal(c.quaternion, (1, 0, 0, 0))
+        testing.assert_equal(c.quaternion_wxyz, (1, 0, 0, 0))
 
     @unittest.skipUnless(_ros_available, 'ROS is not available.')
     def test_geometry_pose_to_coords(self):
         pose = geometry_msgs.msg.Pose()
         c = geometry_pose_to_coords(pose)
         testing.assert_equal(c.translation, (0, 0, 0))
-        testing.assert_equal(c.quaternion, (1, 0, 0, 0))
+        testing.assert_equal(c.quaternion_wxyz, (1, 0, 0, 0))
 
         pose_stamped = geometry_msgs.msg.Pose()
         c = geometry_pose_to_coords(pose_stamped)
         testing.assert_equal(c.translation, (0, 0, 0))
-        testing.assert_equal(c.quaternion, (1, 0, 0, 0))
+        testing.assert_equal(c.quaternion_wxyz, (1, 0, 0, 0))

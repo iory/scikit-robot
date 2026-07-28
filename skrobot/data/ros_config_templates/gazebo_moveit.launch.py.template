@@ -1,0 +1,170 @@
+import os
+import re
+import yaml
+from launch import LaunchDescription
+from launch.actions import TimerAction
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+
+def _load_yaml(package_name, file_path):
+    full_path = os.path.join(get_package_share_directory(package_name), file_path)
+    if not os.path.exists(full_path):
+        return {}
+    with open(full_path, 'r') as f:
+        return yaml.safe_load(f) or {}
+
+
+def generate_launch_description():
+    package_name = '${package_name}'
+    robot_name = '${robot_name}'
+
+    pkg_share = get_package_share_directory(package_name)
+
+    # --- Robot description (use config/ version which has ros2_control) ---
+    urdf_path = os.path.join(pkg_share, 'config', robot_name + '.urdf')
+    with open(urdf_path, 'r') as f:
+        robot_description = f.read()
+
+    # --- SRDF ---
+    srdf_path = os.path.join(pkg_share, 'config', robot_name + '.srdf')
+    if not os.path.exists(srdf_path):
+        config_dir = os.path.join(pkg_share, 'config')
+        for f in os.listdir(config_dir):
+            if f.endswith('.srdf'):
+                srdf_path = os.path.join(config_dir, f)
+                break
+    robot_description_semantic = ''
+    if os.path.exists(srdf_path):
+        with open(srdf_path, 'r') as f:
+            robot_description_semantic = f.read()
+
+    # --- MoveIt config ---
+    kinematics_yaml = _load_yaml(package_name, 'config/kinematics.yaml')
+    joint_limits_yaml = _load_yaml(package_name, 'config/joint_limits.yaml')
+    moveit_controllers_yaml = _load_yaml(package_name, 'config/moveit_controllers.yaml')
+    pilz_limits_yaml = _load_yaml(package_name, 'config/pilz_cartesian_limits.yaml')
+
+    # Planning pipeline (OMPL)
+    ompl_config = {
+        'planning_pipelines': ['ompl'],
+        'default_planning_pipeline': 'ompl',
+        'ompl': {
+            'planning_plugins': ['ompl_interface/OMPLPlanner'],
+            'request_adapters': [
+                'default_planning_request_adapters/ResolveConstraintFrames',
+                'default_planning_request_adapters/ValidateWorkspaceBounds',
+            ],
+            'response_adapters': [
+                'default_planning_response_adapters/AddTimeOptimalParameterization',
+                'default_planning_response_adapters/ValidateSolution',
+            ],
+        },
+    }
+
+    moveit_config = {
+        'robot_description': robot_description,
+        'robot_description_semantic': robot_description_semantic,
+        'robot_description_kinematics': kinematics_yaml,
+        'robot_description_planning': {
+            **joint_limits_yaml,
+            **pilz_limits_yaml,
+        },
+    }
+
+    # --- Build a demo URDF with mock hardware for ros2_control ---
+    # Replace gz_ros2_control plugin with mock_components for demo mode
+    import xml.etree.ElementTree as ET
+    try:
+        urdf_root = ET.fromstring(robot_description)
+        for r2c in urdf_root.findall('ros2_control'):
+            hw = r2c.find('hardware')
+            if hw is not None:
+                plugin = hw.find('plugin')
+                if plugin is not None:
+                    plugin.text = 'mock_components/GenericSystem'
+                # Add mock-specific param
+                fake_sensor = ET.SubElement(hw, 'param')
+                fake_sensor.set('name', 'fake_sensor_commands')
+                fake_sensor.text = 'true'
+        # Remove gazebo plugin (not needed in demo)
+        for gz in urdf_root.findall('gazebo'):
+            plugin = gz.find('plugin')
+            if plugin is not None and 'gz_ros2_control' in (plugin.get('name', '') + plugin.get('filename', '')):
+                urdf_root.remove(gz)
+        robot_description_demo = ET.tostring(urdf_root, encoding='unicode')
+    except Exception:
+        robot_description_demo = robot_description
+
+    # --- Robot State Publisher ---
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        parameters=[{'robot_description': robot_description_demo}],
+        output='screen',
+    )
+
+    # --- ros2_control controller_manager (mock hardware) ---
+    controllers_yaml_path = os.path.join(pkg_share, 'config', 'ros2_controllers.yaml')
+    ros2_controllers = _load_yaml(package_name, 'config/ros2_controllers.yaml')
+
+    controller_manager = Node(
+        package='controller_manager',
+        executable='ros2_control_node',
+        parameters=[
+            {'robot_description': robot_description_demo},
+            controllers_yaml_path,
+        ],
+        output='screen',
+    )
+
+    joint_state_broadcaster_spawner = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['joint_state_broadcaster',
+                   '--controller-manager', '/controller_manager'],
+        output='screen',
+    )
+
+    controller_spawner = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['all_joints_controller',
+                   '--controller-manager', '/controller_manager'],
+        output='screen',
+    )
+
+    # --- MoveIt move_group ---
+    move_group = Node(
+        package='moveit_ros_move_group',
+        executable='move_group',
+        parameters=[
+            moveit_config,
+            ompl_config,
+            moveit_controllers_yaml,
+            {'publish_robot_description_semantic': True},
+        ],
+        output='screen',
+    )
+
+    # --- RViz ---
+    rviz_config = os.path.join(pkg_share, 'config', 'moveit.rviz')
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        arguments=['-d', rviz_config] if os.path.exists(rviz_config) else [],
+        parameters=[
+            moveit_config,
+            ompl_config,
+        ],
+        output='screen',
+    )
+
+    return LaunchDescription([
+        robot_state_publisher,
+        controller_manager,
+        TimerAction(period=2.0, actions=[joint_state_broadcaster_spawner]),
+        TimerAction(period=4.0, actions=[controller_spawner]),
+        TimerAction(period=6.0, actions=[move_group]),
+        TimerAction(period=8.0, actions=[rviz]),
+    ])

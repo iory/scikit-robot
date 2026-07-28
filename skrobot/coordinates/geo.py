@@ -1,9 +1,6 @@
 import warnings
 
-import numpy as np
-
-from skrobot.coordinates.math import angle_between_vectors
-from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import rotation_matrix_from_vectors
 
 
 def midcoords(p, c1, c2):
@@ -46,7 +43,7 @@ def midcoords(p, c1, c2):
     return c1.interpolate(c2, p)
 
 
-def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
+def orient_coords_to_axis(target_coords, v, axis='z', eps=None):
     """Orient axis to the direction
 
     .. deprecated::
@@ -105,19 +102,14 @@ def orient_coords_to_axis(target_coords, v, axis='z', eps=0.005):
         DeprecationWarning,
         stacklevel=2
     )
-    return target_coords.align_axis_to_direction(v, axis=axis, eps=eps)
+    return target_coords.align_axis_to_direction(v, axis=axis)
 
 
 def rotate_points(points, a, b):
     """Rotate given points based on a starting and ending vector.
 
-    Axis vector k is calculated from the any two nonzero vectors a and b.
-    Rotated points are calculated from following Rodrigues rotation formula.
-
-    .. math::
-
-        `P_{rot} = P \\cos \\theta +
-        (k \\times P) \\sin \\theta + k (k \\cdot P) (1 - \\cos \\theta)`
+    The points are rotated by the shortest-arc rotation that takes ``a`` onto
+    ``b``.
 
     Parameters
     ----------
@@ -135,13 +127,4 @@ def rotate_points(points, a, b):
     """
     if points.ndim == 1:
         points = points[None, :]
-
-    a = normalize_vector(a)
-    b = normalize_vector(b)
-    k = normalize_vector(np.cross(a, b))
-    theta = angle_between_vectors(a, b, normalize=False)
-
-    points_rot = points * np.cos(theta) \
-        + np.cross(k, points) * np.sin(theta) \
-        + k * np.dot(k, points.T).reshape(-1, 1) * (1 - np.cos(theta))
-    return points_rot
+    return points.dot(rotation_matrix_from_vectors(a, b).T)

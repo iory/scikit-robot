@@ -8,7 +8,7 @@ import numpy as np
 
 from skrobot.coordinates.math import matrix2rpy
 from skrobot.coordinates.math import rotation_matrix_z_to_axis
-from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import rpy2matrix
 from skrobot.utils.primitive_fitting import fit_primitive_to_mesh
 from skrobot.utils.primitive_fitting import primitive_params_to_origin
 from skrobot.utils.urdf import get_filename
@@ -321,10 +321,10 @@ def convert_meshes_to_primitives(
 
                 # Compose the primitive origin with the mesh element's URDF
                 # origin to obtain the primitive pose in the link frame.
-                rotation_urdf = rpy_matrix(
-                    origin_rpy[2],
+                rotation_urdf = rpy2matrix(
+                    origin_rpy[0],
                     origin_rpy[1],
-                    origin_rpy[0]
+                    origin_rpy[2]
                 )
                 mesh_center_link = rotation_urdf @ local_xyz
                 primitive_center = origin_xyz + mesh_center_link
@@ -339,8 +339,8 @@ def convert_meshes_to_primitives(
                     primitive_rotation = rotation_matrix_z_to_axis(axis_link)
                     final_rpy = matrix2rpy(primitive_rotation)
                 else:
-                    rotation_local = rpy_matrix(
-                        local_rpy[2], local_rpy[1], local_rpy[0])
+                    rotation_local = rpy2matrix(
+                        local_rpy[0], local_rpy[1], local_rpy[2])
                     if np.allclose(rotation_local, np.eye(3)):
                         # Axis-aligned box / sphere: preserve the element's
                         # original URDF origin rpy exactly.

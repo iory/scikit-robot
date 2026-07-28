@@ -4,10 +4,12 @@ import os
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 import pytest
 
 from skrobot.data import kuka_urdfpath
+from skrobot.urdf import change_urdf_root_link
 from skrobot.urdf import URDFXMLRootLinkChanger
 
 
@@ -305,3 +307,134 @@ class TestURDFXMLRootLinkChanger(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestGeometricFidelity(unittest.TestCase):
+    """Re-rooting must preserve the physical geometry exactly.
+
+    Link frames along the path are relocated by design (a reversed
+    revolute joint must rotate its new child about an axis through that
+    child's origin), so fidelity is measured on the visual-mesh world
+    poses, which the relocation compensates through the visual origins.
+    """
+
+    _BOX = ('<visual><geometry><box size="0.05 0.05 0.05"/></geometry>'
+            '</visual>')
+    _BOX_OFFSET = ('<visual><origin xyz="0.02 -0.01 0.03" rpy="0.2 0.1 -0.3"/>'
+                   '<geometry><box size="0.05 0.05 0.05"/></geometry>'
+                   '</visual>')
+    _INERTIAL = ('<inertial><origin xyz="0.01 0.02 0.03" rpy="0 0 0"/>'
+                 '<mass value="1"/><inertia ixx="0.001" ixy="0" ixz="0" '
+                 'iyy="0.001" iyz="0" izz="0.001"/></inertial>')
+
+    @staticmethod
+    def _urdf(link_extra, branch=False):
+        branch_part = ''
+        if branch:
+            branch_part = (
+                f'<link name="branch">{link_extra}</link>'
+                '<joint name="j3" type="fixed">'
+                '<parent link="mid"/><child link="branch"/>'
+                '<origin xyz="-0.05 0.02 0.08" rpy="0.4 -0.1 0.2"/></joint>')
+        return f"""<?xml version="1.0"?>
+<robot name="m">
+  <link name="base_link">{link_extra}</link>
+  <link name="mid">{link_extra}</link>
+  <link name="dummy_link1">{link_extra}</link>
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/><child link="mid"/>
+    <origin xyz="0.1 0.05 0.2" rpy="0.3 -0.2 0.5"/><axis xyz="0 0 1"/>
+    <limit lower="-1" upper="0.8" effort="1" velocity="1"/>
+  </joint>
+  <joint name="j2" type="fixed">
+    <parent link="mid"/><child link="dummy_link1"/>
+    <origin xyz="0 0.15 0.05" rpy="0.1 0.4 -0.3"/>
+  </joint>
+  {branch_part}
+</robot>"""
+
+    @staticmethod
+    def _mesh_world_poses(path, joint_angle):
+        import numpy as np
+
+        from skrobot.coordinates.math import xyzrpy2matrix
+        from skrobot.models.urdf import RobotModelFromURDF
+        robot = RobotModelFromURDF(urdf_file=path)
+        if hasattr(robot, 'j1'):
+            robot.j1.joint_angle(joint_angle)
+        root = ET.parse(path).getroot()
+        poses = {}
+        links = {link.name: link for link in robot.link_list}
+        for link in root.findall('link'):
+            visual = link.find('visual')
+            if visual is None:
+                continue
+            origin = visual.find('origin')
+            xyz = [float(v) for v in
+                   (origin.get('xyz', '0 0 0') if origin is not None
+                    else '0 0 0').split()]
+            rpy = [float(v) for v in
+                   (origin.get('rpy', '0 0 0') if origin is not None
+                    else '0 0 0').split()]
+            name = link.get('name')
+            poses[name] = (links[name].worldcoords().T()
+                           @ xyzrpy2matrix(xyz, rpy))
+        reference = poses['dummy_link1']
+        return {n: np.linalg.inv(reference) @ T for n, T in poses.items()}
+
+    def _assert_fidelity(self, urdf):
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'm.urdf')
+            with open(src, 'w') as f:
+                f.write(urdf)
+            dst = os.path.join(tmp, 'r.urdf')
+            change_urdf_root_link(src, 'dummy_link1', dst)
+            for q in (0.0, 0.5, -0.7):
+                original = self._mesh_world_poses(src, q)
+                rerooted = self._mesh_world_poses(dst, q)
+                for name in original:
+                    np.testing.assert_allclose(
+                        original[name], rerooted[name], atol=1e-9,
+                        err_msg=f'link {name} at q={q}')
+
+    def test_visuals_without_origin_tags(self):
+        # URDF omits <origin> = identity; the relocation must create and
+        # fill it instead of silently skipping the compensation
+        self._assert_fidelity(self._urdf(self._BOX))
+
+    def test_nonzero_visual_offsets_and_inertials(self):
+        # existing offsets must be COMPOSED with the relocation, and
+        # inertial origins compensated the same way
+        self._assert_fidelity(self._urdf(self._BOX_OFFSET + self._INERTIAL))
+
+    def test_off_path_branch(self):
+        self._assert_fidelity(self._urdf(self._BOX, branch=True))
+
+    def test_inertial_com_world_position_preserved(self):
+        import numpy as np
+
+        from skrobot.coordinates.math import xyzrpy2matrix
+        from skrobot.models.urdf import RobotModelFromURDF
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'm.urdf')
+            with open(src, 'w') as f:
+                f.write(self._urdf(self._BOX_OFFSET + self._INERTIAL))
+            dst = os.path.join(tmp, 'r.urdf')
+            change_urdf_root_link(src, 'dummy_link1', dst)
+
+            def com_rel(path):
+                robot = RobotModelFromURDF(urdf_file=path)
+                links = {link.name: link for link in robot.link_list}
+                root = ET.parse(path).getroot()
+                base = [link for link in root.findall('link')
+                        if link.get('name') == 'base_link'][0]
+                origin = base.find('inertial').find('origin')
+                com = xyzrpy2matrix(
+                    [float(v) for v in origin.get('xyz').split()],
+                    [float(v) for v in origin.get('rpy', '0 0 0').split()])
+                world = links['base_link'].worldcoords().T() @ com
+                ref = links['dummy_link1'].worldcoords().T()
+                return np.linalg.inv(ref) @ world
+            np.testing.assert_allclose(com_rel(src), com_rel(dst),
+                                       atol=1e-9)

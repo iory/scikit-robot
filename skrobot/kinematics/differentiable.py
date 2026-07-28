@@ -8,6 +8,7 @@ import numpy as np
 
 from skrobot.backend import rodrigues_rotation as _rodrigues_rotation
 from skrobot.coordinates.math import normalize_axis_mask
+from skrobot.coordinates.math import skew_symmetric_matrix
 
 
 # =============================================================================
@@ -838,11 +839,7 @@ def compute_jacobian_analytical_batch(joint_angles_batch, fk_params):
             # Revolute joint: rotate around axis
             # Rodrigues formula: R = I + sin(θ)K + (1-cos(θ))K²
             # where K is skew-symmetric matrix of axis
-            K = np.array([
-                [0, -axis[2], axis[1]],
-                [axis[2], 0, -axis[0]],
-                [-axis[1], axis[0], 0]
-            ])
+            K = skew_symmetric_matrix(axis)
             K2 = K @ K
 
             sin_theta = np.sin(delta)[:, None, None]  # (batch_size, 1, 1)
@@ -2404,11 +2401,7 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
         for i in range(n_joints):
             axis = np.array(fk_params['joint_axes'][i])
             axis_norm = axis / (np.linalg.norm(axis) + 1e-10)
-            K = np.array([
-                [0, -axis_norm[2], axis_norm[1]],
-                [axis_norm[2], 0, -axis_norm[0]],
-                [-axis_norm[1], axis_norm[0], 0]
-            ])
+            K = skew_symmetric_matrix(axis_norm)
             joint_K.append(jnp.array(K))
             joint_K2.append(jnp.array(K @ K))
 
@@ -3605,11 +3598,7 @@ def _create_jax_jacobian_solver(fk_params, backend):
         for i in range(n_joints):
             axis = np.array(fk_params['joint_axes'][i])
             axis_norm = axis / (np.linalg.norm(axis) + 1e-10)
-            K = np.array([
-                [0, -axis_norm[2], axis_norm[1]],
-                [axis_norm[2], 0, -axis_norm[0]],
-                [-axis_norm[1], axis_norm[0], 0]
-            ])
+            K = skew_symmetric_matrix(axis_norm)
             _joint_K.append(jnp.array(K))
             _joint_K2.append(jnp.array(K @ K))
 
@@ -4537,11 +4526,7 @@ def _axis_angle_to_matrix_batched(axis, angles):
     axis = axis / (np.linalg.norm(axis) + 1e-10)
 
     # Skew-symmetric matrix K
-    K = np.array([
-        [0, -axis[2], axis[1]],
-        [axis[2], 0, -axis[0]],
-        [-axis[1], axis[0], 0]
-    ])
+    K = skew_symmetric_matrix(axis)
 
     # K @ K precomputed
     K2 = K @ K

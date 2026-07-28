@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import contextlib
 import os.path as osp
 from pathlib import Path
 import shutil
@@ -11,14 +10,12 @@ from lxml import etree
 from packaging.version import Version
 
 from skrobot import determine_version
-from skrobot.model import RobotModel
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import print_xacro_usage_instructions
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.utils.package import is_package_installed
-from skrobot.utils.urdf import apply_scale
-from skrobot.utils.urdf import export_mesh_format
-from skrobot.utils.urdf import force_visual_mesh_origin_to_zero
+from skrobot.utils.urdf import convert_urdf_meshes
+from skrobot.utils.urdf import source_urdf_path
 
 
 def main():
@@ -159,6 +156,13 @@ resulting in less simplification. Default is None."""
 
 def process_urdf(urdf_file, args):
     """Process a single URDF file."""
+    # Scoped so that converting several URDFs in one run does not resolve
+    # the second one's meshes against the first one's directory.
+    with source_urdf_path(str(Path(urdf_file).resolve().parent)):
+        _process_urdf(urdf_file, args)
+
+
+def _process_urdf(urdf_file, args):
     urdf_path = Path(urdf_file)
 
     if args.output is None:
@@ -173,59 +177,33 @@ def process_urdf(urdf_file, args):
     else:
         output_path = Path(args.output)
 
-    if args.force_zero_origin:
-        force_visual_mesh_origin_to_zero_or_not = \
-            force_visual_mesh_origin_to_zero
-    else:
-        try:
-            from contextlib import nullcontext
-        except ImportError:
-            # for python3.6
-            @contextlib.contextmanager
-            def nullcontext(enter_result=None):
-                yield enter_result
-        force_visual_mesh_origin_to_zero_or_not = nullcontext
-
-    # Store source URDF path for mesh resolution
-    from skrobot.utils.urdf import _CONFIGURABLE_VALUES
-    # Convert to absolute path to ensure correct mesh resolution
-    urdf_path_abs = urdf_path.resolve()
-    source_urdf_dir = str(urdf_path_abs.parent)
-    _CONFIGURABLE_VALUES['_source_urdf_path'] = source_urdf_dir
-
-    with force_visual_mesh_origin_to_zero_or_not():
-        print(f"Loading URDF from: {urdf_path}")
-        try:
-            r = RobotModel.from_urdf(str(urdf_path_abs))
-        except Exception as e:
-            print(f"[ERROR] Failed to load URDF: {e}")
-            return
-
-    # Verify that the robot model has valid links
-    if r.urdf_robot_model is None or not hasattr(r.urdf_robot_model, 'links') or len(r.urdf_robot_model.links) == 0:
-        print("[ERROR] URDF does not contain any valid links. Cannot proceed.")
-        return
-
-    with export_mesh_format(
+    print(f"Loading URDF from: {urdf_path}")
+    print(f"Saving new URDF to: {output_path}")
+    try:
+        convert_urdf_meshes(
+            urdf_path,
+            output_path,
             '.' + args.format,
+            collision_mesh_format='.' + args.collision_mesh_format,
+            scale=args.scale,
+            force_zero_visual_origin=args.force_zero_origin,
             decimation_area_ratio_threshold=args.decimation_area_ratio_threshold,  # NOQA
             simplify_vertex_clustering_voxel_size=args.voxel_size,
             target_triangles=args.target_triangles,
             overwrite_mesh=args.overwrite_mesh,
-            collision_mesh_format='.' + args.collision_mesh_format,
             blender_remesh=args.blender_remesh,
             blender_voxel_size=args.blender_voxel_size,
             blender_decimate=args.blender_decimate,
             blender_decimate_ratio=args.blender_decimate_ratio,
             blender_executable=args.blender_executable,
             remeshed_suffix=args.remeshed_suffix,
-            draco_compression=args.draco), apply_scale(args.scale):
-        print(f"Saving new URDF to: {output_path}")
-        # Ensure output directory exists
-        output_dir = output_path.parent
-        if not output_dir.exists():
-            output_dir.mkdir(parents=True, exist_ok=True)
-        r.urdf_robot_model.save(str(output_path))
+            draco_compression=args.draco)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return
+    except Exception as e:
+        print(f"[ERROR] Failed to convert URDF: {e}")
+        return
 
     if args.inplace:
         print(f"Moving {output_path} to {urdf_path} (inplace)")

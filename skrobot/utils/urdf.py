@@ -23,12 +23,12 @@ from lxml import etree as ET
 import networkx as nx
 import numpy as np
 import PIL.Image
-import six
 
 from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import normalize_vector
-from skrobot.coordinates import rpy_matrix
 from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import rpy2matrix
+from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.pycompat import lru_cache
 
 
@@ -155,6 +155,104 @@ def apply_scale(scale_factor):
     _CONFIGURABLE_VALUES['scale_factor'] = 1.0
 
 
+@contextlib.contextmanager
+def source_urdf_path(path):
+    """Resolve mesh filenames against ``path`` while saving a URDF.
+
+    ``URDF.save`` normally resolves relative mesh paths against the
+    output location; inside this context it resolves them against the
+    directory the URDF was loaded from instead.
+
+    The previous value is restored on exit. Leaving it set leaks into
+    every later export in the same process -- meshes then resolve
+    against a stale directory.
+
+    Parameters
+    ----------
+    path : str
+        Directory the URDF was loaded from.
+    """
+    previous = _CONFIGURABLE_VALUES.get('_source_urdf_path')
+    _CONFIGURABLE_VALUES['_source_urdf_path'] = path
+    try:
+        yield
+    finally:
+        _CONFIGURABLE_VALUES['_source_urdf_path'] = previous
+
+
+def convert_urdf_meshes(urdf_path, output_path, mesh_format,
+                        collision_mesh_format=None, scale=1.0,
+                        force_zero_visual_origin=False, **export_options):
+    """Re-save a URDF with every mesh converted to another format.
+
+    Loads ``urdf_path`` and writes it to ``output_path`` inside an
+    :func:`export_mesh_format` context, so each referenced mesh is
+    written out in the requested format next to the new URDF. Mesh
+    filenames resolve against the input URDF's directory
+    (:func:`source_urdf_path`), which is what makes a URDF whose meshes
+    live beside it convertible to a different directory.
+
+    Parameters
+    ----------
+    urdf_path : str or pathlib.Path
+        Input URDF path.
+    output_path : str or pathlib.Path
+        Output URDF path. Parent directories are created.
+    mesh_format : str
+        Target format for visual meshes, with the leading dot
+        (``'.dae'``, ``'.stl'``, ``'.glb'``).
+    collision_mesh_format : str, optional
+        Target format for collision meshes, with the leading dot.
+        Defaults to ``mesh_format``.
+    scale : float
+        Scale applied while saving.
+    force_zero_visual_origin : bool
+        Move every visual mesh origin to zero while loading.
+    export_options : dict
+        Passed through to :func:`export_mesh_format` -- decimation,
+        remeshing, Draco compression and so on.
+
+    Returns
+    -------
+    str
+        ``output_path``, as a string.
+
+    Raises
+    ------
+    ValueError
+        If the URDF contains no links.
+    """
+    from skrobot.model import RobotModel
+
+    urdf_path = os.path.abspath(str(urdf_path))
+    output_path = str(output_path)
+
+    with source_urdf_path(os.path.dirname(urdf_path)):
+        origin_context = (force_visual_mesh_origin_to_zero()
+                          if force_zero_visual_origin
+                          else contextlib.nullcontext())
+        with origin_context:
+            robot = RobotModel.from_urdf(urdf_path)
+
+        urdf_robot_model = robot.urdf_robot_model
+        if urdf_robot_model is None or not getattr(
+                urdf_robot_model, 'links', None):
+            raise ValueError(
+                'URDF contains no links: {}'.format(urdf_path))
+
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        with export_mesh_format(
+                mesh_format,
+                collision_mesh_format=collision_mesh_format,
+                **export_options), apply_scale(scale):
+            urdf_robot_model.save(output_path)
+
+    return output_path
+
+
 def get_transparency(mesh):
     if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
         material = mesh.visual.material
@@ -189,7 +287,7 @@ def parse_origin(node):
         if 'rpy' in origin_node.attrib:
             rpy = np.fromstring(origin_node.attrib['rpy'], sep=' ')
             roll, pitch, yaw = rpy
-            matrix[:3, :3] = rpy_matrix(yaw, pitch, roll)
+            matrix[:3, :3] = rpy2matrix(roll, pitch, yaw)
     return matrix
 
 
@@ -708,10 +806,7 @@ def configure_origin(value):
     elif isinstance(value, (list, tuple, np.ndarray)):
         value = np.asanyarray(value).astype(np.float64)
         if value.shape == (6,):
-            value = np.eye(4).astype(np.float64)
-            value[:3, 3] = value[:3]
-            roll, pitch, yaw = value[3:]
-            value[:3, :3] = rpy_matrix(yaw, pitch, roll)
+            value = xyzrpy2matrix(value[:3], value[3:])
         elif value.shape != (4, 4):
             raise ValueError('Origin must be specified as a 4x4 '
                              'homogenous transformation matrix')
@@ -1258,7 +1353,7 @@ class Mesh(URDFType):
 
     @meshes.setter
     def meshes(self, value):
-        if isinstance(value, six.string_types):
+        if isinstance(value, str):
             value = load_meshes(value)
             self._meshes = value
             return
@@ -1948,7 +2043,7 @@ class Material(URDFType):
     @texture.setter
     def texture(self, value):
         if value is not None:
-            if isinstance(value, six.string_types):
+            if isinstance(value, str):
                 image = PIL.Image.open(value)
                 value = Texture(filename=value, image=image)
             elif not isinstance(value, Texture):
@@ -3717,7 +3812,7 @@ class URDF(URDFType):
         urdf : :class:`.URDF`
             The parsed URDF.
         """
-        if isinstance(file_obj, six.string_types):
+        if isinstance(file_obj, str):
             path, _ = os.path.split(file_obj)
         else:
             path, _ = os.path.split(os.path.realpath(file_obj.name))
@@ -3794,7 +3889,7 @@ class URDF(URDFType):
         urdf : :class:`.URDF`
             The parsed URDF.
         """
-        if isinstance(file_obj, six.string_types):
+        if isinstance(file_obj, str):
             # Handle package:// URLs
             if file_obj.startswith('package://'):
                 resolved_path = resolve_filepath(os.getcwd(), file_obj)

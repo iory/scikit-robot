@@ -3,7 +3,7 @@ import numpy as np
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import matrix2ypr
-from skrobot.coordinates.math import rpy_matrix
+from skrobot.coordinates.math import rpy2matrix
 
 
 def scipinize(fun):
@@ -63,7 +63,7 @@ def set_robot_config(robot_model, joint_list, av, with_base=False):
     if with_base:
         av_joint, av_base = av[:-3], av[-3:]
         x, y, theta = av_base
-        co = Coordinates(pos=[x, y, 0.0], rot=rpy_matrix(theta, 0.0, 0.0))
+        co = Coordinates(pos=[x, y, 0.0], rot=rpy2matrix(0.0, 0.0, theta))
         robot_model.newcoords(co)
     else:
         av_joint = av
