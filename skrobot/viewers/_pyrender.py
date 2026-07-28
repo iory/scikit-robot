@@ -32,6 +32,7 @@ if platform.system() == 'Linux':
         os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import inspect
+import warnings
 
 import pyrender
 from pyrender.trackball import Trackball
@@ -72,6 +73,121 @@ def _mesh_from_trimesh(mesh, smooth=False, always_on_top=False):
         return pyrender.Mesh.from_trimesh(
             mesh, smooth=smooth, always_on_top=always_on_top)
     return pyrender.Mesh.from_trimesh(mesh, smooth=smooth)
+
+
+def _normalize_vertex_colors(colors):
+    """Normalize color data to an ``(N, 3|4)`` array or return ``None``.
+
+    Parameters
+    ----------
+    colors : array-like or None
+        Raw color data from trimesh.
+
+    Returns
+    -------
+    np.ndarray or None
+        Normalized color array when usable for pyrender, otherwise ``None``.
+    """
+    if colors is None:
+        return None
+    color_array = np.asarray(colors)
+    if color_array.size == 0:
+        return None
+    if color_array.ndim == 1:
+        if color_array.shape[0] not in (3, 4):
+            return None
+        color_array = color_array.reshape(1, -1)
+    if color_array.ndim != 2:
+        return None
+    if color_array.shape[1] not in (3, 4):
+        return None
+    return color_array
+
+
+def _segment_count_from_entity_nodes(nodes):
+    """Infer a path entity's segment count from its node array."""
+    node_array = np.asarray(nodes)
+    if node_array.size == 0:
+        return 0
+    if node_array.ndim == 1:
+        if node_array.shape[0] < 2:
+            return 0
+        return node_array.shape[0] - 1
+    if node_array.ndim == 2:
+        if node_array.shape[1] < 2:
+            return 0
+        return node_array.shape[0]
+    return None
+
+
+def _resolve_path3d_vertex_colors(mesh, positions):
+    """Return per-vertex colors for a ``Path3D`` primitive.
+
+    pyrender expects one color row per position row. trimesh paths can provide
+    colors per-vertex or per-entity, so this helper expands per-entity colors
+    to exactly match the generated vertex positions.
+    """
+    colors = _normalize_vertex_colors(getattr(mesh, 'colors', None))
+    if colors is None:
+        return None
+
+    n_vertices = positions.shape[0]
+    if colors.shape[0] == n_vertices:
+        return colors
+
+    n_entities = len(mesh.entities)
+    if colors.shape[0] != n_entities:
+        warnings.warn(
+            ('Dropping Path3D colors: expected {} rows (per-vertex) or {} '
+             'rows (per-entity), got {}.').format(
+                n_vertices, n_entities, colors.shape[0]),
+            UserWarning)
+        return None
+
+    per_entity_vertex_counts = []
+    for entity in mesh.entities:
+        segment_count = _segment_count_from_entity_nodes(entity.nodes)
+        if segment_count is None:
+            warnings.warn(
+                'Dropping Path3D colors: failed to infer segment counts.',
+                UserWarning)
+            return None
+        per_entity_vertex_counts.append(int(segment_count) * 2)
+
+    total_vertices = int(np.sum(per_entity_vertex_counts))
+    try:
+        assert total_vertices == n_vertices, (
+            'segment expansion produced {} vertices, expected {}.'.format(
+                total_vertices, n_vertices))
+    except AssertionError as exc:
+        warnings.warn(
+            'Dropping Path3D colors: {}.'.format(exc),
+            UserWarning)
+        return None
+
+    expanded = np.repeat(colors, per_entity_vertex_counts, axis=0)
+    if expanded.shape[0] != n_vertices:
+        warnings.warn(
+            ('Dropping Path3D colors: expanded row count {} does not match '
+             'vertex count {}.').format(expanded.shape[0], n_vertices),
+            UserWarning)
+        return None
+    return expanded
+
+
+def _resolve_pointcloud_vertex_colors(mesh, positions):
+    """Return per-vertex colors for a ``PointCloud`` primitive."""
+    colors = _normalize_vertex_colors(getattr(mesh, 'colors', None))
+    if colors is None:
+        return None
+    n_vertices = positions.shape[0]
+    if colors.shape[0] == n_vertices:
+        return colors
+    warnings.warn(
+        ('Dropping PointCloud colors: expected {} rows (one per point), '
+         'got {}.').format(n_vertices, colors.shape[0]),
+        UserWarning)
+    return None
 
 
 def _redraw_all_windows():
@@ -425,18 +541,28 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
             if link_id not in self._visual_mesh_map and mesh:
                 node = None
                 if isinstance(mesh, trimesh.path.Path3D):
+                    positions = mesh.vertices[mesh.vertex_nodes].reshape(-1, 3)
+                    primitive_kwargs = dict(
+                        mode=pyrender.constants.GLTF.LINE_STRIP)
+                    color_0 = _resolve_path3d_vertex_colors(mesh, positions)
+                    if color_0 is not None:
+                        primitive_kwargs['color_0'] = color_0
                     pyrender_mesh = pyrender.Mesh(
                         primitives=[pyrender.Primitive(
-                            mesh.vertices[mesh.vertex_nodes].reshape(-1, 3),
-                            mode=pyrender.constants.GLTF.LINE_STRIP,
-                            color_0=mesh.colors)])
+                            positions,
+                            **primitive_kwargs)])
                     node = self.scene.add(pyrender_mesh)
                 elif isinstance(mesh, trimesh.PointCloud):
+                    positions = mesh.vertices
+                    primitive_kwargs = dict(
+                        mode=pyrender.constants.GLTF.POINTS)
+                    color_0 = _resolve_pointcloud_vertex_colors(mesh, positions)
+                    if color_0 is not None:
+                        primitive_kwargs['color_0'] = color_0
                     pyrender_mesh = pyrender.Mesh(
                         primitives=[pyrender.Primitive(
-                            mesh.vertices,
-                            mode=pyrender.constants.GLTF.POINTS,
-                            color_0=mesh.colors)])
+                            positions,
+                            **primitive_kwargs)])
                     node = self.scene.add(pyrender_mesh)
                 else:
                     always_on_top = getattr(link, '_always_on_top', False)
@@ -688,6 +814,19 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
         else:
             if isinstance(coords_or_transform, Coordinates):
                 pose = coords_or_transform.worldcoords().T()
+            else:
+                try:
+                    pose = np.asarray(coords_or_transform, dtype=np.float64)
+                except (TypeError, ValueError):
+                    raise TypeError(
+                        ('coords_or_transform must be Coordinates or a '
+                         '(4, 4) array-like, got {}.').format(
+                            type(coords_or_transform).__name__))
+                if pose.shape != (4, 4):
+                    raise ValueError(
+                        ('coords_or_transform must be Coordinates or a '
+                         '(4, 4) array-like, got shape {}.').format(
+                            pose.shape))
         self._camera_node.matrix = pose
         self._trackball = Trackball(
             pose=pose,
