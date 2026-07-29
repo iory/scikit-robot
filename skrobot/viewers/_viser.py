@@ -40,6 +40,9 @@ except ImportError:
     _LIMB_DESCRIPTOR_TYPES = (property, _functools_cached_property)
 
 
+_CHECK_INTERVAL_NOT_GIVEN = object()
+
+
 class ViserViewer(_InteractiveViewerMixin):
     """Viser-based 3D viewer for scikit-robot.
 
@@ -188,11 +191,21 @@ class ViserViewer(_InteractiveViewerMixin):
     def is_active(self) -> bool:
         return self._is_active
 
+    @property
+    def has_exit(self):
+        return not self.is_active
+
     def close(self):
         self._is_active = False
         self._server.stop()
 
-    def wait_until_close(self, check_interval=0.1):
+    def wait_until_close(
+        self,
+        redraw=True,
+        interval=0.1,
+        message='==> Press Ctrl-C in this terminal to stop the viser server',
+        check_interval=_CHECK_INTERVAL_NOT_GIVEN,
+    ):
         """Block until the viewer is closed.
 
         The Viser HTTP/WebSocket server runs in a background thread, so a
@@ -201,14 +214,47 @@ class ViserViewer(_InteractiveViewerMixin):
         keep the viewer alive; it returns when :meth:`close` is called or the
         user interrupts with Ctrl-C.
 
+        This method intentionally does not reuse
+        :meth:`skrobot.viewers._base._InteractiveViewerMixin.wait_until_close`:
+        that helper calls :meth:`redraw` on a timer while waiting, but
+        ``ViserViewer.redraw()`` can run IK/collision updates and is not a
+        cheap event pump.
+
         Parameters
         ----------
-        check_interval : float, optional
+        redraw : bool, optional
+            Accepted for cross-backend API compatibility, but ignored.
+            The browser client renders continuously, so there is no local
+            window event loop to pump from Python.
+        interval : float, optional
             Polling interval in seconds. Default ``0.1``.
+        message : str or None, optional
+            Message printed once before waiting starts. Pass ``None`` to
+            suppress it. The default differs from the mixin's
+            ``'Press [q] to close window'`` text because this backend runs
+            a browser client plus background server, not a keyboard-driven
+            native window.
+        check_interval : float, optional
+            Deprecated alias for ``interval``. Passing this emits a
+            ``DeprecationWarning``. Passing both ``interval`` and
+            ``check_interval`` raises ``TypeError``.
         """
+        if check_interval is not _CHECK_INTERVAL_NOT_GIVEN:
+            if interval != 0.1:
+                raise TypeError(
+                    "wait_until_close() got both 'interval' and deprecated "
+                    "'check_interval'. Use only 'interval'.")
+            warnings.warn(
+                "'check_interval' is deprecated; use 'interval' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            interval = check_interval
+        if message:
+            print(message)
         try:
             while self._is_active:
-                time.sleep(check_interval)
+                time.sleep(interval)
         except KeyboardInterrupt:
             self.close()
 

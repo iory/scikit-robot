@@ -48,7 +48,9 @@ Keeping the viewer responsive
 Every interactive viewer provides two helpers:
 
 - ``viewer.wait_until_close()`` blocks until the window is closed, replacing the
-  manual ``while viewer.is_active: ...`` loop.
+  manual ``while viewer.is_active: ...`` loop. For ``ViserViewer`` this means
+  waiting until the server is stopped (for example Ctrl-C or ``viewer.close()``),
+  not browser-tab state.
 - ``viewer.pause(seconds)`` waits like ``time.sleep`` but keeps the window
   interactive -- use it in animation loops so the camera stays draggable during
   the pause. This matters on macOS, where the trimesh / pyrender GL loop runs on
@@ -76,7 +78,7 @@ It automatically generates GUI sliders for each joint, allowing real-time manipu
    viewer.add(robot)
    viewer.show()  # Opens browser automatically
 
-   # Keep the server running until the browser tab is closed
+   # Keep the server running until it is stopped (Ctrl-C or viewer.close()).
    viewer.wait_until_close()
 
 .. image:: ../../image/viser-viewer.jpg
