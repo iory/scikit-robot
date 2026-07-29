@@ -6,6 +6,9 @@ import skrobot
 from skrobot.model import Box
 from skrobot.planner import SweptSphereSdfCollisionChecker
 from skrobot.planner.utils import set_robot_config
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 try:
@@ -19,13 +22,17 @@ except:  # noqa
         description='Swept spheres visualization.')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
     parser.add_argument(
         '--no-interactive',
         action='store_true',
         help="Run in non-interactive mode (do not wait for user input)"
     )
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the view to this video file (e.g. out.mp4). Works with '
+             'any --viewer; use --viewer mitsuba to record headlessly.')
     args = parser.parse_args()
 
     viewer = skrobot.viewers.create_viewer(
@@ -71,6 +78,12 @@ sscc.add_coll_spheres_to_viewer(viewer)
 viewer.add(robot_model)
 viewer.add(table)
 viewer.show()
+
+# This scene is static, so capture the single shown frame for --save-video.
+recorder = record_viewer(viewer, args.save_video)
+if recorder is not None:
+    recorder.capture()
+    print('saving video to {}'.format(recorder.save()))
 
 if not args.no_interactive:
     viewer.wait_until_close()

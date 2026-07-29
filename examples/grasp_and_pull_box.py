@@ -8,6 +8,9 @@ import numpy as np
 import skrobot
 from skrobot.coordinates.base import Coordinates
 from skrobot.model.primitives import Box
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def init_pose():
@@ -91,8 +94,12 @@ parser.add_argument(
 )
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-    help='Choose the viewer type: trimesh, pyrender or viser')
+    choices=VIEWER_TYPES, default='pyrender',
+    help=VIEWER_HELP)
+parser.add_argument(
+    '--save-video', type=str, default=None,
+    help='Record the animation to this video file (e.g. out.mp4). Works with '
+         'any --viewer; use --viewer mitsuba to record headlessly.')
 args = parser.parse_args()
 
 
@@ -118,6 +125,9 @@ viewer.show()
 viewer.set_camera([np.deg2rad(45), -np.deg2rad(0),
                   np.deg2rad(135)], distance=2.5)
 
+# Record every redraw/pause of the animation below when --save-video is given.
+recorder = record_viewer(viewer, args.save_video, fps=20)
+
 # Move robot
 init_pose()
 box_center = np.array([0.9, -0.2, 0.9])
@@ -125,6 +135,9 @@ box = add_box(box_center)
 move_to_box(box)
 grasp_box(box)
 pull_box(box)
+
+if recorder is not None:
+    print('saving video to {}'.format(recorder.save()))
 
 if not args.no_interactive:
     viewer.wait_until_close()

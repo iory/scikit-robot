@@ -64,6 +64,13 @@ if (sys.version_info.major > 2):
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
+    # mitsuba powers the headless MitsubaViewer; wheels are cp39+
+    if (sys.version_info.major, sys.version_info.minor) >= (3, 9):
+        extra_all_requires.append('mitsuba')
+    # matplotlib backs MitsubaViewer.show()/pause() (the interactive window)
+    extra_all_requires.append('matplotlib')
+    # imageio (+ffmpeg) backs the examples' --save-video / VideoRecorder
+    extra_all_requires.extend(['imageio', 'imageio-ffmpeg'])
 
 # Python 2.7 and 3.4 support has been dropped from packages
 # version lock those packages here so install succeeds

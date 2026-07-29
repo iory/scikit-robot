@@ -80,6 +80,9 @@ from skrobot.coordinates import Coordinates  # noqa: E402
 from skrobot.models import JaxonJVRC  # noqa: E402
 from skrobot.planner.trajectory_optimization import TrajectoryProblem  # noqa: E402
 from skrobot.planner.trajectory_optimization.solvers import create_solver  # noqa: E402
+from skrobot.utils.video import record_viewer  # noqa: E402
+from skrobot.viewers import VIEWER_HELP  # noqa: E402
+from skrobot.viewers import VIEWER_TYPES  # noqa: E402
 
 
 def set_initial_stance(robot, knee_bend_deg=20.0):
@@ -581,12 +584,17 @@ def main():
                         default=default_n_per_transition,
                         help='Waypoints per double-support transition.')
     parser.add_argument('--viewer', type=str, default='pyrender',
-                        choices=['pyrender', 'trimesh', 'viser'],
-                        help='Viewer backend for live visualisation.')
+                        choices=VIEWER_TYPES,
+                        help=VIEWER_HELP)
     parser.add_argument('--no-interactive', action='store_true',
                         help='Skip visualisation; only print timings/errors.')
     parser.add_argument('--no-loop', action='store_true',
                         help='Play the walk once instead of looping.')
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record one walk-through to this video file (e.g. out.mp4). '
+             'Works with any --viewer; use --viewer mitsuba to record '
+             'headlessly.')
     args = parser.parse_args()
 
     segments = parse_segments(args.segments)
@@ -624,7 +632,8 @@ def main():
         final_pos[0], final_pos[1], final_pos[2], final_yaw_deg))
     print('Total wall time: {:.2f} s'.format(time.perf_counter() - t_total))
 
-    if args.no_interactive:
+    # Keep going when recording a video, even under --no-interactive.
+    if args.no_interactive and not args.save_video:
         return
 
     apply_aug_to_robot(
@@ -635,8 +644,16 @@ def main():
     add_ground_with_stripes(viewer, segments_data, args.viewer)
     viewer.show()
 
+    recorder = record_viewer(viewer, args.save_video, fps=20)
+
+    # A recording plays the walk through exactly once (no infinite loop to
+    # capture); interactively it keeps looping unless --no-loop is given.
+    loop = (not args.no_loop) and not args.save_video
     animate_segments(viewer, robot, segments_data, args.viewer,
-                     dt=0.05, loop=not args.no_loop)
+                     dt=0.05, loop=loop)
+
+    if recorder is not None:
+        print('saving video to {}'.format(recorder.save()))
 
     if args.viewer != 'viser':
         viewer.close()

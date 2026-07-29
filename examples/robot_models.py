@@ -6,6 +6,8 @@ import time
 import numpy as np
 
 import skrobot
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def _get_tile_shape(num, hw_ratio=1):
@@ -23,8 +25,8 @@ def main():
         description='Set viewer for skrobot.')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
     parser.add_argument(
         '--no-interactive',
         action='store_true',

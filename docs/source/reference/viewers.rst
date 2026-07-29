@@ -281,6 +281,67 @@ The following video demonstrates the interactive IK feature, where dragging the 
     # Use viser viewer with visualize-urdf command (IK is enabled by default)
     skr visualize-urdf ~/.skrobot/pr2_description/pr2.urdf --viewer viser
 
+MitsubaViewer
+-------------
+
+**Description:**
+  The ``MitsubaViewer`` is a headless offscreen renderer backed by Mitsuba 3. It opens no window by default and needs no display server or OpenGL context, so it works over SSH, in CI, and on macOS where offscreen OpenGL is unavailable. It is a path-traced quality renderer (not a real-time viewer), intended for high-quality stills and batch rendering.
+
+**Key Functionalities:**
+
+- **Installation and Fallback:**
+  Mitsuba is included in the ``scikit-robot[all]`` extra. If ``mitsuba`` cannot be imported, the backend falls back to ``DummyViewer`` so scripts using ``create_viewer('mitsuba', ...)`` still run.
+
+- **Variant Selection and Sampling Defaults:**
+  Use ``variant=...`` or ``SKROBOT_MITSUBA_VARIANT`` to choose the Mitsuba variant explicitly (for example ``metal_ad_rgb`` on Apple GPU, ``cuda_ad_rgb`` on NVIDIA, ``llvm_ad_rgb`` on CPU). With no explicit choice, auto-selection prefers ``metal_ad_rgb`` (when compiled) and otherwise uses ``llvm_ad_rgb``; CUDA is not auto-selected because having a compiled CUDA variant does not guarantee a usable runtime GPU/driver. ``spp`` defaults to ``512`` on GPU variants (Metal/CUDA) and ``64`` on CPU variants.
+
+- **Drop-in Viewer API:**
+  The backend implements the same script-facing API as other viewers: ``add``, ``delete``, ``set_camera``, ``render``, ``save_image``, ``show``, ``redraw``, ``pause``, ``is_active``, ``has_exit``, ``wait_until_close``, ``close``, ``add_joint_axis``, and ``delete_joint_axis``. This keeps existing scripts and ``--viewer mitsuba`` CLI usage unchanged. ``render()`` returns an ``(H, W, 3)`` ``uint8`` array. ``save_image()`` writes an image file. ``show()`` displays inline in Jupyter and otherwise opens a matplotlib window with drag-to-orbit and scroll-to-zoom controls.
+
+- **Cross-backend ``set_camera``:**
+  ``set_camera`` accepts the same ``angles`` / ``distance`` / ``center`` / ``resolution`` / ``fov`` / ``coords_or_transform`` arguments as ``PyrenderViewer`` and ``ViserViewer`` (same euler convention), so a script written for another backend frames the same view here. For ``set_camera(angles=...)``, Mitsuba now uses ``trimesh.scene.cameras.look_at`` with this viewer's effective FOV, matching the trimesh/pyrender framing fitter. It additionally accepts an explicit ``eye`` / ``target`` / ``up`` look-at triple, which takes precedence when given.
+
+- **Runtime recolouring:**
+  ``Link.set_color`` / ``reset_color`` / ``set_alpha`` after ``add()`` are picked up on the next render, as they are by ``PyrenderViewer``: the viewer polls ``link.visual_mesh_changed`` and re-exports only the links that actually changed. Transparency is rendered with Mitsuba's stochastic mask BSDF, so very low ``spp`` values can look noisier on translucent surfaces.
+
+- **Scene Controls (Constructor Arguments):**
+  ``resolution`` sets output size, ``spp`` controls samples per pixel (noise/performance tradeoff), and ``variant`` selects the Mitsuba backend. ``ground`` toggles the default ground plane and key light. ``fov`` defaults to ``(60.0, 45.0)`` and accepts either a scalar degree value (used with ``fov_axis``) or the same ``(xfov, yfov)`` tuple convention as ``PyrenderViewer.set_camera``; ``set_camera(fov=...)`` can change it later. ``ground_height`` sets floor ``z`` explicitly, or auto-detects the lowest added geometry when ``None``. ``ground_size`` sets ground-plane half extent. ``light_intensity`` scales the key area light, and ``ambient_light`` scales constant ambient illumination. ``update_interval`` and ``title`` are accepted for constructor compatibility with windowed viewers and ignored here (no background refresh timer; window title is not part of this backend's API contract).
+
+- **Redraw Cost and Animation Loops:**
+  ``redraw()`` and ``pause()`` re-path-trace each frame; unlike raster backends, they do real rendering work every call. Measured on this branch at ``640x480``: about **113 ms/frame** with a GPU default of ``512`` spp, and about **309 ms/frame** on CPU at ``64`` spp. A 30 Hz loop has a 33 ms frame budget, so animation may need lower ``spp`` (or fewer redraws) to hit target timing.
+
+- **Backend-specific members:**
+  Pyrender/viser-specific members such as ``viewer.scene``, ``enable_collision_visualization`` and ``draw_grid`` are backend-specific and are not part of ``MitsubaViewer``.
+
+- **Auto Ground-Height Behavior:**
+  With ``ground_height=None``, the ground plane defaults to the lowest point of added geometry so robots that are not standing on ``z=0`` (for example, gantries hanging below the origin) are not hidden behind a fixed floor. The detected value is sticky: it is recomputed only when geometry is added/removed, not when existing geometry is moved, so the floor stays put during animation.
+
+- **Marker Helpers for Cheap Animation:**
+  ``add_sphere(center, radius, color, name)`` and ``add_box(center, extents, rotation, color, name)`` add simple scene markers. Re-calling either helper with an existing ``name`` updates that marker pose in-place without recompiling the scene (when marker shape/color are unchanged), which keeps per-frame marker animation cheap.
+
+**Usage Example:**
+
+.. code-block:: python
+
+    import skrobot
+
+    robot = skrobot.models.Panda()
+    viewer = skrobot.viewers.create_viewer(
+        'mitsuba',
+        resolution=(640, 480),
+        fov=40.0,
+        light_intensity=4.0,
+        variant=None,     # auto-select (or set SKROBOT_MITSUBA_VARIANT)
+    )
+    viewer.add(robot)
+    viewer.add_sphere([0.4, -0.1, 0.35], 0.04, name='target')
+    viewer.set_camera(
+        eye=[1.2, -1.1, 0.9],
+        target=[0.2, 0.0, 0.35],
+        up=[0, 0, 1],
+    )
+    viewer.save_image('mitsuba_render.png')
+
 .. note::
 
   Both **TrimeshSceneViewer** and **PyrenderViewer** update at 30 Hz by default (``update_interval=1/30``). The viewer only re-renders when the scene actually changes (e.g. after :func:`redraw`), so a static view stays cheap even at 30 Hz. The ``update_interval`` controls how often the ``redraw()`` request is polled: a smaller value gives a higher refresh rate (smoother interaction and animation) at the cost of more idle CPU, while a larger value lowers idle CPU usage.
@@ -305,7 +366,7 @@ applications that expose a ``--viewer`` option:
 
     import skrobot
 
-    # name is one of 'trimesh', 'pyrender', 'viser' or 'notebook'
+    # name is one of 'trimesh', 'pyrender', 'viser', 'mitsuba' or 'notebook'
     viewer = skrobot.viewers.create_viewer('pyrender', resolution=(640, 480))
     viewer.add(skrobot.models.PR2())
     viewer.show()
@@ -314,7 +375,8 @@ Keyword arguments are forwarded to the selected viewer's constructor. Options a
 backend does not accept are ignored, so the same call works across backends
 (for example ``resolution`` applies to the trimesh / pyrender viewers but is
 dropped for ``viser``, which serves over a browser, while ``enable_ik`` applies
-only to ``viser``). An unknown name raises ``ValueError``.
+only to ``viser`` and ``variant`` / ``spp`` apply to ``mitsuba``). An unknown
+name raises ``ValueError``.
 
 Interactive helpers
 ===================

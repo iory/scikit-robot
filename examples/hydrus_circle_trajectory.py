@@ -24,6 +24,9 @@ from skrobot.coordinates import Coordinates
 from skrobot.model import Axis
 from skrobot.model.primitives import Sphere
 from skrobot.models import Hydrus
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 # Body center is pinned at the world origin.
@@ -84,7 +87,7 @@ def solve_step(robot, target_xy, alpha0, ik_stop):
 
 
 def main(steps=720, radius=0.10, ik_stop=20, interactive=True, pause=0.0,
-         viewer_name='pyrender'):
+         viewer_name='pyrender', save_video=None):
     robot = Hydrus()
     robot.joint1.min_angle = JOINT_MIN
     robot.joint1.max_angle = JOINT_MAX
@@ -101,7 +104,10 @@ def main(steps=720, radius=0.10, ik_stop=20, interactive=True, pause=0.0,
 
     viewer = None
     target_axis = None
-    if interactive:
+    recorder = None
+    # Build the viewer when showing a window (interactive) or when recording a
+    # video headlessly (--save-video), so the circle can be captured either way.
+    if interactive or save_video:
         try:
             from skrobot.viewers import create_viewer
             viewer = create_viewer(viewer_name)
@@ -118,6 +124,7 @@ def main(steps=720, radius=0.10, ik_stop=20, interactive=True, pause=0.0,
                                pos=center.copy())
             viewer.add(target_axis)
             viewer.show()
+            recorder = record_viewer(viewer, save_video, fps=30)
             print('==> viewer running; blue circle is the reference path, '
                   'the axis is the live target.')
         except Exception as e:
@@ -148,6 +155,10 @@ def main(steps=720, radius=0.10, ik_stop=20, interactive=True, pause=0.0,
             if not viewer.is_active:
                 break
             k += 1
+            # When recording, stop after one revolution instead of looping
+            # until the (nonexistent, headless) window is closed.
+            if recorder is not None and k >= steps:
+                break
         else:
             k += 1
             if k >= steps:
@@ -156,7 +167,10 @@ def main(steps=720, radius=0.10, ik_stop=20, interactive=True, pause=0.0,
     print('mean xy error = {:.4f} m, max = {:.4f} m  (over {} steps)'.format(
         float(np.mean(errors)), float(np.max(errors)), len(errors)))
 
-    if viewer is not None:
+    if recorder is not None:
+        print('saving video to {}'.format(recorder.save()))
+
+    if viewer is not None and interactive:
         viewer.wait_until_close()
 
 
@@ -171,16 +185,22 @@ if __name__ == '__main__':
     parser.add_argument('--no-interactive', action='store_true',
                         help='run one revolution headless and exit')
     parser.add_argument('--viewer', type=str,
-                        choices=['trimesh', 'pyrender', 'viser'],
+                        choices=VIEWER_TYPES,
                         default='pyrender',
-                        help='Choose the viewer type: trimesh, pyrender or '
-                             'viser')
+                        help=VIEWER_HELP)
     parser.add_argument('--pause', type=float, default=0.0,
                         help='seconds to pause between steps in the viewer')
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record one revolution to this video file (e.g. out.mp4). Works '
+             'with any --viewer; use --viewer mitsuba to record headlessly. '
+             'With the path-tracing mitsuba viewer, pass a small --steps '
+             '(e.g. 120) to keep rendering time reasonable.')
     args = parser.parse_args()
     main(steps=args.steps,
          radius=args.radius,
          ik_stop=args.ik_stop,
          interactive=not args.no_interactive,
          pause=args.pause,
-         viewer_name=args.viewer)
+         viewer_name=args.viewer,
+         save_video=args.save_video)

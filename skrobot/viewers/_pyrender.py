@@ -379,6 +379,100 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
         if compat_platform == 'darwin':
             _redraw_all_windows()
 
+    def save_image(self, file_obj):
+        """Capture current scene view and write it to ``file_obj``.
+
+        Parameters
+        ----------
+        file_obj : str or file-like
+            Destination path or writable binary file handle.
+        """
+        if getattr(self, 'has_exit', False) or self._renderer is None:
+            raise RuntimeError(
+                'PyrenderViewer is not running (it may already be closed).')
+        if compat_platform != 'darwin':
+            if self.thread is None or not self.thread.is_alive():
+                raise RuntimeError(
+                    'PyrenderViewer event loop is not running. '
+                    'Call show() before save_image().')
+
+        capture_done = threading.Event()
+        capture_state = {'image': None, 'error': None}
+        refresh_rate = max(
+            1.0, float(self.viewer_flags.get('refresh_rate', 30.0)))
+        reschedule_interval = 1.0 / refresh_rate
+        timeout_sec = 10.0
+
+        def _capture_on_viewer_thread(_dt):
+            if getattr(self, 'has_exit', False) or self._renderer is None:
+                capture_state['error'] = RuntimeError(
+                    'PyrenderViewer was closed before image capture.')
+                capture_done.set()
+                return
+            if (not getattr(self, '_context_initialized', False)
+                    or not getattr(self, '_allow_rendering', False)):
+                pyglet.clock.schedule_once(
+                    _capture_on_viewer_thread, reschedule_interval)
+                return
+            try:
+                with self._render_lock:
+                    # on_draw() applies the latest link/joint transforms
+                    # before rendering. Force one draw so read_color_buf()
+                    # captures it.
+                    self._redraw = True
+                    self.on_draw()
+                    if self._redraw:
+                        # Draw was skipped (for example context not ready yet).
+                        pyglet.clock.schedule_once(
+                            _capture_on_viewer_thread, reschedule_interval)
+                        return
+                    color = np.array(self._renderer.read_color_buf(), copy=True)
+                    if np.ptp(color) == 0:
+                        # Some headless X servers keep the front buffer black
+                        # even after a successful on-screen draw. Re-render
+                        # offscreen with the same renderer on the viewer
+                        # thread and capture that color buffer instead.
+                        flags = pyrender.RenderFlags.OFFSCREEN
+                        if self.render_flags['flip_wireframe']:
+                            flags |= pyrender.RenderFlags.FLIP_WIREFRAME
+                        elif self.render_flags['all_wireframe']:
+                            flags |= pyrender.RenderFlags.ALL_WIREFRAME
+                        elif self.render_flags['all_solid']:
+                            flags |= pyrender.RenderFlags.ALL_SOLID
+                        if self.render_flags['shadows']:
+                            flags |= (
+                                pyrender.RenderFlags.SHADOWS_DIRECTIONAL
+                                | pyrender.RenderFlags.SHADOWS_SPOT)
+                        if self.render_flags['vertex_normals']:
+                            flags |= pyrender.RenderFlags.VERTEX_NORMALS
+                        if self.render_flags['face_normals']:
+                            flags |= pyrender.RenderFlags.FACE_NORMALS
+                        if not self.render_flags['cull_faces']:
+                            flags |= pyrender.RenderFlags.SKIP_CULL_FACES
+                        self._camera_node.matrix = self._trackball.pose.copy()
+                        color, _depth = self._renderer.render(self.scene, flags)
+                capture_state['image'] = color
+            except Exception as exc:
+                capture_state['error'] = exc
+            finally:
+                if capture_state['image'] is not None \
+                        or capture_state['error'] is not None:
+                    capture_done.set()
+
+        pyglet.clock.schedule_once(_capture_on_viewer_thread, 0.0)
+        if not capture_done.wait(timeout=timeout_sec):
+            raise RuntimeError(
+                'Timed out waiting for PyrenderViewer image capture. '
+                'Ensure the viewer is still running.')
+        if capture_state['error'] is not None:
+            raise RuntimeError(
+                'PyrenderViewer failed to capture image on the viewer thread.'
+            ) from capture_state['error']
+        if capture_state['image'] is None:
+            raise RuntimeError(
+                'PyrenderViewer returned no image data from read_color_buf().')
+        Image.fromarray(capture_state['image']).save(file_obj)
+
     def on_draw(self):
         # Block rendering until initialization is complete
         if not getattr(self, '_allow_rendering', False):

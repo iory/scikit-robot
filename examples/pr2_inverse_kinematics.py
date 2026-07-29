@@ -6,7 +6,10 @@ import time
 import numpy as np
 
 import skrobot
+from skrobot.utils.video import record_viewer
 from skrobot.utils.visualization import ik_visualization
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def demonstrate_revert_if_fail(robot_model, target_coords, joint_list, viewer,
@@ -255,8 +258,12 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the animation to this video file (e.g. out.mp4). Works '
+             'with any --viewer; use --viewer mitsuba to record headlessly.')
     parser.add_argument(
         '--no-ik-visualization',
         action='store_true',
@@ -315,6 +322,11 @@ def main():
     viewer.show()
     viewer.set_camera([np.deg2rad(45), -np.deg2rad(0),
                        np.deg2rad(135)], distance=2.5)
+
+    # Record every redraw of the IK demos below when --save-video is given. The
+    # recorder wraps the viewer in place, so the demos' own viewer.redraw()
+    # calls are captured without threading it through each function.
+    recorder = record_viewer(viewer, args.save_video, fps=10)
 
     # Define target position
     target_pos = [0.7, -0.2, 0.8]
@@ -375,6 +387,9 @@ def main():
     if not args.skip_fullbody_demo:
         demonstrate_fullbody_ik(robot_model, joint_list, viewer,
                                 args.no_ik_visualization)
+
+    if recorder is not None:
+        print('saving video to {}'.format(recorder.save()))
 
     if not args.no_interactive:
         viewer.wait_until_close()

@@ -13,6 +13,9 @@ from skrobot.models import Nextage
 from skrobot.models import Panda
 from skrobot.models import PR2
 from skrobot.models import R8_6
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def parse_mask_constraint(mask_str):
@@ -56,8 +59,13 @@ def main():
     parser.add_argument('--no-interactive', action='store_true',
                         help='Disable interactive visualization')
     parser.add_argument('--viewer', type=str,
-                        choices=['pyrender', 'trimesh', 'viser'], default='pyrender',
-                        help='Choose the viewer type: trimesh, pyrender or viser. Default: pyrender')
+                        choices=VIEWER_TYPES, default='pyrender',
+                        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the solution cycle to this video file (e.g. out.mp4). '
+             'Works with any --viewer; use --viewer mitsuba to record '
+             'headlessly.')
     parser.add_argument('--with-torso', action='store_true',
                         help='Include torso in IK (PR2 and Fetch only)')
 
@@ -287,10 +295,10 @@ def main():
                 # Restore for next test
                 arm.angle_vector(original_angles)
 
-        if not args.no_interactive:
+        if not args.no_interactive or args.save_video:
             print(f"\nAttempting visualization of {len(successful_solutions)} solutions...")
 
-        if not args.no_interactive:
+        if not args.no_interactive or args.save_video:
             try:
                 from skrobot.viewers import create_viewer
                 viewer = create_viewer(args.viewer)
@@ -338,6 +346,23 @@ def main():
                 print("Added end-effector axis (RGB colors) to show actual robot pose")
 
                 viewer.show()
+
+                recorder = record_viewer(viewer, args.save_video, fps=4)
+                if recorder is not None:
+                    # Recording: show each successful solution once, then save
+                    # and stop (no interactive window to wait on).
+                    for solution_idx, solution in enumerate(
+                            successful_solutions):
+                        arm.angle_vector(solution)
+                        orig_idx = successful_indices[solution_idx]
+                        end_effector_axis.newcoords(
+                            arm.end_coords.copy_worldcoords())
+                        for i, axis in enumerate(axis_objects):
+                            if success_flags[i]:
+                                axis.set_alpha(1.0 if i == orig_idx else 0.3)
+                        viewer.redraw()
+                    print(f"saving video to {recorder.save()}")
+                    return
 
                 print("\n3D VISUALIZATION ACTIVE!")
                 print("=" * 50)
