@@ -271,7 +271,7 @@ The following video demonstrates the interactive IK feature, where dragging the 
     # Open browser to view
     viewer.show()
 
-    # Block until the browser tab / window is closed
+    # Block until the viser server is stopped (Ctrl-C or viewer.close()).
     viewer.wait_until_close()
 
 **Command Line Usage:**
@@ -385,14 +385,17 @@ Every interactive viewer (``TrimeshSceneViewer``, ``PyrenderViewer`` and
 ``ViserViewer``) shares two convenience methods.
 
 **wait_until_close()**
-  Block until the viewer window is closed, pumping :func:`redraw` while
-  waiting. It replaces the boilerplate
+  Block until the viewer backend becomes inactive. On trimesh / pyrender it
+  waits for the window to close and pumps :func:`redraw` while waiting. On
+  viser it waits for the server to stop (for example Ctrl-C in the script or
+  :func:`close`) and does not timer-call :func:`redraw`. It replaces the
+  boilerplate
   ``while viewer.is_active: time.sleep(...); viewer.redraw()`` loop:
 
   .. code-block:: python
 
       viewer.show()
-      viewer.wait_until_close()   # returns once the window / tab is closed
+      viewer.wait_until_close()   # returns once the backend becomes inactive
 
 **pause(duration, fps=30.0)**
   Pause for ``duration`` seconds **while keeping the window interactive**. Use
