@@ -4,7 +4,9 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
+import unittest
 
 import numpy as np
 import pytest
@@ -198,3 +200,148 @@ def test_pointcloud_with_mismatched_colors_does_not_kill_render_thread():
         'pyrender viewer thread died for mismatched PointCloud colors.\n'
         'stdout:\n{}\nstderr:\n{}'.format(
             completed.stdout, completed.stderr))
+
+
+def _pyrender_available():
+    try:
+        import pyrender  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _python_with_x_server_command(script):
+    python_cmd = [sys.executable, '-c', script]
+    if os.environ.get('DISPLAY'):
+        return python_cmd
+    xvfb_run = shutil.which('xvfb-run')
+    if xvfb_run:
+        return [xvfb_run, '-a'] + python_cmd
+    return None
+
+
+class TestPyrenderViewerSaveImage(unittest.TestCase):
+
+    def _run_capture_script(self, script, timeout=180):
+        cmd = _python_with_x_server_command(script)
+        if cmd is None:
+            self.skipTest('requires an X server or xvfb-run')
+        env = os.environ.copy()
+        existing = env.get('PYTHONPATH')
+        if existing:
+            env['PYTHONPATH'] = str(_repo_root()) + os.pathsep + existing
+        else:
+            env['PYTHONPATH'] = str(_repo_root())
+        return subprocess.run(
+            cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            timeout=timeout,
+        )
+
+    def test_save_image_captures_scene_pixels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'pyrender.png')
+            script = textwrap.dedent(
+                """
+                import json
+                import os
+                import sys
+
+                import numpy as np
+                from PIL import Image
+
+                sys.path.insert(0, {repo_root!r})
+                import skrobot
+                from skrobot.viewers import PyrenderViewer
+
+                viewer = PyrenderViewer(resolution=(320, 240))
+                viewer.add(skrobot.models.PR2())
+                viewer.show()
+                try:
+                    viewer.set_camera(angles=[0.0, 0.0, np.pi / 2.0])
+                    with open({path!r}, 'wb') as file_obj:
+                        viewer.save_image(file_obj)
+                finally:
+                    viewer.close()
+
+                image = np.array(Image.open({path!r}).convert('RGB'))
+                background = image[0, 0, :].astype(np.int16)
+                diff = np.abs(image.astype(np.int16) - background)
+                fraction = float(np.any(diff > 0, axis=2).mean())
+                stats = {{
+                    'size': int(os.path.getsize({path!r})),
+                    'fraction': fraction,
+                }}
+                print('PYRENDER_SAVE_IMAGE_STATS=' + json.dumps(stats))
+                """.format(repo_root=str(_repo_root()), path=path))
+            proc = self._run_capture_script(script)
+            self.assertEqual(
+                proc.returncode, 0,
+                msg='stdout:\\n{}\\nstderr:\\n{}'.format(
+                    proc.stdout, proc.stderr))
+            lines = [
+                line for line in proc.stdout.splitlines()
+                if line.startswith('PYRENDER_SAVE_IMAGE_STATS=')
+            ]
+            self.assertTrue(
+                lines, msg='stdout:\\n{}\\nstderr:\\n{}'.format(
+                    proc.stdout, proc.stderr))
+            stats = json.loads(lines[-1].split('=', 1)[1])
+            self.assertGreater(stats['size'], 0)
+            self.assertGreater(stats['fraction'], 0.02)
+
+    def test_save_image_raises_when_viewer_is_not_running(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'unused.png')
+            script = textwrap.dedent(
+                """
+                import json
+                import sys
+
+                sys.path.insert(0, {repo_root!r})
+                from skrobot.viewers import PyrenderViewer
+
+                viewer = PyrenderViewer(resolution=(160, 120))
+                try:
+                    viewer.save_image({path!r})
+                except RuntimeError as exc:
+                    payload = {{
+                        'raised': True,
+                        'message': str(exc),
+                    }}
+                else:
+                    payload = {{
+                        'raised': False,
+                        'message': '',
+                    }}
+                finally:
+                    try:
+                        viewer.close()
+                    except Exception:
+                        pass
+                print('PYRENDER_NOT_RUNNING=' + json.dumps(payload))
+                """.format(repo_root=str(_repo_root()), path=path))
+            proc = self._run_capture_script(script)
+            self.assertEqual(
+                proc.returncode, 0,
+                msg='stdout:\\n{}\\nstderr:\\n{}'.format(
+                    proc.stdout, proc.stderr))
+            lines = [
+                line for line in proc.stdout.splitlines()
+                if line.startswith('PYRENDER_NOT_RUNNING=')
+            ]
+            self.assertTrue(
+                lines, msg='stdout:\\n{}\\nstderr:\\n{}'.format(
+                    proc.stdout, proc.stderr))
+            result = json.loads(lines[-1].split('=', 1)[1])
+            self.assertTrue(result['raised'])
+            msg = result['message'].lower()
+            self.assertTrue('not running' in msg or 'show()' in msg)
+
+
+if __name__ == '__main__':
+    unittest.main()

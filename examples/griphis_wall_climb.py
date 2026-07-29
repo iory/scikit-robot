@@ -34,6 +34,9 @@ from skrobot.coordinates import Coordinates
 from skrobot.model.primitives import Axis
 from skrobot.model.primitives import Box
 from skrobot.models import Griphis
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 # Collision-proxy tuning.  The default swept-sphere radii for Griphis's
@@ -266,7 +269,7 @@ def next_wall_target_above(end_swing):
 # ---------------------------------------------------------------------------
 
 def main(num_steps=40, interactive=True, step_pause=0.05,
-         substep_pause=0.0, viewer_name='pyrender'):
+         substep_pause=0.0, viewer_name='pyrender', save_video=None):
     robot = Griphis()
     end1 = robot.gripper_1_end_coords
     end2 = robot.gripper_2_end_coords
@@ -287,7 +290,10 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
 
     viewer = None
     axis_swing = None
-    if interactive:
+    recorder = None
+    # Build the viewer when showing a window (interactive) or when recording a
+    # video headlessly (--save-video), so the gait can be captured either way.
+    if interactive or save_video:
         try:
             from skrobot.viewers import create_viewer
             viewer = create_viewer(viewer_name)
@@ -305,6 +311,7 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
             axis_swing = Axis(axis_radius=0.003, axis_length=0.05)
             viewer.add(axis_swing)
             viewer.show()
+            recorder = record_viewer(viewer, save_video, fps=20)
         except Exception as e:
             print(f'viewer skipped: {e}')
             viewer = None
@@ -350,7 +357,10 @@ def main(num_steps=40, interactive=True, step_pause=0.05,
 
         stance_id, swing_id = swing_id, stance_id
 
-    if viewer is not None:
+    if recorder is not None:
+        print(f'saving video to {recorder.save()}')
+
+    if viewer is not None and interactive:
         viewer.wait_until_close()
 
 
@@ -370,13 +380,20 @@ if __name__ == '__main__':
                         help='seconds to pause between arc waypoints')
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser')
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the gait to this video file (e.g. out.mp4). Works with '
+             'any --viewer; use --viewer mitsuba to record headlessly.')
     args = parser.parse_args()
+    # Record the full 40-step gait even under --no-interactive so the video is
+    # not cut down to the 3-step smoke-test length.
     steps = args.steps if args.steps is not None else (
-        3 if args.no_interactive else 40)
+        3 if args.no_interactive and not args.save_video else 40)
     main(num_steps=steps,
          interactive=not args.no_interactive,
          step_pause=args.pause,
          substep_pause=args.substep_pause,
-         viewer_name=args.viewer)
+         viewer_name=args.viewer,
+         save_video=args.save_video)

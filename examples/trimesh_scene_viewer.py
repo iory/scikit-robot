@@ -6,6 +6,9 @@ import time
 import numpy as np
 
 import skrobot
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def main():
@@ -24,9 +27,12 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser'
-    )
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the animation to this video file (e.g. out.mp4). Works '
+             'with any --viewer; use --viewer mitsuba to record headlessly.')
     args = parser.parse_args()
 
     robot = skrobot.models.Kuka()
@@ -50,6 +56,9 @@ def main():
     )
     box.translate((0.5, 0, 0.3))
     viewer.add(box)
+
+    # Record every redraw of the pose sequence below when --save-video is given.
+    recorder = record_viewer(viewer, args.save_video, fps=2)
 
     if args.interactive:
         print('''\
@@ -92,6 +101,9 @@ def main():
         print(robot.angle_vector())
         time.sleep(1)
         viewer.redraw()
+
+        if recorder is not None:
+            print('saving video to {}'.format(recorder.save()))
 
         if not args.no_interactive:
             viewer.wait_until_close()

@@ -8,6 +8,9 @@ import numpy as np
 import skrobot
 from skrobot.coordinates.base import lerp_coordinates
 from skrobot.coordinates.base import slerp_coordinates
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def main():
@@ -44,9 +47,12 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser'
-    )
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the view to this video file (e.g. out.mp4). Works with '
+             'any --viewer; use --viewer mitsuba to record headlessly.')
     args = parser.parse_args()
 
     viewer = skrobot.viewers.create_viewer(
@@ -262,8 +268,20 @@ def main():
     # Set camera view
     viewer.set_camera(angles=[np.deg2rad(30), 0, np.deg2rad(45)], distance=2.5)
 
-    if not args.no_interactive:
+    # Window-backed viewers only have a frame to capture once they are shown,
+    # so show before recording even in --no-interactive mode when the user
+    # asked for a video. The headless mitsuba backend does not need this, but
+    # pyrender/trimesh do -- capturing first raised "event loop is not
+    # running".
+    if not args.no_interactive or args.save_video:
         viewer.show()
+
+    # This demo shows the whole trajectory at once (a static set of coordinate
+    # frames), so capture the single assembled scene for --save-video.
+    recorder = record_viewer(viewer, args.save_video)
+    if recorder is not None:
+        recorder.capture()
+        print('saving video to {}'.format(recorder.save()))
 
     if args.interactive:
         print('''>>> # Trajectory Interpolation Demo

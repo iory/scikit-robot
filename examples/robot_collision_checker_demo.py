@@ -21,6 +21,9 @@ import skrobot
 from skrobot.collision import RobotCollisionChecker
 from skrobot.model.primitives import Box
 from skrobot.model.primitives import Sphere
+from skrobot.utils.video import record_viewer
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 def main():
@@ -34,9 +37,12 @@ def main():
     )
     parser.add_argument(
         '--viewer', type=str,
-        choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-        help='Choose the viewer type: trimesh, pyrender or viser'
-    )
+        choices=VIEWER_TYPES, default='pyrender',
+        help=VIEWER_HELP)
+    parser.add_argument(
+        '--save-video', type=str, default=None,
+        help='Record the animation to this video file (e.g. out.mp4). Works '
+             'with any --viewer; use --viewer mitsuba to record headlessly.')
     args = parser.parse_args()
 
     # Create robot
@@ -102,6 +108,9 @@ def main():
 
     viewer.show()
     viewer.set_camera([0, 0, np.pi / 2])
+
+    # Record every redraw/pause below when --save-video is given.
+    recorder = record_viewer(viewer, args.save_video, fps=4)
 
     # Define test configurations
     link_list = [
@@ -198,6 +207,9 @@ def main():
             t += 0.05
 
         print()
+
+    if recorder is not None:
+        print('saving video to {}'.format(recorder.save()))
 
     viewer.close()
     print("\nDemo completed!")

@@ -11,6 +11,8 @@ from skrobot.model import Axis
 from skrobot.model import Box
 from skrobot.model import MeshLink
 from skrobot.sdf import UnionSDF
+from skrobot.viewers import VIEWER_HELP
+from skrobot.viewers import VIEWER_TYPES
 
 
 b = Box(extents=[0.05, 0.1, 0.05], with_sdf=True)
@@ -22,8 +24,8 @@ parser = argparse.ArgumentParser(
     description='Visualization signed distance function.')
 parser.add_argument(
     '--viewer', type=str,
-    choices=['trimesh', 'pyrender', 'viser'], default='pyrender',
-    help='Choose the viewer type: trimesh, pyrender or viser')
+    choices=VIEWER_TYPES, default='pyrender',
+    help=VIEWER_HELP)
 parser.add_argument(
     '--no-interactive',
     action='store_true',
