@@ -11,6 +11,14 @@ class Fetch(RobotModelFromURDF):
     """Fetch Robot Model.
 
     http://docs.fetchrobotics.com/robot_hardware.html
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` is attached to ``gripper_link`` with zero offset.
+    Measured mapping: end +X -> link +X, end +Y -> link +Y,
+    end +Z -> link +Z (identity).
+    Grasp/approach semantics are not documented in this model file.
     """
 
     def __init__(self, *args, **kwargs):

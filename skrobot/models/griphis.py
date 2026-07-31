@@ -64,6 +64,15 @@ class Griphis(RobotModelFromURDF):
     access from the live nail-tip positions, so changes to
     ``worm_rotate_{1,2}`` (which move the tips via URDF mimic bindings)
     are reflected automatically — no manual refresh is required.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``gripper_1_end_coords`` is attached to ``roll_1_link`` with offset
+    ``[0.140857, 0.0, 0.0]`` and identity mapping.
+    ``gripper_2_end_coords`` is attached to ``roll_2_link`` with offset
+    ``[-0.140857, 0.00005, 0.0]`` and mapping end +X -> link -X,
+    end +Y -> link -Y, end +Z -> link +Z.
     """
 
     def __init__(self, *args, **kwargs):

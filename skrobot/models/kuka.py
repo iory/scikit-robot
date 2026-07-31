@@ -8,7 +8,18 @@ from skrobot.models.urdf import RobotModelFromURDF
 
 
 class Kuka(RobotModelFromURDF):
-    """Kuka Robot Model."""
+    """Kuka Robot Model.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` is attached to
+    ``lbr_iiwa_with_wsg50__lbr_iiwa_link_7`` with offset
+    ``[0.0, 0.03, 0.25]`` in the parent-link frame.
+    Measured mapping: end +X -> link +Z, end +Y -> link +X,
+    end +Z -> link +Y.
+    Grasp/approach semantics are not documented in this model file.
+    """
 
     def __init__(self, *args, **kwargs):
         super(Kuka, self).__init__(*args, **kwargs)

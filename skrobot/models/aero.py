@@ -21,6 +21,18 @@ class Aero(RobotModel):
         joints are part of ``angle_vector``.  If False, load the hand-less
         model whose arms end at the built-in ``*_eef_*`` frames.
 
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to
+    ``{r,l}_eef_grasp_link`` with zero offset and identity mapping.
+    ``torso_end_coords`` is attached to ``leg_base_link`` with offset
+    ``[-0.032, 0.0, -0.3507]`` and identity mapping.
+    ``head_end_coords`` is attached to ``head_link`` with offset
+    ``[0.079, 0.0, 0.1035]`` and measured non-axis-aligned rotation
+    ``[[-0.173646458853, 0.0, 0.984808056084], [0.0, 1.0, 0.0],``
+    ``[-0.984808056084, 0.0, -0.173646458853]]`` (end relative to link).
+
     Examples
     --------
     >>> from skrobot.models import Aero

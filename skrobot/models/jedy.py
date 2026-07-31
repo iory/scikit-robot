@@ -19,6 +19,15 @@ class Jedy(RobotModelFromURDF):
     colocates with the D405's **left** (infra1) imager, so the head end
     coordinates coincide with the left camera. It follows the optical-frame
     convention, so its z-axis points along the camera's viewing direction.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to
+    ``{rarm,larm}_link6`` with offset ``[0.0, 0.0, -0.102466]`` and mapping
+    end +X -> link -Z, end +Y -> link +Y, end +Z -> link +X.
+    ``head_end_coords`` is attached to ``camera_depth_optical_frame`` with
+    zero offset and identity mapping.
     """
 
     def __init__(self, *args, **kwargs):
