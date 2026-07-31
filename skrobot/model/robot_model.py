@@ -1676,6 +1676,14 @@ class CascadedLink(CascadedCoords):
             **kwargs):
         """Solve inverse kinematics to reach target coordinates.
 
+        The solve starts from the model's current joint angles, so the
+        current posture is effectively part of the input: it can determine
+        whether the solve converges and which IK branch is selected. When a
+        solve fails, or when you want a repeatable branch, set the model to a
+        known reference posture (for example, ``reset_pose``) before calling
+        this method. For automatic retries from perturbed seeds, use
+        :meth:`batch_inverse_kinematics`.
+
         Parameters
         ----------
         target_coords : skrobot.coordinates.Coordinates or list
@@ -1751,6 +1759,11 @@ class CascadedLink(CascadedCoords):
         -------
         numpy.ndarray or False
             Joint angle vector if successful, False otherwise.
+
+        See Also
+        --------
+        batch_inverse_kinematics : Solve many poses, optionally retrying each
+            from perturbed initial seeds.
         """
         # Handle legacy parameters for backwards compatibility
         if 'translation_axis' in kwargs:
@@ -3518,10 +3531,23 @@ class RobotModel(CascadedLink):
         of coords link-list is set by default based on move-target -> root link
         link-list.
 
+        The solve starts from the model's current joint angles, so the current
+        posture is effectively part of the input: it can determine whether the
+        solve converges and which IK branch is selected. When a solve fails, or
+        when you want a repeatable branch, set the model to a known reference
+        posture (for example, ``reset_pose``) before calling this method. For
+        automatic retries from perturbed seeds, use
+        :meth:`batch_inverse_kinematics`.
+
         ``joint_list`` is an alternative to ``link_list`` that names the
         joints to actuate directly (see the base ``inverse_kinematics``);
         the two are mutually exclusive.  When ``joint_list`` is given the
         default ``move_target -> root`` ``link_list`` is not inferred.
+
+        See Also
+        --------
+        batch_inverse_kinematics
+            Batch/retrying IK with configurable initial seeds.
         """
         if move_target is None:
             move_target = self.end_coords
@@ -3567,6 +3593,9 @@ class RobotModel(CascadedLink):
 
         This method efficiently processes multiple target poses in parallel,
         providing significant performance improvements over sequential IK solving.
+        Compared with :meth:`inverse_kinematics`, this is the retrying
+        counterpart and can retry each pose from perturbed initial seeds via
+        ``attempts_per_pose`` and ``random_initial_range``.
 
         Parameters
         ----------
@@ -3643,6 +3672,11 @@ class RobotModel(CascadedLink):
             - List of joint angle solutions (each is ndarray matching self.angle_vector())
             - List of success flags indicating if IK was solved
             - List of attempt counts (only returned when attempts_per_pose > 1)
+
+        See Also
+        --------
+        inverse_kinematics : Solve a single pose, always seeded from the
+            model's current joint angles.
 
         Examples
         --------
