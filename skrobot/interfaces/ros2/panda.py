@@ -3,12 +3,14 @@ import rclpy
 from rclpy.action import ActionClient
 
 from skrobot.interfaces.ros2.base import ROS2RobotInterfaceBase
+from skrobot.interfaces.ros2.gripper import GripperCommandActionClient
 
 
 try:
     import franka_gripper.action
     FRANKA_GRIPPER_AVAILABLE = True
 except ImportError:
+    franka_gripper = None
     FRANKA_GRIPPER_AVAILABLE = False
 
 
@@ -49,41 +51,75 @@ class PandaROS2RobotInterface(ROS2RobotInterfaceBase):
         for sim setups (mock_components) where ``franka_gripper`` is not
         running, and for unit tests where blocking on
         ``wait_for_server`` is not desired.
+    gripper_backend : {'franka_gripper', 'gripper_command'}, default
+        'franka_gripper'
+        Backend used for gripper commands. ``'franka_gripper'`` keeps
+        the historical Franka-specific action API. ``'gripper_command'``
+        uses ``control_msgs/action/GripperCommand`` and is the preferred
+        backend for simulation and non-Franka grippers.
+    gripper_action_name : str or None
+        Action namespace for ``'gripper_command'`` backend. Defaults to
+        ``f'{arm_id}_hand_controller/gripper_cmd'``.
+    gripper_max_effort : float, default 0.0
+        Default ``max_effort`` sent to ``GripperCommand`` goals.
     """
 
     def __init__(self, *args,
                  arm_id='panda',
                  controller_name=None,
                  gripper_action_prefix=None,
+                 gripper_backend='franka_gripper',
+                 gripper_action_name=None,
+                 gripper_max_effort=0.0,
                  limb_attr='rarm',
                  load_gripper=True,
                  **kwargs):
+        valid_backends = ('franka_gripper', 'gripper_command')
+        if gripper_backend not in valid_backends:
+            raise ValueError(
+                "Unknown gripper_backend '{}'. "
+                "Expected one of {}.".format(
+                    gripper_backend, valid_backends))
+
         self._arm_id = arm_id
-        self._controller_name = controller_name or '{}_arm_controller'.format(arm_id)
+        self._controller_name = controller_name or \
+            '{}_arm_controller'.format(arm_id)
         self._gripper_action_prefix = gripper_action_prefix or 'franka_gripper'
+        self._gripper_backend = gripper_backend
+        self._gripper_action_name = gripper_action_name or \
+            '{}_hand_controller/gripper_cmd'.format(arm_id)
+        self._gripper_max_effort = gripper_max_effort
         self._limb_attr = limb_attr
+        self._warned_gripper_speed_ignored = False
 
         super(PandaROS2RobotInterface, self).__init__(*args, **kwargs)
 
         self.gripper_move = None
         self.gripper_stop = None
+        self.gripper_command = None
         if load_gripper:
-            if FRANKA_GRIPPER_AVAILABLE:
-                self.gripper_move = ActionClient(
-                    self,
-                    franka_gripper.action.Move,
-                    '{}/move'.format(self._gripper_action_prefix))
-                self.gripper_move.wait_for_server()
+            if self._gripper_backend == 'franka_gripper':
+                if FRANKA_GRIPPER_AVAILABLE:
+                    self.gripper_move = ActionClient(
+                        self,
+                        franka_gripper.action.Move,
+                        '{}/move'.format(self._gripper_action_prefix))
+                    self.gripper_move.wait_for_server()
 
-                self.gripper_stop = ActionClient(
-                    self,
-                    franka_gripper.action.Stop,
-                    '{}/stop'.format(self._gripper_action_prefix))
-                self.gripper_stop.wait_for_server()
+                    self.gripper_stop = ActionClient(
+                        self,
+                        franka_gripper.action.Stop,
+                        '{}/stop'.format(self._gripper_action_prefix))
+                    self.gripper_stop.wait_for_server()
+                else:
+                    self.get_logger().warn(
+                        "franka_gripper package not available. "
+                        "Gripper functions disabled.")
             else:
-                self.get_logger().warn(
-                    "franka_gripper package not available. "
-                    "Gripper functions disabled.")
+                self.gripper_command = GripperCommandActionClient(
+                    self,
+                    self._gripper_action_name,
+                    max_effort=self._gripper_max_effort)
 
     @property
     def arm_controller(self):
@@ -114,45 +150,65 @@ class PandaROS2RobotInterface(ROS2RobotInterfaceBase):
         self.move_gripper(width=WIDTH_MAX, **kwargs)
 
     def move_gripper(self, width, speed=WIDTH_MAX, wait=True):
-        if self.gripper_move is None:
-            self.get_logger().warn(
-                "Gripper ActionClient was not initialised "
-                "(load_gripper=False or franka_gripper not available). "
-                "Cannot move gripper.")
-            return
+        if self._gripper_backend == 'franka_gripper':
+            if self.gripper_move is None:
+                self.get_logger().warn(
+                    "Gripper ActionClient was not initialised "
+                    "(load_gripper=False or franka_gripper not available). "
+                    "Cannot move gripper.")
+                return
 
-        goal = franka_gripper.action.Move.Goal()
-        goal.width = width
-        goal.speed = speed
+            goal = franka_gripper.action.Move.Goal()
+            goal.width = width
+            goal.speed = speed
 
-        if wait:
-            future = self.gripper_move.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self, future)
-            goal_handle = future.result()
-            if goal_handle.accepted:
-                result_future = goal_handle.get_result_async()
-                rclpy.spin_until_future_complete(self, result_future)
-                return result_future.result()
+            if wait:
+                future = self.gripper_move.send_goal_async(goal)
+                rclpy.spin_until_future_complete(self, future)
+                goal_handle = future.result()
+                if goal_handle.accepted:
+                    result_future = goal_handle.get_result_async()
+                    rclpy.spin_until_future_complete(self, result_future)
+                    return result_future.result()
+            else:
+                self.gripper_move.send_goal_async(goal)
         else:
-            self.gripper_move.send_goal_async(goal)
+            if self.gripper_command is None:
+                self.get_logger().warn(
+                    "GripperCommand ActionClient was not initialised "
+                    "(load_gripper=False). Cannot move gripper.")
+                return
+            if speed != WIDTH_MAX and not self._warned_gripper_speed_ignored:
+                self.get_logger().warn(
+                    "speed is ignored for gripper_backend='gripper_command'.")
+                self._warned_gripper_speed_ignored = True
+            return self.gripper_command.move(width=width, wait=wait)
 
     def stop_gripper(self, wait=True):
-        if self.gripper_stop is None:
-            self.get_logger().warn(
-                "Gripper ActionClient was not initialised "
-                "(load_gripper=False or franka_gripper not available). "
-                "Cannot stop gripper.")
-            return
+        if self._gripper_backend == 'franka_gripper':
+            if self.gripper_stop is None:
+                self.get_logger().warn(
+                    "Gripper ActionClient was not initialised "
+                    "(load_gripper=False or franka_gripper not available). "
+                    "Cannot stop gripper.")
+                return
 
-        goal = franka_gripper.action.Stop.Goal()
+            goal = franka_gripper.action.Stop.Goal()
 
-        if wait:
-            future = self.gripper_stop.send_goal_async(goal)
-            rclpy.spin_until_future_complete(self, future)
-            goal_handle = future.result()
-            if goal_handle.accepted:
-                result_future = goal_handle.get_result_async()
-                rclpy.spin_until_future_complete(self, result_future)
-                return result_future.result()
+            if wait:
+                future = self.gripper_stop.send_goal_async(goal)
+                rclpy.spin_until_future_complete(self, future)
+                goal_handle = future.result()
+                if goal_handle.accepted:
+                    result_future = goal_handle.get_result_async()
+                    rclpy.spin_until_future_complete(self, result_future)
+                    return result_future.result()
+            else:
+                self.gripper_stop.send_goal_async(goal)
         else:
-            self.gripper_stop.send_goal_async(goal)
+            if self.gripper_command is None:
+                self.get_logger().warn(
+                    "GripperCommand ActionClient was not initialised "
+                    "(load_gripper=False). Cannot stop gripper.")
+                return
+            return self.gripper_command.cancel(wait=wait)
