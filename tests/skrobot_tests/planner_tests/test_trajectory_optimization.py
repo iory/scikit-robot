@@ -11,9 +11,12 @@ import skrobot  # noqa: E402
 from skrobot.planner.trajectory_optimization.collision import create_self_collision_pairs  # noqa: E402
 from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions  # noqa: E402
 from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals  # noqa: E402
+from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances  # noqa: E402
 from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances  # noqa: E402
 from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data  # noqa: E402
 from skrobot.planner.trajectory_optimization.fk_utils import rotation_error_vector  # noqa: E402
+from skrobot.planner.trajectory_optimization.gridsdf_collision import build_gridsdf_self_data  # noqa: E402
+from skrobot.planner.trajectory_optimization.gridsdf_collision import gridsdf_self_distances  # noqa: E402
 from skrobot.planner.trajectory_optimization.problem import TrajectoryProblem  # noqa: E402
 from skrobot.planner.trajectory_optimization.trajectory import interpolate_trajectory  # noqa: E402
 from skrobot.pycompat import HAS_JAX  # noqa: E402
@@ -40,6 +43,25 @@ def _make_kuka():
     link_list = robot.rarm.link_list
     n_joints = len(link_list)
     return robot, link_list, n_joints
+
+
+def _make_panda():
+    """Create a Panda and return robot, joint links and collision links.
+
+    The fingers are left out of the collision link list: they are physically
+    adjacent to the hand but far apart in the list, and
+    ``create_self_collision_pairs`` only knows about list adjacency, so they
+    would show up as a permanent (bogus) contact.
+    """
+    robot = skrobot.models.Panda()
+    robot.reset_manip_pose()
+    link_list = [link for link in robot.link_list
+                 if link.joint is not None
+                 and link.joint.__class__.__name__ != 'FixedJoint']
+    collision_link_list = [link for link in robot.link_list
+                           if link.collision_mesh is not None
+                           and 'finger' not in link.name]
+    return robot, link_list, collision_link_list
 
 
 class TestInterpolateTrajectory(unittest.TestCase):
@@ -1210,6 +1232,185 @@ class TestAugmentedLagrangianSolver(unittest.TestCase):
 
         cache_keys_after_second = list(solver._jit_cache.keys())
         self.assertEqual(cache_keys_after_first, cache_keys_after_second)
+
+
+class TestGridSDFSelfCollision(unittest.TestCase):
+
+    @classmethod
+    def setup_class(cls):
+        cls.robot, cls.link_list, cls.collision_link_list = _make_panda()
+
+    def _link_transforms(self):
+        positions = np.stack(
+            [link.worldpos() for link in self.collision_link_list])
+        rotations = np.stack(
+            [link.worldrot() for link in self.collision_link_list])
+        return positions, rotations
+
+    def test_reset_pose_is_reported_collision_free(self):
+        """GridSDF must not report the rest pose as self-colliding.
+
+        The sphere approximation does, which is the reason this mode exists.
+        """
+        self.robot.reset_manip_pose()
+        data = build_gridsdf_self_data(
+            self.robot, self.collision_link_list, dim_grid=40, n_surface=32)
+        positions, rotations = self._link_transforms()
+        distances = gridsdf_self_distances(positions, rotations, data, np)
+
+        n_pairs = len(data['pairs_a'])
+        self.assertEqual(distances.shape, (n_pairs, 32))
+        self.assertGreater(distances.min(), 0.0)
+
+        # Same pose through the sphere model: heavily over-conservative.
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=2)
+        problem.add_collision_cost(
+            self.collision_link_list, world_obstacles=[])
+        problem.add_self_collision_cost(mode='sphere')
+        spheres = problem.collision_spheres
+        pairs_i, pairs_j = problem.residuals[-1].params['pair_indices']
+        sphere_positions = np.stack([
+            self.collision_link_list[link_idx].worldcoords()
+            .transform_vector(center)
+            for link_idx, center in zip(
+                spheres['link_indices'], spheres['sphere_centers_local'])])
+        sphere_distances = compute_self_collision_distances(
+            sphere_positions, spheres['sphere_radii'], pairs_i, pairs_j, np)
+        self.assertLess(sphere_distances.min(), 0.0)
+
+    def test_matches_gridsdf_reference_interpolation(self):
+        """The batched lookup must agree with ``GridSDF`` itself."""
+        from skrobot.sdf.signed_distance_function import trimesh2sdf
+
+        self.robot.reset_manip_pose()
+        data = build_gridsdf_self_data(
+            self.robot, self.collision_link_list, dim_grid=16, n_surface=8)
+        positions, rotations = self._link_transforms()
+        actual = gridsdf_self_distances(positions, rotations, data, np)
+
+        expected = np.empty_like(actual)
+        for row, (a, b) in enumerate(zip(data['pairs_a'], data['pairs_b'])):
+            mesh = self.collision_link_list[b].collision_mesh.copy()
+            mesh.metadata = {key: value
+                             for key, value in mesh.metadata.items()
+                             if key != 'shape'}
+            sdf = trimesh2sdf(mesh, dim_grid=16)
+            world = positions[a] + data['surface_points'][a].dot(rotations[a].T)
+            local_b = (world - positions[b]).dot(rotations[b])
+            expected[row] = sdf._signed_distance(local_b)
+
+        # GridSDF fills points outside its grid with inf; those are exactly
+        # the ones this module replaces with a finite, differentiable value.
+        inside = np.isfinite(expected)
+        self.assertTrue(inside.any())
+        testing.assert_allclose(actual[inside], expected[inside], atol=1e-12)
+
+    def test_trilinear_handles_grids_of_different_shapes(self):
+        """Padding cells must never leak into the interpolated value."""
+        from skrobot.planner.trajectory_optimization.gridsdf_collision import _trilinear
+
+        small = np.arange(2 * 3 * 2, dtype=np.float64).reshape(2, 3, 2)
+        large = np.arange(4 * 3 * 5, dtype=np.float64).reshape(4, 3, 5)
+        padded = np.stack([
+            np.pad(small, [(0, 2), (0, 0), (0, 3)], mode='edge'), large])
+        dims = np.array([[2.0, 3.0, 2.0], [4.0, 3.0, 5.0]])
+        resolutions = np.array([0.1, 0.1])
+
+        # Query the far corner of each grid, which is padding for the small one.
+        coords = np.array([[[1.0, 2.0, 1.0]], [[3.0, 2.0, 4.0]]])
+        values = _trilinear(padded, coords, dims, resolutions, np)
+        testing.assert_allclose(
+            values[:, 0], [small[1, 2, 1], large[3, 2, 4]])
+
+        # Outside the small grid: edge value plus the distance to the boundary.
+        outside = np.array([[[3.0, 2.0, 1.0]], [[3.0, 2.0, 4.0]]])
+        values = _trilinear(padded, outside, dims, resolutions, np)
+        testing.assert_allclose(
+            values[0, 0], small[1, 2, 1] + 2.0 * 0.1, atol=1e-9)
+
+    def test_pairs_are_evaluated_in_both_directions(self):
+        data = build_gridsdf_self_data(
+            self.robot, self.collision_link_list, dim_grid=16, n_surface=8)
+        pairs = set(zip(data['pairs_a'].tolist(), data['pairs_b'].tolist()))
+        expected = set(
+            create_self_collision_pairs(self.collision_link_list))
+        self.assertEqual(pairs, expected | {(b, a) for a, b in expected})
+
+    @requires_jax
+    def test_numpy_and_jax_agree(self):
+        import jax.numpy as jnp
+
+        self.robot.reset_manip_pose()
+        data = build_gridsdf_self_data(
+            self.robot, self.collision_link_list, dim_grid=16, n_surface=8)
+        positions, rotations = self._link_transforms()
+
+        expected = gridsdf_self_distances(positions, rotations, data, np)
+        actual = gridsdf_self_distances(
+            jnp.asarray(positions), jnp.asarray(rotations),
+            {key: jnp.asarray(value) for key, value in data.items()}, jnp)
+        testing.assert_allclose(np.asarray(actual), expected, atol=1e-5)
+
+    def test_add_self_collision_cost_mode(self):
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=2)
+        problem.add_collision_cost(
+            self.collision_link_list, world_obstacles=[])
+        problem.add_self_collision_cost(
+            mode='gridsdf', dim_grid=16, n_surface=8)
+
+        spec = problem.residuals[-1]
+        self.assertEqual(spec.name, 'self_collision')
+        self.assertEqual(spec.params['mode'], 'gridsdf')
+        self.assertIn('gridsdf_data', spec.params)
+
+    def test_unknown_mode_raises(self):
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=2)
+        problem.add_collision_cost(
+            self.collision_link_list, world_obstacles=[])
+        with self.assertRaises(ValueError):
+            problem.add_self_collision_cost(mode='capsule')
+
+    @requires_jaxls
+    def test_jaxls_resolves_self_collision(self):
+        from skrobot.planner.trajectory_optimization.solvers.jaxls_solver import JaxlsSolver
+
+        # A configuration the GridSDF model reports as penetrating.
+        colliding = np.array(
+            [1.116, -1.309, 0.575, -3.0, 0.074, 0.008, -0.842, 0.015, 0.018])
+        n_waypoints = 3
+
+        problem = TrajectoryProblem(
+            self.robot, self.link_list, n_waypoints=n_waypoints)
+        problem.set_fixed_endpoints(start=False, end=False)
+        problem.add_collision_cost(
+            self.collision_link_list, world_obstacles=[])
+        problem.add_self_collision_cost(
+            mode='gridsdf', dim_grid=16, n_surface=8,
+            weight=1000.0, activation_distance=0.02, as_constraint=False)
+        problem.add_smoothness_cost(weight=0.01)
+
+        data = problem.residuals[-2].params['gridsdf_data']
+
+        def min_distance(angles):
+            for link, angle in zip(self.link_list, angles):
+                link.joint.joint_angle(float(angle))
+            positions, rotations = self._link_transforms()
+            return gridsdf_self_distances(
+                positions, rotations, data, np).min()
+
+        initial_traj = np.tile(colliding, (n_waypoints, 1))
+        before = min(min_distance(q) for q in initial_traj)
+        self.assertLess(before, 0.0)
+
+        solver = JaxlsSolver(max_iterations=50)
+        result = solver.solve(problem, initial_traj)
+        self.assertTrue(result.success)
+
+        after = min(min_distance(q) for q in result.trajectory)
+        self.assertGreater(after, 0.0)
 
 
 if __name__ == '__main__':
