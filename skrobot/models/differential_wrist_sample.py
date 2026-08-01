@@ -22,6 +22,13 @@ class DifferentialWristSample(RobotModelFromURDF):
         If True (default), apply joint limit tables for the wrist joints.
         This enables dynamic joint limits where each wrist joint's limits
         depend on the other wrist joint's current angle.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``end_coords`` is attached to ``end_effector_link`` with zero offset.
+    Measured mapping: end +X -> link +X, end +Y -> link +Y,
+    end +Z -> link +Z (identity).
     """
 
     def __init__(self, use_joint_limit_table=True):

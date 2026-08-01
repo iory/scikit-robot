@@ -15,6 +15,16 @@ class G1(RobotModelFromURDF):
     `isri-aist/g1_description
     <https://github.com/isri-aist/g1_description>`_, derived from Unitree's
     official ``g1_description`` (BSD-3-Clause).
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to the selected
+    wrist terminal link (e.g., ``{right,left}_wrist_roll_rubber_hand`` in the
+    23-DOF model) with zero offset and identity mapping.
+    ``rleg_end_coords`` and ``lleg_end_coords`` are attached to
+    ``{right,left}_ankle_roll_link`` with offset ``[0.0, 0.0, -0.03]`` and
+    identity mapping.
     """
 
     def __init__(self, dof=23, urdf=None, urdf_file=None):

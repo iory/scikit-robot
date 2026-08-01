@@ -8,7 +8,17 @@ from skrobot.models.urdf import RobotModelFromURDF
 
 
 class RoverArmedTycoon(RobotModelFromURDF):
-    """Rover Armed Tycoon Robot Model."""
+    """Rover Armed Tycoon Robot Model.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``_arm_end_coords`` (exposed as ``arm_end_coords``) is attached to
+    ``tycoon_7_roll_link`` with offset ``[-0.05, 0.0, 0.0]``.
+    Measured mapping: end +X -> link -X, end +Y -> link -Y,
+    end +Z -> link +Z.
+    Grasp/approach semantics are not documented in this model file.
+    """
 
     def __init__(self, *args, **kwargs):
         super(RoverArmedTycoon, self).__init__(*args, **kwargs)

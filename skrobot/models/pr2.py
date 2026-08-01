@@ -11,6 +11,16 @@ class PR2(RobotModelFromURDF):
 
     """PR2 Robot Model.
 
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to
+    ``{r,l}_gripper_tool_frame`` with zero offset and identity mapping
+    (end +X/+Y/+Z -> link +X/+Y/+Z). ``torso_end_coords`` is identity on
+    ``torso_lift_link``.
+    ``head_end_coords`` is attached to ``head_tilt_link`` with offset
+    ``[0.08, 0.0, 0.13]`` and mapping end +X -> link -Z, end +Y -> link +Y,
+    end +Z -> link +X.
     """
 
     def __init__(self, use_tight_joint_limit=True):

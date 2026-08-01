@@ -16,6 +16,16 @@ class Nextage(RobotModelFromURDF):
     - Nextage Open Robot Description
 
       https://github.com/tork-a/rtmros_nextage/tree/indigo-devel/nextage_description/urdf
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to
+    ``{RARM,LARM}_JOINT5_Link`` with offset ``[-0.185, 0.0, -0.01]`` and
+    mapping end +X -> link +Z, end +Y -> link +Y, end +Z -> link -X.
+    ``head_end_coords`` is attached to ``HEAD_JOINT1_Link`` with offset
+    ``[0.06, 0.0, 0.025]`` and mapping end +X -> link -Z, end +Y -> link +Y,
+    end +Z -> link +X.
     """
 
     def __init__(self, *args, **kwargs):

@@ -6,6 +6,16 @@ from skrobot.data import r8_6_urdfpath
 
 
 class R8_6(skrobot.model.RobotModel):
+    """R8.6 dual-arm mobile manipulator.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``larm_end_coords`` and ``rarm_end_coords`` are attached to
+    ``{l,r}_hand_y_link`` with zero offset and identity mapping.
+    ``l_hand_camera_end_coords``, ``r_hand_camera_end_coords`` and
+    ``elv_camera_end_coords`` are also identity on their parent camera links.
+    """
 
     def __init__(self, urdf_path=None, *args, **kwargs):
         super(R8_6, self).__init__(*args, **kwargs)

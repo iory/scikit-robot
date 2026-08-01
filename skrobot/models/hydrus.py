@@ -38,6 +38,13 @@ class Hydrus(RobotModelFromURDF):
 
     The URDF and meshes are fetched on first use and cached under
     ``~/.skrobot/hydrus_description/``.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``arm_end_coords`` is attached to ``leg5`` with zero offset.
+    Measured mapping: end +X -> link +X, end +Y -> link +Y,
+    end +Z -> link +Z (identity).
     """
 
     @cached_property

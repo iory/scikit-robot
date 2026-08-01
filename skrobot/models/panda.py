@@ -12,6 +12,16 @@ class Panda(RobotModelFromURDF):
     """Panda Robot Model.
 
     https://frankaemika.github.io/docs/control_parameters.html
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` is attached to ``panda_hand`` with offset
+    ``[0, 0, 0.1034]`` in the parent-link frame. Measured mapping:
+    end +X -> link +Z, end +Y -> link +Y, end +Z -> link -X.
+    Approach direction is local +X and finger-opening axis is local +Y.
+    For a top-down grasp with fingers along world Y, use target rotation
+    matrix ``[[0, 0, 1], [0, 1, 0], [-1, 0, 0]]``.
     """
 
     def __init__(self, *args, **kwargs):

@@ -16,6 +16,18 @@ class JaxonJVRC(RobotModelFromURDF):
     `robot-descriptions/jaxon_description
     <https://github.com/robot-descriptions/jaxon_description>`_,
     licensed under CC BY-SA 4.0.
+
+    Notes
+    -----
+    **End-effector frame.**
+    ``rarm_end_coords`` and ``larm_end_coords`` are attached to
+    ``{RARM,LARM}_LINK7`` with offset ``[0.0, 0.0, -0.217]`` and mapping
+    end +X -> link -Z, end +Y -> link +Y, end +Z -> link +X.
+    ``rleg_end_coords`` and ``lleg_end_coords`` are attached to
+    ``{RLEG,LLEG}_LINK5`` with offset ``[0.0, 0.0, -0.1]`` and identity
+    mapping. ``head_end_coords`` is attached to ``HEAD_LINK1`` with offset
+    ``[0.1, 0.0, 0.1]`` and mapping end +X -> link -Z, end +Y -> link +Y,
+    end +Z -> link +X.
     """
 
     def __init__(self, *args, **kwargs):
