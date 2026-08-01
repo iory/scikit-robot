@@ -46,6 +46,14 @@ def get_problem_structure_key(problem):
         spec.name == 'cartesian_path' for spec in problem.residuals
     )
 
+    # The self-collision representation, and for 'gridsdf' the shape of its
+    # residual block, decide how the cost is compiled -- so they are structure,
+    # not values.
+    self_collision_structure = tuple(
+        _self_collision_structure(spec) for spec in problem.residuals
+        if spec.name == 'self_collision'
+    )
+
     return (
         problem.n_waypoints,
         problem.n_joints,
@@ -58,7 +66,17 @@ def get_problem_structure_key(problem):
         n_obstacles,
         ee_wp_structure,
         has_cartesian,
+        self_collision_structure,
     )
+
+
+def _self_collision_structure(spec):
+    """Cache-key contribution of one self-collision residual spec."""
+    mode = spec.params.get('mode', 'sphere')
+    if mode != 'gridsdf':
+        return (mode, len(spec.params['pair_indices'][0]))
+    data = spec.params['gridsdf_data']
+    return (mode, len(data['pairs_a']), data['surface_points'].shape[1])
 
 
 def get_problem_value_hash(problem):
@@ -113,7 +131,37 @@ def get_problem_value_hash(problem):
     return hashlib.md5(combined).hexdigest()[:16]
 
 
+def build_gridsdf_self_distance_fn(problem, fk_data, backend):
+    """Build the GridSDF self-collision distance function of a problem.
+
+    Parameters
+    ----------
+    problem : TrajectoryProblem
+        Problem definition.
+    fk_data : dict
+        Output of
+        :func:`~skrobot.planner.trajectory_optimization.fk_utils.prepare_fk_data`.
+    backend : module
+        Array module (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    callable or None
+        ``f(angles) -> (n_pairs, n_surface)`` signed distances, or None if the
+        problem has no self-collision cost with ``mode='gridsdf'``.
+    """
+    from skrobot.planner.trajectory_optimization.gridsdf_collision import make_gridsdf_self_distance_fn
+
+    for spec in problem.residuals:
+        if spec.name == 'self_collision' \
+                and spec.params.get('mode') == 'gridsdf':
+            return make_gridsdf_self_distance_fn(
+                fk_data, spec.params['gridsdf_data'], backend)
+    return None
+
+
 __all__ = [
+    'build_gridsdf_self_distance_fn',
     'get_problem_structure_key',
     'get_problem_value_hash',
 ]

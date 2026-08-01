@@ -241,6 +241,7 @@ class GradientDescentSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import build_gridsdf_self_distance_fn
 
         dt = problem.dt
 
@@ -256,6 +257,7 @@ class GradientDescentSolver(BaseSolver):
         get_sphere_positions = None
         get_ee_pose = None
         sphere_radii = None
+        gridsdf_self_distances = None
 
         # Build FK data if needed for collision, cartesian path,
         # or EE waypoint costs
@@ -267,6 +269,8 @@ class GradientDescentSolver(BaseSolver):
                 build_fk_functions(fk_data, jnp)
             get_sphere_positions = get_sphere_positions_fn
             get_ee_pose = get_ee_pose_fn
+            gridsdf_self_distances = build_gridsdf_self_distance_fn(
+                problem, fk_data, jnp)
 
         # Parse residual specs
         costs_config = []
@@ -331,9 +335,24 @@ class GradientDescentSolver(BaseSolver):
                         total_cost = total_cost + weight * jnp.sum(coll_costs)
 
                 elif name == 'self_collision' and has_collision:
-                    pair_indices = params['pair_indices']
                     activation = params['activation_distance']
-                    pairs_i, pairs_j = pair_indices
+
+                    if params.get('mode') == 'gridsdf':
+                        def gridsdf_self_coll_cost_single(angles):
+                            signed_dists = gridsdf_self_distances(angles)
+                            residuals = compute_collision_residuals(
+                                signed_dists, activation, jnp
+                            )
+                            return jnp.sum(residuals ** 2)
+
+                        self_coll_costs = jax.vmap(
+                            gridsdf_self_coll_cost_single
+                        )(trajectory)
+                        total_cost = (total_cost
+                                      + weight * jnp.sum(self_coll_costs))
+                        continue
+
+                    pairs_i, pairs_j = params['pair_indices']
 
                     if len(pairs_i) > 0:
                         pairs_i_arr = jnp.array(pairs_i)

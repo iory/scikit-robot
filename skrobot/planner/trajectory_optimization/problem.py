@@ -652,6 +652,9 @@ class TrajectoryProblem:
         weight=100.0,
         activation_distance=0.02,
         as_constraint=True,
+        mode='sphere',
+        dim_grid=40,
+        n_surface=48,
     ):
         """Add self-collision avoidance cost.
 
@@ -664,11 +667,55 @@ class TrajectoryProblem:
         as_constraint : bool
             If True (default), treat as hard constraint for Augmented Lagrangian
             solver (collision distance >= 0). If False, treat as soft cost.
+        mode : str
+            Link shape representation.  ``'sphere'`` (default) approximates
+            each link by a few spheres: cheap, but conservative enough that
+            bulky links (e.g. the Panda link housings) report even a
+            legitimate rest pose as self-colliding.  ``'gridsdf'`` gives each
+            collision link its own GridSDF and measures penetration by looking
+            the other links' sampled surface points up in it, which is far
+            more accurate at the cost of a one-time voxelization and a larger
+            residual vector.  Requires a collision mesh on every collision
+            link.
+        dim_grid : int
+            GridSDF resolution per axis (``mode='gridsdf'`` only).
+        n_surface : int
+            Surface sample points kept per link (``mode='gridsdf'`` only).
+
+        Raises
+        ------
+        ValueError
+            If ``add_collision_cost`` has not been called, or ``mode`` is not
+            one of ``'sphere'`` / ``'gridsdf'``.
         """
         if self.collision_link_list is None:
             raise ValueError(
                 "Must call add_collision_cost first to set collision_link_list"
             )
+        if mode not in ('sphere', 'gridsdf'):
+            raise ValueError(
+                "mode must be 'sphere' or 'gridsdf', got {}".format(mode))
+
+        # Use 'geq' for hard constraint (Augmented Lagrangian)
+        # Use 'soft' for soft cost (gradient descent, etc.)
+        kind = 'geq' if as_constraint else 'soft'
+
+        if mode == 'gridsdf':
+            from skrobot.planner.trajectory_optimization.gridsdf_collision import build_gridsdf_self_data
+            self.residuals.append(ResidualSpec(
+                name='self_collision',
+                residual_fn='self_collision',
+                params={
+                    'mode': 'gridsdf',
+                    'gridsdf_data': build_gridsdf_self_data(
+                        self.robot_model, self.collision_link_list,
+                        dim_grid=dim_grid, n_surface=n_surface),
+                    'activation_distance': activation_distance,
+                },
+                kind=kind,
+                weight=weight,
+            ))
+            return
 
         # Create self-collision pairs
         from skrobot.planner.trajectory_optimization.collision import create_self_collision_pairs
@@ -694,14 +741,11 @@ class TrajectoryProblem:
 
         self.self_collision_pairs = (np.array(pairs_i), np.array(pairs_j))
 
-        # Use 'geq' for hard constraint (Augmented Lagrangian)
-        # Use 'soft' for soft cost (gradient descent, etc.)
-        kind = 'geq' if as_constraint else 'soft'
-
         self.residuals.append(ResidualSpec(
             name='self_collision',
             residual_fn='self_collision',
             params={
+                'mode': 'sphere',
                 'pair_indices': self.self_collision_pairs,
                 'activation_distance': activation_distance,
             },
