@@ -22,6 +22,10 @@ class Panda(RobotModelFromURDF):
     Approach direction is local +X and finger-opening axis is local +Y.
     For a top-down grasp with fingers along world Y, use target rotation
     matrix ``[[0, 0, 1], [0, 1, 0], [-1, 0, 0]]``.
+
+    **Poses.**
+    ``reset_pose()`` is this model's default posture; ``ready_pose()`` matches
+    Franka's documented neutral configuration.
     """
 
     def __init__(self, *args, **kwargs):
@@ -42,6 +46,12 @@ class Panda(RobotModelFromURDF):
         return panda_urdfpath()
 
     def reset_pose(self):
+        """Set this library's default Panda posture.
+
+        This long-standing default posture is deliberately not identical to
+        Franka's neutral configuration. Use :meth:`ready_pose` for Franka's
+        documented neutral configuration.
+        """
         angle_vector = [
             0.03942226991057396,
             -0.9558116793632507,
@@ -50,6 +60,26 @@ class Panda(RobotModelFromURDF):
             -0.013104429468512535,
             1.1745525598526,
             0.8112226724624634,
+        ]
+        for link, angle in zip(self.rarm.link_list, angle_vector):
+            link.joint.joint_angle(angle)
+        return self.angle_vector()
+
+    def ready_pose(self):
+        """Set Franka's documented neutral configuration.
+
+        This is the neutral configuration from Franka's own documentation and
+        the pose that most Franka tooling and examples start from. It is well
+        away from joint limits and from self-collision.
+        """
+        angle_vector = [
+            0.0,
+            -np.pi / 4,
+            0.0,
+            -3 * np.pi / 4,
+            0.0,
+            np.pi / 2,
+            np.pi / 4,
         ]
         for link, angle in zip(self.rarm.link_list, angle_vector):
             link.joint.joint_angle(angle)
