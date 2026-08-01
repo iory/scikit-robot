@@ -454,6 +454,28 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
     ).Set(bool(self_collision))
 
     link_path = {}
+    if decompose_links and decompose_links is not True:
+        link_names = [link.name for link in urdf.links]
+        unmatched_patterns = [
+            pat for pat in decompose_links
+            if not any(pat in link_name for link_name in link_names)
+        ]
+        if unmatched_patterns:
+            # Link-name patterns are easy to confuse with similarly named
+            # joints; show available links so a typo can be fixed in one edit.
+            # Truncate the list so the warning stays readable: a manipulator
+            # has on the order of ten links and fits, while a humanoid has
+            # enough to bury the patterns that actually failed.
+            max_link_names = 16
+            shown_link_names = ", ".join(link_names[:max_link_names])
+            if len(link_names) > max_link_names:
+                shown_link_names += ", ... ({} total)".format(len(link_names))
+            warnings.warn(
+                "decompose_links pattern(s) matched no link names: {}. "
+                "Available link names: {}".format(
+                    list(unmatched_patterns), shown_link_names),
+                RuntimeWarning, stacklevel=2)
+
     for link in urdf.links:
         path = Sdf.Path("/robot/" + sanitize_name(link.name))
         link_path[link.name] = path
