@@ -2,6 +2,7 @@ import json
 import os
 import struct
 import tempfile
+import unittest
 
 import numpy as np
 import pytest
@@ -523,6 +524,83 @@ class TestDraco:
 
             draco_attrs = primitive['extensions']['KHR_draco_mesh_compression']['attributes']
             assert 'COLOR_0' in draco_attrs
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+
+class TestDracoVertexColorRoundTrip(unittest.TestCase):
+    """A multi-colored mesh must survive export_glb_with_draco unchanged.
+
+    The exporter also writes a PBR material so renderers that ignore COLOR_0
+    still show something. That material used to carry the *mean* of the
+    vertex colors: glTF multiplies baseColorFactor by COLOR_0, and trimesh
+    files COLOR_0 under vertex_attributes as soon as a primitive names a
+    material, so a mesh with fourteen part colors came back as one muddy
+    shade.
+    """
+
+    @staticmethod
+    def _tricolor_mesh():
+        import trimesh
+        parts = []
+        for i, rgb in enumerate([(75, 75, 75), (164, 132, 0), (0, 128, 0)]):
+            box = trimesh.creation.box(extents=(0.05, 0.05, 0.05))
+            box.apply_translation((i * 0.06, 0.0, 0.0))
+            box.visual.vertex_colors = np.tile(
+                np.array([rgb[0], rgb[1], rgb[2], 255], dtype=np.uint8),
+                (len(box.vertices), 1))
+            parts.append(box)
+        return trimesh.util.concatenate(parts)
+
+    def test_vertex_colors_survive_round_trip(self):
+        import trimesh
+        from skrobot.utils.draco import export_glb_with_draco
+        from skrobot.utils.draco import register_dracopy_handlers
+
+        register_dracopy_handlers()
+        mesh = self._tricolor_mesh()
+        expected = np.unique(
+            np.asarray(mesh.visual.vertex_colors)[:, :3], axis=0)
+        self.assertEqual(len(expected), 3)
+
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as f:
+            temp_path = f.name
+        try:
+            export_glb_with_draco([mesh], temp_path)
+            loaded = trimesh.load(temp_path)
+            geom = (list(loaded.geometry.values())[0]
+                    if hasattr(loaded, 'geometry') else loaded)
+            colors = getattr(geom.visual, 'vertex_colors', None)
+            self.assertIsNotNone(colors, "vertex colors were dropped entirely")
+            self.assertGreater(len(colors), 0)
+            actual = np.unique(np.asarray(colors)[:, :3], axis=0)
+            # compare whole colors, not per-channel distributions: sorting
+            # each column on its own lets two different palettes match
+            self.assertEqual({tuple(int(c) for c in row) for row in actual},
+                             {tuple(int(c) for c in row) for row in expected})
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_fallback_material_does_not_tint_vertex_colors(self):
+        from skrobot.utils.draco import export_glb_with_draco
+
+        mesh = self._tricolor_mesh()
+        with tempfile.NamedTemporaryFile(suffix='.glb', delete=False) as f:
+            temp_path = f.name
+        try:
+            export_glb_with_draco([mesh], temp_path)
+            with open(temp_path, 'rb') as f:
+                data = f.read()
+            json_len = struct.unpack('<I', data[12:16])[0]
+            doc = json.loads(data[20:20 + json_len].decode('utf-8').rstrip())
+            primitive = doc['meshes'][0]['primitives'][0]
+            self.assertNotIn(
+                'material', primitive,
+                "a vertex-coloured primitive must not name a material: glTF "
+                "multiplies baseColorFactor into COLOR_0, and trimesh files "
+                "COLOR_0 under vertex_attributes when a material is present")
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
