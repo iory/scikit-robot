@@ -1,4 +1,6 @@
 from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
+from skrobot.urdf.canonicalize import canonicalize_urdf
+from skrobot.urdf.canonicalize import canonicalize_urdf_file
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
 from skrobot.urdf.llm_grouping import build_grouping_prompt
 from skrobot.urdf.llm_grouping import compute_jaw_gripper_frame
@@ -50,5 +52,7 @@ __all__ = [
     'compute_jaw_gripper_frame',
     'sanitize_name',
     'sanitize_urdf_names',
+    'canonicalize_urdf',
+    'canonicalize_urdf_file',
     'urdf_to_mjcf',
 ]
