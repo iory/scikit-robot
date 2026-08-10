@@ -26,11 +26,25 @@ __all__ = [
     'transform_inertial',
     'link_inertial_from_mesh',
     'rescale_inertial_to_mass',
+    'parallel_axis',
+    'combine_inertials',
     'validate_inertia',
 ]
 
 
 DEFAULT_DENSITY = 1000.0  # kg/m^3 (water) -- generic light part
+
+
+def _as_tensor(inertia):
+    """A 3x3 inertia tensor from either a 3x3 matrix or the 6 components
+    ``(ixx, ixy, ixz, iyy, iyz, izz)``."""
+    inertia = np.asarray(inertia, dtype=np.float64)
+    if inertia.shape == (6,):
+        ixx, ixy, ixz, iyy, iyz, izz = inertia
+        inertia = np.array([[ixx, ixy, ixz],
+                            [ixy, iyy, iyz],
+                            [ixz, iyz, izz]], dtype=np.float64)
+    return inertia
 
 
 def _solid_properties(mesh, density):
@@ -155,12 +169,7 @@ def transform_inertial(mass, com, inertia, visual_xyz, visual_rpy,
     try:
         mass = float(mass)
         com = np.asarray(com, dtype=float)
-        inertia = np.asarray(inertia, dtype=float)
-        if inertia.shape == (6,):
-            ixx, ixy, ixz, iyy, iyz, izz = inertia
-            inertia = np.array([[ixx, ixy, ixz],
-                                [ixy, iyy, iyz],
-                                [ixz, iyz, izz]], dtype=float)
+        inertia = _as_tensor(inertia)
     except (TypeError, ValueError):
         return None
     if not (np.isfinite(mass) and mass > 0 and com.shape == (3,)
@@ -242,6 +251,115 @@ def rescale_inertial_to_mass(info, target_mass):
         'com': list(info['com']),
         'inertia': tuple(float(x) * factor for x in info['inertia']),
         'method': '{}->mass'.format(info.get('method', '?')),
+    }
+
+
+def parallel_axis(mass, inertia, com, reference):
+    """Shift an inertia tensor to be taken about a different point.
+
+    The parallel-axis (Huygens-Steiner) theorem: a tensor taken about the
+    centre of mass gains ``mass * (|d|^2 * I3 - d d^T)`` when moved to a
+    reference point offset by ``d = com - reference``.  This is the piece
+    :func:`transform_inertial` deliberately leaves out -- it maps a tensor
+    into another frame while keeping it about the (moved) centre of mass,
+    whereas this moves the reference point itself.
+
+    Parameters
+    ----------
+    mass : float
+        Mass of the body in kg.
+    inertia : numpy.ndarray or sequence of 6 floats
+        Tensor about ``com``: either the 3x3 matrix or the 6 components
+        ``(ixx, ixy, ixz, iyy, iyz, izz)``.
+    com : sequence of 3 floats
+        Centre of mass, in the frame the tensor is expressed in.
+    reference : sequence of 3 floats
+        Point to take the shifted tensor about, in the same frame.
+
+    Returns
+    -------
+    inertia : numpy.ndarray
+        3x3 tensor about ``reference``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.utils.inertia import parallel_axis
+    >>> # a 2 kg point-like body 1 m along x picks up m * d^2 about y and z
+    >>> parallel_axis(2.0, np.zeros((3, 3)), [1, 0, 0], [0, 0, 0])
+    array([[0., 0., 0.],
+           [0., 2., 0.],
+           [0., 0., 2.]])
+    """
+    inertia = _as_tensor(inertia)
+    offset = np.asarray(com, dtype=np.float64) \
+        - np.asarray(reference, dtype=np.float64)
+    return inertia + float(mass) * (
+        float(offset.dot(offset)) * np.eye(3) - np.outer(offset, offset))
+
+
+def combine_inertials(*infos):
+    """Lump several rigid bodies into one inertial.
+
+    Every input must already be expressed in the SAME frame (use
+    :func:`transform_inertial` first if they are not).  The combined mass is
+    the sum, the combined centre of mass is the mass-weighted mean, and each
+    tensor is shifted to that combined centre with :func:`parallel_axis`
+    before being summed -- the standard rigid-body composition, and exactly
+    what lumping a fixed-joint child into its parent requires.
+
+    Parameters
+    ----------
+    infos : dict
+        Inertial dicts as produced by :func:`transform_inertial` /
+        :func:`link_inertial_from_mesh`: ``{'mass', 'com', 'inertia'}``, with
+        ``inertia`` as the 6 components or a 3x3 tensor.  Entries that are
+        None or carry a non-positive mass are skipped, so a link without an
+        ``<inertial>`` can be passed straight through.
+
+    Returns
+    -------
+    info : dict or None
+        ``{'mass', 'com', 'inertia', 'method'}`` with ``inertia`` as the 6
+        components about the combined centre of mass, or None when nothing
+        usable was given.  ``method`` joins the inputs' tags with ``'+'``.
+
+    Examples
+    --------
+    >>> from skrobot.utils.inertia import combine_inertials
+    >>> a = {'mass': 1.0, 'com': [0, 0, 0], 'inertia': (0, 0, 0, 0, 0, 0)}
+    >>> b = {'mass': 1.0, 'com': [2, 0, 0], 'inertia': (0, 0, 0, 0, 0, 0)}
+    >>> combined = combine_inertials(a, b)
+    >>> combined['mass'], combined['com']
+    (2.0, [1.0, 0.0, 0.0])
+    """
+    usable = []
+    for info in infos:
+        if not info:
+            continue
+        try:
+            mass = float(info['mass'])
+            com = np.asarray(info['com'], dtype=np.float64)
+            inertia = _as_tensor(info['inertia'])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (np.isfinite(mass) and mass > 0 and com.shape == (3,)
+                and np.all(np.isfinite(com)) and np.all(np.isfinite(inertia))):
+            continue
+        usable.append((mass, com, inertia, info.get('method', '?')))
+    if not usable:
+        return None
+    total_mass = sum(item[0] for item in usable)
+    centroid = sum(item[0] * item[1] for item in usable) / total_mass
+    tensor = sum(parallel_axis(mass, inertia, com, centroid)
+                 for mass, com, inertia, _ in usable)
+    return {
+        'mass': total_mass,
+        'com': [float(c) for c in centroid],
+        'inertia': (float(tensor[0, 0]), float(tensor[0, 1]),
+                    float(tensor[0, 2]), float(tensor[1, 1]),
+                    float(tensor[1, 2]), float(tensor[2, 2])),
+        'method': '+'.join(item[3] for item in usable),
     }
 
 
