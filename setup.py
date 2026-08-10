@@ -98,6 +98,7 @@ console_scripts.append("urdf-hash=skrobot.apps.urdf_hash:main")
 console_scripts.append("convert-wheel-collision=skrobot.apps.convert_wheel_collision:main")
 console_scripts.append("urdf-tree=skrobot.apps.urdf_tree:main")
 console_scripts.append("convert-urdf-to-mjcf=skrobot.apps.convert_urdf_to_mjcf:main")
+console_scripts.append("canonicalize-urdf=skrobot.apps.canonicalize_urdf:main")
 
 
 setup(
