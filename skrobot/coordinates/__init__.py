@@ -26,6 +26,7 @@ from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_mask
 from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import orthonormalize_rotation_matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_from_vectors
 from skrobot.coordinates.math import rotation_geodesic_distance

@@ -3103,6 +3103,69 @@ def quaternion_from_vectors(a, b):
     return matrix2quaternion(rotation_matrix_from_vectors(a, b))
 
 
+def orthonormalize_rotation_matrix(matrix):
+    """Return the rotation matrix closest to the given matrix.
+
+    Projects an approximately-orthogonal matrix back onto SO(3) by
+    solving the orthogonal Procrustes problem: with the singular value
+    decomposition ``M = U S V^T``, the rotation closest to ``M`` in the
+    Frobenius norm is ``U V^T``.  When ``U V^T`` is a reflection
+    (determinant -1), the singular vector of the smallest singular value
+    is flipped so the result always has determinant +1.
+
+    Useful to repair rotation matrices that drifted away from
+    orthogonality — e.g. through long chains of matrix products or
+    matrices imported from external CAD/robot APIs — before handing them
+    to functions that validate their input, such as
+    :func:`matrix2quaternion` or :class:`~skrobot.coordinates.Coordinates`.
+
+    Parameters
+    ----------
+    matrix : list or numpy.ndarray
+        rotation-like matrix of shape ``(3, 3)``, or a batch of them
+        with shape ``(..., 3, 3)``.
+
+    Returns
+    -------
+    rotation : numpy.ndarray
+        closest rotation matrix (or batch of matrices), same shape as
+        the input, with determinant +1.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import orthonormalize_rotation_matrix
+    >>> noisy = np.eye(3) + 1e-4 * np.random.rand(3, 3)
+    >>> fixed = orthonormalize_rotation_matrix(noisy)
+    >>> np.allclose(fixed.T @ fixed, np.eye(3))
+    True
+    >>> np.isclose(np.linalg.det(fixed), 1.0)
+    True
+    """
+    m = np.asarray(matrix, dtype=np.float64)
+    if m.ndim < 2 or m.shape[-2:] != (3, 3):
+        raise ValueError(
+            'matrix must have shape (3, 3) or (..., 3, 3), '
+            'got {}'.format(m.shape))
+    u, _, vt = np.linalg.svd(m)
+    rotation = np.matmul(u, vt)
+    # A negative determinant means the nearest orthogonal matrix is a
+    # reflection.  The nearest proper rotation is obtained by flipping
+    # the column of U paired with the smallest singular value (the last
+    # one; numpy returns singular values in descending order).
+    det = np.linalg.det(rotation)
+    if m.ndim == 2:
+        if det < 0:
+            u[:, 2] = -u[:, 2]
+            rotation = np.matmul(u, vt)
+    else:
+        negative = det < 0
+        if np.any(negative):
+            u[negative, :, 2] = -u[negative, :, 2]
+            rotation = np.matmul(u, vt)
+    return rotation
+
+
 def matrix2xyzrpy(matrix):
     """Split a 4x4 homogeneous transform into translation and roll-pitch-yaw.
 

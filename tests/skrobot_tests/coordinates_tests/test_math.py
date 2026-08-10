@@ -26,6 +26,7 @@ from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import matrix_relative
 from skrobot.coordinates.math import normalize_vector
+from skrobot.coordinates.math import orthonormalize_rotation_matrix
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.coordinates.math import quaternion2rpy
 from skrobot.coordinates.math import quaternion_absolute_distance
@@ -1184,6 +1185,67 @@ class TestMath(unittest.TestCase):
         # identity transform leaves the point untouched
         testing.assert_almost_equal(
             transform_point(np.eye(4), [1, 2, 3]), [1, 2, 3])
+
+    def test_orthonormalize_rotation_matrix(self):
+        # an already-valid rotation passes through unchanged
+        rng = np.random.RandomState(7)
+        for _ in range(20):
+            valid = rpy2matrix(*rng.uniform(-np.pi, np.pi, 3))
+            testing.assert_almost_equal(
+                orthonormalize_rotation_matrix(valid), valid)
+
+        # a drifted matrix is projected back onto SO(3), close to the
+        # original rotation
+        for _ in range(50):
+            valid = rpy2matrix(*rng.uniform(-np.pi, np.pi, 3))
+            drifted = valid + rng.uniform(-1e-4, 1e-4, (3, 3))
+            fixed = orthonormalize_rotation_matrix(drifted)
+            testing.assert_almost_equal(fixed.T.dot(fixed), np.eye(3))
+            self.assertAlmostEqual(np.linalg.det(fixed), 1.0)
+            self.assertLess(np.abs(fixed - valid).max(), 1e-3)
+            _check_valid_rotation(fixed)
+
+        # heavy distortion (non-uniform scaling) still yields a proper
+        # rotation
+        distorted = rpy2matrix(0.3, -0.2, 0.9).dot(np.diag([2.0, 0.5, 1.3]))
+        fixed = orthonormalize_rotation_matrix(distorted)
+        testing.assert_almost_equal(fixed.T.dot(fixed), np.eye(3))
+        self.assertAlmostEqual(np.linalg.det(fixed), 1.0)
+
+        # a reflection (det == -1) maps to a proper rotation, not a
+        # reflection
+        reflection = np.diag([1.0, 1.0, -1.0])
+        fixed = orthonormalize_rotation_matrix(reflection)
+        self.assertAlmostEqual(np.linalg.det(fixed), 1.0)
+        testing.assert_almost_equal(fixed.T.dot(fixed), np.eye(3))
+
+        # batch input keeps its shape and fixes each element, including a
+        # mix of proper and reflected matrices
+        batch = np.stack([
+            rpy2matrix(0.1, 0.2, 0.3) + 1e-5,
+            np.diag([1.0, 1.0, -1.0]),
+            np.eye(3),
+        ])
+        fixed = orthonormalize_rotation_matrix(batch)
+        self.assertEqual(fixed.shape, (3, 3, 3))
+        for i in range(3):
+            testing.assert_almost_equal(
+                fixed[i].T.dot(fixed[i]), np.eye(3))
+            self.assertAlmostEqual(np.linalg.det(fixed[i]), 1.0)
+        testing.assert_almost_equal(fixed[2], np.eye(3))
+
+        # multi-dimensional batch (2, 2, 3, 3)
+        nested = batch[:2].reshape(1, 2, 3, 3).repeat(2, axis=0)
+        fixed = orthonormalize_rotation_matrix(nested)
+        self.assertEqual(fixed.shape, (2, 2, 3, 3))
+        for idx in np.ndindex(2, 2):
+            self.assertAlmostEqual(np.linalg.det(fixed[idx]), 1.0)
+
+        # invalid shapes are rejected
+        with self.assertRaises(ValueError):
+            orthonormalize_rotation_matrix(np.eye(4))
+        with self.assertRaises(ValueError):
+            orthonormalize_rotation_matrix([1, 2, 3])
 
     def test_matrix_relative(self):
         rng = np.random.RandomState(3)
