@@ -2,6 +2,8 @@ from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
 from skrobot.urdf.canonicalize import canonicalize_urdf
 from skrobot.urdf.canonicalize import canonicalize_urdf_file
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
+from skrobot.urdf.flip_axis import flip_joint_axis
+from skrobot.urdf.flip_axis import flip_joint_axis_file
 from skrobot.urdf.llm_grouping import build_grouping_prompt
 from skrobot.urdf.llm_grouping import compute_jaw_gripper_frame
 from skrobot.urdf.llm_grouping import generate_groups_from_llm
@@ -39,6 +41,8 @@ __all__ = [
     'convert_meshes_to_primitives',
     'get_mesh_dimensions',
     'extract_sub_urdf',
+    'flip_joint_axis',
+    'flip_joint_axis_file',
     'scale_urdf',
     'generate_groups_from_geometry',
     'generate_robot_class_from_geometry',
