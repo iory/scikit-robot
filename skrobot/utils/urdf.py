@@ -38,7 +38,6 @@ except ImportError:
     rospkg = None
 
 
-mesh_filenames_cache = {}
 logger = getLogger(__name__)
 
 # Whether the one-time "install DracoPy" hint has already been emitted.
@@ -146,6 +145,48 @@ def force_visual_mesh_origin_to_zero():
     _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = True
     yield
     _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = False
+
+
+def bake_origin_into_meshes(geometry, origin):
+    """Bake ``origin`` into the vertices of a geometry's meshes.
+
+    Used by :func:`force_visual_mesh_origin_to_zero`, which zeroes an
+    element's ``<origin>`` and moves that offset into the geometry itself.
+
+    The meshes are copied before being transformed, because one
+    :class:`~trimesh.base.Trimesh` may be shared by several elements: the
+    same file referenced by a ``<visual>`` and a ``<collision>``, or by two
+    links, and under :func:`enable_mesh_cache` every such load returns the
+    one cached list. Transforming in place would bake one element's origin
+    into another element's geometry, or bake both origins into a single
+    mesh.
+
+    Parameters
+    ----------
+    geometry : :class:`.Geometry`
+        Geometry whose meshes are baked. Only a ``<mesh>`` geometry is
+        touched; a primitive carries no vertices to bake into and is left
+        alone. Its ``mesh.meshes`` is replaced with the transformed copies.
+    origin : (4, 4) float
+        Pose to bake into the vertices. Treated as identity within
+        ``1e-8``, in which case nothing is copied or transformed.
+    """
+    if geometry.mesh is None or np.allclose(origin, np.eye(4)):
+        # No vertices to bake into, or an offset small enough that baking it
+        # would only cost a copy of possibly shared meshes.
+        return
+    baked_meshes = []
+    for mesh in geometry.mesh.meshes:
+        baked_mesh = mesh.copy()
+        baked_mesh.apply_transform(origin)
+        # copy() deep-copies the material, including its texture image; the
+        # material is not what the transform changes, so hand the copy back
+        # the original rather than a per-element duplicate of the image
+        visual, original = baked_mesh.visual, mesh.visual
+        if hasattr(visual, 'material') and hasattr(original, 'material'):
+            visual.material = original.material
+        baked_meshes.append(baked_mesh)
+    geometry.mesh.meshes = baked_meshes
 
 
 @contextlib.contextmanager
@@ -2108,16 +2149,8 @@ class Collision(URDFType):
         self.name = name
         self.origin = origin
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh is not None and \
-                self.geometry.mesh.filename not in mesh_filenames_cache:
-                mesh_filenames_cache[self.geometry.mesh.filename] = True
-                if self.geometry.mesh is not None:
-                    new_mesh = []
-                    for mesh in self.geometry.meshes:
-                        mesh.apply_transform(self.origin)
-                        new_mesh.append(mesh)
-                    self.geometry.mesh.meshes = new_mesh
-                    del new_mesh
+            if self.geometry.mesh is not None:
+                bake_origin_into_meshes(self.geometry, self.origin)
             # force the origin to be zero
             self.origin = np.eye(4)
 
@@ -2213,16 +2246,8 @@ class Visual(URDFType):
         self.material = material
 
         if _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero']:
-            if self.geometry.mesh is not None and \
-                self.geometry.mesh.filename not in mesh_filenames_cache:
-                mesh_filenames_cache[self.geometry.mesh.filename] = True
-                if self.geometry.mesh is not None:
-                    new_mesh = []
-                    for mesh in self.geometry.meshes:
-                        mesh.apply_transform(self.origin)
-                        new_mesh.append(mesh)
-                    self.geometry.mesh.meshes = new_mesh
-                    del new_mesh
+            if self.geometry.mesh is not None:
+                bake_origin_into_meshes(self.geometry, self.origin)
             # force the origin to be zero
             self.origin = np.eye(4)
 
