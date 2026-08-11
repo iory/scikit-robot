@@ -3,8 +3,11 @@ import os
 import tempfile
 import unittest
 
+import numpy as np
+
 from skrobot.collision import is_fcl_available
 from skrobot.collision import link_meshes
+from skrobot.collision import moving_links
 from skrobot.collision import SelfCollision
 from skrobot.collision import sweep_limits
 
@@ -109,6 +112,101 @@ class TestSweepLimits(unittest.TestCase):
                            parts={'pillar': [meshes['pillar']]})
         with self.assertRaises(ValueError):
             sweep_limits(robot, meshes, sc=sc)
+
+
+_MIMIC_URDF = """<?xml version="1.0"?>
+<robot name="mimic_pair">
+  <link name="base_link"/>
+  <link name="driver"/>
+  <link name="driver_tip"/>
+  <link name="follower"/>
+  <link name="follower_tip"/>
+  <joint name="drive" type="revolute">
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="driver"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2" upper="2" effort="1" velocity="1"/>
+  </joint>
+  <joint name="drive_fix" type="fixed">
+    <origin xyz="0 0 0.2" rpy="0 0 0"/>
+    <parent link="driver"/><child link="driver_tip"/>
+  </joint>
+  <joint name="follow" type="revolute">
+    <origin xyz="0.3 0 0" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="follower"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2" upper="2" effort="1" velocity="1"/>
+    <mimic joint="drive" multiplier="1"/>
+  </joint>
+  <joint name="follow_fix" type="fixed">
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <parent link="follower"/><child link="follower_tip"/>
+  </joint>
+</robot>"""
+
+
+class TestMovingLinks(unittest.TestCase):
+    """``moving_links`` must not be replaceable by a link-tree walk.
+
+    A mimic follower is driven by a hook, not by an edge, so moving the driver
+    moves the follower and everything below it -- none of which appears below
+    the driver in the parent/child tree.  A sweep that decided which links move
+    by descending that tree would freeze them at home and miss any collision
+    they cause.
+    """
+
+    def _model(self):
+        from skrobot.models.urdf import RobotModelFromURDF
+        with tempfile.NamedTemporaryFile('w', suffix='.urdf',
+                                         delete=False) as f:
+            f.write(_MIMIC_URDF)
+            path = f.name
+        try:
+            return RobotModelFromURDF(urdf_file=path)
+        finally:
+            os.unlink(path)
+
+    def _descend(self, link, found=None):
+        found = set() if found is None else found
+        found.add(link.name)
+        for child in link.child_links:
+            self._descend(child, found)
+        return found
+
+    def test_reports_the_mimic_subtree_a_tree_walk_cannot_see(self):
+        robot = self._model()
+        drive = next(j for j in robot.joint_list if j.name == 'drive')
+        links = {link.name: link for link in robot.link_list}
+
+        moved = moving_links(drive, links, 0.4)
+        self.assertEqual(moved,
+                         {'driver', 'driver_tip', 'follower', 'follower_tip'})
+        # not merely incomplete: a recursive descent CANNOT reach them, so
+        # swapping the probe for a tree walk would silently under-report
+        self.assertEqual(moved - self._descend(drive.child_link),
+                         {'follower', 'follower_tip'})
+
+    def test_restores_the_joint_it_probed(self):
+        robot = self._model()
+        drive = next(j for j in robot.joint_list if j.name == 'drive')
+        links = {link.name: link for link in robot.link_list}
+        drive.joint_angle(0.2)
+        moving_links(drive, links, 0.4)
+        self.assertAlmostEqual(float(drive.joint_angle()), 0.2)
+
+    def test_a_link_only_rotating_on_the_axis_still_counts(self):
+        """Comparing positions instead of full transforms would miss it."""
+        robot = self._model()
+        drive = next(j for j in robot.joint_list if j.name == 'drive')
+        links = {link.name: link for link in robot.link_list}
+        # 'driver' sits on the rotation axis: its origin does not translate
+        before = links['driver'].worldcoords().T()[:3, 3].copy()
+        moved = moving_links(drive, links, 0.4)
+        drive.joint_angle(0.4)
+        after = links['driver'].worldcoords().T()[:3, 3]
+        drive.joint_angle(0.0)
+        np.testing.assert_allclose(after, before, atol=1e-12)
+        self.assertIn('driver', moved)
 
 
 if __name__ == '__main__':
