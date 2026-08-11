@@ -44,9 +44,24 @@ def split_mesh_by_face_color(mesh):
     # This creates a list of arrays, each containing face indices for one color
     grouped_face_indices = np.split(sorted_face_indices, counts.cumsum()[:-1])
 
+    # Drop empty groups so the submeshes line up with grouped_face_indices:
+    # trimesh.util.submesh silently skips them.
+    grouped_face_indices = [g for g in grouped_face_indices if len(g) > 0]
+
     # Create all submeshes at once using the grouped indices
     # append=False prevents adding to the original mesh
     submeshes = mesh.submesh(grouped_face_indices, append=False)
+
+    # submesh() builds fresh meshes, so any normals the mesh file supplied are
+    # dropped and would later be re-derived by averaging -- which rounds off
+    # hard edges.  trimesh keys each submesh on ``np.unique`` of the group's
+    # face indices, so the same expression re-creates the vertex mapping.
+    authored_normals = mesh._cache.cache.get('vertex_normals')
+    if authored_normals is not None:
+        for group, submesh in zip(grouped_face_indices, submeshes):
+            unique = np.unique(mesh.faces[group].reshape(-1))
+            if len(unique) == len(submesh.vertices):
+                submesh.vertex_normals = authored_normals[unique]
 
     return submeshes
 
