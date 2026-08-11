@@ -42,6 +42,7 @@ from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
 from skrobot.utils import urdf
 from skrobot.utils.listify import listify
+from skrobot.utils.urdf import _transform_vertex_normals
 from skrobot.utils.urdf import enable_mesh_cache
 from skrobot.utils.urdf import URDF
 
@@ -2925,7 +2926,18 @@ class RobotModel(CascadedLink):
         for mesh in visual.geometry.meshes:
             if trimesh is None:
                 trimesh = _lazy_trimesh()
+            # ``copy`` drops the cache, which is where normals loaded from
+            # the mesh file live.  Carry them over by hand: they record which
+            # edges the author meant to be smooth, and averaging face normals
+            # later cannot recover that.  They are re-attached after the
+            # transforms below, mapped through ``_transform_vertex_normals``
+            # rather than by ``apply_transform``, whose plain matrix multiply
+            # is wrong for a mirroring scale such as ``1 -1 1``.
+            authored_normals = mesh._cache.cache.get('vertex_normals')
             mesh = mesh.copy()
+            if authored_normals is not None \
+                    and len(authored_normals) != len(mesh.vertices):
+                authored_normals = None
 
             # rescale
             if visual.geometry.mesh is not None:
@@ -2943,6 +2955,9 @@ class RobotModel(CascadedLink):
                     scale_transform[:3, :3] = np.diag(
                         visual.geometry.mesh.scale)
                     mesh.apply_transform(scale_transform)
+                    if authored_normals is not None:
+                        authored_normals = _transform_vertex_normals(
+                            authored_normals, scale_transform)
 
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
@@ -2968,6 +2983,9 @@ class RobotModel(CascadedLink):
                     mesh.visual.face_colors = visual.material.color
 
             mesh.apply_transform(visual.origin)
+            if authored_normals is not None:
+                mesh.vertex_normals = _transform_vertex_normals(
+                    authored_normals, visual.origin)
             meshes.append(mesh)
         return meshes
 

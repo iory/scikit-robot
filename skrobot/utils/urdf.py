@@ -617,6 +617,116 @@ def resolve_simplified_mesh_path(filename, simplify_factor):
     return cache_path
 
 
+def _transform_vertex_normals(normals, matrix):
+    """Map normals through a 4x4 transform.
+
+    Normals do not transform like points.  The inverse transpose of the linear
+    block is what keeps them perpendicular to the surface under a non-uniform
+    scale, and a transform with a negative determinant (a mirror, common in
+    exported CAD scenes) reverses the triangle winding, so the result has to be
+    negated to keep pointing out of the same side.  ``Trimesh.apply_transform``
+    multiplies by the matrix directly, which is only correct for a rotation.
+
+    Parameters
+    ----------
+    normals : (n, 3) float
+        Unit normals in the source frame.
+    matrix : (4, 4) float
+        Transform applied to the vertices.
+
+    Returns
+    -------
+    normals : (n, 3) float
+        Unit normals in the destination frame.
+    """
+    linear = np.asarray(matrix)[:3, :3]
+    try:
+        mapped = np.asarray(normals) @ np.linalg.inv(linear)
+    except np.linalg.LinAlgError:
+        return np.asarray(normals)
+    if np.linalg.det(linear) < 0:
+        mapped = -mapped
+    length = np.linalg.norm(mapped, axis=1)
+    length[length < 1e-12] = 1.0
+    return mapped / length[:, None]
+
+
+def _authored_vertex_normals(obj):
+    """Snapshot the vertex normals a mesh file actually stored.
+
+    ``vertex_normals`` is a lazily computed property, so only an array already
+    sitting in the cache came from the file; touching the property here would
+    fabricate one and defeat the point.
+
+    Parameters
+    ----------
+    obj : trimesh.Scene or trimesh.Trimesh
+        Freshly loaded geometry.
+
+    Returns
+    -------
+    normals : dict
+        Geometry name (``None`` for a bare mesh) -> (n, 3) float array.
+    """
+    trimesh = _lazy_trimesh()
+    if isinstance(obj, trimesh.Scene):
+        items = list(obj.geometry.items())
+    else:
+        items = [(None, obj)]
+    normals = {}
+    for name, geom in items:
+        cache = getattr(geom, '_cache', None)
+        stored = cache.cache.get('vertex_normals') if cache is not None else None
+        if stored is not None:
+            normals[name] = np.array(stored)
+    return normals
+
+
+def _restore_vertex_normals(obj, normals):
+    """Put snapshotted normals back after a units conversion.
+
+    ``convert_units`` rebuilds the geometry and drops the cache, but it only
+    applies a uniform scale, which leaves normal directions untouched.
+    """
+    if not normals:
+        return obj
+    trimesh = _lazy_trimesh()
+    if isinstance(obj, trimesh.Scene):
+        items = list(obj.geometry.items())
+    else:
+        items = [(None, obj)]
+    for name, geom in items:
+        stored = normals.get(name)
+        if stored is not None and len(stored) == len(geom.vertices):
+            geom.vertex_normals = stored
+    return obj
+
+
+def _dump_scene(scene):
+    """Flatten a scene into world-frame meshes, keeping authored normals.
+
+    ``Scene.dump`` copies each geometry without its cache, so normals supplied
+    by the file are lost and later recomputed by averaging, which rounds off
+    every hard edge.  Re-attaching them before ``apply_transform`` lets trimesh
+    rotate them along with the vertices instead.
+    """
+    trimesh = _lazy_trimesh()
+    meshes = []
+    for node in scene.graph.nodes_geometry:
+        transform, geom_name = scene.graph[node]
+        geom = scene.geometry.get(geom_name)
+        if not isinstance(geom, trimesh.Trimesh):
+            continue
+        cache = getattr(geom, '_cache', None)
+        stored = cache.cache.get('vertex_normals') if cache is not None else None
+        mesh = geom.copy()
+        mesh.apply_transform(transform)
+        if stored is not None and len(stored) == len(mesh.vertices):
+            mesh.vertex_normals = _transform_vertex_normals(stored, transform)
+        meshes.append(mesh)
+    return meshes
+
+
 def load_meshes(filename):
     enable_mesh_cache = _CONFIGURABLE_VALUES['enable_mesh_cache']
     if enable_mesh_cache:
@@ -778,8 +888,13 @@ def _load_meshes(filename):
         # To convert the mesh unit from millimeters to meters,
         # use the function meshes.convert_units('meter').
         meshes = trimesh.load(filename)
+        # Keep whatever normals the file stored: they encode which edges the
+        # author meant to be smooth, and nothing downstream can recover that
+        # once they have been dropped.
+        authored_normals = _authored_vertex_normals(meshes)
         if meshes.units is not None and meshes.units != 'meter':
             meshes = meshes.convert_units('meter')
+            _restore_vertex_normals(meshes, authored_normals)
     except Exception as e:
         if is_glb_or_gltf and not dracopy_available:
             logger.error(
@@ -793,8 +908,7 @@ def _load_meshes(filename):
 
     # If we got a scene, dump the meshes
     if isinstance(meshes, trimesh.Scene):
-        meshes = list(meshes.dump())
-        meshes = [g for g in meshes if isinstance(g, trimesh.Trimesh)]
+        meshes = _dump_scene(meshes)
 
     if isinstance(meshes, (list, tuple, set)):
         meshes = list(meshes)
