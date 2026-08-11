@@ -17,6 +17,7 @@ from skrobot.utils.visualization import get_ik_visualization_enabled
 from skrobot.utils.blender_mesh import remesh_with_blender
 
 from skrobot.utils.convex_decomposition import convex_decomposition
+from skrobot.utils.convex_decomposition import convex_decomposition_cached
 from skrobot.utils.convex_decomposition import is_coacd_available
 
 from skrobot.utils.inertia import combine_inertials
