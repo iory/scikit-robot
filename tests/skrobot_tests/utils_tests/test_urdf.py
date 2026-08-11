@@ -391,3 +391,139 @@ class TestConfigureOrigin(unittest.TestCase):
             urdf_utils.configure_origin(np.zeros(5))
         with pytest.raises(TypeError):
             urdf_utils.configure_origin('not-a-matrix')
+
+
+class TestForceVisualMeshOriginToZero(unittest.TestCase):
+    """Every element must get its own origin baked into its own vertices.
+
+    ``force_visual_mesh_origin_to_zero`` zeroes an element's ``<origin>``
+    and moves the offset into the mesh vertices. One mesh file is commonly
+    referenced by several elements with different origins -- a ``<visual>``
+    and a ``<collision>`` of one link, or two links sharing a part. Baking
+    only the first origin seen for a filename, or transforming a shared
+    Trimesh in place, misplaces every other element's geometry.
+    """
+
+    URDF_TEMPLATE = """<?xml version="1.0"?>
+<robot name="shared_mesh">
+  <link name="base_link">
+    <visual>
+      <origin xyz="1 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="box.stl"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 2 0" rpy="0 0 0"/>
+      <geometry><mesh filename="box.stl"/></geometry>
+    </collision>
+  </link>
+  <link name="second_link">
+    <visual>
+      <origin xyz="0 0 3" rpy="0 0 0"/>
+      <geometry><mesh filename="box.stl"/></geometry>
+    </visual>
+  </link>
+  <joint name="fixed_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="second_link"/>
+  </joint>
+</robot>
+"""
+
+    def setUp(self):
+        import trimesh
+
+        self._tmp = tempfile.mkdtemp()
+        box = trimesh.creation.box(extents=[0.2, 0.2, 0.2])
+        box.export(os.path.join(self._tmp, 'box.stl'))
+        self._urdf_path = os.path.join(self._tmp, 'robot.urdf')
+        with open(self._urdf_path, 'w') as f:
+            f.write(self.URDF_TEMPLATE)
+        urdf_utils._MESH_CACHE.clear()
+
+    def tearDown(self):
+        import shutil
+
+        urdf_utils._MESH_CACHE.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _load(self):
+        with urdf_utils.force_visual_mesh_origin_to_zero():
+            return urdf_utils.URDF.load(self._urdf_path)
+
+    def _assert_baked(self, robot):
+        elements = {}
+        for link in robot.links:
+            for visual in link.visuals:
+                elements['visual/' + link.name] = visual
+            for collision in link.collisions:
+                elements['collision/' + link.name] = collision
+        expected = {'visual/base_link': [1.0, 0.0, 0.0],
+                    'collision/base_link': [0.0, 2.0, 0.0],
+                    'visual/second_link': [0.0, 0.0, 3.0]}
+        self.assertEqual(set(elements), set(expected))
+        for key, center in expected.items():
+            element = elements[key]
+            # The origin is zeroed, so the offset has to live in the vertices.
+            np.testing.assert_allclose(element.origin, np.eye(4), atol=1e-9)
+            vertices = np.vstack(
+                [m.vertices for m in element.geometry.meshes])
+            np.testing.assert_allclose(
+                vertices.mean(axis=0), center, atol=1e-6,
+                err_msg='{} geometry is not centered at {}'.format(
+                    key, center))
+
+    def test_each_element_keeps_its_own_origin(self):
+        self._assert_baked(self._load())
+
+    def test_reloading_the_same_urdf_bakes_again(self):
+        # No module-level state may make a later load skip the baking.
+        self._load()
+        self._assert_baked(self._load())
+
+    def test_shared_trimesh_objects_are_not_transformed_in_place(self):
+        # enable_mesh_cache hands the very same Trimesh objects to every
+        # element referencing the file.
+        with urdf_utils.enable_mesh_cache():
+            self._assert_baked(self._load())
+
+
+class TestBakeOriginIntoMeshes(unittest.TestCase):
+    """The helper behind ``force_visual_mesh_origin_to_zero``."""
+
+    def _geometry(self):
+        import trimesh
+        mesh = urdf_utils.Mesh(filename='box.stl',
+                               meshes=[trimesh.creation.box(
+                                   extents=(0.2, 0.2, 0.2))])
+        return urdf_utils.Geometry(mesh=mesh)
+
+    def test_an_identity_origin_leaves_the_meshes_shared(self):
+        """An identity origin must not even copy: under a mesh cache the
+        objects are shared, and copying them costs memory for nothing."""
+        geometry = self._geometry()
+        before = geometry.mesh.meshes[0]
+        urdf_utils.bake_origin_into_meshes(geometry, np.eye(4))
+        self.assertIs(geometry.mesh.meshes[0], before)
+
+    def test_a_real_origin_copies_and_transforms(self):
+        geometry = self._geometry()
+        before = geometry.mesh.meshes[0]
+        origin = np.eye(4)
+        origin[:3, 3] = [1.0, 2.0, 3.0]
+        urdf_utils.bake_origin_into_meshes(geometry, origin)
+        baked = geometry.mesh.meshes[0]
+        self.assertIsNot(baked, before)
+        np.testing.assert_allclose(
+            baked.bounding_box.centroid, [1.0, 2.0, 3.0], atol=1e-9)
+        # the original is left where it was, for whoever else holds it
+        np.testing.assert_allclose(
+            before.bounding_box.centroid, [0.0, 0.0, 0.0], atol=1e-9)
+
+    def test_a_primitive_geometry_is_left_alone(self):
+        """A ``<box>`` has no vertices to bake into; the helper must not
+        reach for a mesh that is not there."""
+        geometry = urdf_utils.Geometry(box=urdf_utils.Box(size=[1, 1, 1]))
+        origin = np.eye(4)
+        origin[:3, 3] = [1.0, 0.0, 0.0]
+        urdf_utils.bake_origin_into_meshes(geometry, origin)
+        self.assertIsNone(geometry.mesh)
