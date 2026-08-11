@@ -4,6 +4,9 @@ from skrobot.urdf.canonicalize import canonicalize_urdf_file
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
 from skrobot.urdf.flip_axis import flip_joint_axis
 from skrobot.urdf.flip_axis import flip_joint_axis_file
+from skrobot.urdf.link_origins import geometry_centroid
+from skrobot.urdf.link_origins import normalize_link_origins
+from skrobot.urdf.link_origins import normalize_link_origins_file
 from skrobot.urdf.llm_grouping import build_grouping_prompt
 from skrobot.urdf.llm_grouping import compute_jaw_gripper_frame
 from skrobot.urdf.llm_grouping import generate_groups_from_llm
@@ -58,5 +61,8 @@ __all__ = [
     'sanitize_urdf_names',
     'canonicalize_urdf',
     'canonicalize_urdf_file',
+    'geometry_centroid',
+    'normalize_link_origins',
+    'normalize_link_origins_file',
     'urdf_to_mjcf',
 ]
