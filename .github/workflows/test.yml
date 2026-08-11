@@ -250,21 +250,59 @@ jobs:
             os: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
-    - name: Setup ROS 2
-      uses: ros-tooling/setup-ros@v0.7
-      with:
-        required-ros-distributions: ${{ matrix.ros-distribution }}
-    - name: Install ROS 2 interface packages
-      # ros-tooling/setup-ros only installs ros-<distro>-ros-base, which lacks
-      # the message / action packages that skrobot.interfaces.ros2.base imports
-      # (control_msgs, trajectory_msgs, action_msgs, sensor_msgs).
+    - name: Add the ROS 2 apt repository
+      # Done by hand instead of via ros-tooling/setup-ros@v0.7, because that
+      # action resolves which ros-apt-source release to fetch with an
+      # *unauthenticated* `curl https://api.github.com/.../releases/latest`.
+      # Whenever the runner's IP is over the anonymous API rate limit the
+      # response carries no "tag_name", the version expands to the empty
+      # string, and the download URL degenerates into
+      #   .../releases/download//ros2-apt-source_.noble_all.deb
+      # which 404s and kills the job before a single test runs. That is
+      # https://github.com/ros-tooling/setup-ros/issues/892, still open, and it
+      # was failing roughly one in six runs here. The install below is the same
+      # one, except the version is resolved through `gh` -- authenticated with
+      # GITHUB_TOKEN, so the anonymous limit does not apply.
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=$(gh release view --repo ros-infrastructure/ros-apt-source \
+          --json tagName --jq .tagName)
+        # Fail on an unresolvable version here, saying so, rather than letting
+        # it travel downstream and resurface as an unexplained 404.
+        if [ -z "$version" ]; then
+          echo "::error::could not resolve the latest ros-apt-source release"
+          exit 1
+        fi
+        codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+        deb=$(mktemp --suffix=.deb)
+        curl --fail --location --retry 3 --retry-delay 2 -o "$deb" \
+          "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${version}/ros2-apt-source_${version}.${codename}_all.deb"
+        sudo dpkg -i "$deb"
+        rm -f "$deb"
+    - name: Install ROS 2
+      # ros-base is all these tests need -- it carries rclpy -- rather than the
+      # ros-<distro>-desktop setup-ros pulled in, which spent about three
+      # minutes on RViz and friends nothing here touches. The message / action
+      # packages that skrobot.interfaces.ros2.base imports are not part of
+      # ros-base, hence naming them too. python3-pytest is named because
+      # setup-ros used to install it as a side effect of its own dependency
+      # set; keeping it makes the `pip install pytest` below a no-op, so pytest
+      # stays the distro's 7.4.4 on /usr/bin/pytest rather than a newer one
+      # landing in ~/.local underneath the plugin handling described further
+      # down. numpy needs no such entry -- python3-numpy arrives transitively
+      # via rosidl-generator-py.
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
+          ros-${{ matrix.ros-distribution }}-ros-base \
           ros-${{ matrix.ros-distribution }}-control-msgs \
           ros-${{ matrix.ros-distribution }}-trajectory-msgs \
           ros-${{ matrix.ros-distribution }}-action-msgs \
-          ros-${{ matrix.ros-distribution }}-sensor-msgs
+          ros-${{ matrix.ros-distribution }}-sensor-msgs \
+          python3-pytest
     - name: Install Python dependencies
       shell: bash
       run: |
