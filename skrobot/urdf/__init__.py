@@ -11,6 +11,8 @@ from skrobot.urdf.llm_grouping import build_grouping_prompt
 from skrobot.urdf.llm_grouping import compute_jaw_gripper_frame
 from skrobot.urdf.llm_grouping import generate_groups_from_llm
 from skrobot.urdf.llm_grouping import parse_grouping_response
+from skrobot.urdf.merge_fixed_links import merge_fixed_links
+from skrobot.urdf.merge_fixed_links import merge_fixed_links_file
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
@@ -46,6 +48,8 @@ __all__ = [
     'extract_sub_urdf',
     'flip_joint_axis',
     'flip_joint_axis_file',
+    'merge_fixed_links',
+    'merge_fixed_links_file',
     'scale_urdf',
     'generate_groups_from_geometry',
     'generate_robot_class_from_geometry',
