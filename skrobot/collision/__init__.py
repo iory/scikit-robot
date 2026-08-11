@@ -57,6 +57,7 @@ from skrobot.collision.robot_collision import RobotCollisionChecker
 from skrobot.collision.self_collision import is_fcl_available
 from skrobot.collision.self_collision import link_meshes
 from skrobot.collision.self_collision import link_visual_mesh
+from skrobot.collision.self_collision import moving_links
 from skrobot.collision.self_collision import SelfCollision
 from skrobot.collision.self_collision import sweep_limits
 
@@ -86,6 +87,7 @@ __all__ = [
     'SelfCollision',
     'sweep_limits',
     'link_meshes',
+    'moving_links',
     'link_visual_mesh',
     'is_fcl_available',
 ]

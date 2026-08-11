@@ -278,6 +278,47 @@ def _prismatic_joints(robot):
     return [j for j in robot.joint_list if isinstance(j, LinearJoint)]
 
 
+def moving_links(joint, links, probe):
+    """Which links actually move when ``joint`` moves, found by moving it.
+
+    Walking the link tree needs care -- ``Link.child_links`` is one level, so
+    it has to recurse -- but even a correct recursive descent from
+    ``joint.child_link`` can be wrong: a mimic follower is driven through a
+    hook rather than an edge, so it can sit outside the joint's subtree
+    entirely and take its own children with it.
+
+    Under-reporting is what hurts a collision sweep.  A link left out is
+    frozen at its home pose, so a collision it would have caused is never
+    seen and the limit comes back too wide.  One probe is enough because each
+    moved subtree is rigid, and comparing full transforms rather than
+    positions catches a link that only rotates, on the axis.
+
+    Parameters
+    ----------
+    joint : skrobot.model.Joint
+        The joint to probe.  Its angle is restored before returning.
+    links : dict
+        ``{name: Link}`` to consider.
+    probe : float
+        How far to move the joint, in its native unit (radians for a
+        rotational joint, metres for a linear one).
+
+    Returns
+    -------
+    moved : set of str
+        Names of the links whose world transform changed.
+    """
+    home = {name: link.worldcoords().T() for name, link in links.items()}
+    previous = float(joint.joint_angle())
+    joint.joint_angle(probe)
+    try:
+        return {name for name, link in links.items()
+                if not np.allclose(link.worldcoords().T(), home[name],
+                                   atol=1e-7)}
+    finally:
+        joint.joint_angle(previous)
+
+
 def sweep_limits(robot, meshes, step_deg=6.0, max_deg=180.0, margin_deg=2.0,
                  step_mm=5.0, max_mm=300.0, margin_mm=2.0,
                  margin_m=REST_MARGIN, only=None, progress=None, refine=True,
@@ -366,19 +407,7 @@ def sweep_limits(robot, meshes, step_deg=6.0, max_deg=180.0, margin_deg=2.0,
     hull_objs, hull_g2n, hull_set_T = _world(sc_hull)
 
     def _moving_set(J, probe):
-        # Which links ACTUALLY move when only J moves?  Determined by probing
-        # (the skrobot parent/child tree-walk under-reports the subtree for
-        # this model -- it returned just the immediate child while 18 links
-        # really move).  The subtree is rigid, so one probe reveals all of it;
-        # the full transform comparison catches on-axis rotation too.  ``probe``
-        # is in the joint's native unit (radians / metres).
-        home = {n: sc._link[n].worldcoords().T() for n in sc.names}
-        J.joint_angle(probe)
-        moved = {n for n in sc.names
-                 if not np.allclose(sc._link[n].worldcoords().T(),
-                                    home[n], atol=1e-7)}
-        J.joint_angle(0.0)
-        return moved
+        return moving_links(J, sc._link, probe)
 
     out = {}
     try:
