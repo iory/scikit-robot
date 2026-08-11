@@ -6,7 +6,7 @@ from setuptools import find_packages
 from setuptools import setup
 
 
-version = '0.3.28'
+version = '0.3.29'
 
 
 def listup_package_data():
