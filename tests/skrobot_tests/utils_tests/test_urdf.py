@@ -9,13 +9,14 @@ import numpy as np
 import pytest
 
 from skrobot.utils import urdf as urdf_utils
+from skrobot.utils import urdf_mesh
 
 
 class TestLoadMeshesNoneGuard(unittest.TestCase):
 
     def test_raises_file_not_found_with_helpful_message(self):
         with pytest.raises(FileNotFoundError) as excinfo:
-            urdf_utils._load_meshes(None)
+            urdf_mesh._load_meshes(None)
         msg = str(excinfo.value)
         # The user has to know the cause and the typical fix.
         assert 'package://' in msg
@@ -53,7 +54,7 @@ class TestDracoCompressedMeshDetection(unittest.TestCase):
             path = tmp.name
         try:
             self._make_draco_glb(path)
-            self.assertTrue(urdf_utils._gltf_uses_draco(path))
+            self.assertTrue(urdf_mesh._gltf_uses_draco(path))
         finally:
             os.remove(path)
 
@@ -63,13 +64,13 @@ class TestDracoCompressedMeshDetection(unittest.TestCase):
         try:
             self._make_draco_glb(path)
             # Reset the one-time hint flag so the verbose hint is emitted.
-            urdf_utils._DRACO_MISSING_HINT_SHOWN = False
+            urdf_mesh._DRACO_MISSING_HINT_SHOWN = False
             with mock.patch(
                     'skrobot.utils.draco.is_dracopy_available',
                     return_value=False):
                 with self.assertLogs(
-                        'skrobot.utils.urdf', level='WARNING') as logs:
-                    meshes = urdf_utils._load_meshes(path)
+                        'skrobot.utils.urdf_mesh', level='WARNING') as logs:
+                    meshes = urdf_mesh._load_meshes(path)
             # The mesh is skipped (no broken geometry returned) but not raised,
             # so the rest of a URDF can still load.
             self.assertEqual(meshes, [])
@@ -86,7 +87,7 @@ class TestDracoCompressedMeshDetection(unittest.TestCase):
             path = tmp.name
         try:
             box.export(path)
-            self.assertFalse(urdf_utils._gltf_uses_draco(path))
+            self.assertFalse(urdf_mesh._gltf_uses_draco(path))
         finally:
             os.remove(path)
 
@@ -95,70 +96,70 @@ class TestGetPathWithCacheResolverOrder(unittest.TestCase):
     """get_path_with_cache should respect ROS_VERSION when both resolvers are present."""
 
     def setUp(self):
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         # Save and clear ROS_VERSION so each test sets it explicitly.
         self._saved_ros_version = os.environ.pop('ROS_VERSION', None)
 
     def tearDown(self):
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         if self._saved_ros_version is None:
             os.environ.pop('ROS_VERSION', None)
         else:
             os.environ['ROS_VERSION'] = self._saved_ros_version
 
     def test_ament_is_tried_first_by_default(self):
-        with mock.patch.object(urdf_utils, '_try_ament',
+        with mock.patch.object(urdf_mesh, '_try_ament',
                                return_value='/ament/foo') as ament, \
-             mock.patch.object(urdf_utils, '_try_rospkg',
+             mock.patch.object(urdf_mesh, '_try_rospkg',
                                return_value='/rospkg/foo') as rospkg_:
-            assert urdf_utils.get_path_with_cache('foo') == '/ament/foo'
+            assert urdf_mesh.get_path_with_cache('foo') == '/ament/foo'
             ament.assert_called_once_with('foo')
             rospkg_.assert_not_called()
 
     def test_ros_version_2_prefers_ament(self):
         os.environ['ROS_VERSION'] = '2'
-        with mock.patch.object(urdf_utils, '_try_ament',
+        with mock.patch.object(urdf_mesh, '_try_ament',
                                return_value='/ament/foo'), \
-             mock.patch.object(urdf_utils, '_try_rospkg',
+             mock.patch.object(urdf_mesh, '_try_rospkg',
                                return_value='/rospkg/foo') as rospkg_:
-            assert urdf_utils.get_path_with_cache('foo') == '/ament/foo'
+            assert urdf_mesh.get_path_with_cache('foo') == '/ament/foo'
             rospkg_.assert_not_called()
 
     def test_ros_version_1_prefers_rospkg(self):
         """Hybrid env where the user explicitly asks for ROS 1 must keep using rospkg."""
         os.environ['ROS_VERSION'] = '1'
-        with mock.patch.object(urdf_utils, '_try_ament',
+        with mock.patch.object(urdf_mesh, '_try_ament',
                                return_value='/ament/foo') as ament, \
-             mock.patch.object(urdf_utils, '_try_rospkg',
+             mock.patch.object(urdf_mesh, '_try_rospkg',
                                return_value='/rospkg/foo') as rospkg_:
-            assert urdf_utils.get_path_with_cache('foo') == '/rospkg/foo'
+            assert urdf_mesh.get_path_with_cache('foo') == '/rospkg/foo'
             rospkg_.assert_called_once_with('foo')
             ament.assert_not_called()
 
     def test_falls_back_when_first_resolver_returns_none(self):
-        with mock.patch.object(urdf_utils, '_try_ament',
+        with mock.patch.object(urdf_mesh, '_try_ament',
                                return_value=None) as ament, \
-             mock.patch.object(urdf_utils, '_try_rospkg',
+             mock.patch.object(urdf_mesh, '_try_rospkg',
                                return_value='/rospkg/foo') as rospkg_:
-            assert urdf_utils.get_path_with_cache('foo') == '/rospkg/foo'
+            assert urdf_mesh.get_path_with_cache('foo') == '/rospkg/foo'
             ament.assert_called_once()
             rospkg_.assert_called_once()
 
     def test_lookup_error_when_both_resolvers_fail(self):
-        with mock.patch.object(urdf_utils, '_try_ament', return_value=None), \
-             mock.patch.object(urdf_utils, '_try_rospkg', return_value=None):
+        with mock.patch.object(urdf_mesh, '_try_ament', return_value=None), \
+             mock.patch.object(urdf_mesh, '_try_rospkg', return_value=None):
             # rospkg variable still pointing at the real (or None) module is
             # fine — we just need the resolvers to claim "not found".
             with pytest.raises((LookupError, ImportError)):
-                urdf_utils.get_path_with_cache('does_not_exist')
+                urdf_mesh.get_path_with_cache('does_not_exist')
 
     def test_import_error_when_no_resolver_installed(self):
         with mock.patch.dict(sys.modules,
                              {'ament_index_python': None,
                               'ament_index_python.packages': None}):
-            with mock.patch.object(urdf_utils, 'rospkg', None):
+            with mock.patch.object(urdf_mesh, 'rospkg', None):
                 with pytest.raises(ImportError) as excinfo:
-                    urdf_utils.get_path_with_cache('whatever')
+                    urdf_mesh.get_path_with_cache('whatever')
                 assert 'ament_index_python' in str(excinfo.value)
                 assert 'rospkg' in str(excinfo.value)
 
@@ -172,11 +173,11 @@ class TestResolveFilepathWithoutRospkg(unittest.TestCase):
     """
 
     def setUp(self):
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         self._saved_ros_version = os.environ.pop('ROS_VERSION', None)
 
     def tearDown(self):
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         if self._saved_ros_version is None:
             os.environ.pop('ROS_VERSION', None)
         else:
@@ -190,10 +191,10 @@ class TestResolveFilepathWithoutRospkg(unittest.TestCase):
             with open(mesh_path, 'w') as f:
                 f.write('<dummy/>')
 
-            with mock.patch.object(urdf_utils, '_try_ament',
+            with mock.patch.object(urdf_mesh, '_try_ament',
                                     return_value=pkg_dir):
-                with mock.patch.object(urdf_utils, 'rospkg', None):
-                    result = urdf_utils.resolve_filepath(
+                with mock.patch.object(urdf_mesh, 'rospkg', None):
+                    result = urdf_mesh.resolve_filepath(
                         '/tmp', 'package://my_pkg/meshes/foo.dae')
             assert result == mesh_path
 
@@ -215,17 +216,17 @@ class TestResolveFilepathWithoutRospkg(unittest.TestCase):
                 with open(p, 'w') as f:
                     f.write('<dummy/>')
 
-            with mock.patch.object(urdf_utils, '_try_ament',
+            with mock.patch.object(urdf_mesh, '_try_ament',
                                     return_value=None), \
-                 mock.patch.object(urdf_utils, '_try_rospkg',
+                 mock.patch.object(urdf_mesh, '_try_rospkg',
                                     return_value=None), \
                  mock.patch.dict(sys.modules,
                                  {'ament_index_python': None,
                                   'ament_index_python.packages': None}), \
-                 mock.patch.object(urdf_utils, 'rospkg', None):
+                 mock.patch.object(urdf_mesh, 'rospkg', None):
                 # base_path is the URDF's directory; resolver should walk up
                 # one level and find sibling 'pr2_description/meshes/foo.dae'.
-                result = urdf_utils.resolve_filepath(
+                result = urdf_mesh.resolve_filepath(
                     pkg_dir, 'package://pr2_description/meshes/foo.dae')
             assert result == mesh_path
 
@@ -255,7 +256,7 @@ class TestGlbExportPreservesMaterialColor(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             make_box().export(os.path.join(tmpdir, 'box.dae'))
             mesh = urdf_utils.Mesh(filename='box.dae', meshes=[make_box()])
-            with urdf_utils.export_mesh_format('.glb', overwrite_mesh=True):
+            with urdf_mesh.export_mesh_format('.glb', overwrite_mesh=True):
                 mesh._to_xml(etree.Element('visual'), tmpdir)
 
             scene = trimesh.load(
@@ -279,13 +280,13 @@ class TestEnvPrefixResolver(unittest.TestCase):
              'ROS_PACKAGE_PATH', 'ROS_VERSION')
 
     def setUp(self):
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         self._saved = {v: os.environ.pop(v, None) for v in self._VARS}
         self._tmp = tempfile.mkdtemp()
 
     def tearDown(self):
         import shutil
-        urdf_utils.get_path_with_cache.cache_clear()
+        urdf_mesh.get_path_with_cache.cache_clear()
         for v, val in self._saved.items():
             if val is None:
                 os.environ.pop(v, None)
@@ -306,14 +307,14 @@ class TestEnvPrefixResolver(unittest.TestCase):
             os.path.join(prefix, 'share', 'my_robot'), 'my_robot')
         os.environ['AMENT_PREFIX_PATH'] = prefix
         assert os.path.samefile(
-            urdf_utils._try_env_prefixes('my_robot'), share)
+            urdf_mesh._try_env_prefixes('my_robot'), share)
 
     def test_resolves_via_ros_package_path_direct_child(self):
         src = os.path.join(self._tmp, 'ws', 'src')
         pkg = self._make_package(os.path.join(src, 'my_robot'), 'my_robot')
         os.environ['ROS_PACKAGE_PATH'] = src
         assert os.path.samefile(
-            urdf_utils._try_env_prefixes('my_robot'), pkg)
+            urdf_mesh._try_env_prefixes('my_robot'), pkg)
 
     def test_resolves_via_ros_package_path_recursive_crawl(self):
         src = os.path.join(self._tmp, 'ws', 'src')
@@ -321,7 +322,7 @@ class TestEnvPrefixResolver(unittest.TestCase):
             os.path.join(src, 'nested', 'my_robot'), 'my_robot')
         os.environ['ROS_PACKAGE_PATH'] = src
         assert os.path.samefile(
-            urdf_utils._try_env_prefixes('my_robot'), pkg)
+            urdf_mesh._try_env_prefixes('my_robot'), pkg)
 
     def test_name_in_manifest_wins_over_directory_name(self):
         # under ROS_PACKAGE_PATH the package.xml <name>, not the folder name,
@@ -329,14 +330,14 @@ class TestEnvPrefixResolver(unittest.TestCase):
         src = os.path.join(self._tmp, 'ws', 'src')
         pkg = self._make_package(os.path.join(src, 'pkg_dir'), 'real_name')
         os.environ['ROS_PACKAGE_PATH'] = src
-        assert urdf_utils._try_env_prefixes('pkg_dir') is None
+        assert urdf_mesh._try_env_prefixes('pkg_dir') is None
         assert os.path.samefile(
-            urdf_utils._try_env_prefixes('real_name'), pkg)
+            urdf_mesh._try_env_prefixes('real_name'), pkg)
 
     def test_returns_none_when_not_found(self):
         os.environ['AMENT_PREFIX_PATH'] = self._tmp
         os.environ['ROS_PACKAGE_PATH'] = self._tmp
-        assert urdf_utils._try_env_prefixes('absent') is None
+        assert urdf_mesh._try_env_prefixes('absent') is None
 
     def test_malformed_manifest_is_skipped_gracefully(self):
         # a broken package.xml must not raise; the crawl just moves on
@@ -347,10 +348,10 @@ class TestEnvPrefixResolver(unittest.TestCase):
             f.write('<package><name>oops')          # unterminated XML
         good = self._make_package(os.path.join(src, 'good'), 'good')
         os.environ['ROS_PACKAGE_PATH'] = src
-        assert urdf_utils._manifest_package_name(broken) is None
-        assert urdf_utils._try_env_prefixes('broken') is None
+        assert urdf_mesh._manifest_package_name(broken) is None
+        assert urdf_mesh._try_env_prefixes('broken') is None
         assert os.path.samefile(
-            urdf_utils._try_env_prefixes('good'), good)
+            urdf_mesh._try_env_prefixes('good'), good)
 
     def test_get_path_with_cache_falls_back_to_env(self):
         prefix = os.path.join(self._tmp, 'install')
@@ -358,10 +359,10 @@ class TestEnvPrefixResolver(unittest.TestCase):
             os.path.join(prefix, 'share', 'my_robot'), 'my_robot')
         os.environ['AMENT_PREFIX_PATH'] = prefix
         # neither ROS Python resolver available -> env fallback must resolve
-        with mock.patch.object(urdf_utils, '_try_ament', return_value=None), \
-             mock.patch.object(urdf_utils, '_try_rospkg', return_value=None):
+        with mock.patch.object(urdf_mesh, '_try_ament', return_value=None), \
+             mock.patch.object(urdf_mesh, '_try_rospkg', return_value=None):
             assert os.path.samefile(
-                urdf_utils.get_path_with_cache('my_robot'), share)
+                urdf_mesh.get_path_with_cache('my_robot'), share)
 
 
 class TestConfigureOrigin(unittest.TestCase):
@@ -438,16 +439,16 @@ class TestForceVisualMeshOriginToZero(unittest.TestCase):
         self._urdf_path = os.path.join(self._tmp, 'robot.urdf')
         with open(self._urdf_path, 'w') as f:
             f.write(self.URDF_TEMPLATE)
-        urdf_utils._MESH_CACHE.clear()
+        urdf_mesh._MESH_CACHE.clear()
 
     def tearDown(self):
         import shutil
 
-        urdf_utils._MESH_CACHE.clear()
+        urdf_mesh._MESH_CACHE.clear()
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _load(self):
-        with urdf_utils.force_visual_mesh_origin_to_zero():
+        with urdf_mesh.force_visual_mesh_origin_to_zero():
             return urdf_utils.URDF.load(self._urdf_path)
 
     def _assert_baked(self, robot):
@@ -483,7 +484,7 @@ class TestForceVisualMeshOriginToZero(unittest.TestCase):
     def test_shared_trimesh_objects_are_not_transformed_in_place(self):
         # enable_mesh_cache hands the very same Trimesh objects to every
         # element referencing the file.
-        with urdf_utils.enable_mesh_cache():
+        with urdf_mesh.enable_mesh_cache():
             self._assert_baked(self._load())
 
 
@@ -502,7 +503,7 @@ class TestBakeOriginIntoMeshes(unittest.TestCase):
         objects are shared, and copying them costs memory for nothing."""
         geometry = self._geometry()
         before = geometry.mesh.meshes[0]
-        urdf_utils.bake_origin_into_meshes(geometry, np.eye(4))
+        urdf_mesh.bake_origin_into_meshes(geometry, np.eye(4))
         self.assertIs(geometry.mesh.meshes[0], before)
 
     def test_a_real_origin_copies_and_transforms(self):
@@ -510,7 +511,7 @@ class TestBakeOriginIntoMeshes(unittest.TestCase):
         before = geometry.mesh.meshes[0]
         origin = np.eye(4)
         origin[:3, 3] = [1.0, 2.0, 3.0]
-        urdf_utils.bake_origin_into_meshes(geometry, origin)
+        urdf_mesh.bake_origin_into_meshes(geometry, origin)
         baked = geometry.mesh.meshes[0]
         self.assertIsNot(baked, before)
         np.testing.assert_allclose(
@@ -525,7 +526,7 @@ class TestBakeOriginIntoMeshes(unittest.TestCase):
         geometry = urdf_utils.Geometry(box=urdf_utils.Box(size=[1, 1, 1]))
         origin = np.eye(4)
         origin[:3, 3] = [1.0, 0.0, 0.0]
-        urdf_utils.bake_origin_into_meshes(geometry, origin)
+        urdf_mesh.bake_origin_into_meshes(geometry, origin)
         self.assertIsNone(geometry.mesh)
 
 
@@ -543,14 +544,14 @@ class TestTransformVertexNormals(unittest.TestCase):
                           [np.sin(angle), np.cos(angle), 0],
                           [0, 0, 1]]
         normals = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-        got = urdf_utils._transform_vertex_normals(normals, matrix)
+        got = urdf_mesh._transform_vertex_normals(normals, matrix)
         np.testing.assert_allclose(
             got, [[np.cos(angle), np.sin(angle), 0.0], [0.0, 0.0, 1.0]],
             atol=1e-9)
 
     def test_a_uniform_scale_leaves_the_direction_alone(self):
         normals = np.array([[0.0, 0.6, 0.8]])
-        got = urdf_utils._transform_vertex_normals(normals, np.eye(4) * 25.4)
+        got = urdf_mesh._transform_vertex_normals(normals, np.eye(4) * 25.4)
         np.testing.assert_allclose(got, normals, atol=1e-9)
 
     def test_a_non_uniform_scale_needs_the_inverse_transpose(self):
@@ -559,7 +560,7 @@ class TestTransformVertexNormals(unittest.TestCase):
         does, which would tip it away."""
         matrix = np.diag([1.0, 1.0, 0.1, 1.0])
         normals = np.array([[np.sqrt(0.5), 0.0, np.sqrt(0.5)]])
-        got = urdf_utils._transform_vertex_normals(normals, matrix)
+        got = urdf_mesh._transform_vertex_normals(normals, matrix)
         self.assertLess(got[0, 0], normals[0, 0])
         self.assertGreater(got[0, 2], normals[0, 2])
         np.testing.assert_allclose(np.linalg.norm(got, axis=1), 1.0, atol=1e-9)
@@ -572,12 +573,12 @@ class TestTransformVertexNormals(unittest.TestCase):
         normal has to be negated to keep pointing out of the same side."""
         matrix = np.diag([1.0, -1.0, 1.0, 1.0])
         normals = np.array([[0.0, 1.0, 0.0]])
-        got = urdf_utils._transform_vertex_normals(normals, matrix)
+        got = urdf_mesh._transform_vertex_normals(normals, matrix)
         np.testing.assert_allclose(got, [[0.0, 1.0, 0.0]], atol=1e-9)
 
     def test_a_singular_matrix_is_passed_through(self):
         normals = np.array([[0.0, 0.0, 1.0]])
-        got = urdf_utils._transform_vertex_normals(normals, np.zeros((4, 4)))
+        got = urdf_mesh._transform_vertex_normals(normals, np.zeros((4, 4)))
         np.testing.assert_allclose(got, normals, atol=1e-9)
 
 
@@ -599,19 +600,19 @@ class TestSceneNormalsSurviveLoading(unittest.TestCase):
         plain = trimesh.Scene()
         plain.add_geometry(trimesh.creation.box(), geom_name='thing')
         plain.units = 'meters'
-        self.assertEqual(urdf_utils._authored_vertex_normals(plain), {})
+        self.assertEqual(urdf_mesh._authored_vertex_normals(plain), {})
         self.assertIn('thing',
-                      urdf_utils._authored_vertex_normals(self._scene()))
+                      urdf_mesh._authored_vertex_normals(self._scene()))
 
     def test_they_are_restored_after_a_units_conversion(self):
         scene = self._scene()
-        snapshot = urdf_utils._authored_vertex_normals(scene)
+        snapshot = urdf_mesh._authored_vertex_normals(scene)
         converted = scene.convert_units('inch')
         # convert_units rebuilds the geometry, losing the cache
         self.assertNotIn(
             'vertex_normals',
             list(converted.geometry.values())[0]._cache.cache)
-        urdf_utils._restore_vertex_normals(converted, snapshot)
+        urdf_mesh._restore_vertex_normals(converted, snapshot)
         np.testing.assert_allclose(
             np.asarray(list(converted.geometry.values())[0].vertex_normals),
             snapshot['thing'], atol=1e-9)
@@ -622,7 +623,7 @@ class TestSceneNormalsSurviveLoading(unittest.TestCase):
         transform[:3, :3] = np.array([[1.0, 0.0, 0.0],
                                       [0.0, 0.0, -1.0],
                                       [0.0, 1.0, 0.0]]) * 25.4
-        meshes = urdf_utils._dump_scene(self._scene(transform))
+        meshes = urdf_mesh._dump_scene(self._scene(transform))
         self.assertEqual(len(meshes), 1)
         np.testing.assert_allclose(
             np.asarray(meshes[0].vertex_normals),
@@ -635,30 +636,30 @@ class TestConfiguredRestoresState(unittest.TestCase):
     poisons every later load and export in the same process."""
 
     def test_a_raising_block_still_restores(self):
-        before = dict(urdf_utils._CONFIGURABLE_VALUES)
+        before = dict(urdf_mesh._CONFIGURABLE_VALUES)
         with pytest.raises(RuntimeError):
-            with urdf_utils.export_mesh_format('.stl',
+            with urdf_mesh.export_mesh_format('.stl',
                                                collision_mesh_format='.glb',
                                                target_triangles=100):
                 raise RuntimeError('export blew up')
-        self.assertEqual(urdf_utils._CONFIGURABLE_VALUES, before)
+        self.assertEqual(urdf_mesh._CONFIGURABLE_VALUES, before)
 
     def test_a_raising_scale_or_origin_block_still_restores(self):
-        before = dict(urdf_utils._CONFIGURABLE_VALUES)
-        for manager in (urdf_utils.apply_scale(2.0),
-                        urdf_utils.force_visual_mesh_origin_to_zero(),
-                        urdf_utils.enable_mesh_cache(),
-                        urdf_utils.no_mesh_load_mode()):
+        before = dict(urdf_mesh._CONFIGURABLE_VALUES)
+        for manager in (urdf_mesh.apply_scale(2.0),
+                        urdf_mesh.force_visual_mesh_origin_to_zero(),
+                        urdf_mesh.enable_mesh_cache(),
+                        urdf_mesh.no_mesh_load_mode()):
             with pytest.raises(RuntimeError):
                 with manager:
                     raise RuntimeError('boom')
-            self.assertEqual(urdf_utils._CONFIGURABLE_VALUES, before)
+            self.assertEqual(urdf_mesh._CONFIGURABLE_VALUES, before)
 
     def test_they_nest(self):
-        with urdf_utils.apply_scale(2.0):
-            with urdf_utils.apply_scale(3.0):
+        with urdf_mesh.apply_scale(2.0):
+            with urdf_mesh.apply_scale(3.0):
                 self.assertEqual(
-                    urdf_utils._CONFIGURABLE_VALUES['scale_factor'], 3.0)
+                    urdf_mesh._CONFIGURABLE_VALUES['scale_factor'], 3.0)
             # the outer block is still running and still means 2.0
             self.assertEqual(
-                urdf_utils._CONFIGURABLE_VALUES['scale_factor'], 2.0)
+                urdf_mesh._CONFIGURABLE_VALUES['scale_factor'], 2.0)
