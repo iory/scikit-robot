@@ -23,6 +23,17 @@ def _lazy_scipy():
     return _scipy
 
 
+_pysdfgen = None
+
+
+def _lazy_pysdfgen():
+    global _pysdfgen
+    if _pysdfgen is None:
+        import pysdfgen
+        _pysdfgen = pysdfgen
+    return _pysdfgen
+
+
 class LazyImportClass(object):
 
     def __init__(self, module_name, class_name, package):
