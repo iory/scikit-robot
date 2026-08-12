@@ -5,19 +5,6 @@ import contextlib
 import copy
 from logging import getLogger
 import os
-import pickle
-import sys
-
-from skrobot.data import get_cache_dir
-from skrobot.utils.checksum import checksum_md5
-
-
-try:
-    # for python3
-    from urllib.parse import urlparse
-except ImportError:
-    # for python2
-    from urlparse import urlparse
 
 from lxml import etree as ET
 import networkx as nx
@@ -29,196 +16,41 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import xyzrpy2matrix
-from skrobot.pycompat import lru_cache
+from skrobot.utils.urdf_mesh import _apply_mesh_processing
+from skrobot.utils.urdf_mesh import _CONFIGURABLE_VALUES
+from skrobot.utils.urdf_mesh import _export_session
+from skrobot.utils.urdf_mesh import _EXPORTED_MESH_FILES
+from skrobot.utils.urdf_mesh import _load_meshes
+from skrobot.utils.urdf_mesh import _REMESHED_FILES_CACHE
+from skrobot.utils.urdf_mesh import _replace_extension
+from skrobot.utils.urdf_mesh import _should_skip_mesh_export
+from skrobot.utils.urdf_mesh import _write_meshes
+from skrobot.utils.urdf_mesh import apply_scale
+from skrobot.utils.urdf_mesh import bake_origin_into_meshes
+from skrobot.utils.urdf_mesh import claim_mesh_output_path
+from skrobot.utils.urdf_mesh import element_output_name
+from skrobot.utils.urdf_mesh import enable_mesh_cache  # NOQA: F401
+from skrobot.utils.urdf_mesh import export_mesh_format
+from skrobot.utils.urdf_mesh import force_visual_mesh_origin_to_zero
+from skrobot.utils.urdf_mesh import geometry_key
+from skrobot.utils.urdf_mesh import get_filename
+from skrobot.utils.urdf_mesh import get_path_with_cache  # NOQA: F401
+from skrobot.utils.urdf_mesh import load_meshes
+from skrobot.utils.urdf_mesh import mesh_processing_key
+from skrobot.utils.urdf_mesh import mesh_simplify_factor  # NOQA: F401
+from skrobot.utils.urdf_mesh import mesh_variant_suffix
+from skrobot.utils.urdf_mesh import no_mesh_load_mode  # NOQA: F401
+from skrobot.utils.urdf_mesh import resolve_filepath  # NOQA: F401
+from skrobot.utils.urdf_mesh import search_up  # NOQA: F401
+from skrobot.utils.urdf_mesh import source_urdf_path
 
 
-try:
-    import rospkg
-except ImportError:
-    rospkg = None
-
+# Reading, resolving and writing the files a URDF points at lives in
+# skrobot.utils.urdf_mesh. The imports above marked NOQA are not used in
+# this module; they are re-exported for the callers that have always
+# imported them from here.
 
 logger = getLogger(__name__)
-
-# Whether the one-time "install DracoPy" hint has already been emitted.
-# A scene may reference many Draco-compressed meshes; we warn per file but
-# only show the verbose installation instruction once per process.
-_DRACO_MISSING_HINT_SHOWN = False
-
-_CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
-                        'no_mesh_load_mode': False,
-                        'export_mesh_format': None,
-                        'collision_mesh_format': None,
-                        'decimation_area_ratio_threshold': None,
-                        'simplify_vertex_clustering_voxel_size': None,
-                        'target_triangles': None,
-                        'enable_mesh_cache': False,
-                        'force_visual_mesh_origin_to_zero': False,
-                        'overwrite_mesh': False,
-                        'scale_factor': 1.0,
-                        'blender_remesh': False,
-                        'blender_voxel_size': 0.002,
-                        'blender_decimate': False,
-                        'blender_decimate_ratio': 0.1,
-                        'blender_executable': None,
-                        '_current_geometry_context': None,  # 'collision' or 'visual'
-                        '_source_urdf_path': None,  # Original URDF file path for mesh resolution
-                        }
-_MESH_CACHE = {}
-_REMESHED_FILES_CACHE = {}  # Cache to track which files have been remeshed
-
-
-@contextlib.contextmanager
-def mesh_simplify_factor(factor):
-    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = factor
-    yield
-    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = np.inf
-
-
-@contextlib.contextmanager
-def no_mesh_load_mode():
-    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
-    yield
-    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
-
-
-@contextlib.contextmanager
-def export_mesh_format(
-        mesh_format,
-        decimation_area_ratio_threshold=None,
-        simplify_vertex_clustering_voxel_size=None,
-        target_triangles=None,
-        overwrite_mesh=False,
-        collision_mesh_format=None,
-        blender_remesh=False,
-        blender_voxel_size=0.002,
-        blender_decimate=False,
-        blender_decimate_ratio=0.1,
-        blender_executable=None,
-        remeshed_suffix='_remeshed',
-        draco_compression=False):
-    global _REMESHED_FILES_CACHE
-    _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
-    _CONFIGURABLE_VALUES["collision_mesh_format"] = collision_mesh_format
-    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
-        decimation_area_ratio_threshold
-    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
-        simplify_vertex_clustering_voxel_size
-    _CONFIGURABLE_VALUES["target_triangles"] = target_triangles
-    _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
-    _CONFIGURABLE_VALUES["blender_remesh"] = blender_remesh
-    _CONFIGURABLE_VALUES["blender_voxel_size"] = blender_voxel_size
-    _CONFIGURABLE_VALUES["blender_decimate"] = blender_decimate
-    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = blender_decimate_ratio
-    _CONFIGURABLE_VALUES["blender_executable"] = blender_executable
-    _CONFIGURABLE_VALUES["remeshed_suffix"] = remeshed_suffix
-    _CONFIGURABLE_VALUES["draco_compression"] = draco_compression
-    # Clear the remeshed files cache at the start of each export
-    _REMESHED_FILES_CACHE.clear()
-    yield
-    _CONFIGURABLE_VALUES["export_mesh_format"] = None
-    _CONFIGURABLE_VALUES["collision_mesh_format"] = None
-    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
-    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
-    _CONFIGURABLE_VALUES["target_triangles"] = None
-    _CONFIGURABLE_VALUES["overwrite_mesh"] = False
-    _CONFIGURABLE_VALUES["blender_remesh"] = False
-    _CONFIGURABLE_VALUES["blender_voxel_size"] = 0.002
-    _CONFIGURABLE_VALUES["blender_decimate"] = False
-    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = 0.1
-    _CONFIGURABLE_VALUES["blender_executable"] = None
-    _CONFIGURABLE_VALUES["remeshed_suffix"] = '_remeshed'
-    _CONFIGURABLE_VALUES["draco_compression"] = False
-    # Clear cache after export is complete
-    _REMESHED_FILES_CACHE.clear()
-
-
-@contextlib.contextmanager
-def enable_mesh_cache():
-    _CONFIGURABLE_VALUES['enable_mesh_cache'] = True
-    yield
-    _CONFIGURABLE_VALUES['enable_mesh_cache'] = False
-
-
-@contextlib.contextmanager
-def force_visual_mesh_origin_to_zero():
-    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = True
-    yield
-    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = False
-
-
-def bake_origin_into_meshes(geometry, origin):
-    """Bake ``origin`` into the vertices of a geometry's meshes.
-
-    Used by :func:`force_visual_mesh_origin_to_zero`, which zeroes an
-    element's ``<origin>`` and moves that offset into the geometry itself.
-
-    The meshes are copied before being transformed, because one
-    :class:`~trimesh.base.Trimesh` may be shared by several elements: the
-    same file referenced by a ``<visual>`` and a ``<collision>``, or by two
-    links, and under :func:`enable_mesh_cache` every such load returns the
-    one cached list. Transforming in place would bake one element's origin
-    into another element's geometry, or bake both origins into a single
-    mesh.
-
-    Parameters
-    ----------
-    geometry : :class:`.Geometry`
-        Geometry whose meshes are baked. Only a ``<mesh>`` geometry is
-        touched; a primitive carries no vertices to bake into and is left
-        alone. Its ``mesh.meshes`` is replaced with the transformed copies.
-    origin : (4, 4) float
-        Pose to bake into the vertices. Treated as identity within
-        ``1e-8``, in which case nothing is copied or transformed.
-    """
-    if geometry.mesh is None or np.allclose(origin, np.eye(4)):
-        # No vertices to bake into, or an offset small enough that baking it
-        # would only cost a copy of possibly shared meshes.
-        return
-    baked_meshes = []
-    for mesh in geometry.mesh.meshes:
-        baked_mesh = mesh.copy()
-        baked_mesh.apply_transform(origin)
-        # copy() deep-copies the material, including its texture image; the
-        # material is not what the transform changes, so hand the copy back
-        # the original rather than a per-element duplicate of the image
-        visual, original = baked_mesh.visual, mesh.visual
-        if hasattr(visual, 'material') and hasattr(original, 'material'):
-            visual.material = original.material
-        baked_meshes.append(baked_mesh)
-    geometry.mesh.meshes = baked_meshes
-
-
-@contextlib.contextmanager
-def apply_scale(scale_factor):
-    _CONFIGURABLE_VALUES['scale_factor'] = scale_factor
-    yield
-    _CONFIGURABLE_VALUES['scale_factor'] = 1.0
-
-
-@contextlib.contextmanager
-def source_urdf_path(path):
-    """Resolve mesh filenames against ``path`` while saving a URDF.
-
-    ``URDF.save`` normally resolves relative mesh paths against the
-    output location; inside this context it resolves them against the
-    directory the URDF was loaded from instead.
-
-    The previous value is restored on exit. Leaving it set leaks into
-    every later export in the same process -- meshes then resolve
-    against a stale directory.
-
-    Parameters
-    ----------
-    path : str
-        Directory the URDF was loaded from.
-    """
-    previous = _CONFIGURABLE_VALUES.get('_source_urdf_path')
-    _CONFIGURABLE_VALUES['_source_urdf_path'] = path
-    try:
-        yield
-    finally:
-        _CONFIGURABLE_VALUES['_source_urdf_path'] = previous
 
 
 def convert_urdf_meshes(urdf_path, output_path, mesh_format,
@@ -294,13 +126,6 @@ def convert_urdf_meshes(urdf_path, output_path, mesh_format,
     return output_path
 
 
-def get_transparency(mesh):
-    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
-        material = mesh.visual.material
-        if hasattr(material, 'main_color'):
-            return material.main_color[3]
-
-
 def parse_origin(node):
     """Find the ``origin`` subelement of an XML node and convert it
 
@@ -356,590 +181,6 @@ def unparse_origin(matrix):
     yaw, pitch, roll = matrix2ypr(matrix[:3, :3])
     node.attrib['rpy'] = '{} {} {}'.format(roll, pitch, yaw)
     return node
-
-
-def _try_ament(ros_package):
-    """Resolve via ament_index_python. Returns path or None if unavailable / not found."""
-    try:
-        from ament_index_python.packages import get_package_share_directory
-        from ament_index_python.packages import PackageNotFoundError
-    except ImportError:
-        return None
-    try:
-        return get_package_share_directory(ros_package)
-    except PackageNotFoundError:
-        return None
-    except Exception as e:
-        logger.warning(
-            "ament_index lookup for ROS package '%s' failed: %s",
-            ros_package, e)
-        return None
-
-
-def _try_rospkg(ros_package):
-    """Resolve via rospkg. Returns path or None if unavailable / not found."""
-    if rospkg is None:
-        return None
-    try:
-        return rospkg.RosPack().get_path(ros_package)
-    except rospkg.common.ResourceNotFound:
-        return None
-
-
-def _manifest_package_name(directory):
-    """Return the ``<name>`` declared in ``<directory>/package.xml``, or None."""
-    manifest = os.path.join(directory, 'package.xml')
-    if not os.path.isfile(manifest):
-        return None
-    try:
-        name = ET.parse(manifest).getroot().findtext('name')
-    except (OSError, ET.XMLSyntaxError):
-        return None
-    return name.strip() if name else None
-
-
-def _env_paths(variable):
-    """Absolute, expanded, non-empty entries of an ``os.pathsep`` env variable."""
-    return [os.path.abspath(os.path.expanduser(p))
-            for p in os.environ.get(variable, '').split(os.pathsep) if p]
-
-
-def _find_package_dir(root, ros_package):
-    """Locate ``ros_package`` under one ``ROS_PACKAGE_PATH`` entry.
-
-    An entry may itself be the package, a directory that contains it, or a
-    workspace ``src`` to crawl (the several catkin layouts). The recursive walk
-    is the last resort and prunes build/VCS trees.
-    """
-    if _manifest_package_name(root) == ros_package:
-        return root
-    direct = os.path.join(root, ros_package)
-    if _manifest_package_name(direct) == ros_package:
-        return direct
-    if not os.path.isdir(root):
-        return None
-    for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs
-                   if not d.startswith('.')
-                   and d not in ('build', 'devel', 'install', 'log')]
-        if 'package.xml' in files:
-            if _manifest_package_name(current) == ros_package:
-                return current
-            # A catkin package cannot contain another; stop descending here
-            # (also avoids crawling large mesh/resource trees).
-            dirs[:] = []
-    return None
-
-
-def _try_env_prefixes(ros_package):
-    """Resolve a ROS package from the sourced shell environment alone.
-
-    Uses only the standard search-path variables, so it works when neither
-    ``ament_index_python`` nor ``rospkg`` is importable -- e.g. inside a
-    PyInstaller-frozen binary launched from a sourced ROS workspace. Returns
-    the package's share/root directory, or ``None``.
-
-    * ``AMENT_PREFIX_PATH`` / ``COLCON_PREFIX_PATH`` / ``CMAKE_PREFIX_PATH``:
-      ``<prefix>/share/<pkg>`` (the ament / ROS 2 install layout).
-    * ``ROS_PACKAGE_PATH``: each entry is the package, a directory of packages,
-      or a workspace ``src`` to crawl (the catkin / ROS 1 layouts).
-    """
-    for variable in ('AMENT_PREFIX_PATH', 'COLCON_PREFIX_PATH',
-                     'CMAKE_PREFIX_PATH'):
-        for prefix in _env_paths(variable):
-            share = os.path.join(prefix, 'share', ros_package)
-            if _manifest_package_name(share) == ros_package:
-                return share
-    for root in _env_paths('ROS_PACKAGE_PATH'):
-        found = _find_package_dir(root, ros_package)
-        if found:
-            return found
-    return None
-
-
-@lru_cache(maxsize=None)
-def get_path_with_cache(ros_package):
-    """Resolve a ROS package name to its share/install directory.
-
-    Tries ``ament_index_python`` (ROS 2) and ``rospkg`` (ROS 1) when available,
-    then falls back to :func:`_try_env_prefixes`, which resolves straight from
-    the sourced shell environment and needs no ROS Python at all. The order of
-    the first two respects the ``ROS_VERSION`` environment variable so that
-    users with ROS 1 and ROS 2 coexisting on the same machine get the resolver
-    matching their currently-sourced distro:
-
-    * ``ROS_VERSION=1`` -> rospkg first, then ament (preserves the old
-      behaviour where rospkg-only resolution was used).
-    * ``ROS_VERSION=2`` or unset -> ament first, then rospkg. This is what
-      makes the function work on plain ``ros-<distro>-desktop`` installs that
-      ship ament but not rospkg (previously such environments hit a
-      ``TypeError`` deeper in mesh loading).
-
-    The environment fallback runs last in both orders, so it only changes the
-    outcome when the ROS Python resolvers are absent or come up empty -- e.g. a
-    PyInstaller-frozen binary launched from a sourced workspace.
-
-    Results are cached for the process lifetime (``lru_cache``); a change to the
-    ROS search-path environment variables after the first lookup is not picked
-    up, matching the existing behaviour for the ament/rospkg resolvers.
-
-    Raises
-    ------
-    ImportError
-        No ROS Python resolver is installed and the package was not found under
-        the ROS search-path environment variables either.
-    LookupError
-        The resolvers were tried but none of them found the package.
-    """
-    # ament_index / rospkg are the authoritative package indices when present;
-    # _try_env_prefixes is a dependency-free fallback that resolves straight
-    # from the sourced shell environment, so a frozen binary (no ROS Python)
-    # still finds meshes after `source install/setup.bash`.
-    if os.environ.get('ROS_VERSION') == '1':
-        resolvers = (_try_rospkg, _try_ament, _try_env_prefixes)
-    else:
-        resolvers = (_try_ament, _try_rospkg, _try_env_prefixes)
-
-    for resolver in resolvers:
-        path = resolver(ros_package)
-        if path is not None:
-            return path
-
-    # Distinguish "neither resolver installed" from "package missing".
-    ament_available = True
-    try:
-        import ament_index_python  # noqa: F401
-    except ImportError:
-        ament_available = False
-    if not ament_available and rospkg is None:
-        raise ImportError(
-            "Cannot resolve ROS package '{}': neither ament_index_python "
-            "nor rospkg is installed, and it was not found under "
-            "AMENT_PREFIX_PATH / ROS_PACKAGE_PATH / CMAKE_PREFIX_PATH. "
-            "Source your ROS workspace (e.g. `source install/setup.bash`) "
-            "or install one of the resolvers.".format(ros_package))
-    raise LookupError(
-        "ROS package '{}' was not found by ament_index_python or rospkg. "
-        "Did you forget to source your ROS workspace "
-        "(e.g. `source install/setup.bash` for ROS 2)?".format(ros_package))
-
-
-def search_up(start_dir, relative_path):
-    current_dir = start_dir
-    while True:
-        candidate = os.path.join(current_dir, relative_path)
-        if os.path.exists(candidate):
-            return candidate
-        parent = os.path.dirname(current_dir)
-        if parent == current_dir:
-            return None
-        current_dir = parent
-
-
-def resolve_filepath(base_path, file_path):
-    if os.path.isabs(file_path):
-        if os.path.exists(file_path):
-            return os.path.normpath(file_path)
-        return None
-
-    parsed_url = urlparse(file_path)
-    base_path = os.path.abspath(base_path)
-
-    if parsed_url.scheme == 'package':
-        try:
-            ros_package = parsed_url.netloc
-            package_path = get_path_with_cache(ros_package)
-            pkg_relative_path = parsed_url.path.lstrip("/")
-            resolved_filepath = os.path.join(package_path, pkg_relative_path)
-            if os.path.exists(resolved_filepath):
-                return os.path.normpath(resolved_filepath)
-        except Exception:
-            # Catches ament's PackageNotFoundError, rospkg's ResourceNotFound,
-            # and the ImportError raised by get_path_with_cache when neither
-            # resolver is installed. We fall through to the search_up()
-            # heuristic below so behaviour stays graceful for pure-filesystem
-            # URDFs that just happen to use package:// for documentation.
-            pass
-
-    rel_paths = [
-        os.path.join(parsed_url.netloc, parsed_url.path.lstrip('/')),
-        parsed_url.path.lstrip('/')
-    ]
-    for rel in rel_paths:
-        found_path = search_up(base_path, rel)
-        if found_path:
-            return os.path.normpath(found_path)
-    return None
-
-
-def get_filename(base_path, file_path, makedirs=False):
-    """Formats a file path correctly for URDF loading.
-
-    Parameters
-    ----------
-    base_path : str
-        The base path to the URDF's folder.
-    file_path : str
-        The path to the file.
-    makedirs : bool, optional
-        If ``True``, the directories leading to the file will be created
-        if needed.
-
-    Returns
-    -------
-    resolved : str
-        The resolved filepath -- just the normal ``file_path`` if it was an
-        absolute path, otherwise that path joined to ``base_path``.
-    """
-    resolved_file_path = resolve_filepath(base_path, file_path)
-    if resolved_file_path is None:
-        logger.error('could not find %s', file_path)
-        return None
-    if not os.path.isabs(resolved_file_path):
-        resolved_file_path = os.path.join(base_path, resolved_file_path)
-    if makedirs:
-        d, _ = os.path.split(resolved_file_path)
-        if not os.path.exists(d):
-            os.makedirs(d)
-    return resolved_file_path
-
-
-def resolve_simplified_mesh_path(filename, simplify_factor):
-    hash_value = checksum_md5(filename)
-    cache_base_path = os.path.join(get_cache_dir(), "simplified_mesh")
-
-    if not os.path.exists(cache_base_path):
-        os.makedirs(cache_base_path)
-
-    rounded_simplify_factor = round(simplify_factor, 3)
-    cache_path = os.path.join(cache_base_path, "{}-{}.pkl".format(
-        hash_value, rounded_simplify_factor))
-    return cache_path
-
-
-def _transform_vertex_normals(normals, matrix):
-    """Map normals through a 4x4 transform.
-
-    Normals do not transform like points.  The inverse transpose of the linear
-    block is what keeps them perpendicular to the surface under a non-uniform
-    scale, and a transform with a negative determinant (a mirror, common in
-    exported CAD scenes) reverses the triangle winding, so the result has to be
-    negated to keep pointing out of the same side.  ``Trimesh.apply_transform``
-    multiplies by the matrix directly, which is only correct for a rotation.
-
-    Parameters
-    ----------
-    normals : (n, 3) float
-        Unit normals in the source frame.
-    matrix : (4, 4) float
-        Transform applied to the vertices.
-
-    Returns
-    -------
-    normals : (n, 3) float
-        Unit normals in the destination frame.
-    """
-    linear = np.asarray(matrix)[:3, :3]
-    try:
-        mapped = np.asarray(normals) @ np.linalg.inv(linear)
-    except np.linalg.LinAlgError:
-        return np.asarray(normals)
-    if np.linalg.det(linear) < 0:
-        mapped = -mapped
-    length = np.linalg.norm(mapped, axis=1)
-    length[length < 1e-12] = 1.0
-    return mapped / length[:, None]
-
-
-def _authored_vertex_normals(obj):
-    """Snapshot the vertex normals a mesh file actually stored.
-
-    ``vertex_normals`` is a lazily computed property, so only an array already
-    sitting in the cache came from the file; touching the property here would
-    fabricate one and defeat the point.
-
-    Parameters
-    ----------
-    obj : trimesh.Scene or trimesh.Trimesh
-        Freshly loaded geometry.
-
-    Returns
-    -------
-    normals : dict
-        Geometry name (``None`` for a bare mesh) -> (n, 3) float array.
-    """
-    trimesh = _lazy_trimesh()
-    if isinstance(obj, trimesh.Scene):
-        items = list(obj.geometry.items())
-    else:
-        items = [(None, obj)]
-    normals = {}
-    for name, geom in items:
-        cache = getattr(geom, '_cache', None)
-        stored = cache.cache.get('vertex_normals') if cache is not None else None
-        if stored is not None:
-            normals[name] = np.array(stored)
-    return normals
-
-
-def _restore_vertex_normals(obj, normals):
-    """Put snapshotted normals back after a units conversion.
-
-    ``convert_units`` rebuilds the geometry and drops the cache, but it only
-    applies a uniform scale, which leaves normal directions untouched.
-    """
-    if not normals:
-        return obj
-    trimesh = _lazy_trimesh()
-    if isinstance(obj, trimesh.Scene):
-        items = list(obj.geometry.items())
-    else:
-        items = [(None, obj)]
-    for name, geom in items:
-        stored = normals.get(name)
-        if stored is not None and len(stored) == len(geom.vertices):
-            geom.vertex_normals = stored
-    return obj
-
-
-def _dump_scene(scene):
-    """Flatten a scene into world-frame meshes, keeping authored normals.
-
-    ``Scene.dump`` copies each geometry without its cache, so normals supplied
-    by the file are lost and later recomputed by averaging, which rounds off
-    every hard edge.  Re-attaching them before ``apply_transform`` lets trimesh
-    rotate them along with the vertices instead.
-    """
-    trimesh = _lazy_trimesh()
-    meshes = []
-    for node in scene.graph.nodes_geometry:
-        transform, geom_name = scene.graph[node]
-        geom = scene.geometry.get(geom_name)
-        if not isinstance(geom, trimesh.Trimesh):
-            continue
-        cache = getattr(geom, '_cache', None)
-        stored = cache.cache.get('vertex_normals') if cache is not None else None
-        mesh = geom.copy()
-        mesh.apply_transform(transform)
-        if stored is not None and len(stored) == len(mesh.vertices):
-            mesh.vertex_normals = _transform_vertex_normals(stored, transform)
-        meshes.append(mesh)
-    return meshes
-
-
-def load_meshes(filename):
-    enable_mesh_cache = _CONFIGURABLE_VALUES['enable_mesh_cache']
-    if enable_mesh_cache:
-        if filename in _MESH_CACHE:
-            return _MESH_CACHE[filename]
-    use_simplified_meshs = _CONFIGURABLE_VALUES["mesh_simplify_factor"] < 1.0
-
-    if use_simplified_meshs:
-        cache_path = resolve_simplified_mesh_path(
-            filename, _CONFIGURABLE_VALUES["mesh_simplify_factor"])
-
-        if os.path.exists(cache_path):
-            with open(cache_path, mode="rb") as f:
-                return pickle.load(f)
-        else:
-            meshes = _load_meshes(filename)
-
-            assert sys.version_info.major > 2, "supported only for python3.x"
-            try:
-                import open3d  # noqa
-            except ImportError:
-                message = "to simplify mesh, you need to install open3d\n"
-                message += "run 'pip install open3d'"
-                raise ImportError(message)
-
-            mesh_simplified_list = []
-            for mesh in meshes:
-                n_face = len(mesh.faces)
-                n_face_reduced = int(
-                    n_face * _CONFIGURABLE_VALUES["mesh_simplify_factor"])
-                mesh_simplified = mesh.simplify_quadratic_decimation(
-                    n_face_reduced)
-                mesh_simplified_list.append(mesh_simplified)
-
-            with open(cache_path, mode="wb") as f:
-                pickle.dump(mesh_simplified_list, f)
-            return mesh_simplified_list
-    else:
-        meshes = _load_meshes(filename)
-        if enable_mesh_cache:
-            _MESH_CACHE[filename] = meshes
-        return meshes
-
-
-def _gltf_uses_draco(filename):
-    """Return whether a glTF/GLB file uses Draco mesh compression.
-
-    A glTF/GLB file that lists ``KHR_draco_mesh_compression`` in its
-    ``extensionsUsed`` or ``extensionsRequired`` cannot be decoded without
-    DracoPy.  trimesh silently returns degenerate (all-zero) geometry in
-    that case rather than raising, so we detect it explicitly.
-
-    Parameters
-    ----------
-    filename : str
-        Path to a ``.glb`` or ``.gltf`` file.
-
-    Returns
-    -------
-    uses_draco : bool
-        ``True`` if the file references the Draco extension, ``False``
-        otherwise (including when the file cannot be parsed).
-    """
-    import json
-    import struct
-
-    ext_name = 'KHR_draco_mesh_compression'
-    try:
-        _, ext = os.path.splitext(filename)
-        if ext.lower() == '.glb':
-            with open(filename, 'rb') as f:
-                header = f.read(12)
-                if len(header) < 12 or header[:4] != b'glTF':
-                    return False
-                chunk_header = f.read(8)
-                if len(chunk_header) < 8:
-                    return False
-                chunk_length, chunk_type = struct.unpack('<II', chunk_header)
-                if chunk_type != 0x4E4F534A:  # 'JSON'
-                    return False
-                gltf = json.loads(f.read(chunk_length))
-        else:
-            with open(filename, 'r') as f:
-                gltf = json.load(f)
-    except Exception:
-        return False
-
-    extensions = set(gltf.get('extensionsUsed', []) or [])
-    extensions.update(gltf.get('extensionsRequired', []) or [])
-    return ext_name in extensions
-
-
-def _load_meshes(filename):
-    """Loads triangular meshes from a file.
-
-    Parameters
-    ----------
-    filename : str
-        Path to the mesh file.
-
-    Returns
-    -------
-    meshes : list of :class:`~trimesh.base.Trimesh`
-        The meshes loaded from the file.
-    """
-    if filename is None:
-        raise FileNotFoundError(
-            "Cannot load mesh: file path is None. This usually means a "
-            "package:// URI in the URDF could not be resolved. Make sure the "
-            "referenced ROS package is installed and your environment is "
-            "sourced (`source install/setup.bash` for ROS 2, or set "
-            "`ROS_PACKAGE_PATH` for ROS 1).")
-    trimesh = _lazy_trimesh()
-    _, ext = os.path.splitext(filename)
-    is_glb_or_gltf = ext.lower() in ('.glb', '.gltf')
-    dracopy_available = False
-
-    # Register DracoPy handlers for Draco decompression of GLB/GLTF
-    if is_glb_or_gltf:
-        from skrobot.utils.draco import is_dracopy_available
-        from skrobot.utils.draco import register_dracopy_handlers
-        dracopy_available = is_dracopy_available()
-        if dracopy_available:
-            register_dracopy_handlers()
-
-    # A Draco-compressed glTF/GLB cannot be decoded without DracoPy.  In
-    # that case trimesh does not raise; it silently returns degenerate
-    # (all-zero) geometry.  Detect the situation up front and skip the mesh
-    # with a clear warning, instead of letting the broken geometry pass as a
-    # successful load.  We deliberately do NOT raise here: a single Draco
-    # mesh would otherwise abort the whole URDF load (and trigger a confusing
-    # "load as URDF string" fallback).  Skipping lets the rest of the model
-    # load while keeping the missing geometry visible in the logs.
-    #
-    # NOTE: PR #715 already added a "pip install DracoPy" hint, but it only
-    # fired when trimesh.load() raised or returned an empty mesh list.  For
-    # the urdfeus Draco models trimesh does neither -- it returns a single
-    # all-zero mesh -- so the hint never triggered and nothing was reported.
-    # Parsing the extension list here covers that silent-degenerate case
-    # regardless of how trimesh behaves.
-    if is_glb_or_gltf and not dracopy_available and _gltf_uses_draco(filename):
-        global _DRACO_MISSING_HINT_SHOWN
-        if not _DRACO_MISSING_HINT_SHOWN:
-            logger.error(
-                "DracoPy is not installed, so Draco-compressed glTF/GLB "
-                "meshes (KHR_draco_mesh_compression) cannot be decoded and "
-                "will be skipped; trimesh would otherwise return empty "
-                "all-zero geometry. Install DracoPy with: pip install DracoPy")
-            _DRACO_MISSING_HINT_SHOWN = True
-        logger.warning(
-            "Skipping Draco-compressed mesh (DracoPy not installed): %s",
-            filename)
-        return []
-
-    load_error_reported = False
-    try:
-        # It seems that .3DXML files assume [mm] unit.
-        # Convert the mesh unit from [mm] to [m].
-        # To convert the mesh unit from millimeters to meters,
-        # use the function meshes.convert_units('meter').
-        meshes = trimesh.load(filename)
-        # Keep whatever normals the file stored: they encode which edges the
-        # author meant to be smooth, and nothing downstream can recover that
-        # once they have been dropped.
-        authored_normals = _authored_vertex_normals(meshes)
-        if meshes.units is not None and meshes.units != 'meter':
-            meshes = meshes.convert_units('meter')
-            _restore_vertex_normals(meshes, authored_normals)
-    except Exception as e:
-        if is_glb_or_gltf and not dracopy_available:
-            logger.error(
-                "Failed to load mesh from %s: %s. "
-                "This file may use Draco compression. "
-                "Install DracoPy with: pip install DracoPy", filename, e)
-        else:
-            logger.error("Failed to load meshes from %s. Error: %s", filename, e)
-        load_error_reported = True
-        meshes = []
-
-    # If we got a scene, dump the meshes
-    if isinstance(meshes, trimesh.Scene):
-        meshes = _dump_scene(meshes)
-
-    if isinstance(meshes, (list, tuple, set)):
-        meshes = list(meshes)
-        if len(meshes) == 0:
-            if not load_error_reported:
-                if is_glb_or_gltf and not dracopy_available:
-                    logger.error(
-                        "Failed to load mesh from %s. "
-                        "This file may use Draco compression. "
-                        "Install DracoPy with: pip install DracoPy", filename)
-                else:
-                    logger.error('At least one mesh must be present in file.'
-                                 ' Please check %s file', filename)
-            meshes = []
-        for r in meshes:
-            if not isinstance(r, trimesh.Trimesh):
-                raise TypeError('Could not load meshes from file {}'.
-                                format(filename))
-    elif isinstance(meshes, trimesh.Trimesh):
-        meshes = [meshes]
-    else:
-        logger.error('Unable to load mesh from file %s', filename)
-        meshes = []
-
-    for mesh in meshes:
-        transparency = get_transparency(mesh)
-        if transparency is not None and transparency == 0.0:
-            if isinstance(mesh.visual.material,
-                          trimesh.visual.material.PBRMaterial):
-                mesh.visual.material.baseColorFactor[3] = 255
-    return meshes
 
 
 def configure_origin(value):
@@ -1459,6 +700,19 @@ class Mesh(URDFType):
         The list of meshes is useful for visual geometries that
         might be composed of separate trimesh objects.
         If not specified, the mesh is loaded from the file using trimesh.
+
+    Attributes
+    ----------
+    baked_origin : (4, 4) float or None
+        Set by :func:`bake_origin_into_meshes` to the pose baked into
+        ``meshes``. ``None`` while the geometry is still the file's own.
+        Saving the URDF gives baked geometry a file of its own, since the
+        file it was loaded from no longer describes it.
+    element_name : str or None
+        Set by :class:`.Link` to name the element this mesh belongs to, so
+        that the file it gets to itself can be named after it. ``None`` for
+        a mesh that is not part of a link, which falls back to a name taken
+        from the geometry.
     """
     _ATTRIBS = {
         'filename': (str, True),
@@ -1472,6 +726,8 @@ class Mesh(URDFType):
         self.filename = filename
         self.scale = scale
         self.meshes = meshes
+        self.baked_origin = None
+        self.element_name = None
 
     @property
     def filename(self):
@@ -1549,342 +805,170 @@ class Mesh(URDFType):
 
         return Mesh(**kwargs)
 
-    def _to_xml(self, parent, path):
-        # Get the filename
-        # Store original filename for remesh processing
-        original_urdf_filename = self.filename
+    def _resolve_source_file(self, path):
+        """Resolve this element's ``filename`` to a readable mesh file.
 
-        # Use source URDF path for mesh resolution if available
+        Parameters
+        ----------
+        path : str
+            Directory the URDF is being written to.
+
+        Returns
+        -------
+        str or None
+            The resolved path, or ``None`` if the file was not found.
+        """
         source_path = _CONFIGURABLE_VALUES.get('_source_urdf_path')
         if source_path is not None:
-            fn = get_filename(source_path, self.filename, makedirs=False)
-        else:
-            fn = get_filename(path, self.filename, makedirs=True)
+            # Saving to a different directory than the URDF was loaded
+            # from; the meshes still live beside the original.
+            return get_filename(source_path, self.filename, makedirs=False)
+        return get_filename(path, self.filename, makedirs=True)
 
-        if fn is None:
-            # File not found, skip mesh processing and just apply scaling
-            scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-            original_scale = None
-            if scale_factor != 1.0:
-                original_scale = self.scale.copy() if self.scale is not None else None
-                if self.scale is None:
-                    self.scale = np.array([scale_factor, scale_factor, scale_factor])
-                else:
-                    self.scale = self.scale * scale_factor
+    def _mesh_node(self, filename):
+        """Build this element's ``<mesh>`` node.
 
-            node = self._unparse(path)
+        Takes the filename to write into the node rather than reading
+        ``self.filename``, because the saved URDF may have to name a
+        converted or per-element file that is not the one this object was
+        loaded from. Nothing on ``self`` is modified, so there is no state
+        to restore on the way out and no way for one element's export to
+        be seen by the next.
 
-            # Restore original scale
-            if original_scale is not None:
-                self.scale = original_scale
-            elif scale_factor != 1.0:
-                self.scale = None
+        Parameters
+        ----------
+        filename : str
+            Value for the node's ``filename`` attribute.
 
-            return node
-
-        # Determine which format to use based on context
-        is_collision = (_CONFIGURABLE_VALUES.get('_current_geometry_context')
-                        == 'collision')
-        ext = (_CONFIGURABLE_VALUES['collision_mesh_format'] if is_collision
-               else _CONFIGURABLE_VALUES['export_mesh_format'])
-
-        if ext is not None:
-            if not fn.endswith(ext):
-                name, _ = os.path.splitext(fn)
-                fn = name + ext
-                self.filename = os.path.splitext(self.filename)[0] + ext
-                if os.path.exists(fn) and not _CONFIGURABLE_VALUES['overwrite_mesh']:
-                    # skip mesh save process but still apply scaling
-                    scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-                    original_scale = None
-                    if scale_factor != 1.0:
-                        original_scale = self.scale.copy() if self.scale is not None else None
-                        if self.scale is None:
-                            self.scale = np.array([scale_factor, scale_factor, scale_factor])
-                        else:
-                            self.scale = self.scale * scale_factor
-
-                    node = self._unparse(path)
-
-                    # Restore original scale
-                    if original_scale is not None:
-                        self.scale = original_scale
-                    elif scale_factor != 1.0:
-                        self.scale = None
-
-                    return node
-
-        # Export the meshes as a single file
-        meshes = self.meshes
-
-        # Apply Blender remeshing if requested (before other simplifications)
-        blender_remesh_applied = False
-        if _CONFIGURABLE_VALUES['blender_remesh']:
-            from pathlib import Path
-            global _REMESHED_FILES_CACHE
-
-            # Check if we already processed this file
-            # Use source path to find the actual existing mesh file
-            actual_source_file = get_filename(source_path if source_path is not None else path,
-                                              original_urdf_filename, makedirs=False)
-            if actual_source_file is None:
-                # Mesh file not found, skip remeshing
-                logger.warning("Source mesh file not found for remeshing: %s", original_urdf_filename)
-                blender_remesh_applied = False
-            else:
-                original_mesh_path = Path(actual_source_file)
-                remeshed_suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
-
-                # Determine output filename based on remeshed_suffix
-                # Blender always outputs DAE format, so use .dae for remeshed file
-                remeshed_ext = '.dae'  # Blender remesh always creates DAE
-                if remeshed_suffix == '':
-                    # Empty suffix means overwrite original file
-                    remeshed_path = original_mesh_path
-                    remeshed_filename = original_mesh_path.name
-                else:
-                    # Create new file with specified suffix
-                    remeshed_filename = original_mesh_path.stem + remeshed_suffix + remeshed_ext
-                    remeshed_path = original_mesh_path.parent / remeshed_filename
-
-                # Check if this file has already been remeshed in this export session
-                cache_key = str(original_mesh_path.resolve())
-                if cache_key in _REMESHED_FILES_CACHE:
-                    # Already processed, just update the filename reference
-                    logger.info("Reusing already remeshed file: %s", remeshed_path)
-                    fn = str(remeshed_path)
-                    # Load the remeshed mesh
-                    meshes = _load_meshes(fn)
-                    blender_remesh_applied = True
-                # If remeshed file already exists and is newer than original, use it
-                elif remeshed_suffix != '' and \
-                   remeshed_path.exists() and not _CONFIGURABLE_VALUES['overwrite_mesh']:
-                    orig_mtime = original_mesh_path.stat().st_mtime
-                    remesh_mtime = remeshed_path.stat().st_mtime
-                    if remesh_mtime > orig_mtime:
-                        logger.info("Using existing remeshed file: %s", remeshed_path)
-                        # Update fn to point to remeshed file
-                        fn = str(remeshed_path)
-                        # Load remeshed meshes
-                        meshes = _load_meshes(fn)
-                        blender_remesh_applied = True
-                        # Mark as processed
-                        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
-                    else:
-                        # Original is newer, need to remesh
-                        logger.info("Original mesh is newer, remeshing: %s", original_mesh_path)
-                        meshes = self._apply_blender_remesh(actual_source_file, ext, remeshed_path)
-                        # Update fn to point to new remeshed file
-                        fn = str(remeshed_path)
-                        blender_remesh_applied = True
-                        # Mark as processed
-                        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
-                else:
-                    # No remeshed file exists, overwrite requested, or empty suffix
-                    logger.info("Creating remeshed file: %s", remeshed_path)
-                    meshes = self._apply_blender_remesh(actual_source_file, remeshed_ext, remeshed_path)
-                    # Update fn to point to new remeshed file
-                    fn = str(remeshed_path)
-                    blender_remesh_applied = True
-                    # Mark as processed
-                    _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
-
-        # Apply Blender decimation (collapse) if requested. This reduces the
-        # triangle count while preserving shape and colors, and works on
-        # Blender 5.x because the mesh is exchanged in glb (not Collada).
-        if _CONFIGURABLE_VALUES['blender_decimate'] and not blender_remesh_applied:
-            from skrobot.utils.blender_mesh import decimate_with_blender
-            meshes = decimate_with_blender(
-                meshes,
-                ratio=_CONFIGURABLE_VALUES['blender_decimate_ratio'],
-                blender_executable=_CONFIGURABLE_VALUES['blender_executable'],
-                verbose=True,
-            )
-
-        if _CONFIGURABLE_VALUES["target_triangles"] is not None:
-            from skrobot.utils.mesh import auto_simplify_quadric_decimation_with_texture_preservation
-            meshes = auto_simplify_quadric_decimation_with_texture_preservation(
-                meshes, target_number_of_triangles=_CONFIGURABLE_VALUES[
-                    "target_triangles"], verbose=True)
-        elif _CONFIGURABLE_VALUES[
-                "decimation_area_ratio_threshold"] is not None:
-            from skrobot.utils.mesh import auto_simplify_quadric_decimation
-            meshes = auto_simplify_quadric_decimation(
-                meshes, area_ratio_threshold=_CONFIGURABLE_VALUES[
-                    "decimation_area_ratio_threshold"])
-        if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
-            from skrobot.utils.mesh import simplify_vertex_clustering
-            meshes = simplify_vertex_clustering(
-                meshes,
-                _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
-            )
-
-        # If collision mesh needs STL output, update fn to STL path
-        if blender_remesh_applied and is_collision and ext == '.stl' and fn.endswith('.dae'):
-            # fn currently points to remeshed DAE, but we need STL output for collision
-            stl_path = fn.replace('.dae', '.stl')
-            fn = stl_path
-
-        trimesh = _lazy_trimesh()
-        # Skip export if Blender remesh already saved the file, except for collision STL
-        # Collision meshes need to be exported as STL even after Blender remesh (DAE->STL conversion)
-        skip_export = blender_remesh_applied and not (is_collision and ext == '.stl' and fn.endswith('.stl'))
-
-        if not skip_export:
-            if fn.endswith('.dae'):
-                from skrobot.utils.mesh import split_mesh_by_face_color
-                export_meshes = []
-                has_texture_visual = False
-                for mesh in meshes:
-                    has_texture_visual |= mesh.visual.kind == 'texture'
-                    # Fix: STL files load with visual.defined=False even though
-                    # they have default face colors. Explicitly setting
-                    # face_colors makes visual.defined=True and visual.kind='face',
-                    # which allows trimesh's export_collada to use the colors.
-                    if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
-                        mesh.visual.face_colors = mesh.visual.face_colors
-                    export_meshes.extend(split_mesh_by_face_color(mesh))
-                meshes = export_meshes
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] is True \
-                        or not (os.path.exists(fn) and has_texture_visual):
-                    # don't overwrite textured mesh.
-                    dae_data = trimesh.exchange.dae.export_collada(meshes)
-                    with open(fn, 'wb') as f:
-                        f.write(dae_data)
-            elif fn.endswith('.stl'):
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    meshes = trimesh.util.concatenate(meshes)
-                    trimesh.exchange.export.export_mesh(meshes, fn)
-            elif fn.endswith('.glb') or fn.endswith('.gltf'):
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    draco = _CONFIGURABLE_VALUES.get('draco_compression', False)
-
-                    # Convert texture visuals without actual image to
-                    # vertex colors.  Many DAE files store per-material
-                    # diffuse colors this way; without conversion the
-                    # colors are lost in GLB export.
-                    for mesh in meshes:
-                        if mesh.visual.kind == 'texture':
-                            mat = getattr(mesh.visual, 'material', None)
-                            has_image = (
-                                mat is not None
-                                and (
-                                    (hasattr(mat, 'image')
-                                     and mat.image is not None)
-                                    or (hasattr(mat, 'baseColorTexture')
-                                        and mat.baseColorTexture
-                                        is not None)
-                                )
-                            )
-                            if not has_image:
-                                try:
-                                    color_visual = mesh.visual.to_color()
-                                    vertex_colors = np.asarray(
-                                        color_visual.vertex_colors)
-                                    if len(vertex_colors) != len(mesh.vertices):
-                                        # ``to_color`` can return a color array
-                                        # whose length does not match the
-                                        # vertex count (e.g. one entry per
-                                        # material) when the TextureVisuals has
-                                        # no UV coordinates.  GLB export then
-                                        # silently drops the mismatched colors
-                                        # and the mesh becomes the default gray.
-                                        # Broadcast the single material color to
-                                        # every vertex so the color survives.
-                                        material_color = getattr(
-                                            mat, 'main_color', None)
-                                        if material_color is None:
-                                            material_color = (
-                                                vertex_colors[0]
-                                                if len(vertex_colors)
-                                                else [200, 200, 200, 255])
-                                        material_color = np.asarray(
-                                            material_color)
-                                        if material_color.dtype.kind == 'f':
-                                            material_color = (
-                                                material_color * 255.0).round()
-                                        material_color = material_color.astype(
-                                            np.uint8)
-                                        if material_color.shape[0] == 3:
-                                            material_color = np.append(
-                                                material_color, np.uint8(255))
-                                        vertex_colors = np.tile(
-                                            material_color,
-                                            (len(mesh.vertices), 1))
-                                        color_visual = \
-                                            trimesh.visual.ColorVisuals(
-                                                mesh=mesh,
-                                                vertex_colors=vertex_colors)
-                                    mesh.visual = color_visual
-                                except Exception:
-                                    pass
-
-                    if draco:
-                        from skrobot.utils.draco import export_glb_with_draco
-                        # Skip if collision would overwrite a visual GLB
-                        if is_collision and os.path.exists(fn):
-                            pass
-                        else:
-                            export_glb_with_draco(meshes, fn)
-                    else:
-                        if is_collision and os.path.exists(fn):
-                            pass
-                        else:
-                            scene = trimesh.Scene()
-                            for mesh in meshes:
-                                scene.add_geometry(mesh)
-                            scene.export(fn)
-            else:
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    trimesh.exchange.export.export_mesh(meshes, fn)
-
-        # Apply scale factor to the mesh if different from 1.0
+        Returns
+        -------
+        node : :class:`lxml.etree.Element`
+            The ``<mesh>`` node.
+        """
+        scale = self.scale
         scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-        original_scale = None
         if scale_factor != 1.0:
-            original_scale = self.scale.copy() if self.scale is not None else None
-            if self.scale is None:
-                self.scale = np.array([scale_factor, scale_factor, scale_factor])
-            else:
-                self.scale = self.scale * scale_factor
-
-        # Update self.filename to point to remeshed file for URDF output
-        if blender_remesh_applied:
-            remeshed_suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
-            if remeshed_suffix != '':
-                # Determine the output file extension from fn (actual output file)
-                # This handles cases where collision meshes are converted DAE->STL
-                output_ext = os.path.splitext(fn)[1]
-
-                # Extract just the filename part from the URDF path
-                if original_urdf_filename.startswith('package://'):
-                    # Handle ROS package:// URIs
-                    from urllib.parse import urlparse
-                    parsed = urlparse(original_urdf_filename)
-                    pkg_path = parsed.netloc + parsed.path
-                    base_name, _ = os.path.splitext(pkg_path)
-                    self.filename = 'package://' + base_name + remeshed_suffix + output_ext
-                else:
-                    # Handle regular file paths
-                    base_name, _ = os.path.splitext(original_urdf_filename)
-                    self.filename = base_name + remeshed_suffix + output_ext
-
-        # Unparse the node
-        node = self._unparse(path)
-
-        # Restore original scale (but NOT filename for remeshed meshes)
-        # Only restore filename if remesh was not applied
-        if not blender_remesh_applied:
-            self.filename = original_urdf_filename
-        if original_scale is not None:
-            self.scale = original_scale
-        elif scale_factor != 1.0:
-            self.scale = None
-
+            scale = (np.array([scale_factor] * 3) if scale is None
+                     else scale * scale_factor)
+        node = ET.Element(self._TAG)
+        node.attrib['filename'] = self._unparse_attrib(str, filename)
+        if scale is not None:
+            node.attrib['scale'] = self._unparse_attrib(np.ndarray, scale)
         return node
+
+    def _to_xml(self, parent, path):
+        source_file = self._resolve_source_file(path)
+        if source_file is None:
+            # Nothing to convert; the URDF keeps the name it came with.
+            return self._mesh_node(self.filename)
+
+        context = _CONFIGURABLE_VALUES.get('_current_geometry_context')
+        ext = (_CONFIGURABLE_VALUES['collision_mesh_format']
+               if context == 'collision'
+               else _CONFIGURABLE_VALUES['export_mesh_format'])
+        geometry = geometry_key(self.baked_origin)
+
+        if _CONFIGURABLE_VALUES['blender_remesh']:
+            meshes, output_file, output_urdf_filename, written = \
+                self._remesh_with_blender(source_file, ext, context)
+        else:
+            # --overwrite-mesh is the opt-in to processed geometry landing
+            # on top of its own source file.
+            processing_key = ('' if _CONFIGURABLE_VALUES['overwrite_mesh']
+                              else mesh_processing_key())
+            output_file, output_urdf_filename = claim_mesh_output_path(
+                source_file, self.filename, ext,
+                mesh_variant_suffix(self.baked_origin, self.element_name),
+                geometry, processing_key)
+            meshes, written = self.meshes, False
+
+        if not written:
+            if _should_skip_mesh_export(output_file, context, geometry):
+                return self._mesh_node(output_urdf_filename)
+            meshes = _apply_mesh_processing(
+                meshes, _CONFIGURABLE_VALUES['blender_remesh'])
+            _write_meshes(meshes, output_file)
+            _EXPORTED_MESH_FILES[os.path.normpath(output_file)] = (
+                context, geometry)
+
+        return self._mesh_node(output_urdf_filename)
+
+    def _remesh_with_blender(self, source_file, ext, context):
+        """Remesh through Blender, which writes the file itself.
+
+        Blender's voxel remesher reads and writes files rather than
+        meshes, so this stage picks its own output name --
+        ``<stem><remeshed_suffix>.dae`` beside the source, or the source
+        itself when the suffix is empty -- instead of
+        :func:`resolve_mesh_output_path`'s. An up-to-date remesh from an
+        earlier run, or one made for another element of this run, is
+        reused rather than made again.
+
+        Parameters
+        ----------
+        source_file : str
+            Resolved path of the element's mesh file.
+        ext : str or None
+            Target extension for this element, leading dot included.
+        context : str or None
+            ``'visual'`` or ``'collision'``.
+
+        Returns
+        -------
+        meshes : list of :class:`~trimesh.base.Trimesh`
+            The remeshed geometry.
+        output_file : str
+            The file that holds, or still has to hold, that geometry.
+        output_urdf_filename : str
+            What the saved URDF should call it.
+        written : bool
+            Whether ``output_file`` is already on disk. ``False`` when a
+            collision element still has to be written out as STL.
+        """
+        from pathlib import Path
+
+        source_path = Path(source_file)
+        suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
+        # Blender hands back Collada whatever the element's target format.
+        if suffix == '':
+            remeshed_path = source_path
+        else:
+            remeshed_path = source_path.parent / (
+                source_path.stem + suffix + '.dae')
+
+        cache_key = str(source_path.resolve())
+        reusable = (
+            suffix != ''
+            and remeshed_path.exists()
+            and not _CONFIGURABLE_VALUES['overwrite_mesh']
+            and remeshed_path.stat().st_mtime > source_path.stat().st_mtime)
+        if cache_key in _REMESHED_FILES_CACHE or reusable:
+            logger.info('Reusing remeshed file: %s', remeshed_path)
+            meshes = _load_meshes(str(remeshed_path))
+        else:
+            logger.info('Creating remeshed file: %s', remeshed_path)
+            meshes = self._apply_blender_remesh(
+                source_file, '.dae', remeshed_path)
+        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
+
+        output_file = str(remeshed_path)
+        written = True
+        if context == 'collision' and ext == '.stl':
+            # Blender writes Collada; a collision element wants STL, so an
+            # STL is the one thing still left to write. An empty suffix
+            # sends the remesh into the source file whatever that is
+            # named, and a name that is neither Collada nor STL is left
+            # alone rather than turned into an STL nothing refers to.
+            if output_file.endswith('.dae'):
+                output_file = _replace_extension(output_file, '', '.stl')
+            written = not output_file.endswith('.stl')
+
+        if suffix == '':
+            output_urdf_filename = self.filename
+        else:
+            output_urdf_filename = _replace_extension(
+                self.filename, suffix, os.path.splitext(output_file)[1])
+        return meshes, output_file, output_urdf_filename, written
 
     def _apply_blender_remesh(self, input_mesh_path, ext, output_path):
         """Apply Blender remeshing and save result.
@@ -3579,9 +2663,29 @@ class Link(URDFType):
         self.inertial = inertial
         self.visuals = visuals
         self.collisions = collisions
+        self._name_mesh_elements()
 
         self._visual_meshes = None
         self._collision_mesh = None
+
+    def _name_mesh_elements(self):
+        """Tell each of this link's meshes which element it belongs to.
+
+        An element whose ``<origin>`` has been baked into its vertices needs
+        an output file of its own, and the readable name for that file is
+        the element's. The mesh cannot work out which element it belongs to
+        by itself -- a :class:`.Geometry` does not know its
+        :class:`.Visual`, and a ``<visual>`` does not know its link -- so
+        the link, which knows both, hands the name down.
+        """
+        for context, elements in (('visual', self.visuals),
+                                  ('collision', self.collisions)):
+            elements = elements or []
+            for index, element in enumerate(elements):
+                mesh = getattr(element.geometry, 'mesh', None)
+                if mesh is not None:
+                    mesh.element_name = element_output_name(
+                        self.name, context, index, len(elements))
 
     @property
     def name(self):
@@ -3956,7 +3060,8 @@ class URDF(URDFType):
         else:
             path, _ = os.path.split(os.path.realpath(file_obj.name))
 
-        node = self._to_xml(None, path)
+        with _export_session():
+            node = self._to_xml(None, path)
         tree = ET.ElementTree(node)
         tree.write(file_obj, pretty_print=True,
                    xml_declaration=True, encoding='utf-8')

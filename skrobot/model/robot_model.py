@@ -42,7 +42,6 @@ from skrobot.model.link import find_link_path
 from skrobot.model.link import Link
 from skrobot.utils import urdf
 from skrobot.utils.listify import listify
-from skrobot.utils.urdf import _transform_vertex_normals
 from skrobot.utils.urdf import enable_mesh_cache
 from skrobot.utils.urdf import URDF
 
@@ -2920,6 +2919,10 @@ class RobotModel(CascadedLink):
         if not isinstance(visual, urdf.Visual):
             raise TypeError('visual must be urdf.Visual, but got: {}'
                             .format(type(visual)))
+
+        # Imported here, not at module level: skrobot.utils.mesh pulls in
+        # trimesh, and this module is careful not to (see _lazy_trimesh).
+        from skrobot.utils.mesh import _transform_vertex_normals
 
         trimesh = None
         meshes = []
