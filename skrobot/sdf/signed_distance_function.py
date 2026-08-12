@@ -6,8 +6,8 @@ import tempfile
 
 import filelock
 import numpy as np
-import pysdfgen
 
+from skrobot._lazy_imports import _lazy_pysdfgen
 from skrobot._lazy_imports import _lazy_scipy
 from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import Coordinates
@@ -532,8 +532,9 @@ class GridSDF(SignedDistanceFunction):
                     'trying to acquire lock for %s...', sdf_cache_path)
                 logger.info(
                     'pre-computing sdf and making a cache at %s.', sdf_cache_path)
-                pysdfgen.mesh2sdf(str(obj_filepath), dim_grid, padding_grid,
-                                  output_filepath=sdf_cache_path)
+                _lazy_pysdfgen().mesh2sdf(
+                    str(obj_filepath), dim_grid, padding_grid,
+                    output_filepath=sdf_cache_path)
                 logger.info('finish pre-computation')
         return GridSDF.from_file(sdf_cache_path, **kwargs)
 
