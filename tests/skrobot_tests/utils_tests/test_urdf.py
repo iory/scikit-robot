@@ -667,7 +667,7 @@ class TestConfiguredRestoresState(unittest.TestCase):
                 urdf_mesh._CONFIGURABLE_VALUES['scale_factor'], 2.0)
 
 
-class TestResolveMeshOutputPath(unittest.TestCase):
+class TestMeshOutputNaming(unittest.TestCase):
     """An output mesh file may only ever hold geometry that matches it.
 
     ``force_visual_mesh_origin_to_zero`` gives each element its own baked
@@ -684,58 +684,162 @@ class TestResolveMeshOutputPath(unittest.TestCase):
 
     def test_unbaked_geometry_keeps_the_plain_name(self):
         output_file, urdf_filename = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', None)
+            '/meshes/box.stl', 'box.stl', '.dae', '')
         self.assertEqual(output_file, '/meshes/box.dae')
         self.assertEqual(urdf_filename, 'box.dae')
 
     def test_a_package_uri_is_rewritten_like_a_path(self):
         _, urdf_filename = urdf_mesh.resolve_mesh_output_path(
             '/share/pkg/meshes/box.stl', 'package://pkg/meshes/box.stl',
-            '.dae', None)
-        self.assertEqual(urdf_filename, 'package://pkg/meshes/box.dae')
+            '.dae', '_rleg')
+        self.assertEqual(urdf_filename, 'package://pkg/meshes/box_rleg.dae')
 
-    def test_two_baked_origins_get_two_files(self):
+    def test_an_element_is_named_after_its_link(self):
+        """The whole point of naming a file after the element: the output
+        directory says which mesh belongs where."""
+        self.assertEqual(
+            urdf_mesh.element_output_name('rleg', 'visual', 0, 1), 'rleg')
+        self.assertEqual(
+            urdf_mesh.element_output_name('rleg', 'collision', 0, 1),
+            'rleg_collision')
+
+    def test_several_elements_of_one_link_are_numbered(self):
+        self.assertEqual(
+            urdf_mesh.element_output_name('rleg', 'visual', 1, 3), 'rleg_1')
+
+    def test_a_link_name_a_filename_cannot_hold_is_replaced(self):
+        self.assertEqual(
+            urdf_mesh.element_output_name('robot/r leg', 'visual', 0, 1),
+            'robot_r_leg')
+
+    def test_two_elements_get_two_files(self):
         first, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
+            '/meshes/leg.stl', 'leg.stl', '.dae', '_rleg')
         second, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 5]))
-        self.assertNotEqual(first, second)
-
-    def test_the_same_baked_origin_shares_one_file(self):
-        first, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
-        second, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
-        self.assertEqual(first, second)
-
-    def test_a_negative_zero_is_the_same_origin(self):
-        """-0.0 and 0.0 are equal but have different bytes; hashing the
-        raw bytes would hand one origin two files."""
-        plus, minus = np.eye(4), np.eye(4)
-        minus[0, 3] = -0.0
-        self.assertEqual(urdf_mesh.geometry_variant_suffix(plus),
-                         urdf_mesh.geometry_variant_suffix(minus))
+            '/meshes/leg.stl', 'leg.stl', '.dae', '_lleg')
+        self.assertEqual(first, '/meshes/leg_rleg.dae')
+        self.assertEqual(second, '/meshes/leg_lleg.dae')
 
     def test_baking_survives_the_format_staying_the_same(self):
         output_file, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.stl', self._origin([0, 0, 1]))
-        self.assertNotEqual(output_file, '/meshes/box.stl')
+            '/meshes/leg.stl', 'leg.stl', '.stl', '_rleg')
+        self.assertNotEqual(output_file, '/meshes/leg.stl')
+
+    def test_an_unnamed_element_falls_back_to_its_geometry(self):
+        """A Mesh built by hand is not part of a link and has no element
+        name; it still may not share a file with a different origin."""
+        first = urdf_mesh.mesh_variant_suffix(self._origin([0, 0, 1]), None)
+        second = urdf_mesh.mesh_variant_suffix(self._origin([0, 0, 5]), None)
+        self.assertTrue(first and second)
+        self.assertNotEqual(first, second)
+
+    def test_the_same_origin_is_the_same_geometry(self):
+        self.assertEqual(urdf_mesh.geometry_key(self._origin([0, 0, 1])),
+                         urdf_mesh.geometry_key(self._origin([0, 0, 1])))
+
+    def test_a_negative_zero_is_the_same_geometry(self):
+        """-0.0 and 0.0 are equal but have different bytes; hashing the
+        raw bytes would call one origin two geometries."""
+        plus, minus = np.eye(4), np.eye(4)
+        minus[0, 3] = -0.0
+        self.assertEqual(urdf_mesh.geometry_key(plus),
+                         urdf_mesh.geometry_key(minus))
+
+    def test_unbaked_geometry_has_no_key(self):
+        self.assertEqual(urdf_mesh.geometry_key(None), '')
 
     def test_processing_only_renames_when_it_would_hit_the_source(self):
         # converting the format already moves the output off the source
         converted, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.dae', None, '_deadbeef')
+            '/meshes/box.stl', 'box.stl', '.dae', '', '_deadbeef')
         self.assertEqual(converted, '/meshes/box.dae')
         # ... but keeping the format would land on the input file
         kept, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.stl', None, '_deadbeef')
+            '/meshes/box.stl', 'box.stl', '.stl', '', '_deadbeef')
         self.assertEqual(kept, '/meshes/box_deadbeef.stl')
 
     def test_an_empty_processing_key_lets_the_source_be_replaced(self):
         # what --overwrite-mesh asks for
         kept, _ = urdf_mesh.resolve_mesh_output_path(
-            '/meshes/box.stl', 'box.stl', '.stl', None, '')
+            '/meshes/box.stl', 'box.stl', '.stl', '', '')
         self.assertEqual(kept, '/meshes/box.stl')
+
+
+class TestClaimMeshOutputPath(unittest.TestCase):
+    """Naming a file after an element reads better than naming it after
+    the geometry, but two link names can reach one filename.  Nothing may
+    come of that except a different filename."""
+
+    def setUp(self):
+        urdf_mesh._EXPORTED_MESH_FILES.clear()
+
+    def tearDown(self):
+        urdf_mesh._EXPORTED_MESH_FILES.clear()
+
+    def _claim(self, suffix, geometry):
+        return urdf_mesh.claim_mesh_output_path(
+            '/meshes/leg.stl', 'leg.stl', '.dae', suffix, geometry)
+
+    def test_an_unclaimed_path_is_handed_out_as_is(self):
+        output_file, _ = self._claim('_rleg', 'aaaaaaaa')
+        self.assertEqual(output_file, '/meshes/leg_rleg.dae')
+
+    def test_the_same_geometry_may_share_the_claimed_path(self):
+        first, _ = self._claim('_rleg', 'aaaaaaaa')
+        urdf_mesh._EXPORTED_MESH_FILES[os.path.normpath(first)] = (
+            'visual', 'aaaaaaaa')
+        again, _ = self._claim('_rleg', 'aaaaaaaa')
+        self.assertEqual(again, first)
+
+    def test_different_geometry_is_moved_off_the_claimed_path(self):
+        first, _ = self._claim('_rleg', 'aaaaaaaa')
+        urdf_mesh._EXPORTED_MESH_FILES[os.path.normpath(first)] = (
+            'visual', 'aaaaaaaa')
+        other, _ = self._claim('_rleg', 'bbbbbbbb')
+        self.assertNotEqual(other, first)
+        self.assertIn('bbbbbbbb', other)
+
+
+class TestShouldSkipMeshExport(unittest.TestCase):
+
+    def setUp(self):
+        urdf_mesh._EXPORTED_MESH_FILES.clear()
+        self._tmp = tempfile.mkdtemp()
+        self._existing = os.path.join(self._tmp, 'leg.dae')
+        with open(self._existing, 'w') as f:
+            f.write('')
+
+    def tearDown(self):
+        import shutil
+
+        urdf_mesh._EXPORTED_MESH_FILES.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_an_existing_unbaked_mesh_is_left_alone(self):
+        self.assertTrue(
+            urdf_mesh._should_skip_mesh_export(self._existing, 'visual', ''))
+
+    def test_baked_geometry_is_always_written(self):
+        """The file is named after the element, which says nothing about
+        which origin went into it, so an existing one may well be an
+        earlier run's."""
+        self.assertFalse(
+            urdf_mesh._should_skip_mesh_export(
+                self._existing, 'visual', 'aaaaaaaa'))
+
+    def test_a_collision_does_not_overwrite_a_visual(self):
+        # the collision export concatenates and drops the materials
+        urdf_mesh._EXPORTED_MESH_FILES[os.path.normpath(self._existing)] = (
+            'visual', '')
+        self.assertTrue(
+            urdf_mesh._should_skip_mesh_export(
+                self._existing, 'collision', ''))
+
+    def test_a_visual_may_upgrade_a_collision(self):
+        urdf_mesh._EXPORTED_MESH_FILES[os.path.normpath(self._existing)] = (
+            'collision', '')
+        self.assertFalse(
+            urdf_mesh._should_skip_mesh_export(self._existing, 'visual', ''))
 
 
 class TestMeshProcessingKey(unittest.TestCase):
@@ -862,6 +966,18 @@ class TestConvertUrdfMeshesSharedMesh(unittest.TestCase):
         for name in written:
             self.assertTrue(os.path.exists(os.path.join(self._tmp, name)),
                             '{} was not written again'.format(name))
+
+    def test_each_element_is_named_after_the_link_it_belongs_to(self):
+        """Reading the output directory has to tell you which mesh is
+        which; two hashes would not."""
+        output_path = os.path.join(self._tmp, 'converted.urdf')
+        urdf_utils.convert_urdf_meshes(
+            self._urdf_path, output_path, '.dae',
+            force_zero_visual_origin=True)
+        filenames = {visual.find('geometry/mesh').get('filename') for visual
+                     in etree.parse(output_path).getroot().iter('visual')}
+        self.assertEqual(
+            filenames, {'box_base_link.dae', 'box_second_link.dae'})
 
     def test_an_unbaked_shared_mesh_still_shares_one_file(self):
         # Without baking the elements really do have the same geometry;

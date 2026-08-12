@@ -27,6 +27,7 @@ import hashlib
 from logging import getLogger
 import os
 import pickle
+import re
 import sys
 
 from lxml import etree as ET
@@ -776,18 +777,15 @@ def _replace_extension(filename, suffix, ext):
     return stem + suffix + (current_ext if ext is None else ext)
 
 
-def geometry_variant_suffix(baked_origin):
-    """Filename suffix distinguishing one baked geometry from another.
+def geometry_key(baked_origin):
+    """A stable identity for the geometry an element ends up holding.
 
     ``force_visual_mesh_origin_to_zero`` bakes each element's ``<origin>``
-    into its own copy of the mesh, so several elements sharing one mesh
-    file end up with *different* geometry. They can no longer share one
-    output file: whichever element is written first (or last, under
-    ``overwrite_mesh``) would decide the geometry for all of them, and the
-    others would be misplaced by the difference between their origins.
-
-    The suffix is a hash of the baked pose, so it is stable across runs and
-    two elements that baked the *same* origin still share a single file.
+    into its own copy of the mesh, so elements sharing one mesh file end up
+    with *different* geometry and can no longer share one output file. This
+    is what "different" means: a hash of the baked pose, equal for two
+    elements that baked the same origin and for the same element across
+    runs.
 
     Parameters
     ----------
@@ -798,16 +796,79 @@ def geometry_variant_suffix(baked_origin):
     Returns
     -------
     str
-        ``''`` for unbaked geometry, otherwise ``'_'`` and eight hex
-        digits.
+        ``''`` for unbaked geometry, otherwise eight hex digits.
     """
     if baked_origin is None:
         return ''
     origin = np.round(np.asarray(baked_origin, dtype=np.float64), 9)
     # -0.0 and 0.0 compare equal but have different bytes; without this two
-    # elements baking the same origin would get two files.
+    # elements baking the same origin would look different.
     origin[origin == 0] = 0.0
-    return '_' + hashlib.md5(origin.tobytes()).hexdigest()[:8]
+    return hashlib.md5(origin.tobytes()).hexdigest()[:8]
+
+
+def element_output_name(link_name, context, index, count):
+    """Name the mesh file an element of a link gets to itself.
+
+    Only used once an element's geometry stops matching the file it was
+    read from, which is when it needs a file of its own (see
+    :func:`resolve_mesh_output_path`). Naming it after the element is what
+    makes the result readable -- ``leg_rleg.dae`` and ``leg_lleg.dae``
+    rather than two hashes -- so that whoever opens the output directory
+    can tell which mesh belongs where.
+
+    Parameters
+    ----------
+    link_name : str
+        Name of the link the element belongs to.
+    context : str
+        ``'visual'`` or ``'collision'``.
+    index : int
+        Position of the element among its link's elements of that kind.
+    count : int
+        How many the link has. The index is left out of the name when
+        there is only one, which is the common case.
+
+    Returns
+    -------
+    str
+        A name safe to put in a filename.
+    """
+    name = link_name
+    if context == 'collision':
+        name += '_collision'
+    if count > 1:
+        name += '_{}'.format(index)
+    # A URDF link name is free-form text; a mesh filename is not.
+    return re.sub(r'[^A-Za-z0-9_.-]', '_', name)
+
+
+def mesh_variant_suffix(baked_origin, element_name):
+    """Filename suffix telling one element's geometry from another's.
+
+    Named after the element when the caller knows which one it is, and
+    after the geometry itself when it does not -- a :class:`.Mesh` built by
+    hand rather than parsed as part of a link, or two link names that a
+    filename cannot tell apart.
+
+    Parameters
+    ----------
+    baked_origin : (4, 4) float or None
+        The pose baked into this element's vertices, if any.
+    element_name : str or None
+        :func:`element_output_name` for the element, when known.
+
+    Returns
+    -------
+    str
+        ``''`` when the geometry still matches its file, otherwise ``'_'``
+        and a name.
+    """
+    if baked_origin is None:
+        return ''
+    if element_name:
+        return '_' + element_name
+    return '_' + geometry_key(baked_origin)
 
 
 def mesh_processing_key():
@@ -842,7 +903,7 @@ def mesh_processing_key():
     return '_' + digest[:8]
 
 
-def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
+def resolve_mesh_output_path(source_file, urdf_filename, ext, variant_suffix,
                              processing_key=''):
     """Decide where an element's mesh is written, and how the URDF names it.
 
@@ -854,12 +915,13 @@ def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
         an output file only ever holds geometry that matches it.
 
     Two things can make an element's geometry differ from the file it was
-    read from -- a baked origin, which differs per element, and the
-    configured processing, which does not -- and each contributes to the
-    name. The baked origin always does, since elements sharing a file
-    otherwise overwrite each other. The processing only has to when the
-    file would otherwise be the source itself, and it is left out when the
-    caller passes an empty ``processing_key`` to allow exactly that.
+    read from, and each contributes to the name. A baked origin differs per
+    element, so it always does -- that is ``variant_suffix``, which
+    :func:`mesh_variant_suffix` takes from the element's own name. The
+    configured processing is the same for every element of an export, so it
+    only has to contribute when the output would otherwise be the source
+    file itself; passing an empty ``processing_key`` leaves it out to allow
+    exactly that.
 
     Parameters
     ----------
@@ -871,8 +933,9 @@ def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
     ext : str or None
         Target extension, leading dot included. ``None`` keeps the source
         format.
-    baked_origin : (4, 4) float or None
-        Pose baked into this element's vertices, if any.
+    variant_suffix : str
+        :func:`mesh_variant_suffix` for this element -- ``''`` while its
+        geometry still matches ``source_file``.
     processing_key : str
         :func:`mesh_processing_key`, or ``''`` to let a processed mesh
         replace its source.
@@ -884,7 +947,7 @@ def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
     output_urdf_filename : str
         What the saved URDF should call it.
     """
-    suffix = geometry_variant_suffix(baked_origin)
+    suffix = variant_suffix
     output_file = _replace_extension(source_file, suffix, ext)
     if processing_key and os.path.normpath(output_file) == os.path.normpath(
             source_file):
@@ -893,24 +956,60 @@ def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
     return output_file, _replace_extension(urdf_filename, suffix, ext)
 
 
-def _should_skip_mesh_export(output_file, context):
+def claim_mesh_output_path(source_file, urdf_filename, ext, variant_suffix,
+                           geometry, processing_key=''):
+    """Resolve an element's output path and record that it owns it.
+
+    :func:`resolve_mesh_output_path` names a file after the element, which
+    reads far better than naming it after the geometry but no longer makes
+    two different geometries impossible to land on one name: a link name
+    goes through :func:`element_output_name` on the way into a filename,
+    and two of them can come out the same. This is where that is caught --
+    a path already claimed by *different* geometry falls back to a name
+    derived from the geometry itself, which cannot collide.
+
+    Parameters
+    ----------
+    source_file, urdf_filename, ext, variant_suffix, processing_key
+        As for :func:`resolve_mesh_output_path`.
+    geometry : str
+        :func:`geometry_key` for this element.
+
+    Returns
+    -------
+    output_file : str
+        Path to write the mesh to.
+    output_urdf_filename : str
+        What the saved URDF should call it.
+    """
+    output_file, output_urdf_filename = resolve_mesh_output_path(
+        source_file, urdf_filename, ext, variant_suffix, processing_key)
+    claimed = _EXPORTED_MESH_FILES.get(os.path.normpath(output_file))
+    if claimed is not None and claimed[1] != geometry and variant_suffix:
+        logger.warning(
+            'Two elements with different geometry both want %s; falling '
+            'back to a name taken from the geometry itself.', output_file)
+        output_file, output_urdf_filename = resolve_mesh_output_path(
+            source_file, urdf_filename, ext, '_' + geometry, processing_key)
+    return output_file, output_urdf_filename
+
+
+def _should_skip_mesh_export(output_file, context, geometry):
     """Whether an element's mesh file is already what it has to be.
 
-    Two reasons, kept together so that the interaction between them is
-    visible:
-
-    * Another element of this export already wrote the file. One mesh
-      shared by several links needs writing once. A ``<collision>``
-      additionally must not overwrite what a ``<visual>`` wrote, because
-      the collision export concatenates the meshes and drops their
-      materials -- it would strip the colors off the visual mesh. The
-      reverse is an upgrade and is allowed.
+    * Another element of this save already wrote the file. One mesh shared
+      by several links needs writing once. A ``<collision>`` additionally
+      must not overwrite what a ``<visual>`` wrote, because the collision
+      export concatenates the meshes and drops their materials -- it would
+      strip the colors off the visual mesh. The reverse is an upgrade and
+      is allowed.
     * The file already exists from an earlier run and ``overwrite_mesh``
-      was not given.
-
-    Skipping is safe in both cases only because
-    :func:`resolve_mesh_output_path` guarantees that a file's name matches
-    its content: an existing file is the geometry we were about to write.
+      was not given. This one only holds for a mesh that still matches the
+      file it was read from, since only then does an existing file's name
+      say what is in it. Geometry that was baked lands in a file named
+      after the element, which says nothing about which origin went into
+      it, so it is always written: skipping would leave the output of an
+      earlier run, with a different origin baked in, standing.
 
     Parameters
     ----------
@@ -918,6 +1017,9 @@ def _should_skip_mesh_export(output_file, context):
         Path the element would be written to.
     context : str or None
         ``'visual'`` or ``'collision'``.
+    geometry : str
+        :func:`geometry_key` for this element, ``''`` if it still matches
+        its source file.
 
     Returns
     -------
@@ -925,9 +1027,11 @@ def _should_skip_mesh_export(output_file, context):
         True if the write must be skipped.
     """
     key = os.path.normpath(output_file)
-    written_by = _EXPORTED_MESH_FILES.get(key)
-    if written_by is not None:
-        return not (written_by == 'collision' and context == 'visual')
+    claimed = _EXPORTED_MESH_FILES.get(key)
+    if claimed is not None:
+        return not (claimed[0] == 'collision' and context == 'visual')
+    if geometry:
+        return False
     return (not _CONFIGURABLE_VALUES['overwrite_mesh']
             and os.path.exists(key))
 

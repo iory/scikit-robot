@@ -36,9 +36,9 @@ def main():
     parser.add_argument('--force-zero-origin', action='store_true',
                         help='Force the visual mesh origin to zero. Each '
                         'element\'s origin is baked into its own copy of '
-                        'the mesh, so one mesh file referenced with several '
-                        'origins is written out once per origin, under a '
-                        'name suffixed with a hash of it.')
+                        'the mesh, so a mesh file used by several elements '
+                        'is written out once per element, named after the '
+                        'link it belongs to (leg.stl -> leg_rleg.dae).')
     parser.add_argument(
         '--overwrite-mesh',
         action='store_true',

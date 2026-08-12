@@ -27,17 +27,20 @@ from skrobot.utils.urdf_mesh import _should_skip_mesh_export
 from skrobot.utils.urdf_mesh import _write_meshes
 from skrobot.utils.urdf_mesh import apply_scale
 from skrobot.utils.urdf_mesh import bake_origin_into_meshes
+from skrobot.utils.urdf_mesh import claim_mesh_output_path
+from skrobot.utils.urdf_mesh import element_output_name
 from skrobot.utils.urdf_mesh import enable_mesh_cache  # NOQA: F401
 from skrobot.utils.urdf_mesh import export_mesh_format
 from skrobot.utils.urdf_mesh import force_visual_mesh_origin_to_zero
+from skrobot.utils.urdf_mesh import geometry_key
 from skrobot.utils.urdf_mesh import get_filename
 from skrobot.utils.urdf_mesh import get_path_with_cache  # NOQA: F401
 from skrobot.utils.urdf_mesh import load_meshes
 from skrobot.utils.urdf_mesh import mesh_processing_key
 from skrobot.utils.urdf_mesh import mesh_simplify_factor  # NOQA: F401
+from skrobot.utils.urdf_mesh import mesh_variant_suffix
 from skrobot.utils.urdf_mesh import no_mesh_load_mode  # NOQA: F401
 from skrobot.utils.urdf_mesh import resolve_filepath  # NOQA: F401
-from skrobot.utils.urdf_mesh import resolve_mesh_output_path
 from skrobot.utils.urdf_mesh import search_up  # NOQA: F401
 from skrobot.utils.urdf_mesh import source_urdf_path
 
@@ -705,6 +708,11 @@ class Mesh(URDFType):
         ``meshes``. ``None`` while the geometry is still the file's own.
         Saving the URDF gives baked geometry a file of its own, since the
         file it was loaded from no longer describes it.
+    element_name : str or None
+        Set by :class:`.Link` to name the element this mesh belongs to, so
+        that the file it gets to itself can be named after it. ``None`` for
+        a mesh that is not part of a link, which falls back to a name taken
+        from the geometry.
     """
     _ATTRIBS = {
         'filename': (str, True),
@@ -719,6 +727,7 @@ class Mesh(URDFType):
         self.scale = scale
         self.meshes = meshes
         self.baked_origin = None
+        self.element_name = None
 
     @property
     def filename(self):
@@ -857,6 +866,7 @@ class Mesh(URDFType):
         ext = (_CONFIGURABLE_VALUES['collision_mesh_format']
                if context == 'collision'
                else _CONFIGURABLE_VALUES['export_mesh_format'])
+        geometry = geometry_key(self.baked_origin)
 
         if _CONFIGURABLE_VALUES['blender_remesh']:
             meshes, output_file, output_urdf_filename, written = \
@@ -866,18 +876,20 @@ class Mesh(URDFType):
             # on top of its own source file.
             processing_key = ('' if _CONFIGURABLE_VALUES['overwrite_mesh']
                               else mesh_processing_key())
-            output_file, output_urdf_filename = resolve_mesh_output_path(
-                source_file, self.filename, ext, self.baked_origin,
-                processing_key)
+            output_file, output_urdf_filename = claim_mesh_output_path(
+                source_file, self.filename, ext,
+                mesh_variant_suffix(self.baked_origin, self.element_name),
+                geometry, processing_key)
             meshes, written = self.meshes, False
 
         if not written:
-            if _should_skip_mesh_export(output_file, context):
+            if _should_skip_mesh_export(output_file, context, geometry):
                 return self._mesh_node(output_urdf_filename)
             meshes = _apply_mesh_processing(
                 meshes, _CONFIGURABLE_VALUES['blender_remesh'])
             _write_meshes(meshes, output_file)
-            _EXPORTED_MESH_FILES[os.path.normpath(output_file)] = context
+            _EXPORTED_MESH_FILES[os.path.normpath(output_file)] = (
+                context, geometry)
 
         return self._mesh_node(output_urdf_filename)
 
@@ -2651,9 +2663,29 @@ class Link(URDFType):
         self.inertial = inertial
         self.visuals = visuals
         self.collisions = collisions
+        self._name_mesh_elements()
 
         self._visual_meshes = None
         self._collision_mesh = None
+
+    def _name_mesh_elements(self):
+        """Tell each of this link's meshes which element it belongs to.
+
+        An element whose ``<origin>`` has been baked into its vertices needs
+        an output file of its own, and the readable name for that file is
+        the element's. The mesh cannot work out which element it belongs to
+        by itself -- a :class:`.Geometry` does not know its
+        :class:`.Visual`, and a ``<visual>`` does not know its link -- so
+        the link, which knows both, hands the name down.
+        """
+        for context, elements in (('visual', self.visuals),
+                                  ('collision', self.collisions)):
+            elements = elements or []
+            for index, element in enumerate(elements):
+                mesh = getattr(element.geometry, 'mesh', None)
+                if mesh is not None:
+                    mesh.element_name = element_output_name(
+                        self.name, context, index, len(elements))
 
     @property
     def name(self):
