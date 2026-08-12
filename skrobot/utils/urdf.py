@@ -69,17 +69,50 @@ _REMESHED_FILES_CACHE = {}  # Cache to track which files have been remeshed
 
 
 @contextlib.contextmanager
+def _configured(**values):
+    """Set ``_CONFIGURABLE_VALUES`` entries for the duration of a block.
+
+    Every public context manager in this module is a thin wrapper around
+    this one, so that all of them restore state the same way: on the way
+    out, whatever the block did, and back to the value that was in force
+    on the way in rather than to a hard-coded default.
+
+    Both properties matter. A block that leaks its settings poisons the
+    rest of the process -- a batch converter that fails on one URDF would
+    convert the next one with the failed run's mesh format, scale and
+    origin baking still switched on, and a viewer opened afterwards would
+    load every model through them. Restoring the previous value (instead
+    of the default) additionally makes the managers nest.
+
+    Parameters
+    ----------
+    values : dict
+        ``_CONFIGURABLE_VALUES`` keys to set for the duration of the
+        block. A key that did not exist before is removed again.
+    """
+    missing = object()
+    previous = {key: _CONFIGURABLE_VALUES.get(key, missing) for key in values}
+    _CONFIGURABLE_VALUES.update(values)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is missing:
+                _CONFIGURABLE_VALUES.pop(key, None)
+            else:
+                _CONFIGURABLE_VALUES[key] = value
+
+
+@contextlib.contextmanager
 def mesh_simplify_factor(factor):
-    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = factor
-    yield
-    _CONFIGURABLE_VALUES["mesh_simplify_factor"] = np.inf
+    with _configured(mesh_simplify_factor=factor):
+        yield
 
 
 @contextlib.contextmanager
 def no_mesh_load_mode():
-    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = True
-    yield
-    _CONFIGURABLE_VALUES["no_mesh_load_mode"] = False
+    with _configured(no_mesh_load_mode=True):
+        yield
 
 
 @contextlib.contextmanager
@@ -97,54 +130,41 @@ def export_mesh_format(
         blender_executable=None,
         remeshed_suffix='_remeshed',
         draco_compression=False):
-    global _REMESHED_FILES_CACHE
-    _CONFIGURABLE_VALUES["export_mesh_format"] = mesh_format
-    _CONFIGURABLE_VALUES["collision_mesh_format"] = collision_mesh_format
-    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = \
-        decimation_area_ratio_threshold
-    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = \
-        simplify_vertex_clustering_voxel_size
-    _CONFIGURABLE_VALUES["target_triangles"] = target_triangles
-    _CONFIGURABLE_VALUES["overwrite_mesh"] = overwrite_mesh
-    _CONFIGURABLE_VALUES["blender_remesh"] = blender_remesh
-    _CONFIGURABLE_VALUES["blender_voxel_size"] = blender_voxel_size
-    _CONFIGURABLE_VALUES["blender_decimate"] = blender_decimate
-    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = blender_decimate_ratio
-    _CONFIGURABLE_VALUES["blender_executable"] = blender_executable
-    _CONFIGURABLE_VALUES["remeshed_suffix"] = remeshed_suffix
-    _CONFIGURABLE_VALUES["draco_compression"] = draco_compression
-    # Clear the remeshed files cache at the start of each export
-    _REMESHED_FILES_CACHE.clear()
-    yield
-    _CONFIGURABLE_VALUES["export_mesh_format"] = None
-    _CONFIGURABLE_VALUES["collision_mesh_format"] = None
-    _CONFIGURABLE_VALUES["decimation_area_ratio_threshold"] = None
-    _CONFIGURABLE_VALUES["simplify_vertex_clustering_voxel_size"] = None
-    _CONFIGURABLE_VALUES["target_triangles"] = None
-    _CONFIGURABLE_VALUES["overwrite_mesh"] = False
-    _CONFIGURABLE_VALUES["blender_remesh"] = False
-    _CONFIGURABLE_VALUES["blender_voxel_size"] = 0.002
-    _CONFIGURABLE_VALUES["blender_decimate"] = False
-    _CONFIGURABLE_VALUES["blender_decimate_ratio"] = 0.1
-    _CONFIGURABLE_VALUES["blender_executable"] = None
-    _CONFIGURABLE_VALUES["remeshed_suffix"] = '_remeshed'
-    _CONFIGURABLE_VALUES["draco_compression"] = False
-    # Clear cache after export is complete
-    _REMESHED_FILES_CACHE.clear()
+    with _configured(
+            export_mesh_format=mesh_format,
+            collision_mesh_format=collision_mesh_format,
+            decimation_area_ratio_threshold=decimation_area_ratio_threshold,
+            simplify_vertex_clustering_voxel_size=(
+                simplify_vertex_clustering_voxel_size),
+            target_triangles=target_triangles,
+            overwrite_mesh=overwrite_mesh,
+            blender_remesh=blender_remesh,
+            blender_voxel_size=blender_voxel_size,
+            blender_decimate=blender_decimate,
+            blender_decimate_ratio=blender_decimate_ratio,
+            blender_executable=blender_executable,
+            remeshed_suffix=remeshed_suffix,
+            draco_compression=draco_compression):
+        # Cleared at both ends: the cache records what this export has
+        # already remeshed, and must not be seen by, or survive into,
+        # another one.
+        _REMESHED_FILES_CACHE.clear()
+        try:
+            yield
+        finally:
+            _REMESHED_FILES_CACHE.clear()
 
 
 @contextlib.contextmanager
 def enable_mesh_cache():
-    _CONFIGURABLE_VALUES['enable_mesh_cache'] = True
-    yield
-    _CONFIGURABLE_VALUES['enable_mesh_cache'] = False
+    with _configured(enable_mesh_cache=True):
+        yield
 
 
 @contextlib.contextmanager
 def force_visual_mesh_origin_to_zero():
-    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = True
-    yield
-    _CONFIGURABLE_VALUES['force_visual_mesh_origin_to_zero'] = False
+    with _configured(force_visual_mesh_origin_to_zero=True):
+        yield
 
 
 def bake_origin_into_meshes(geometry, origin):
@@ -191,9 +211,8 @@ def bake_origin_into_meshes(geometry, origin):
 
 @contextlib.contextmanager
 def apply_scale(scale_factor):
-    _CONFIGURABLE_VALUES['scale_factor'] = scale_factor
-    yield
-    _CONFIGURABLE_VALUES['scale_factor'] = 1.0
+    with _configured(scale_factor=scale_factor):
+        yield
 
 
 @contextlib.contextmanager
@@ -213,12 +232,8 @@ def source_urdf_path(path):
     path : str
         Directory the URDF was loaded from.
     """
-    previous = _CONFIGURABLE_VALUES.get('_source_urdf_path')
-    _CONFIGURABLE_VALUES['_source_urdf_path'] = path
-    try:
+    with _configured(_source_urdf_path=path):
         yield
-    finally:
-        _CONFIGURABLE_VALUES['_source_urdf_path'] = previous
 
 
 def convert_urdf_meshes(urdf_path, output_path, mesh_format,

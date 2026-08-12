@@ -628,3 +628,37 @@ class TestSceneNormalsSurviveLoading(unittest.TestCase):
             np.asarray(meshes[0].vertex_normals),
             np.tile([0.0, -1.0, 0.0], (len(meshes[0].vertices), 1)),
             atol=1e-9)
+
+
+class TestConfiguredRestoresState(unittest.TestCase):
+    """The export settings are module-global, so a block that leaks them
+    poisons every later load and export in the same process."""
+
+    def test_a_raising_block_still_restores(self):
+        before = dict(urdf_utils._CONFIGURABLE_VALUES)
+        with pytest.raises(RuntimeError):
+            with urdf_utils.export_mesh_format('.stl',
+                                               collision_mesh_format='.glb',
+                                               target_triangles=100):
+                raise RuntimeError('export blew up')
+        self.assertEqual(urdf_utils._CONFIGURABLE_VALUES, before)
+
+    def test_a_raising_scale_or_origin_block_still_restores(self):
+        before = dict(urdf_utils._CONFIGURABLE_VALUES)
+        for manager in (urdf_utils.apply_scale(2.0),
+                        urdf_utils.force_visual_mesh_origin_to_zero(),
+                        urdf_utils.enable_mesh_cache(),
+                        urdf_utils.no_mesh_load_mode()):
+            with pytest.raises(RuntimeError):
+                with manager:
+                    raise RuntimeError('boom')
+            self.assertEqual(urdf_utils._CONFIGURABLE_VALUES, before)
+
+    def test_they_nest(self):
+        with urdf_utils.apply_scale(2.0):
+            with urdf_utils.apply_scale(3.0):
+                self.assertEqual(
+                    urdf_utils._CONFIGURABLE_VALUES['scale_factor'], 3.0)
+            # the outer block is still running and still means 2.0
+            self.assertEqual(
+                urdf_utils._CONFIGURABLE_VALUES['scale_factor'], 2.0)
