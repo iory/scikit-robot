@@ -16,9 +16,15 @@ from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import rpy2matrix
 from skrobot.coordinates.math import xyzrpy2matrix
+from skrobot.utils.urdf_mesh import _apply_mesh_processing
 from skrobot.utils.urdf_mesh import _CONFIGURABLE_VALUES
+from skrobot.utils.urdf_mesh import _export_session
+from skrobot.utils.urdf_mesh import _EXPORTED_MESH_FILES
 from skrobot.utils.urdf_mesh import _load_meshes
 from skrobot.utils.urdf_mesh import _REMESHED_FILES_CACHE
+from skrobot.utils.urdf_mesh import _replace_extension
+from skrobot.utils.urdf_mesh import _should_skip_mesh_export
+from skrobot.utils.urdf_mesh import _write_meshes
 from skrobot.utils.urdf_mesh import apply_scale
 from skrobot.utils.urdf_mesh import bake_origin_into_meshes
 from skrobot.utils.urdf_mesh import enable_mesh_cache  # NOQA: F401
@@ -27,21 +33,21 @@ from skrobot.utils.urdf_mesh import force_visual_mesh_origin_to_zero
 from skrobot.utils.urdf_mesh import get_filename
 from skrobot.utils.urdf_mesh import get_path_with_cache  # NOQA: F401
 from skrobot.utils.urdf_mesh import load_meshes
+from skrobot.utils.urdf_mesh import mesh_processing_key
 from skrobot.utils.urdf_mesh import mesh_simplify_factor  # NOQA: F401
 from skrobot.utils.urdf_mesh import no_mesh_load_mode  # NOQA: F401
 from skrobot.utils.urdf_mesh import resolve_filepath  # NOQA: F401
+from skrobot.utils.urdf_mesh import resolve_mesh_output_path
 from skrobot.utils.urdf_mesh import search_up  # NOQA: F401
 from skrobot.utils.urdf_mesh import source_urdf_path
 
 
-# Reading and resolving the files a URDF points at lives in
+# Reading, resolving and writing the files a URDF points at lives in
 # skrobot.utils.urdf_mesh. The imports above marked NOQA are not used in
 # this module; they are re-exported for the callers that have always
 # imported them from here.
 
 logger = getLogger(__name__)
-
-# Whether the one-time "install DracoPy" hint has already been emitted.
 
 
 def convert_urdf_meshes(urdf_path, output_path, mesh_format,
@@ -691,6 +697,14 @@ class Mesh(URDFType):
         The list of meshes is useful for visual geometries that
         might be composed of separate trimesh objects.
         If not specified, the mesh is loaded from the file using trimesh.
+
+    Attributes
+    ----------
+    baked_origin : (4, 4) float or None
+        Set by :func:`bake_origin_into_meshes` to the pose baked into
+        ``meshes``. ``None`` while the geometry is still the file's own.
+        Saving the URDF gives baked geometry a file of its own, since the
+        file it was loaded from no longer describes it.
     """
     _ATTRIBS = {
         'filename': (str, True),
@@ -704,6 +718,7 @@ class Mesh(URDFType):
         self.filename = filename
         self.scale = scale
         self.meshes = meshes
+        self.baked_origin = None
 
     @property
     def filename(self):
@@ -781,342 +796,167 @@ class Mesh(URDFType):
 
         return Mesh(**kwargs)
 
-    def _to_xml(self, parent, path):
-        # Get the filename
-        # Store original filename for remesh processing
-        original_urdf_filename = self.filename
+    def _resolve_source_file(self, path):
+        """Resolve this element's ``filename`` to a readable mesh file.
 
-        # Use source URDF path for mesh resolution if available
+        Parameters
+        ----------
+        path : str
+            Directory the URDF is being written to.
+
+        Returns
+        -------
+        str or None
+            The resolved path, or ``None`` if the file was not found.
+        """
         source_path = _CONFIGURABLE_VALUES.get('_source_urdf_path')
         if source_path is not None:
-            fn = get_filename(source_path, self.filename, makedirs=False)
-        else:
-            fn = get_filename(path, self.filename, makedirs=True)
+            # Saving to a different directory than the URDF was loaded
+            # from; the meshes still live beside the original.
+            return get_filename(source_path, self.filename, makedirs=False)
+        return get_filename(path, self.filename, makedirs=True)
 
-        if fn is None:
-            # File not found, skip mesh processing and just apply scaling
-            scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-            original_scale = None
-            if scale_factor != 1.0:
-                original_scale = self.scale.copy() if self.scale is not None else None
-                if self.scale is None:
-                    self.scale = np.array([scale_factor, scale_factor, scale_factor])
-                else:
-                    self.scale = self.scale * scale_factor
+    def _mesh_node(self, filename):
+        """Build this element's ``<mesh>`` node.
 
-            node = self._unparse(path)
+        Takes the filename to write into the node rather than reading
+        ``self.filename``, because the saved URDF may have to name a
+        converted or per-element file that is not the one this object was
+        loaded from. Nothing on ``self`` is modified, so there is no state
+        to restore on the way out and no way for one element's export to
+        be seen by the next.
 
-            # Restore original scale
-            if original_scale is not None:
-                self.scale = original_scale
-            elif scale_factor != 1.0:
-                self.scale = None
+        Parameters
+        ----------
+        filename : str
+            Value for the node's ``filename`` attribute.
 
-            return node
+        Returns
+        -------
+        node : :class:`lxml.etree.Element`
+            The ``<mesh>`` node.
+        """
+        scale = self.scale
+        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
+        if scale_factor != 1.0:
+            scale = (np.array([scale_factor] * 3) if scale is None
+                     else scale * scale_factor)
+        node = ET.Element(self._TAG)
+        node.attrib['filename'] = self._unparse_attrib(str, filename)
+        if scale is not None:
+            node.attrib['scale'] = self._unparse_attrib(np.ndarray, scale)
+        return node
 
-        # Determine which format to use based on context
-        is_collision = (_CONFIGURABLE_VALUES.get('_current_geometry_context')
-                        == 'collision')
-        ext = (_CONFIGURABLE_VALUES['collision_mesh_format'] if is_collision
+    def _to_xml(self, parent, path):
+        source_file = self._resolve_source_file(path)
+        if source_file is None:
+            # Nothing to convert; the URDF keeps the name it came with.
+            return self._mesh_node(self.filename)
+
+        context = _CONFIGURABLE_VALUES.get('_current_geometry_context')
+        ext = (_CONFIGURABLE_VALUES['collision_mesh_format']
+               if context == 'collision'
                else _CONFIGURABLE_VALUES['export_mesh_format'])
 
-        if ext is not None:
-            if not fn.endswith(ext):
-                name, _ = os.path.splitext(fn)
-                fn = name + ext
-                self.filename = os.path.splitext(self.filename)[0] + ext
-                if os.path.exists(fn) and not _CONFIGURABLE_VALUES['overwrite_mesh']:
-                    # skip mesh save process but still apply scaling
-                    scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-                    original_scale = None
-                    if scale_factor != 1.0:
-                        original_scale = self.scale.copy() if self.scale is not None else None
-                        if self.scale is None:
-                            self.scale = np.array([scale_factor, scale_factor, scale_factor])
-                        else:
-                            self.scale = self.scale * scale_factor
-
-                    node = self._unparse(path)
-
-                    # Restore original scale
-                    if original_scale is not None:
-                        self.scale = original_scale
-                    elif scale_factor != 1.0:
-                        self.scale = None
-
-                    return node
-
-        # Export the meshes as a single file
-        meshes = self.meshes
-
-        # Apply Blender remeshing if requested (before other simplifications)
-        blender_remesh_applied = False
         if _CONFIGURABLE_VALUES['blender_remesh']:
-            from pathlib import Path
-            global _REMESHED_FILES_CACHE
+            meshes, output_file, output_urdf_filename, written = \
+                self._remesh_with_blender(source_file, ext, context)
+        else:
+            # --overwrite-mesh is the opt-in to processed geometry landing
+            # on top of its own source file.
+            processing_key = ('' if _CONFIGURABLE_VALUES['overwrite_mesh']
+                              else mesh_processing_key())
+            output_file, output_urdf_filename = resolve_mesh_output_path(
+                source_file, self.filename, ext, self.baked_origin,
+                processing_key)
+            meshes, written = self.meshes, False
 
-            # Check if we already processed this file
-            # Use source path to find the actual existing mesh file
-            actual_source_file = get_filename(source_path if source_path is not None else path,
-                                              original_urdf_filename, makedirs=False)
-            if actual_source_file is None:
-                # Mesh file not found, skip remeshing
-                logger.warning("Source mesh file not found for remeshing: %s", original_urdf_filename)
-                blender_remesh_applied = False
-            else:
-                original_mesh_path = Path(actual_source_file)
-                remeshed_suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
+        if not written:
+            if _should_skip_mesh_export(output_file, context):
+                return self._mesh_node(output_urdf_filename)
+            meshes = _apply_mesh_processing(
+                meshes, _CONFIGURABLE_VALUES['blender_remesh'])
+            _write_meshes(meshes, output_file)
+            _EXPORTED_MESH_FILES[os.path.normpath(output_file)] = context
 
-                # Determine output filename based on remeshed_suffix
-                # Blender always outputs DAE format, so use .dae for remeshed file
-                remeshed_ext = '.dae'  # Blender remesh always creates DAE
-                if remeshed_suffix == '':
-                    # Empty suffix means overwrite original file
-                    remeshed_path = original_mesh_path
-                    remeshed_filename = original_mesh_path.name
-                else:
-                    # Create new file with specified suffix
-                    remeshed_filename = original_mesh_path.stem + remeshed_suffix + remeshed_ext
-                    remeshed_path = original_mesh_path.parent / remeshed_filename
+        return self._mesh_node(output_urdf_filename)
 
-                # Check if this file has already been remeshed in this export session
-                cache_key = str(original_mesh_path.resolve())
-                if cache_key in _REMESHED_FILES_CACHE:
-                    # Already processed, just update the filename reference
-                    logger.info("Reusing already remeshed file: %s", remeshed_path)
-                    fn = str(remeshed_path)
-                    # Load the remeshed mesh
-                    meshes = _load_meshes(fn)
-                    blender_remesh_applied = True
-                # If remeshed file already exists and is newer than original, use it
-                elif remeshed_suffix != '' and \
-                   remeshed_path.exists() and not _CONFIGURABLE_VALUES['overwrite_mesh']:
-                    orig_mtime = original_mesh_path.stat().st_mtime
-                    remesh_mtime = remeshed_path.stat().st_mtime
-                    if remesh_mtime > orig_mtime:
-                        logger.info("Using existing remeshed file: %s", remeshed_path)
-                        # Update fn to point to remeshed file
-                        fn = str(remeshed_path)
-                        # Load remeshed meshes
-                        meshes = _load_meshes(fn)
-                        blender_remesh_applied = True
-                        # Mark as processed
-                        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
-                    else:
-                        # Original is newer, need to remesh
-                        logger.info("Original mesh is newer, remeshing: %s", original_mesh_path)
-                        meshes = self._apply_blender_remesh(actual_source_file, ext, remeshed_path)
-                        # Update fn to point to new remeshed file
-                        fn = str(remeshed_path)
-                        blender_remesh_applied = True
-                        # Mark as processed
-                        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
-                else:
-                    # No remeshed file exists, overwrite requested, or empty suffix
-                    logger.info("Creating remeshed file: %s", remeshed_path)
-                    meshes = self._apply_blender_remesh(actual_source_file, remeshed_ext, remeshed_path)
-                    # Update fn to point to new remeshed file
-                    fn = str(remeshed_path)
-                    blender_remesh_applied = True
-                    # Mark as processed
-                    _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
+    def _remesh_with_blender(self, source_file, ext, context):
+        """Remesh through Blender, which writes the file itself.
 
-        # Apply Blender decimation (collapse) if requested. This reduces the
-        # triangle count while preserving shape and colors, and works on
-        # Blender 5.x because the mesh is exchanged in glb (not Collada).
-        if _CONFIGURABLE_VALUES['blender_decimate'] and not blender_remesh_applied:
-            from skrobot.utils.blender_mesh import decimate_with_blender
-            meshes = decimate_with_blender(
-                meshes,
-                ratio=_CONFIGURABLE_VALUES['blender_decimate_ratio'],
-                blender_executable=_CONFIGURABLE_VALUES['blender_executable'],
-                verbose=True,
-            )
+        Blender's voxel remesher reads and writes files rather than
+        meshes, so this stage picks its own output name --
+        ``<stem><remeshed_suffix>.dae`` beside the source, or the source
+        itself when the suffix is empty -- instead of
+        :func:`resolve_mesh_output_path`'s. An up-to-date remesh from an
+        earlier run, or one made for another element of this run, is
+        reused rather than made again.
 
-        if _CONFIGURABLE_VALUES["target_triangles"] is not None:
-            from skrobot.utils.mesh import auto_simplify_quadric_decimation_with_texture_preservation
-            meshes = auto_simplify_quadric_decimation_with_texture_preservation(
-                meshes, target_number_of_triangles=_CONFIGURABLE_VALUES[
-                    "target_triangles"], verbose=True)
-        elif _CONFIGURABLE_VALUES[
-                "decimation_area_ratio_threshold"] is not None:
-            from skrobot.utils.mesh import auto_simplify_quadric_decimation
-            meshes = auto_simplify_quadric_decimation(
-                meshes, area_ratio_threshold=_CONFIGURABLE_VALUES[
-                    "decimation_area_ratio_threshold"])
-        if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
-            from skrobot.utils.mesh import simplify_vertex_clustering
-            meshes = simplify_vertex_clustering(
-                meshes,
-                _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
-            )
+        Parameters
+        ----------
+        source_file : str
+            Resolved path of the element's mesh file.
+        ext : str or None
+            Target extension for this element, leading dot included.
+        context : str or None
+            ``'visual'`` or ``'collision'``.
 
-        # If collision mesh needs STL output, update fn to STL path
-        if blender_remesh_applied and is_collision and ext == '.stl' and fn.endswith('.dae'):
-            # fn currently points to remeshed DAE, but we need STL output for collision
-            stl_path = fn.replace('.dae', '.stl')
-            fn = stl_path
+        Returns
+        -------
+        meshes : list of :class:`~trimesh.base.Trimesh`
+            The remeshed geometry.
+        output_file : str
+            The file that holds, or still has to hold, that geometry.
+        output_urdf_filename : str
+            What the saved URDF should call it.
+        written : bool
+            Whether ``output_file`` is already on disk. ``False`` when a
+            collision element still has to be written out as STL.
+        """
+        from pathlib import Path
 
-        trimesh = _lazy_trimesh()
-        # Skip export if Blender remesh already saved the file, except for collision STL
-        # Collision meshes need to be exported as STL even after Blender remesh (DAE->STL conversion)
-        skip_export = blender_remesh_applied and not (is_collision and ext == '.stl' and fn.endswith('.stl'))
+        source_path = Path(source_file)
+        suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
+        # Blender hands back Collada whatever the element's target format.
+        if suffix == '':
+            remeshed_path = source_path
+        else:
+            remeshed_path = source_path.parent / (
+                source_path.stem + suffix + '.dae')
 
-        if not skip_export:
-            if fn.endswith('.dae'):
-                from skrobot.utils.mesh import split_mesh_by_face_color
-                export_meshes = []
-                has_texture_visual = False
-                for mesh in meshes:
-                    has_texture_visual |= mesh.visual.kind == 'texture'
-                    # Fix: STL files load with visual.defined=False even though
-                    # they have default face colors. Explicitly setting
-                    # face_colors makes visual.defined=True and visual.kind='face',
-                    # which allows trimesh's export_collada to use the colors.
-                    if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
-                        mesh.visual.face_colors = mesh.visual.face_colors
-                    export_meshes.extend(split_mesh_by_face_color(mesh))
-                meshes = export_meshes
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] is True \
-                        or not (os.path.exists(fn) and has_texture_visual):
-                    # don't overwrite textured mesh.
-                    dae_data = trimesh.exchange.dae.export_collada(meshes)
-                    with open(fn, 'wb') as f:
-                        f.write(dae_data)
-            elif fn.endswith('.stl'):
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    meshes = trimesh.util.concatenate(meshes)
-                    trimesh.exchange.export.export_mesh(meshes, fn)
-            elif fn.endswith('.glb') or fn.endswith('.gltf'):
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    draco = _CONFIGURABLE_VALUES.get('draco_compression', False)
+        cache_key = str(source_path.resolve())
+        reusable = (
+            suffix != ''
+            and remeshed_path.exists()
+            and not _CONFIGURABLE_VALUES['overwrite_mesh']
+            and remeshed_path.stat().st_mtime > source_path.stat().st_mtime)
+        if cache_key in _REMESHED_FILES_CACHE or reusable:
+            logger.info('Reusing remeshed file: %s', remeshed_path)
+            meshes = _load_meshes(str(remeshed_path))
+        else:
+            logger.info('Creating remeshed file: %s', remeshed_path)
+            meshes = self._apply_blender_remesh(
+                source_file, '.dae', remeshed_path)
+        _REMESHED_FILES_CACHE[cache_key] = str(remeshed_path)
 
-                    # Convert texture visuals without actual image to
-                    # vertex colors.  Many DAE files store per-material
-                    # diffuse colors this way; without conversion the
-                    # colors are lost in GLB export.
-                    for mesh in meshes:
-                        if mesh.visual.kind == 'texture':
-                            mat = getattr(mesh.visual, 'material', None)
-                            has_image = (
-                                mat is not None
-                                and (
-                                    (hasattr(mat, 'image')
-                                     and mat.image is not None)
-                                    or (hasattr(mat, 'baseColorTexture')
-                                        and mat.baseColorTexture
-                                        is not None)
-                                )
-                            )
-                            if not has_image:
-                                try:
-                                    color_visual = mesh.visual.to_color()
-                                    vertex_colors = np.asarray(
-                                        color_visual.vertex_colors)
-                                    if len(vertex_colors) != len(mesh.vertices):
-                                        # ``to_color`` can return a color array
-                                        # whose length does not match the
-                                        # vertex count (e.g. one entry per
-                                        # material) when the TextureVisuals has
-                                        # no UV coordinates.  GLB export then
-                                        # silently drops the mismatched colors
-                                        # and the mesh becomes the default gray.
-                                        # Broadcast the single material color to
-                                        # every vertex so the color survives.
-                                        material_color = getattr(
-                                            mat, 'main_color', None)
-                                        if material_color is None:
-                                            material_color = (
-                                                vertex_colors[0]
-                                                if len(vertex_colors)
-                                                else [200, 200, 200, 255])
-                                        material_color = np.asarray(
-                                            material_color)
-                                        if material_color.dtype.kind == 'f':
-                                            material_color = (
-                                                material_color * 255.0).round()
-                                        material_color = material_color.astype(
-                                            np.uint8)
-                                        if material_color.shape[0] == 3:
-                                            material_color = np.append(
-                                                material_color, np.uint8(255))
-                                        vertex_colors = np.tile(
-                                            material_color,
-                                            (len(mesh.vertices), 1))
-                                        color_visual = \
-                                            trimesh.visual.ColorVisuals(
-                                                mesh=mesh,
-                                                vertex_colors=vertex_colors)
-                                    mesh.visual = color_visual
-                                except Exception:
-                                    pass
+        output_file = str(remeshed_path)
+        written = True
+        if context == 'collision' and ext == '.stl':
+            # Blender writes Collada; a collision element wants STL, so an
+            # STL is the one thing still left to write. An empty suffix
+            # sends the remesh into the source file whatever that is
+            # named, and a name that is neither Collada nor STL is left
+            # alone rather than turned into an STL nothing refers to.
+            if output_file.endswith('.dae'):
+                output_file = _replace_extension(output_file, '', '.stl')
+            written = not output_file.endswith('.stl')
 
-                    if draco:
-                        from skrobot.utils.draco import export_glb_with_draco
-                        # Skip if collision would overwrite a visual GLB
-                        if is_collision and os.path.exists(fn):
-                            pass
-                        else:
-                            export_glb_with_draco(meshes, fn)
-                    else:
-                        if is_collision and os.path.exists(fn):
-                            pass
-                        else:
-                            scene = trimesh.Scene()
-                            for mesh in meshes:
-                                scene.add_geometry(mesh)
-                            scene.export(fn)
-            else:
-                if _CONFIGURABLE_VALUES['overwrite_mesh'] \
-                        or not os.path.exists(fn):
-                    trimesh.exchange.export.export_mesh(meshes, fn)
-
-        # Apply scale factor to the mesh if different from 1.0
-        scale_factor = _CONFIGURABLE_VALUES.get('scale_factor', 1.0)
-        original_scale = None
-        if scale_factor != 1.0:
-            original_scale = self.scale.copy() if self.scale is not None else None
-            if self.scale is None:
-                self.scale = np.array([scale_factor, scale_factor, scale_factor])
-            else:
-                self.scale = self.scale * scale_factor
-
-        # Update self.filename to point to remeshed file for URDF output
-        if blender_remesh_applied:
-            remeshed_suffix = _CONFIGURABLE_VALUES.get('remeshed_suffix', '_remeshed')
-            if remeshed_suffix != '':
-                # Determine the output file extension from fn (actual output file)
-                # This handles cases where collision meshes are converted DAE->STL
-                output_ext = os.path.splitext(fn)[1]
-
-                # Extract just the filename part from the URDF path
-                if original_urdf_filename.startswith('package://'):
-                    # Handle ROS package:// URIs
-                    from urllib.parse import urlparse
-                    parsed = urlparse(original_urdf_filename)
-                    pkg_path = parsed.netloc + parsed.path
-                    base_name, _ = os.path.splitext(pkg_path)
-                    self.filename = 'package://' + base_name + remeshed_suffix + output_ext
-                else:
-                    # Handle regular file paths
-                    base_name, _ = os.path.splitext(original_urdf_filename)
-                    self.filename = base_name + remeshed_suffix + output_ext
-
-        # Unparse the node
-        node = self._unparse(path)
-
-        # Restore original scale (but NOT filename for remeshed meshes)
-        # Only restore filename if remesh was not applied
-        if not blender_remesh_applied:
-            self.filename = original_urdf_filename
-        if original_scale is not None:
-            self.scale = original_scale
-        elif scale_factor != 1.0:
-            self.scale = None
-
-        return node
+        if suffix == '':
+            output_urdf_filename = self.filename
+        else:
+            output_urdf_filename = _replace_extension(
+                self.filename, suffix, os.path.splitext(output_file)[1])
+        return meshes, output_file, output_urdf_filename, written
 
     def _apply_blender_remesh(self, input_mesh_path, ext, output_path):
         """Apply Blender remeshing and save result.
@@ -3188,7 +3028,8 @@ class URDF(URDFType):
         else:
             path, _ = os.path.split(os.path.realpath(file_obj.name))
 
-        node = self._to_xml(None, path)
+        with _export_session():
+            node = self._to_xml(None, path)
         tree = ET.ElementTree(node)
         tree.write(file_obj, pretty_print=True,
                    xml_declaration=True, encoding='utf-8')

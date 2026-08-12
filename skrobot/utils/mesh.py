@@ -659,3 +659,35 @@ def _dump_scene(scene):
             mesh.vertex_normals = _transform_vertex_normals(stored, transform)
         meshes.append(mesh)
     return meshes
+
+
+def _material_color_to_vertex_colors(mesh, material):
+    """Broadcast a material's single color over every vertex of ``mesh``.
+
+    ``TextureVisuals.to_color`` can return a color array whose length does
+    not match the vertex count (e.g. one entry per material) when there
+    are no UV coordinates. glTF export silently drops the mismatched
+    colors and the mesh comes out the default gray.
+
+    Parameters
+    ----------
+    mesh : :class:`~trimesh.base.Trimesh`
+        Mesh the colors are for.
+    material : object or None
+        The visual's material, read for its ``main_color``.
+
+    Returns
+    -------
+    (n, 4) uint8
+        One color per vertex.
+    """
+    color = getattr(material, 'main_color', None)
+    if color is None:
+        color = [200, 200, 200, 255]
+    color = np.asarray(color)
+    if color.dtype.kind == 'f':
+        color = (color * 255.0).round()
+    color = color.astype(np.uint8)
+    if color.shape[0] == 3:
+        color = np.append(color, np.uint8(255))
+    return np.tile(color, (len(mesh.vertices), 1))

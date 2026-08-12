@@ -34,7 +34,11 @@ def main():
     parser.add_argument('--inplace', '-i', action='store_true',
                         help='Modify the input URDF file inplace. If not specified, a new file is created.')  # NOQA
     parser.add_argument('--force-zero-origin', action='store_true',
-                        help='Force the visual mesh origin to zero.')
+                        help='Force the visual mesh origin to zero. Each '
+                        'element\'s origin is baked into its own copy of '
+                        'the mesh, so one mesh file referenced with several '
+                        'origins is written out once per origin, under a '
+                        'name suffixed with a hash of it.')
     parser.add_argument(
         '--overwrite-mesh',
         action='store_true',

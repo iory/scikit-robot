@@ -11,6 +11,7 @@ import pytest
 from skrobot.utils import mesh as mesh_utils
 from skrobot.utils import urdf as urdf_utils
 from skrobot.utils import urdf_mesh
+from skrobot.utils.package import is_package_installed
 
 
 class TestLoadMeshesNoneGuard(unittest.TestCase):
@@ -664,3 +665,271 @@ class TestConfiguredRestoresState(unittest.TestCase):
             # the outer block is still running and still means 2.0
             self.assertEqual(
                 urdf_mesh._CONFIGURABLE_VALUES['scale_factor'], 2.0)
+
+
+class TestResolveMeshOutputPath(unittest.TestCase):
+    """An output mesh file may only ever hold geometry that matches it.
+
+    ``force_visual_mesh_origin_to_zero`` gives each element its own baked
+    copy of a shared mesh, and the simplification options rewrite every
+    mesh of an export. Either way the geometry no longer matches the file
+    it was read from, and naming the output after that file alone makes
+    elements overwrite each other or destroy the input.
+    """
+
+    def _origin(self, xyz):
+        origin = np.eye(4)
+        origin[:3, 3] = xyz
+        return origin
+
+    def test_unbaked_geometry_keeps_the_plain_name(self):
+        output_file, urdf_filename = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', None)
+        self.assertEqual(output_file, '/meshes/box.dae')
+        self.assertEqual(urdf_filename, 'box.dae')
+
+    def test_a_package_uri_is_rewritten_like_a_path(self):
+        _, urdf_filename = urdf_mesh.resolve_mesh_output_path(
+            '/share/pkg/meshes/box.stl', 'package://pkg/meshes/box.stl',
+            '.dae', None)
+        self.assertEqual(urdf_filename, 'package://pkg/meshes/box.dae')
+
+    def test_two_baked_origins_get_two_files(self):
+        first, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
+        second, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 5]))
+        self.assertNotEqual(first, second)
+
+    def test_the_same_baked_origin_shares_one_file(self):
+        first, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
+        second, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', self._origin([0, 0, 1]))
+        self.assertEqual(first, second)
+
+    def test_a_negative_zero_is_the_same_origin(self):
+        """-0.0 and 0.0 are equal but have different bytes; hashing the
+        raw bytes would hand one origin two files."""
+        plus, minus = np.eye(4), np.eye(4)
+        minus[0, 3] = -0.0
+        self.assertEqual(urdf_mesh.geometry_variant_suffix(plus),
+                         urdf_mesh.geometry_variant_suffix(minus))
+
+    def test_baking_survives_the_format_staying_the_same(self):
+        output_file, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.stl', self._origin([0, 0, 1]))
+        self.assertNotEqual(output_file, '/meshes/box.stl')
+
+    def test_processing_only_renames_when_it_would_hit_the_source(self):
+        # converting the format already moves the output off the source
+        converted, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.dae', None, '_deadbeef')
+        self.assertEqual(converted, '/meshes/box.dae')
+        # ... but keeping the format would land on the input file
+        kept, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.stl', None, '_deadbeef')
+        self.assertEqual(kept, '/meshes/box_deadbeef.stl')
+
+    def test_an_empty_processing_key_lets_the_source_be_replaced(self):
+        # what --overwrite-mesh asks for
+        kept, _ = urdf_mesh.resolve_mesh_output_path(
+            '/meshes/box.stl', 'box.stl', '.stl', None, '')
+        self.assertEqual(kept, '/meshes/box.stl')
+
+
+class TestMeshProcessingKey(unittest.TestCase):
+
+    def test_it_is_empty_without_processing(self):
+        self.assertEqual(urdf_mesh.mesh_processing_key(), '')
+
+    def test_different_settings_do_not_share_a_file(self):
+        with urdf_mesh.export_mesh_format(
+                '.stl', simplify_vertex_clustering_voxel_size=0.01):
+            coarse = urdf_mesh.mesh_processing_key()
+        with urdf_mesh.export_mesh_format(
+                '.stl', simplify_vertex_clustering_voxel_size=0.05):
+            finer = urdf_mesh.mesh_processing_key()
+        self.assertTrue(coarse)
+        self.assertNotEqual(coarse, finer)
+
+
+class TestConvertUrdfMeshesSharedMesh(unittest.TestCase):
+    """Saving must keep apart what loading kept apart.
+
+    ``force_visual_mesh_origin_to_zero`` bakes each element's origin into
+    its own copy of the mesh. Writing those copies back out under the
+    source filename hands every element one file: whichever element is
+    written decides the geometry for all of them, and the others end up
+    displaced by the difference between their origins.
+    """
+
+    URDF_TEMPLATE = """<?xml version="1.0"?>
+<robot name="shared_mesh">
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 1" rpy="0 0 0"/>
+      <geometry><mesh filename="box.stl"/></geometry>
+    </visual>
+  </link>
+  <link name="second_link">
+    <visual>
+      <origin xyz="0 0 5" rpy="0 0 0"/>
+      <geometry><mesh filename="box.stl"/></geometry>
+    </visual>
+  </link>
+  <joint name="fixed_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="second_link"/>
+  </joint>
+</robot>
+"""
+
+    def setUp(self):
+        import trimesh
+
+        self._tmp = tempfile.mkdtemp()
+        trimesh.creation.box(extents=[0.2, 0.2, 0.2]).export(
+            os.path.join(self._tmp, 'box.stl'))
+        self._urdf_path = os.path.join(self._tmp, 'robot.urdf')
+        with open(self._urdf_path, 'w') as f:
+            f.write(self.URDF_TEMPLATE)
+        urdf_mesh._MESH_CACHE.clear()
+
+    def tearDown(self):
+        import shutil
+
+        urdf_mesh._MESH_CACHE.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _convert(self, mesh_format='.dae', **kwargs):
+        import trimesh
+
+        output_path = os.path.join(self._tmp, 'converted.urdf')
+        urdf_utils.convert_urdf_meshes(
+            self._urdf_path, output_path, mesh_format, **kwargs)
+        centers = []
+        for visual in etree.parse(output_path).getroot().iter('visual'):
+            filename = visual.find('geometry/mesh').get('filename')
+            mesh = trimesh.load(
+                os.path.join(self._tmp, filename), force='mesh')
+            centers.append(mesh.bounding_box.centroid[2])
+        return centers
+
+    def test_each_element_gets_the_geometry_it_was_given(self):
+        np.testing.assert_allclose(
+            self._convert(force_zero_visual_origin=True), [1.0, 5.0],
+            atol=1e-6)
+
+    def test_overwriting_does_not_make_one_element_win(self):
+        np.testing.assert_allclose(
+            self._convert(force_zero_visual_origin=True, overwrite_mesh=True),
+            [1.0, 5.0], atol=1e-6)
+
+    def test_baking_survives_the_format_staying_the_same(self):
+        # Converting .stl to .stl leaves the output path equal to the
+        # input path, where an "it already exists" check used to skip the
+        # write and leave both elements pointing at unbaked geometry.
+        np.testing.assert_allclose(
+            self._convert('.stl', force_zero_visual_origin=True), [1.0, 5.0],
+            atol=1e-6)
+
+    def test_the_source_mesh_is_left_alone(self):
+        import trimesh
+
+        self._convert('.stl', force_zero_visual_origin=True)
+        source = trimesh.load(os.path.join(self._tmp, 'box.stl'))
+        np.testing.assert_allclose(
+            source.bounding_box.centroid, [0.0, 0.0, 0.0], atol=1e-9)
+
+    def test_saving_twice_writes_the_meshes_twice(self):
+        """The record of what has already been written belongs to one
+        save. A module-global one that nothing resets makes the next save
+        skip meshes that are not there yet."""
+        first = os.path.join(self._tmp, 'first.urdf')
+        urdf_utils.convert_urdf_meshes(
+            self._urdf_path, first, '.dae', force_zero_visual_origin=True)
+        written = [name for name in os.listdir(self._tmp)
+                   if name.endswith('.dae')]
+        # one per baked origin
+        self.assertEqual(len(written), 2)
+        for name in written:
+            os.remove(os.path.join(self._tmp, name))
+
+        second = os.path.join(self._tmp, 'second.urdf')
+        urdf_utils.convert_urdf_meshes(
+            self._urdf_path, second, '.dae', force_zero_visual_origin=True)
+        for name in written:
+            self.assertTrue(os.path.exists(os.path.join(self._tmp, name)),
+                            '{} was not written again'.format(name))
+
+    def test_an_unbaked_shared_mesh_still_shares_one_file(self):
+        # Without baking the elements really do have the same geometry;
+        # giving each of them a file would be pure duplication.
+        output_path = os.path.join(self._tmp, 'converted.urdf')
+        urdf_utils.convert_urdf_meshes(self._urdf_path, output_path, '.dae')
+        filenames = {visual.find('geometry/mesh').get('filename') for visual
+                     in etree.parse(output_path).getroot().iter('visual')}
+        self.assertEqual(filenames, {'box.dae'})
+
+
+@pytest.mark.skipif(
+    not is_package_installed('open3d'),
+    reason='the simplification this exercises runs through open3d')
+class TestConvertUrdfMeshesSimplification(unittest.TestCase):
+    """A simplified mesh must reach the file the saved URDF points at."""
+
+    URDF_TEMPLATE = """<?xml version="1.0"?>
+<robot name="ball">
+  <link name="base_link">
+    <visual><geometry><mesh filename="ball.stl"/></geometry></visual>
+  </link>
+</robot>
+"""
+
+    def setUp(self):
+        import trimesh
+
+        self._tmp = tempfile.mkdtemp()
+        self._source = trimesh.creation.icosphere(subdivisions=3, radius=0.1)
+        self._source.export(os.path.join(self._tmp, 'ball.stl'))
+        self._urdf_path = os.path.join(self._tmp, 'robot.urdf')
+        with open(self._urdf_path, 'w') as f:
+            f.write(self.URDF_TEMPLATE)
+        urdf_mesh._MESH_CACHE.clear()
+
+    def tearDown(self):
+        import shutil
+
+        urdf_mesh._MESH_CACHE.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _faces_of_the_saved_mesh(self, **kwargs):
+        import trimesh
+
+        output_path = os.path.join(self._tmp, 'converted.urdf')
+        urdf_utils.convert_urdf_meshes(
+            self._urdf_path, output_path, '.stl',
+            simplify_vertex_clustering_voxel_size=0.05, **kwargs)
+        filename = etree.parse(output_path).getroot().find(
+            'link/visual/geometry/mesh').get('filename')
+        mesh = trimesh.load(os.path.join(self._tmp, filename), force='mesh')
+        return len(mesh.faces)
+
+    def test_it_is_written_even_when_the_format_does_not_change(self):
+        self.assertLess(self._faces_of_the_saved_mesh(),
+                        len(self._source.faces))
+
+    def test_it_does_not_land_on_top_of_its_own_source(self):
+        import trimesh
+
+        self._faces_of_the_saved_mesh()
+        source = trimesh.load(os.path.join(self._tmp, 'ball.stl'))
+        self.assertEqual(len(source.faces), len(self._source.faces))
+
+    def test_overwrite_mesh_asks_for_the_source_to_be_replaced(self):
+        import trimesh
+
+        self._faces_of_the_saved_mesh(overwrite_mesh=True)
+        source = trimesh.load(os.path.join(self._tmp, 'ball.stl'))
+        self.assertLess(len(source.faces), len(self._source.faces))

@@ -1,8 +1,9 @@
-"""The file side of a URDF: resolving its mesh references and loading them.
+"""The file side of a URDF: resolving, loading and writing its meshes.
 
 A URDF names its geometry indirectly -- a relative path or a
 ``package://`` URI -- and every one of those names has to be turned into a
-file on disk and read. That is what this module does, leaving
+file on disk, read, and (when converting a model) written back out in
+another format. That is what this module does, leaving
 :mod:`skrobot.utils.urdf` to the XML types themselves.
 
 It is organised in the order a mesh travels:
@@ -11,10 +12,18 @@ It is organised in the order a mesh travels:
   the ``_to_xml`` methods of types that cannot take extra arguments, and
   the context managers that scope them;
 * resolving a URDF's file references, including ROS package lookup;
-* loading meshes, with the caches and the vertex-normal handling.
+* loading meshes, with the caches and the vertex-normal handling;
+* deciding what an element's mesh is written to, and writing it.
+
+The one rule the last part exists to keep is that **an output mesh file
+only ever holds geometry that matches it**: an element whose vertices were
+changed -- by baking its origin in, or by simplification -- may not be
+written under the name of the file it was read from, or under a name
+another element with different geometry is using.
 """
 
 import contextlib
+import hashlib
 from logging import getLogger
 import os
 import pickle
@@ -44,6 +53,7 @@ except ImportError:
 
 logger = getLogger(__name__)
 
+# Whether the one-time "install DracoPy" hint has already been emitted.
 # A scene may reference many Draco-compressed meshes; we warn per file but
 # only show the verbose installation instruction once per process.
 _DRACO_MISSING_HINT_SHOWN = False
@@ -69,6 +79,10 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         }
 _MESH_CACHE = {}
 _REMESHED_FILES_CACHE = {}  # Cache to track which files have been remeshed
+# Mesh files written by the save currently in progress, mapping the
+# normalized output path to the geometry context ('visual' or 'collision')
+# that wrote it. Scoped by :func:`_export_session`.
+_EXPORTED_MESH_FILES = {}
 
 
 @contextlib.contextmanager
@@ -148,14 +162,26 @@ def export_mesh_format(
             blender_executable=blender_executable,
             remeshed_suffix=remeshed_suffix,
             draco_compression=draco_compression):
-        # Cleared at both ends: the cache records what this export has
-        # already remeshed, and must not be seen by, or survive into,
-        # another one.
+        yield
+
+
+@contextlib.contextmanager
+def _export_session():
+    """Scope the record of what one :meth:`URDF.save` has already written.
+
+    Both caches say "this file is already the geometry we were about to
+    write", which is only true of the save that wrote it. Letting either
+    outlive its save makes the next one skip meshes that are not there
+    yet -- and a module-global cache that nothing resets is how a
+    second ``URDF.load`` in one process used to come out collapsed.
+    """
+    _REMESHED_FILES_CACHE.clear()
+    _EXPORTED_MESH_FILES.clear()
+    try:
+        yield
+    finally:
         _REMESHED_FILES_CACHE.clear()
-        try:
-            yield
-        finally:
-            _REMESHED_FILES_CACHE.clear()
+        _EXPORTED_MESH_FILES.clear()
 
 
 @contextlib.contextmanager
@@ -189,7 +215,11 @@ def bake_origin_into_meshes(geometry, origin):
     geometry : :class:`.Geometry`
         Geometry whose meshes are baked. Only a ``<mesh>`` geometry is
         touched; a primitive carries no vertices to bake into and is left
-        alone. Its ``mesh.meshes`` is replaced with the transformed copies.
+        alone. Its ``mesh.meshes`` is replaced with the transformed copies,
+        and ``mesh.baked_origin`` records what was baked -- the geometry no
+        longer matches the file it was loaded from, so saving the URDF has
+        to give it a file of its own (see
+        :func:`resolve_mesh_output_path`).
     origin : (4, 4) float
         Pose to bake into the vertices. Treated as identity within
         ``1e-8``, in which case nothing is copied or transformed.
@@ -210,6 +240,7 @@ def bake_origin_into_meshes(geometry, origin):
             visual.material = original.material
         baked_meshes.append(baked_mesh)
     geometry.mesh.meshes = baked_meshes
+    geometry.mesh.baked_origin = np.array(origin, dtype=np.float64)
 
 
 @contextlib.contextmanager
@@ -718,3 +749,313 @@ def _load_meshes(filename):
                           trimesh.visual.material.PBRMaterial):
                 mesh.visual.material.baseColorFactor[3] = 255
     return meshes
+
+
+def _replace_extension(filename, suffix, ext):
+    """Insert ``suffix`` before, and replace, a filename's extension.
+
+    Works on a plain path and on a ``package://`` URI alike, since both end
+    in ``<stem>.<ext>``.
+
+    Parameters
+    ----------
+    filename : str
+        Path or URI to rewrite.
+    suffix : str
+        Inserted between the stem and the extension. May be empty.
+    ext : str or None
+        Replacement extension, leading dot included. ``None`` keeps the
+        current one.
+
+    Returns
+    -------
+    str
+        The rewritten path or URI.
+    """
+    stem, current_ext = os.path.splitext(filename)
+    return stem + suffix + (current_ext if ext is None else ext)
+
+
+def geometry_variant_suffix(baked_origin):
+    """Filename suffix distinguishing one baked geometry from another.
+
+    ``force_visual_mesh_origin_to_zero`` bakes each element's ``<origin>``
+    into its own copy of the mesh, so several elements sharing one mesh
+    file end up with *different* geometry. They can no longer share one
+    output file: whichever element is written first (or last, under
+    ``overwrite_mesh``) would decide the geometry for all of them, and the
+    others would be misplaced by the difference between their origins.
+
+    The suffix is a hash of the baked pose, so it is stable across runs and
+    two elements that baked the *same* origin still share a single file.
+
+    Parameters
+    ----------
+    baked_origin : (4, 4) float or None
+        The pose baked into the vertices, or ``None`` if the geometry is
+        still the file's own.
+
+    Returns
+    -------
+    str
+        ``''`` for unbaked geometry, otherwise ``'_'`` and eight hex
+        digits.
+    """
+    if baked_origin is None:
+        return ''
+    origin = np.round(np.asarray(baked_origin, dtype=np.float64), 9)
+    # -0.0 and 0.0 compare equal but have different bytes; without this two
+    # elements baking the same origin would get two files.
+    origin[origin == 0] = 0.0
+    return '_' + hashlib.md5(origin.tobytes()).hexdigest()[:8]
+
+
+def mesh_processing_key():
+    """Filename suffix identifying the configured mesh processing.
+
+    Decimation, vertex clustering and the Blender modifiers change the
+    geometry for the whole export, so unlike a baked origin they do not
+    tell two elements apart. What they do tell apart is the processed mesh
+    from the file it was read out of -- which matters when the target
+    format equals the source format and the natural output path is the
+    input file itself.
+
+    The key is a hash of the settings, so re-running with the same
+    settings reuses the file and re-running with different ones does not
+    quietly inherit the previous result.
+
+    Returns
+    -------
+    str
+        ``''`` when nothing is configured, otherwise ``'_'`` and eight hex
+        digits.
+    """
+    settings = [_CONFIGURABLE_VALUES.get(key) for key in (
+        'target_triangles',
+        'decimation_area_ratio_threshold',
+        'simplify_vertex_clustering_voxel_size',
+        'blender_decimate',
+        'blender_decimate_ratio')]
+    if not any(settings[:4]):
+        return ''
+    digest = hashlib.md5(repr(settings).encode('utf-8')).hexdigest()
+    return '_' + digest[:8]
+
+
+def resolve_mesh_output_path(source_file, urdf_filename, ext, baked_origin,
+                             processing_key=''):
+    """Decide where an element's mesh is written, and how the URDF names it.
+
+    The single place that maps an element to an output mesh file. Every
+    bug in which two elements silently shared one file, or in which a
+    processed mesh landed on top of its own source, was a disagreement
+    about this mapping, so it holds the invariant those bugs broke:
+
+        an output file only ever holds geometry that matches it.
+
+    Two things can make an element's geometry differ from the file it was
+    read from -- a baked origin, which differs per element, and the
+    configured processing, which does not -- and each contributes to the
+    name. The baked origin always does, since elements sharing a file
+    otherwise overwrite each other. The processing only has to when the
+    file would otherwise be the source itself, and it is left out when the
+    caller passes an empty ``processing_key`` to allow exactly that.
+
+    Parameters
+    ----------
+    source_file : str
+        Resolved path of the mesh file the element was loaded from.
+    urdf_filename : str
+        The element's ``filename`` attribute, as it appears in the URDF --
+        a relative path or a ``package://`` URI.
+    ext : str or None
+        Target extension, leading dot included. ``None`` keeps the source
+        format.
+    baked_origin : (4, 4) float or None
+        Pose baked into this element's vertices, if any.
+    processing_key : str
+        :func:`mesh_processing_key`, or ``''`` to let a processed mesh
+        replace its source.
+
+    Returns
+    -------
+    output_file : str
+        Path to write the mesh to.
+    output_urdf_filename : str
+        What the saved URDF should call it.
+    """
+    suffix = geometry_variant_suffix(baked_origin)
+    output_file = _replace_extension(source_file, suffix, ext)
+    if processing_key and os.path.normpath(output_file) == os.path.normpath(
+            source_file):
+        suffix += processing_key
+        output_file = _replace_extension(source_file, suffix, ext)
+    return output_file, _replace_extension(urdf_filename, suffix, ext)
+
+
+def _should_skip_mesh_export(output_file, context):
+    """Whether an element's mesh file is already what it has to be.
+
+    Two reasons, kept together so that the interaction between them is
+    visible:
+
+    * Another element of this export already wrote the file. One mesh
+      shared by several links needs writing once. A ``<collision>``
+      additionally must not overwrite what a ``<visual>`` wrote, because
+      the collision export concatenates the meshes and drops their
+      materials -- it would strip the colors off the visual mesh. The
+      reverse is an upgrade and is allowed.
+    * The file already exists from an earlier run and ``overwrite_mesh``
+      was not given.
+
+    Skipping is safe in both cases only because
+    :func:`resolve_mesh_output_path` guarantees that a file's name matches
+    its content: an existing file is the geometry we were about to write.
+
+    Parameters
+    ----------
+    output_file : str
+        Path the element would be written to.
+    context : str or None
+        ``'visual'`` or ``'collision'``.
+
+    Returns
+    -------
+    bool
+        True if the write must be skipped.
+    """
+    key = os.path.normpath(output_file)
+    written_by = _EXPORTED_MESH_FILES.get(key)
+    if written_by is not None:
+        return not (written_by == 'collision' and context == 'visual')
+    return (not _CONFIGURABLE_VALUES['overwrite_mesh']
+            and os.path.exists(key))
+
+
+def _apply_mesh_processing(meshes, blender_remesh_applied):
+    """Run the configured geometry-reducing steps over ``meshes``.
+
+    Parameters
+    ----------
+    meshes : list of :class:`~trimesh.base.Trimesh`
+        Meshes to process.
+    blender_remesh_applied : bool
+        Whether Blender already remeshed them. Its voxel remesher and the
+        decimate modifier are alternatives, not a pipeline.
+
+    Returns
+    -------
+    list of :class:`~trimesh.base.Trimesh`
+        The processed meshes, or the originals if nothing is configured.
+    """
+    if _CONFIGURABLE_VALUES['blender_decimate'] and not blender_remesh_applied:
+        from skrobot.utils.blender_mesh import decimate_with_blender
+        meshes = decimate_with_blender(
+            meshes,
+            ratio=_CONFIGURABLE_VALUES['blender_decimate_ratio'],
+            blender_executable=_CONFIGURABLE_VALUES['blender_executable'],
+            verbose=True,
+        )
+
+    if _CONFIGURABLE_VALUES['target_triangles'] is not None:
+        from skrobot.utils.mesh import auto_simplify_quadric_decimation_with_texture_preservation  # NOQA
+        meshes = auto_simplify_quadric_decimation_with_texture_preservation(
+            meshes,
+            target_number_of_triangles=_CONFIGURABLE_VALUES[
+                'target_triangles'],
+            verbose=True)
+    elif _CONFIGURABLE_VALUES['decimation_area_ratio_threshold'] is not None:
+        from skrobot.utils.mesh import auto_simplify_quadric_decimation
+        meshes = auto_simplify_quadric_decimation(
+            meshes, area_ratio_threshold=_CONFIGURABLE_VALUES[
+                'decimation_area_ratio_threshold'])
+
+    if _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size']:
+        from skrobot.utils.mesh import simplify_vertex_clustering
+        meshes = simplify_vertex_clustering(
+            meshes,
+            _CONFIGURABLE_VALUES['simplify_vertex_clustering_voxel_size'],
+        )
+    return meshes
+
+
+def _write_collada(meshes, output_file):
+    """Write ``meshes`` as a Collada file, one geometry per face color."""
+    from skrobot.utils.mesh import split_mesh_by_face_color
+
+    trimesh = _lazy_trimesh()
+    export_meshes = []
+    for mesh in meshes:
+        # STL files load with visual.defined=False even though they have
+        # default face colors. Explicitly setting face_colors makes
+        # visual.defined=True and visual.kind='face', which allows
+        # trimesh's export_collada to use the colors.
+        if not mesh.visual.defined and hasattr(mesh.visual, 'face_colors'):
+            mesh.visual.face_colors = mesh.visual.face_colors
+        export_meshes.extend(split_mesh_by_face_color(mesh))
+    with open(output_file, 'wb') as f:
+        f.write(trimesh.exchange.dae.export_collada(export_meshes))
+
+
+def _write_gltf(meshes, output_file):
+    """Write ``meshes`` as glTF/GLB, keeping colors that carry no image.
+
+    Many DAE files store a per-material diffuse color as a texture visual
+    with no image; without converting it to vertex colors the color is
+    lost on the way into glTF.
+    """
+    from skrobot.utils.mesh import _material_color_to_vertex_colors
+
+    trimesh = _lazy_trimesh()
+    for mesh in meshes:
+        if mesh.visual.kind != 'texture':
+            continue
+        material = getattr(mesh.visual, 'material', None)
+        has_image = material is not None and (
+            getattr(material, 'image', None) is not None
+            or getattr(material, 'baseColorTexture', None) is not None)
+        if has_image:
+            continue
+        try:
+            color_visual = mesh.visual.to_color()
+            vertex_colors = np.asarray(color_visual.vertex_colors)
+            if len(vertex_colors) != len(mesh.vertices):
+                color_visual = trimesh.visual.ColorVisuals(
+                    mesh=mesh,
+                    vertex_colors=_material_color_to_vertex_colors(
+                        mesh, material))
+            mesh.visual = color_visual
+        except Exception:
+            pass
+
+    if _CONFIGURABLE_VALUES.get('draco_compression', False):
+        from skrobot.utils.draco import export_glb_with_draco
+        export_glb_with_draco(meshes, output_file)
+        return
+    scene = trimesh.Scene()
+    for mesh in meshes:
+        scene.add_geometry(mesh)
+    scene.export(output_file)
+
+
+def _write_meshes(meshes, output_file):
+    """Write ``meshes`` to ``output_file``, in the format its name asks for.
+
+    Parameters
+    ----------
+    meshes : list of :class:`~trimesh.base.Trimesh`
+        Meshes making up one URDF geometry element.
+    output_file : str
+        Path to write. Whether it may be written at all is
+        :func:`_should_skip_mesh_export`'s decision, not this one's.
+    """
+    trimesh = _lazy_trimesh()
+    if output_file.endswith('.dae'):
+        _write_collada(meshes, output_file)
+    elif output_file.endswith('.stl'):
+        trimesh.exchange.export.export_mesh(
+            trimesh.util.concatenate(meshes), output_file)
+    elif output_file.endswith('.glb') or output_file.endswith('.gltf'):
+        _write_gltf(meshes, output_file)
+    else:
+        trimesh.exchange.export.export_mesh(meshes, output_file)
