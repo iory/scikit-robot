@@ -19,7 +19,6 @@ from skrobot.coordinates.math import xyzrpy2matrix
 from skrobot.utils.urdf_mesh import _CONFIGURABLE_VALUES
 from skrobot.utils.urdf_mesh import _load_meshes
 from skrobot.utils.urdf_mesh import _REMESHED_FILES_CACHE
-from skrobot.utils.urdf_mesh import _transform_vertex_normals  # NOQA: F401
 from skrobot.utils.urdf_mesh import apply_scale
 from skrobot.utils.urdf_mesh import bake_origin_into_meshes
 from skrobot.utils.urdf_mesh import enable_mesh_cache  # NOQA: F401
@@ -27,7 +26,6 @@ from skrobot.utils.urdf_mesh import export_mesh_format
 from skrobot.utils.urdf_mesh import force_visual_mesh_origin_to_zero
 from skrobot.utils.urdf_mesh import get_filename
 from skrobot.utils.urdf_mesh import get_path_with_cache  # NOQA: F401
-from skrobot.utils.urdf_mesh import get_transparency  # NOQA: F401
 from skrobot.utils.urdf_mesh import load_meshes
 from skrobot.utils.urdf_mesh import mesh_simplify_factor  # NOQA: F401
 from skrobot.utils.urdf_mesh import no_mesh_load_mode  # NOQA: F401

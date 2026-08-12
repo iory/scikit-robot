@@ -545,3 +545,117 @@ def auto_simplify_quadric_decimation(meshes, area_ratio_threshold=0.98):
         )
         mesh_simplified_list.append(mesh_simplified)
     return mesh_simplified_list
+
+
+def get_transparency(mesh):
+    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'material'):
+        material = mesh.visual.material
+        if hasattr(material, 'main_color'):
+            return material.main_color[3]
+
+
+def _transform_vertex_normals(normals, matrix):
+    """Map normals through a 4x4 transform.
+
+    Normals do not transform like points.  The inverse transpose of the linear
+    block is what keeps them perpendicular to the surface under a non-uniform
+    scale, and a transform with a negative determinant (a mirror, common in
+    exported CAD scenes) reverses the triangle winding, so the result has to be
+    negated to keep pointing out of the same side.  ``Trimesh.apply_transform``
+    multiplies by the matrix directly, which is only correct for a rotation.
+
+    Parameters
+    ----------
+    normals : (n, 3) float
+        Unit normals in the source frame.
+    matrix : (4, 4) float
+        Transform applied to the vertices.
+
+    Returns
+    -------
+    normals : (n, 3) float
+        Unit normals in the destination frame.
+    """
+    linear = np.asarray(matrix)[:3, :3]
+    try:
+        mapped = np.asarray(normals) @ np.linalg.inv(linear)
+    except np.linalg.LinAlgError:
+        return np.asarray(normals)
+    if np.linalg.det(linear) < 0:
+        mapped = -mapped
+    length = np.linalg.norm(mapped, axis=1)
+    length[length < 1e-12] = 1.0
+    return mapped / length[:, None]
+
+
+def _authored_vertex_normals(obj):
+    """Snapshot the vertex normals a mesh file actually stored.
+
+    ``vertex_normals`` is a lazily computed property, so only an array already
+    sitting in the cache came from the file; touching the property here would
+    fabricate one and defeat the point.
+
+    Parameters
+    ----------
+    obj : trimesh.Scene or trimesh.Trimesh
+        Freshly loaded geometry.
+
+    Returns
+    -------
+    normals : dict
+        Geometry name (``None`` for a bare mesh) -> (n, 3) float array.
+    """
+    if isinstance(obj, trimesh.Scene):
+        items = list(obj.geometry.items())
+    else:
+        items = [(None, obj)]
+    normals = {}
+    for name, geom in items:
+        cache = getattr(geom, '_cache', None)
+        stored = cache.cache.get('vertex_normals') if cache is not None else None
+        if stored is not None:
+            normals[name] = np.array(stored)
+    return normals
+
+
+def _restore_vertex_normals(obj, normals):
+    """Put snapshotted normals back after a units conversion.
+
+    ``convert_units`` rebuilds the geometry and drops the cache, but it only
+    applies a uniform scale, which leaves normal directions untouched.
+    """
+    if not normals:
+        return obj
+    if isinstance(obj, trimesh.Scene):
+        items = list(obj.geometry.items())
+    else:
+        items = [(None, obj)]
+    for name, geom in items:
+        stored = normals.get(name)
+        if stored is not None and len(stored) == len(geom.vertices):
+            geom.vertex_normals = stored
+    return obj
+
+
+def _dump_scene(scene):
+    """Flatten a scene into world-frame meshes, keeping authored normals.
+
+    ``Scene.dump`` copies each geometry without its cache, so normals supplied
+    by the file are lost and later recomputed by averaging, which rounds off
+    every hard edge.  Re-attaching them before ``apply_transform`` lets trimesh
+    rotate them along with the vertices instead.
+    """
+    meshes = []
+    for node in scene.graph.nodes_geometry:
+        transform, geom_name = scene.graph[node]
+        geom = scene.geometry.get(geom_name)
+        if not isinstance(geom, trimesh.Trimesh):
+            continue
+        cache = getattr(geom, '_cache', None)
+        stored = cache.cache.get('vertex_normals') if cache is not None else None
+        mesh = geom.copy()
+        mesh.apply_transform(transform)
+        if stored is not None and len(stored) == len(mesh.vertices):
+            mesh.vertex_normals = _transform_vertex_normals(stored, transform)
+        meshes.append(mesh)
+    return meshes

@@ -8,6 +8,7 @@ from lxml import etree
 import numpy as np
 import pytest
 
+from skrobot.utils import mesh as mesh_utils
 from skrobot.utils import urdf as urdf_utils
 from skrobot.utils import urdf_mesh
 
@@ -544,14 +545,14 @@ class TestTransformVertexNormals(unittest.TestCase):
                           [np.sin(angle), np.cos(angle), 0],
                           [0, 0, 1]]
         normals = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-        got = urdf_mesh._transform_vertex_normals(normals, matrix)
+        got = mesh_utils._transform_vertex_normals(normals, matrix)
         np.testing.assert_allclose(
             got, [[np.cos(angle), np.sin(angle), 0.0], [0.0, 0.0, 1.0]],
             atol=1e-9)
 
     def test_a_uniform_scale_leaves_the_direction_alone(self):
         normals = np.array([[0.0, 0.6, 0.8]])
-        got = urdf_mesh._transform_vertex_normals(normals, np.eye(4) * 25.4)
+        got = mesh_utils._transform_vertex_normals(normals, np.eye(4) * 25.4)
         np.testing.assert_allclose(got, normals, atol=1e-9)
 
     def test_a_non_uniform_scale_needs_the_inverse_transpose(self):
@@ -560,7 +561,7 @@ class TestTransformVertexNormals(unittest.TestCase):
         does, which would tip it away."""
         matrix = np.diag([1.0, 1.0, 0.1, 1.0])
         normals = np.array([[np.sqrt(0.5), 0.0, np.sqrt(0.5)]])
-        got = urdf_mesh._transform_vertex_normals(normals, matrix)
+        got = mesh_utils._transform_vertex_normals(normals, matrix)
         self.assertLess(got[0, 0], normals[0, 0])
         self.assertGreater(got[0, 2], normals[0, 2])
         np.testing.assert_allclose(np.linalg.norm(got, axis=1), 1.0, atol=1e-9)
@@ -573,12 +574,12 @@ class TestTransformVertexNormals(unittest.TestCase):
         normal has to be negated to keep pointing out of the same side."""
         matrix = np.diag([1.0, -1.0, 1.0, 1.0])
         normals = np.array([[0.0, 1.0, 0.0]])
-        got = urdf_mesh._transform_vertex_normals(normals, matrix)
+        got = mesh_utils._transform_vertex_normals(normals, matrix)
         np.testing.assert_allclose(got, [[0.0, 1.0, 0.0]], atol=1e-9)
 
     def test_a_singular_matrix_is_passed_through(self):
         normals = np.array([[0.0, 0.0, 1.0]])
-        got = urdf_mesh._transform_vertex_normals(normals, np.zeros((4, 4)))
+        got = mesh_utils._transform_vertex_normals(normals, np.zeros((4, 4)))
         np.testing.assert_allclose(got, normals, atol=1e-9)
 
 
@@ -600,19 +601,19 @@ class TestSceneNormalsSurviveLoading(unittest.TestCase):
         plain = trimesh.Scene()
         plain.add_geometry(trimesh.creation.box(), geom_name='thing')
         plain.units = 'meters'
-        self.assertEqual(urdf_mesh._authored_vertex_normals(plain), {})
+        self.assertEqual(mesh_utils._authored_vertex_normals(plain), {})
         self.assertIn('thing',
-                      urdf_mesh._authored_vertex_normals(self._scene()))
+                      mesh_utils._authored_vertex_normals(self._scene()))
 
     def test_they_are_restored_after_a_units_conversion(self):
         scene = self._scene()
-        snapshot = urdf_mesh._authored_vertex_normals(scene)
+        snapshot = mesh_utils._authored_vertex_normals(scene)
         converted = scene.convert_units('inch')
         # convert_units rebuilds the geometry, losing the cache
         self.assertNotIn(
             'vertex_normals',
             list(converted.geometry.values())[0]._cache.cache)
-        urdf_mesh._restore_vertex_normals(converted, snapshot)
+        mesh_utils._restore_vertex_normals(converted, snapshot)
         np.testing.assert_allclose(
             np.asarray(list(converted.geometry.values())[0].vertex_normals),
             snapshot['thing'], atol=1e-9)
@@ -623,7 +624,7 @@ class TestSceneNormalsSurviveLoading(unittest.TestCase):
         transform[:3, :3] = np.array([[1.0, 0.0, 0.0],
                                       [0.0, 0.0, -1.0],
                                       [0.0, 1.0, 0.0]]) * 25.4
-        meshes = urdf_mesh._dump_scene(self._scene(transform))
+        meshes = mesh_utils._dump_scene(self._scene(transform))
         self.assertEqual(len(meshes), 1)
         np.testing.assert_allclose(
             np.asarray(meshes[0].vertex_normals),
