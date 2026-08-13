@@ -191,11 +191,19 @@ class TestFlipJointAxisFile(unittest.TestCase):
                 self.assertEqual(f.read(), _URDF)
 
 
-class TestRootLinkChangeRemapsLimits(unittest.TestCase):
-    """Re-rooting reverses the joints along the path; an asymmetric limit has
-    to be remapped with the axis or the robot's reachable range moves."""
+class TestRootLinkChangeKeepsLimits(unittest.TestCase):
+    """Re-rooting negates the axis of every joint along the path, and must
+    leave the limits alone.
 
-    def test_asymmetric_limits_follow_the_reversed_axis(self):
+    Two reversals happen there, not one: swapping <parent>/<child> already
+    reverses the joint's sense, so negating <axis> puts the sense back.  The
+    same commanded value therefore still produces the same pose, and remapping
+    the limits as well would send the joint through its range mirrored about
+    zero -- shrinking the reach on one side and inventing it on the other.
+    A standalone flip_joint_axis is the case that DOES have to remap them; the
+    tests above cover it."""
+
+    def test_asymmetric_limits_survive_the_reversal(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, 'in.urdf')
             dst = os.path.join(tmp, 'out.urdf')
@@ -207,9 +215,65 @@ class TestRootLinkChangeRemapsLimits(unittest.TestCase):
             axis = [float(v) for v in drive.find('axis').get('xyz').split()]
             self.assertEqual(axis, [0.0, 0.0, -1.0])
             limit = drive.find('limit')
-            self.assertAlmostEqual(float(limit.get('lower')), -2.0)
-            self.assertAlmostEqual(float(limit.get('upper')), 0.5)
+            self.assertAlmostEqual(float(limit.get('lower')), -0.5)
+            self.assertAlmostEqual(float(limit.get('upper')), 2.0)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestRootLinkChangeKeepsSafetyAndMimic(unittest.TestCase):
+    """The same cancellation applies to everything else expressed in the
+    joint's own value: the soft bounds on <safety_controller>, the reversed
+    joint's own <mimic>, and the <mimic> of a follower that is NOT on the
+    re-rooting path but tracks a joint that is."""
+
+    _URDF_MIMIC = """<?xml version="1.0"?>
+<robot name="m">
+  <link name="base"/><link name="mid"/><link name="tip"/><link name="finger"/>
+  <joint name="drive" type="revolute">
+    <parent link="base"/><child link="mid"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-0.5" upper="2.0" effort="10" velocity="1"/>
+    <safety_controller soft_lower_limit="-0.4" soft_upper_limit="1.9"
+                       k_position="100" k_velocity="10"/>
+  </joint>
+  <joint name="fix" type="fixed">
+    <parent link="mid"/><child link="tip"/>
+    <origin xyz="0.2 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="follower" type="revolute">
+    <parent link="mid"/><child link="finger"/>
+    <origin xyz="0.05 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.0" upper="1.0" effort="10" velocity="1"/>
+    <mimic joint="drive" multiplier="2.5" offset="0.1"/>
+  </joint>
+</robot>"""
+
+    def test_soft_bounds_and_mimic_survive_the_reversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'in.urdf')
+            dst = os.path.join(tmp, 'out.urdf')
+            with open(src, 'w') as f:
+                f.write(self._URDF_MIMIC)
+            change_urdf_root_link(src, 'tip', dst)
+            root = ET.parse(dst).getroot()
+
+            drive = _joint(root, 'drive')
+            self.assertEqual(
+                [float(v) for v in drive.find('axis').get('xyz').split()],
+                [0.0, 0.0, -1.0])
+            safety = drive.find('safety_controller')
+            self.assertAlmostEqual(
+                float(safety.get('soft_lower_limit')), -0.4)
+            self.assertAlmostEqual(
+                float(safety.get('soft_upper_limit')), 1.9)
+
+            # 'follower' hangs off the path rather than lying on it, so it is
+            # never reversed itself; its coupling to 'drive' is unchanged
+            # because 'drive' still means what it meant.
+            mimic = _joint(root, 'follower').find('mimic')
+            self.assertEqual(mimic.get('joint'), 'drive')
+            self.assertAlmostEqual(float(mimic.get('multiplier')), 2.5)
+            self.assertAlmostEqual(float(mimic.get('offset')), 0.1)
