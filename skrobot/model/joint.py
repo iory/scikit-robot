@@ -184,6 +184,37 @@ class Joint(object):
     def joint_dof(self):
         raise NotImplementedError
 
+    @property
+    def is_movable(self):
+        """Whether this joint contributes any degree of freedom.
+
+        Defined by the degrees of freedom rather than by the type name.
+        A name-based test has to keep a list of the movable types, and
+        such a list is wrong in two ways at once: it silently omits
+        ``planar`` and ``floating``, which move in three and six
+        directions, and it cannot classify :class:`OmniWheelJoint` at
+        all, which has three degrees of freedom and no ``type`` to
+        compare against. Counting the degrees of freedom asks the
+        question directly and needs no revisiting when a joint type is
+        added.
+
+        Returns
+        -------
+        bool
+            True unless the joint is rigid, i.e. anything but
+            :class:`FixedJoint`.
+
+        Examples
+        --------
+        >>> from skrobot.model import FixedJoint, Link, RotationalJoint
+        >>> parent, child = Link(name='p'), Link(name='c')
+        >>> RotationalJoint(parent_link=parent, child_link=child).is_movable
+        True
+        >>> FixedJoint(parent_link=parent, child_link=child).is_movable
+        False
+        """
+        return self.joint_dof > 0
+
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         raise NotImplementedError
 
