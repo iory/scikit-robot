@@ -5,7 +5,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from skrobot.coordinates.math import invert_yaw_pitch_roll
-from skrobot.urdf.flip_axis import flip_joint_axis
+from skrobot.urdf.flip_axis import _negate_joint_axis
 
 
 class URDFXMLRootLinkChanger:
@@ -346,10 +346,14 @@ class URDFXMLRootLinkChanger:
         origin.set('xyz', ' '.join(map(str, new_xyz)))
         origin.set('rpy', ' '.join(map(str, new_rpy)))
 
-        # Reverse the joint's sense.  The axis is not the only thing that has
-        # to move: an asymmetric <limit> and any mimic coupling are expressed
-        # in the old sense too, so they are remapped with it.
-        flip_joint_axis(self.root, joint.get('name'))
+        # Negate the axis ONLY.  This joint also has its <parent> and <child>
+        # swapped (see _reverse_joints_along_path), and those two reversals
+        # cancel: the same commanded value still produces the same pose.  So
+        # the limits, safety bounds and mimic coefficients must stay as they
+        # are -- remapping them as well, which a full flip_joint_axis would do,
+        # sends the joint through its range mirrored about zero, and the
+        # re-rooted robot can no longer reach where the original could.
+        _negate_joint_axis(self.root, joint.get('name'))
 
         # The joint's old parent link frame is relocated onto this joint's
         # frame; re-express everything attached to that link (visuals,

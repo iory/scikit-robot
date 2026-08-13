@@ -438,3 +438,67 @@ class TestGeometricFidelity(unittest.TestCase):
                 return np.linalg.inv(ref) @ world
             np.testing.assert_allclose(com_rel(src), com_rel(dst),
                                        atol=1e-9)
+
+    def test_reversed_joint_keeps_its_travel_range(self):
+        """Re-rooting must not mirror a joint's limits.
+
+        Swapping <parent>/<child> already reverses the joint's sense, so
+        negating <axis> restores the original convention: the same commanded
+        value still produces the same pose.  Moving the limits as well would
+        send the joint through its range mirrored about zero, and a re-rooted
+        arm could no longer reach where the original could.
+        """
+        import numpy as np
+
+        from skrobot.coordinates.math import xyzrpy2matrix
+        from skrobot.models.urdf import RobotModelFromURDF
+        urdf = """<?xml version="1.0"?>
+<robot name="m">
+  <link name="base_link">{v}</link>
+  <link name="dummy_link1">{v}</link>
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/><child link="dummy_link1"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-0.2" upper="1.4" effort="1" velocity="1"/>
+  </joint>
+</robot>""".format(v=self._BOX_OFFSET)
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'm.urdf')
+            with open(src, 'w') as f:
+                f.write(urdf)
+            dst = os.path.join(tmp, 'r.urdf')
+            change_urdf_root_link(src, 'dummy_link1', dst)
+
+            joint = [j for j in ET.parse(dst).getroot().findall('joint')
+                     if j.get('name') == 'j1'][0]
+            self.assertEqual(joint.find('axis').get('xyz').split(),
+                             ['0', '0', '-1'])
+            limit = joint.find('limit')
+            self.assertAlmostEqual(float(limit.get('lower')), -0.2)
+            self.assertAlmostEqual(float(limit.get('upper')), 1.4)
+
+            # and the range means the same thing: driving both documents to the
+            # same value puts the geometry in the same place
+            def box_rel(path, angle):
+                robot = RobotModelFromURDF(urdf_file=path)
+                robot.j1.joint_angle(angle)
+                links = {link.name: link for link in robot.link_list}
+                root = ET.parse(path).getroot()
+                poses = {}
+                for link in root.findall('link'):
+                    origin = link.find('visual').find('origin')
+                    poses[link.get('name')] = (
+                        links[link.get('name')].worldcoords().T()
+                        @ xyzrpy2matrix(
+                            [float(v) for v in origin.get('xyz').split()],
+                            [float(v) for v in
+                             origin.get('rpy', '0 0 0').split()]))
+                ref = np.linalg.inv(poses['base_link'])
+                return {n: ref @ T for n, T in poses.items()}
+
+            for angle in (0.0, 1.3, -0.15):
+                original, rerooted = box_rel(src, angle), box_rel(dst, angle)
+                for name in original:
+                    np.testing.assert_allclose(
+                        original[name], rerooted[name], atol=1e-9,
+                        err_msg='link {} at q={}'.format(name, angle))

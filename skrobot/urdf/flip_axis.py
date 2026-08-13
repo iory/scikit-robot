@@ -60,6 +60,31 @@ def _axis_of(joint):
     return values
 
 
+def _negate_joint_axis(root, joint_name):
+    """Negate one joint's ``<axis xyz>`` and nothing else, in place.
+
+    On its own this is only half a reversal -- the joint value's sign changes
+    while the limits and mimic coefficients still describe the old sense -- so
+    it is deliberately private.  The one caller that wants exactly this is
+    :func:`~skrobot.urdf.change_urdf_root_link`, where swapping a joint's
+    ``<parent>`` and ``<child>`` supplies the other half.  Everyone else wants
+    :func:`flip_joint_axis`.
+
+    Returns the ``<joint>`` element, or None when there is no such joint or it
+    has no usable axis.
+    """
+    for joint in root.findall('joint'):
+        if joint.get('name') != joint_name:
+            continue
+        axis_values = _axis_of(joint)
+        if axis_values is None:
+            return None
+        joint.find('axis').set(
+            'xyz', ' '.join(_fmt(-v) for v in axis_values))
+        return joint
+    return None
+
+
 def flip_joint_axis(root, joint_name):
     """Reverse one joint's positive direction, in place.
 
@@ -120,19 +145,9 @@ def flip_joint_axis(root, joint_name):
     skrobot.urdf.change_urdf_root_link : re-roots a URDF, reversing every joint
         along the path with this function.
     """
-    joint = None
-    for candidate in root.findall('joint'):
-        if candidate.get('name') == joint_name:
-            joint = candidate
-            break
+    joint = _negate_joint_axis(root, joint_name)
     if joint is None:
         return False
-    axis_values = _axis_of(joint)
-    if axis_values is None:
-        return False
-
-    joint.find('axis').set(
-        'xyz', ' '.join(_fmt(-v) for v in axis_values))
 
     # q <= U becomes q' >= -U, so a bound does not merely change sign: it
     # changes side.  A one-sided limit therefore moves to the other attribute
