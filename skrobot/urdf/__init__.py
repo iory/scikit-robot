@@ -1,6 +1,8 @@
 from skrobot.urdf.aggregate import aggregate_urdf_mesh_files
 from skrobot.urdf.canonicalize import canonicalize_urdf
 from skrobot.urdf.canonicalize import canonicalize_urdf_file
+from skrobot.urdf.compare import compare_kinematics
+from skrobot.urdf.compare import KinematicComparison
 from skrobot.urdf.extract_sub_urdf import extract_sub_urdf
 from skrobot.urdf.flip_axis import flip_joint_axis
 from skrobot.urdf.flip_axis import flip_joint_axis_file
@@ -55,6 +57,8 @@ __all__ = [
     'generate_robot_class_from_geometry',
     'print_urdf_tree',
     'kinematic_tree',
+    'compare_kinematics',
+    'KinematicComparison',
     'validate_urdf_structure',
     'ValidationResult',
     'generate_groups_from_llm',
