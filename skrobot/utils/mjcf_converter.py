@@ -494,7 +494,7 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
 
     _indent(root)
     tree = ET.ElementTree(root)
-    tree.write(out_path, encoding="unicode", xml_declaration=False)
+    tree.write(out_path, encoding="utf-8", xml_declaration=False)
     return ET.tostring(root, encoding="unicode")
 
 

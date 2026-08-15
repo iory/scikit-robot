@@ -1749,7 +1749,7 @@ class {class_name}(RobotModelFromURDF):
 {viewer_code}'''
 
     if output_path:
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
     return code

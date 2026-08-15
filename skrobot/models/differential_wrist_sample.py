@@ -48,7 +48,7 @@ class DifferentialWristSample(RobotModelFromURDF):
     def _apply_joint_limit_tables(self):
         """Apply joint limit tables from YAML configuration."""
         yaml_path = differential_wrist_sample_joint_limit_table_path()
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
         for table_config in config['joint_limit_tables']:

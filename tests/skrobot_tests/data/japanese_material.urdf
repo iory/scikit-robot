@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="japanese_material">
+  <!-- Two ways a UTF-8 name goes wrong when it is read with the platform
+       default instead of the declared encoding. Half-width katakana "ｱﾙﾐ"
+       ("aluminium") is ef bd b1 ef be 99 ef be 90, and 0xEF is not a valid
+       cp932 lead byte, so the read raises. Full-width "ゴム" ("rubber") is
+       e3 82 b4 e3 83 a0, which is valid cp932 and decodes to garbage, so
+       the name comes back quietly wrong instead. -->
+  <material name="ｱﾙﾐ">
+    <color rgba="0.8 0.8 0.8 1.0"/>
+  </material>
+  <material name="ゴム">
+    <color rgba="0.1 0.1 0.1 1.0"/>
+  </material>
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.062"/>
+      <inertia ixx="1e-05" ixy="0" ixz="0" iyy="1e-05" iyz="0" izz="1e-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material name="ｱﾙﾐ"/>
+    </visual>
+    <visual>
+      <origin xyz="0.2 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material name="ゴム"/>
+    </visual>
+  </link>
+</robot>

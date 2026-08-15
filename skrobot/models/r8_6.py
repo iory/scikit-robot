@@ -21,7 +21,7 @@ class R8_6(skrobot.model.RobotModel):
         super(R8_6, self).__init__(*args, **kwargs)
         urdf_path = r8_6_urdfpath() if urdf_path is None else urdf_path
         if osp.exists(urdf_path):
-            self.load_urdf_file(open(urdf_path, 'r'))
+            self.load_urdf_file(open(urdf_path, 'rb'))
         else:
             raise ValueError()
 

@@ -3134,7 +3134,8 @@ class RobotModel(CascadedLink):
 
     def _load_urdf_from_string_secure(self, urdf_string, include_mimic_joints):
         """Load URDF from string using secure temporary file handling."""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".urdf") as f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         delete=False, suffix=".urdf") as f:
             f.write(urdf_string)
             tmp_path = f.name
 
@@ -3227,7 +3228,9 @@ class RobotModel(CascadedLink):
         robot_model = RobotModel()
         if os.path.isfile(urdf_input):
             try:
-                with open(urdf_input, 'r') as f:
+                # 'rb': a URDF is XML and declares its own encoding, so
+                # let the parser decode it rather than the platform default.
+                with open(urdf_input, 'rb') as f:
                     robot_model.load_urdf_file(
                         file_obj=f, include_mimic_joints=include_mimic_joints)
             except Exception as e:
@@ -3263,6 +3266,9 @@ class RobotModel(CascadedLink):
         ----------
         file_obj : str or file-like object
             Path to the URDF file or a file-like object containing URDF data.
+            A file object is parsed from its undecoded bytes where possible,
+            so the URDF's own encoding declaration decides how it is read
+            rather than the platform default encoding.
         include_mimic_joints : bool, optional
             If True, mimic joints are included in the `self.joint_list`.
             If False, mimic joints are excluded from `self.joint_list`,

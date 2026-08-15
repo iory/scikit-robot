@@ -1710,7 +1710,7 @@ class RobotAssembly:
                 "closure's\n"
                 "# two link points (the cut hinge) coincide.\n")
         path = os.path.join(directory, "loop_closures.yaml")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(head + yaml.safe_dump(config, sort_keys=False,
                                           default_flow_style=None))
         return path

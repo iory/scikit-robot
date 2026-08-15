@@ -36,7 +36,7 @@ def _load_template(name):
     Template
         string.Template instance.
     """
-    with open(TEMPLATES_DIR / name) as f:
+    with open(TEMPLATES_DIR / name, encoding='utf-8') as f:
         return Template(f.read())
 
 
@@ -94,6 +94,6 @@ def generate_fjt_server(controllers, node_name='isaac_fjt_server',
 
 def write_fjt_server(controllers, path, **kwargs):
     """Write :func:`generate_fjt_server`'s output to ``path``. Returns ``path``."""
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(generate_fjt_server(controllers, **kwargs))
     return path

@@ -46,7 +46,7 @@ def _load_template(name):
     Template
         string.Template instance.
     """
-    with open(TEMPLATES_DIR / name) as f:
+    with open(TEMPLATES_DIR / name, encoding="utf-8") as f:
         return Template(f.read())
 
 
@@ -61,7 +61,7 @@ def _write_file(content, output_path):
         Destination path.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
@@ -81,7 +81,7 @@ def _write_yaml(data, output_path):
             return super().increase_indent(flow, False)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, Dumper=_CleanDumper, default_flow_style=False, sort_keys=False)
 
 
@@ -331,11 +331,11 @@ def _patch_dae_for_gazebo(dae_path):
       in COLLADA's A_ONE mode and causes black rendering in Gazebo.
     """
     dae_path = Path(dae_path)
-    data = dae_path.read_text()
+    data = dae_path.read_text(encoding="utf-8")
     data = data.replace("<up_axis>Y_UP</up_axis>", "<up_axis>Z_UP</up_axis>")
     data = re.sub(r"\s*<transparent>\s*<color>[^<]+</color>\s*</transparent>", "", data)
     data = re.sub(r"\s*<transparency>\s*<float>[^<]+</float>\s*</transparency>", "", data)
-    dae_path.write_text(data)
+    dae_path.write_text(data, encoding="utf-8")
 
 
 def _convert_urdf_meshes(urdf_path, output_path, visual_format="stl", collision_format="stl"):
@@ -462,7 +462,7 @@ def build_moveit_package(
     # --- Config files ---
 
     # Re-read the converted URDF
-    with open(urdf_dir / f"{robot_name}.urdf") as f:
+    with open(urdf_dir / f"{robot_name}.urdf", encoding="utf-8") as f:
         urdf_content = f.read()
 
     # URDF with ros2_control (for Gazebo / controllers)
