@@ -335,7 +335,7 @@ def _read_cache_entry(part_dir):
     """
     trimesh = _lazy_trimesh()
     try:
-        with open(os.path.join(part_dir, _MANIFEST_NAME)) as f:
+        with open(os.path.join(part_dir, _MANIFEST_NAME), encoding='utf-8') as f:
             manifest = json.load(f)
         if manifest['version'] != _CACHE_VERSION:
             return None

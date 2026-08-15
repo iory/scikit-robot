@@ -480,7 +480,7 @@ class GridSDF(SignedDistanceFunction):
         sdf_instance : skrobot.esdf.GridSDF
             instance of sdf
         """
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             # dimension of each axis should all be equal for LSH
             nx, ny, nz = [int(i) for i in f.readline().split()]
             ox, oy, oz = [float(i) for i in f.readline().split()]

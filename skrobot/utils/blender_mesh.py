@@ -391,7 +391,7 @@ ratio = {ratio}
 decimate_glb_file(input_path, output_path, ratio)
 """
 
-    script_path.write_text(script_content)
+    script_path.write_text(script_content, encoding='utf-8')
 
 
 def _create_blender_wrapper_script(script_path, input_path, output_path, voxel_size, export_format):
@@ -434,4 +434,4 @@ export_format = "{export_format}"
 remesh_and_bake_file(input_path, output_path, voxel_size, export_format)
 """
 
-    script_path.write_text(script_content)
+    script_path.write_text(script_content, encoding='utf-8')

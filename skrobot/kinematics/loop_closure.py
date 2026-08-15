@@ -115,7 +115,7 @@ class LoopClosureSolver(object):
     def from_yaml(cls, robot_model, path):
         """Build a solver from a ``loop_closures.yaml`` sidecar file."""
         import yaml
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return cls(robot_model, yaml.safe_load(f))
 
     @staticmethod

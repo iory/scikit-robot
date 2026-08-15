@@ -90,7 +90,7 @@ class ROSPackageExporter:
         original_package_name : str, optional
             Original package name to replace with the new package name.
         """
-        with open(urdf_path) as f:
+        with open(urdf_path, encoding="utf-8") as f:
             content = f.read()
 
         if original_package_name:
@@ -315,7 +315,7 @@ class ROSPackageExporter:
                 # ``<package_name>/meshes/``.
                 export_content = rewrite_mesh_package_references(export_content, self.package_name)
                 urdf_path = urdf_dir / f"{self.package_name}.urdf"
-                with open(urdf_path, "w") as f:
+                with open(urdf_path, "w", encoding="utf-8") as f:
                     f.write(export_content)
                 if progress_callback:
                     progress_callback("Wrote URDF file", 1, 4)
@@ -366,12 +366,12 @@ class ROSPackageExporter:
                 package_xml = generate_package_xml(self.package_name)
                 cmake_content = generate_cmake_lists(self.package_name, include_xacro=False)
 
-            with open(package_dir / "package.xml", "w") as f:
+            with open(package_dir / "package.xml", "w", encoding="utf-8") as f:
                 f.write(package_xml)
             if progress_callback:
                 progress_callback("Generated package.xml", 3, 4)
 
-            with open(package_dir / "CMakeLists.txt", "w") as f:
+            with open(package_dir / "CMakeLists.txt", "w", encoding="utf-8") as f:
                 f.write(cmake_content)
             if progress_callback:
                 progress_callback("Generated CMakeLists.txt", 4, 4)
@@ -401,13 +401,13 @@ class ROSPackageExporter:
         rviz_dir.mkdir(parents=True, exist_ok=True)
 
         launch_content = generate_ros1_display_launch(self.package_name)
-        with open(launch_dir / "display.launch", "w") as f:
+        with open(launch_dir / "display.launch", "w", encoding="utf-8") as f:
             f.write(launch_content)
         if progress_callback:
             progress_callback("Generated display.launch", 1, 2)
 
         rviz_content = generate_ros1_rviz_config()
-        with open(rviz_dir / "urdf.rviz", "w") as f:
+        with open(rviz_dir / "urdf.rviz", "w", encoding="utf-8") as f:
             f.write(rviz_content)
         if progress_callback:
             progress_callback("Generated urdf.rviz", 2, 2)

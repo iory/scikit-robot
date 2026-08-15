@@ -3,6 +3,7 @@
 
 import contextlib
 import copy
+import io
 from logging import getLogger
 import os
 
@@ -51,6 +52,49 @@ from skrobot.utils.urdf_mesh import source_urdf_path
 # imported them from here.
 
 logger = getLogger(__name__)
+
+
+def _byte_stream(file_obj):
+    """Return a byte stream to parse a URDF from, and an encoding override.
+
+    A URDF is XML: it carries its own encoding declaration and defaults to
+    UTF-8. A text file object decodes with whatever encoding it was opened
+    with -- the platform default, ``cp932`` on a Japanese Windows -- so a
+    non-ASCII UTF-8 URDF is misread, or fails to be read at all, before the
+    parser ever sees the declaration. Handing the parser the still-undecoded
+    bytes instead lets the declaration decide.
+
+    A text stream with nothing but text behind it (:class:`io.StringIO`, how
+    :meth:`skrobot.model.RobotModel.load_urdf` passes a URDF string) is
+    already decoded. lxml refuses text that declares an encoding, so such a
+    stream is re-encoded as UTF-8 and the parser is told to ignore the
+    declaration.
+
+    Parameters
+    ----------
+    file_obj : file-like object
+        Stream a URDF is about to be parsed from.
+
+    Returns
+    -------
+    stream : file-like object
+        Byte stream for the parser, or ``file_obj`` itself if it already
+        yields bytes.
+    encoding : str or None
+        Encoding to parse ``stream`` with, overriding the document's own
+        declaration, or None to let the declaration stand.
+    """
+    if not isinstance(file_obj, io.TextIOBase):
+        return file_obj, None
+    buffer = getattr(file_obj, 'buffer', None)
+    if buffer is not None:
+        try:
+            at_start = file_obj.tell() == 0
+        except (OSError, ValueError):
+            at_start = False
+        if at_start:
+            return buffer, None
+    return io.BytesIO(file_obj.read().encode('utf-8')), 'utf-8'
 
 
 def convert_urdf_meshes(urdf_path, output_path, mesh_format,
@@ -3154,13 +3198,15 @@ class URDF(URDFType):
             else:
                 raise ValueError('{} is not a file'.format(file_obj))
         else:
-            parser = ET.XMLParser(remove_comments=True, remove_blank_text=True)
+            path, _ = os.path.split(getattr(file_obj, 'name', ''))
+            stream, encoding = _byte_stream(file_obj)
+            parser = ET.XMLParser(remove_comments=True, remove_blank_text=True,
+                                  encoding=encoding)
             try:
-                tree = ET.parse(file_obj, parser=parser)
+                tree = ET.parse(stream, parser=parser)
             except ET.XMLSyntaxError as e:
                 logger.error('Failed to parse XML from file-like object: %s', e)
                 return URDF(name='INVALID_URDF', links=[])
-            path, _ = os.path.split(file_obj.name)
 
         node = tree.getroot()
         return URDF._from_xml(node, path)

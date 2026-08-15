@@ -612,7 +612,7 @@ def _gltf_uses_draco(filename):
                     return False
                 gltf = json.loads(f.read(chunk_length))
         else:
-            with open(filename, 'r') as f:
+            with open(filename, 'r', encoding='utf-8') as f:
                 gltf = json.load(f)
     except Exception:
         return False
