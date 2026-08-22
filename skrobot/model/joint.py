@@ -215,6 +215,96 @@ class Joint(object):
         """
         return self.joint_dof > 0
 
+    def flip_axis(self):
+        """Reverse this joint's positive direction, leaving the robot as it is.
+
+        The joint reaches the same poses afterwards; only the sign of the
+        value that commands it changes. Three things move together:
+
+        - ``axis`` is negated;
+        - ``min_angle`` and ``max_angle`` are swapped and negated, so
+          ``[-0.5, 2.0]`` becomes ``[-2.0, 0.5]``. A bound changes side
+          rather than merely sign: ``q <= U`` is ``q' >= -U``;
+        - the current joint value becomes its own negative, which is the
+          same configuration written in the reversed convention.
+
+        Nothing in the model moves. The child link is driven back to zero
+        and out again to re-express the pose, with the limits opened for
+        that trip: the old range and the new one need not overlap -- a
+        joint limited to ``[0.5, 1.0]`` cannot pass through zero -- and
+        :meth:`joint_angle` clamps rather than refuses, which would leave
+        the robot somewhere nobody asked for.
+
+        Hooks stay silent throughout, for the same reason. A mimic
+        follower is already where it belongs, and firing its hook with the
+        negated value would drive it away; re-signing the coupling is the
+        caller's to do, as :func:`~skrobot.urdf.flip_joint_axis` does for
+        a URDF.
+
+        Returns
+        -------
+        flipped : bool
+            False when there is no single direction to reverse: a
+            :class:`FixedJoint`, a joint whose axis is the zero vector, or
+            a joint with more than one degree of freedom, whose ``axis``
+            is a set of axes rather than one. Nothing is modified then.
+
+        Raises
+        ------
+        ValueError
+            When a joint limit table is attached. Its bounds are functions
+            of another joint's angle written in this joint's old sense, so
+            leaving them would let the table contradict the axis, and
+            rewriting them is not this method's to guess.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from skrobot.model import Link, RotationalJoint
+        >>> joint = RotationalJoint(parent_link=Link(name='p'),
+        ...                         child_link=Link(name='c'),
+        ...                         axis='z', min_angle=-0.5, max_angle=2.0)
+        >>> joint.joint_angle(1.0)
+        1.0
+        >>> joint.flip_axis()
+        True
+        >>> bool(np.allclose(joint.axis, [0, 0, -1]))
+        True
+        >>> joint.joint_angle()
+        -1.0
+        >>> (joint.min_angle, joint.max_angle)
+        (-2.0, 0.5)
+
+        See Also
+        --------
+        skrobot.urdf.flip_joint_axis : the same reversal on a URDF document.
+        """
+        if self.joint_dof != 1:
+            return False
+        axis = getattr(self, 'axis', None)
+        if axis is None:
+            return False
+        axis = np.array(axis, dtype=np.float64).flatten()
+        if axis.shape != (3,) or not np.any(axis):
+            return False
+        if self.joint_min_max_table is not None:
+            raise ValueError(
+                '{} carries a joint limit table, whose bounds are written '
+                'in the sense this would reverse; flip it with the table '
+                'rebuilt, or drop the table first'.format(self))
+
+        value = self.joint_angle()
+        min_angle, max_angle = self.min_angle, self.max_angle
+
+        self.min_angle, self.max_angle = -np.inf, np.inf
+        try:
+            self.joint_angle(0.0, enable_hook=False)
+            self.axis = -axis
+        finally:
+            self.min_angle, self.max_angle = -max_angle, -min_angle
+        self.joint_angle(-value, enable_hook=False)
+        return True
+
     def joint_angle(self, v=None, relative=None, enable_hook=True):
         raise NotImplementedError
 
