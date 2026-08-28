@@ -859,11 +859,15 @@ class JaxlsSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
         from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances
 
+        if spec.params.get('mode') == 'gridsdf':
+            return self._make_self_collision_gridsdf_cost(
+                problem, TrajectoryVar, fk_data, spec)
+
         T = problem.n_waypoints
-        pair_indices = spec.params['pair_indices']
         activation_dist = spec.params['activation_distance']
         weight = jnp.sqrt(spec.weight)
 
+        pair_indices = spec.params['pair_indices']
         pairs_i, pairs_j = pair_indices
 
         if len(pairs_i) == 0:
@@ -894,6 +898,30 @@ class JaxlsSolver(BaseSolver):
             return (weight * residuals).flatten()
 
         return self_collision_cost(TrajectoryVar(jnp.arange(T)))
+
+    def _make_self_collision_gridsdf_cost(
+            self, problem, TrajectoryVar, fk_data, spec):
+        """Create self-collision cost from per-link GridSDFs."""
+        import jax.numpy as jnp
+        import jaxls
+
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
+        from skrobot.planner.trajectory_optimization.gridsdf_collision import make_gridsdf_self_distance_fn
+
+        T = problem.n_waypoints
+        activation_dist = spec.params['activation_distance']
+        weight = jnp.sqrt(spec.weight)
+        self_distances = make_gridsdf_self_distance_fn(
+            fk_data, spec.params['gridsdf_data'], jnp)
+
+        @jaxls.Cost.factory(name='self_collision_gridsdf')
+        def self_collision_gridsdf_cost(vals, var):
+            signed_dists = self_distances(vals[var])
+            residuals = compute_collision_residuals(
+                signed_dists, activation_dist, jnp)
+            return (weight * residuals).flatten()
+
+        return self_collision_gridsdf_cost(TrajectoryVar(jnp.arange(T)))
 
     def _make_cartesian_path_cost(
         self, problem, TrajectoryVar,

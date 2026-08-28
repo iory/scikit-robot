@@ -652,6 +652,9 @@ class TrajectoryProblem:
         weight=100.0,
         activation_distance=0.02,
         as_constraint=True,
+        mode='sphere',
+        dim_grid=40,
+        n_surface=48,
     ):
         """Add self-collision avoidance cost.
 
@@ -664,11 +667,55 @@ class TrajectoryProblem:
         as_constraint : bool
             If True (default), treat as hard constraint for Augmented Lagrangian
             solver (collision distance >= 0). If False, treat as soft cost.
+        mode : str
+            Link shape representation.  ``'sphere'`` (default) approximates
+            each link by a few spheres: cheap, but conservative enough that
+            bulky links (e.g. the Panda link housings) report even a
+            legitimate rest pose as self-colliding.  ``'gridsdf'`` gives each
+            collision link its own GridSDF and measures penetration by looking
+            the other links' sampled surface points up in it, which is far
+            more accurate at the cost of a one-time voxelization and a larger
+            residual vector.  Requires a collision mesh on every collision
+            link.
+        dim_grid : int
+            GridSDF resolution per axis (``mode='gridsdf'`` only).
+        n_surface : int
+            Surface sample points kept per link (``mode='gridsdf'`` only).
+
+        Raises
+        ------
+        ValueError
+            If ``add_collision_cost`` has not been called, or ``mode`` is not
+            one of ``'sphere'`` / ``'gridsdf'``.
         """
         if self.collision_link_list is None:
             raise ValueError(
                 "Must call add_collision_cost first to set collision_link_list"
             )
+        if mode not in ('sphere', 'gridsdf'):
+            raise ValueError(
+                "mode must be 'sphere' or 'gridsdf', got {}".format(mode))
+
+        # Use 'geq' for hard constraint (Augmented Lagrangian)
+        # Use 'soft' for soft cost (gradient descent, etc.)
+        kind = 'geq' if as_constraint else 'soft'
+
+        if mode == 'gridsdf':
+            from skrobot.planner.trajectory_optimization.gridsdf_collision import build_gridsdf_self_data
+            self.residuals.append(ResidualSpec(
+                name='self_collision',
+                residual_fn='self_collision',
+                params={
+                    'mode': 'gridsdf',
+                    'gridsdf_data': build_gridsdf_self_data(
+                        self.robot_model, self.collision_link_list,
+                        dim_grid=dim_grid, n_surface=n_surface),
+                    'activation_distance': activation_distance,
+                },
+                kind=kind,
+                weight=weight,
+            ))
+            return
 
         # Create self-collision pairs
         from skrobot.planner.trajectory_optimization.collision import create_self_collision_pairs
@@ -694,14 +741,11 @@ class TrajectoryProblem:
 
         self.self_collision_pairs = (np.array(pairs_i), np.array(pairs_j))
 
-        # Use 'geq' for hard constraint (Augmented Lagrangian)
-        # Use 'soft' for soft cost (gradient descent, etc.)
-        kind = 'geq' if as_constraint else 'soft'
-
         self.residuals.append(ResidualSpec(
             name='self_collision',
             residual_fn='self_collision',
             params={
+                'mode': 'sphere',
                 'pair_indices': self.self_collision_pairs,
                 'activation_distance': activation_distance,
             },
@@ -710,41 +754,61 @@ class TrajectoryProblem:
         ))
 
     def _compute_collision_link_offsets(self):
-        """Compute offsets from kinematic chain links to collision links."""
+        """Compute offsets from kinematic chain links to collision links.
+
+        A collision link that is neither in the optimized chain nor a
+        descendant of it (typically the base link) cannot move with the joint
+        angles.  Such links are marked static and their offset is stored
+        relative to the base frame instead, so forward kinematics places them
+        where they actually are.
+        """
         link_to_idx = {link: idx for idx, link in enumerate(self.link_list)}
+        base_position = np.asarray(self.fk_params['base_position'])
+        base_rotation = np.asarray(self.fk_params['base_rotation'])
         self.collision_link_to_chain_idx = []
         self.collision_link_offsets_pos = []
         self.collision_link_offsets_rot = []
+        self.collision_link_is_static = []
 
         for link in self.collision_link_list:
             if link in link_to_idx:
                 self.collision_link_to_chain_idx.append(link_to_idx[link])
                 self.collision_link_offsets_pos.append(np.zeros(3))
                 self.collision_link_offsets_rot.append(np.eye(3))
-            else:
-                # Find parent in kinematic chain
-                parent = link.parent_link
-                while parent is not None and parent not in link_to_idx:
-                    parent = parent.parent_link
+                self.collision_link_is_static.append(False)
+                continue
 
-                if parent is not None:
-                    self.collision_link_to_chain_idx.append(link_to_idx[parent])
-                    parent_coords = parent.worldcoords()
-                    link_coords = link.worldcoords()
-                    rel_pos = parent_coords.inverse_transform_vector(
-                        link_coords.worldpos()
-                    )
-                    rel_rot = parent_coords.worldrot().T @ link_coords.worldrot()
-                    self.collision_link_offsets_pos.append(rel_pos)
-                    self.collision_link_offsets_rot.append(rel_rot)
-                else:
-                    self.collision_link_to_chain_idx.append(0)
-                    self.collision_link_offsets_pos.append(np.zeros(3))
-                    self.collision_link_offsets_rot.append(np.eye(3))
+            # Find parent in kinematic chain
+            parent = link.parent_link
+            while parent is not None and parent not in link_to_idx:
+                parent = parent.parent_link
+
+            if parent is not None:
+                self.collision_link_to_chain_idx.append(link_to_idx[parent])
+                parent_coords = parent.worldcoords()
+                link_coords = link.worldcoords()
+                rel_pos = parent_coords.inverse_transform_vector(
+                    link_coords.worldpos()
+                )
+                rel_rot = parent_coords.worldrot().T @ link_coords.worldrot()
+                self.collision_link_offsets_pos.append(rel_pos)
+                self.collision_link_offsets_rot.append(rel_rot)
+                self.collision_link_is_static.append(False)
+            else:
+                # Static with respect to the base frame.  chain_idx is unused
+                # for these links but must stay a valid index.
+                link_coords = link.worldcoords()
+                self.collision_link_to_chain_idx.append(0)
+                self.collision_link_offsets_pos.append(
+                    base_rotation.T @ (link_coords.worldpos() - base_position))
+                self.collision_link_offsets_rot.append(
+                    base_rotation.T @ link_coords.worldrot())
+                self.collision_link_is_static.append(True)
 
         self.collision_link_to_chain_idx = np.array(self.collision_link_to_chain_idx)
         self.collision_link_offsets_pos = np.array(self.collision_link_offsets_pos)
         self.collision_link_offsets_rot = np.array(self.collision_link_offsets_rot)
+        self.collision_link_is_static = np.array(self.collision_link_is_static)
 
     def add_pose_cost(
         self,
