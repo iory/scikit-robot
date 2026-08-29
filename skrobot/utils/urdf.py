@@ -2044,8 +2044,10 @@ class Actuator(URDFType):
 
     Parameters
     ----------
-    name : str
-        The name of this actuator.
+    name : str, optional
+        The name of this actuator. The URDF spec makes it mandatory, but
+        published models leave it out, and nothing here reads it, so a
+        missing name must not abort loading the robot.
     mechanicalReduction : str, optional
         A specifier for the mechanical reduction at the joint/actuator
         transmission.
@@ -2053,11 +2055,11 @@ class Actuator(URDFType):
         The supported hardware interfaces to the actuator.
     """
     _ATTRIBS = {
-        'name': (str, True),
+        'name': (str, False),
     }
     _TAG = 'actuator'
 
-    def __init__(self, name, mechanicalReduction=None,
+    def __init__(self, name=None, mechanicalReduction=None,
                  hardwareInterfaces=None):
         self.name = name
         self.mechanicalReduction = mechanicalReduction
@@ -2072,7 +2074,7 @@ class Actuator(URDFType):
 
     @name.setter
     def name(self, value):
-        self._name = str(value)
+        self._name = None if value is None else str(value)
 
     @property
     def mechanicalReduction(self):
