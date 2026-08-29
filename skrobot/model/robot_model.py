@@ -3361,9 +3361,25 @@ class RobotModel(CascadedLink):
                     max_angle=j.limit.upper,
                     max_joint_torque=j.limit.effort,
                     max_joint_velocity=velocity)
+            else:
+                # 'floating' (6-DoF) and 'planar' (2-DoF) have no joint
+                # class here, and neither does a type we do not know.
+                # Attach the child rigidly at the joint origin, the pose
+                # Joint.get_child_pose already gives those two at zero
+                # configuration, so the kinematic tree stays whole
+                # instead of leaving the joint unbuilt.
+                logger.warning(
+                    "Joint '%s' has type '%s', which is not supported. "
+                    'Treating it as a fixed joint, so its degrees of '
+                    'freedom are not represented in this model.',
+                    j.name, j.joint_type)
+                joint = FixedJoint(
+                    name=j.name,
+                    parent_link=link_maps[j.parent],
+                    child_link=link_maps[j.child])
 
             is_mimic = j.name in mimic_joint_names
-            if j.joint_type != 'fixed':
+            if not isinstance(joint, FixedJoint):
                 if include_mimic_joints or not is_mimic:
                     joint_list.append(joint)
             whole_joint_list.append(joint)
@@ -3446,7 +3462,10 @@ class RobotModel(CascadedLink):
         if root_link is None:
             self.root_link = None
         else:
-            self.root_link = self.__dict__[root_link.name]
+            # Look the link up among the links. URDF keeps link and joint
+            # names in separate namespaces, so a joint may share the base
+            # link's name and overwrite it in ``__dict__`` just above.
+            self.root_link = link_maps[root_link.name]
             self.assoc(self.root_link)
 
         # Add hook of mimic joint.
