@@ -1189,20 +1189,22 @@ class Texture(URDFType):
 
     Parameters
     ----------
-    filename : str
+    filename : str, optional
         The path to the image that contains this texture. This can be
-        relative to the top-level URDF or an absolute path.
+        relative to the top-level URDF or an absolute path. Models omit
+        it, and a texture without one is a material's decoration, not a
+        reason to reject the robot it decorates.
     image : :class:`PIL.Image.Image`, optional
         The image for the texture.
         If not specified, it is loaded automatically from the filename.
     """
 
     _ATTRIBS = {
-        'filename': (str, True)
+        'filename': (str, False)
     }
     _TAG = 'texture'
 
-    def __init__(self, filename, image=None):
+    def __init__(self, filename=None, image=None):
         self.filename = filename
         if image is None:
             if filename and os.path.exists(filename):
@@ -1246,9 +1248,11 @@ class Texture(URDFType):
         kwargs = cls._parse(node, path)
 
         # Load image
-        fn = get_filename(path, kwargs['filename'])
-        if fn and os.path.exists(fn):
-            kwargs['image'] = PIL.Image.open(fn)
+        filename = kwargs.get('filename')
+        if filename:
+            fn = get_filename(path, filename)
+            if fn and os.path.exists(fn):
+                kwargs['image'] = PIL.Image.open(fn)
 
         return Texture(**kwargs)
 
@@ -1269,22 +1273,24 @@ class Material(URDFType):
 
     Parameters
     ----------
-    name : str
-        The name of the material.
+    name : str, optional
+        The name of the material. The spec makes it mandatory and it is
+        how one material refers to another, but a `<material>` that
+        carries its colour inline needs no name and models leave it out.
     color : (4,) float, optional
         The RGBA color of the material in the range [0,1].
     texture : :class:`.Texture`, optional
         A texture for the material.
     """
     _ATTRIBS = {
-        'name': (str, True)
+        'name': (str, False)
     }
     _ELEMENTS = {
         'texture': (Texture, False, False),
     }
     _TAG = 'material'
 
-    def __init__(self, name, color=None, texture=None):
+    def __init__(self, name=None, color=None, texture=None):
         self.name = name
         self.color = color
         self.texture = texture
@@ -1298,7 +1304,7 @@ class Material(URDFType):
 
     @name.setter
     def name(self, value):
-        self._name = str(value)
+        self._name = None if value is None else str(value)
 
     @property
     def color(self):
@@ -1627,14 +1633,31 @@ class Inertial(URDFType):
     @classmethod
     def _from_xml(cls, node, path):
         origin = parse_origin(node)
-        mass = float(node.find('mass').attrib['value'])
-        n = node.find('inertia')
-        xx = float(n.attrib['ixx'])
-        xy = float(n.attrib['ixy'])
-        xz = float(n.attrib['ixz'])
-        yy = float(n.attrib['iyy'])
-        yz = float(n.attrib['iyz'])
-        zz = float(n.attrib['izz'])
+        # A hand-written <inertial> often carries an origin and a mass
+        # and stops there, or gives an inertia with some terms left
+        # out. Reading what is present and defaulting the rest keeps
+        # the link, and the robot; insisting on all of it discards a
+        # model over numbers most callers never ask for.
+        mass_node = node.find('mass')
+        mass = 0.0
+        if mass_node is not None and 'value' in mass_node.attrib:
+            mass = float(mass_node.attrib['value'])
+        else:
+            logger.warning('<inertial> without a mass; assuming zero')
+
+        moments = node.find('inertia')
+        if moments is None:
+            logger.warning('<inertial> without an inertia; assuming zero')
+            moments = ET.Element('inertia')
+
+        def term(name):
+            try:
+                return float(moments.attrib[name])
+            except (KeyError, ValueError):
+                return 0.0
+
+        xx, xy, xz = term('ixx'), term('ixy'), term('ixz')
+        yy, yz, zz = term('iyy'), term('iyz'), term('izz')
         inertia = np.array([
             [xx, xy, xz],
             [xy, yy, yz],
@@ -2111,7 +2134,16 @@ class Actuator(URDFType):
         kwargs = cls._parse(node, path)
         mr = node.find('mechanicalReduction')
         if mr is not None:
-            mr = float(mr.text)
+            try:
+                mr = float(mr.text)
+            except (TypeError, ValueError):
+                # Templates ship the word rather than a ratio. Nothing
+                # here reads it, so record that it was unusable and
+                # carry on rather than refusing the whole model.
+                logger.warning(
+                    '<mechanicalReduction> is %r, not a number; ignoring',
+                    mr.text)
+                mr = None
         kwargs['mechanicalReduction'] = mr
         hi = node.findall('hardwareInterface')
         if len(hi) > 0:
