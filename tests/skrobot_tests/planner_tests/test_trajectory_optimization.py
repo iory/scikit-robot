@@ -287,6 +287,77 @@ class TestPrismaticFK(unittest.TestCase):
         self.assertEqual(fk_data['joint_types'][0], 'prismatic')
 
 
+@unittest.skipUnless(HAS_JAX, 'jax is not installed')
+class TestBatchedSolve(unittest.TestCase):
+    """solve_batched must agree with solve, member for member."""
+
+    # A fixed world-frame goal. It must be identical for every member:
+    # solve_batched takes the targets from the representative problem, so a
+    # per-robot goal would not be a fair comparison against the sequential
+    # solve, which uses each problem's own.
+    TARGET = np.array([0.5, 0.1, 0.5])
+
+    def _problem(self, robot, link_list, n_waypoints=3):
+        problem = TrajectoryProblem(
+            robot, link_list, n_waypoints=n_waypoints,
+            move_target=robot.rarm_end_coords)
+        problem.add_cartesian_path_cost(
+            np.tile(self.TARGET, (n_waypoints, 1)),
+            np.tile(np.eye(3), (n_waypoints, 1, 1)),
+            weight=10.0, rotation_weight=0.0)
+        problem.add_smoothness_cost(weight=0.05)
+        problem.add_joint_limit_constraint()
+        return problem
+
+    def test_matches_sequential(self):
+        import jax.numpy as jnp
+
+        from skrobot.planner.trajectory_optimization.fk_utils import fk_runtime_arrays
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        # Three members of one structure: same chain, different base poses,
+        # so the FK arrays differ while the shapes do not.
+        offsets = [0.0, 0.05, -0.05]
+        problems = []
+        for dx in offsets:
+            robot, link_list, n_joints = _make_kuka()
+            robot.translate(np.array([dx, 0.0, 0.0]))
+            problems.append((robot, link_list, self._problem(robot, link_list)))
+
+        n_joints = len(problems[0][1])
+        start = np.zeros(n_joints)
+        end = np.ones(n_joints) * 0.2
+        initial_traj = interpolate_trajectory(start, end, 3)
+
+        kwargs = dict(max_outer_iterations=3, max_inner_iterations=30)
+        sequential = []
+        for _, _, problem in problems:
+            solver = AugmentedLagrangianSolver(**kwargs)
+            sequential.append(solver.solve(problem, initial_traj))
+
+        fk_list = [fk_runtime_arrays(prepare_fk_data(p, jnp))
+                   for _, _, p in problems]
+        fk_batch = {k: jnp.stack([f[k] for f in fk_list])
+                    for k in sorted(fk_list[0])}
+        lower = jnp.stack([jnp.asarray(p.joint_limits_lower, dtype=jnp.float32)
+                           for _, _, p in problems])
+        upper = jnp.stack([jnp.asarray(p.joint_limits_upper, dtype=jnp.float32)
+                           for _, _, p in problems])
+
+        solver = AugmentedLagrangianSolver(**kwargs)
+        batched = solver.solve_batched(
+            problems[0][2], initial_traj, fk_batch, lower, upper, **kwargs)
+
+        self.assertEqual(len(batched), len(sequential))
+        for i, (seq, bat) in enumerate(zip(sequential, batched)):
+            testing.assert_allclose(
+                bat.trajectory, seq.trajectory, rtol=0, atol=0,
+                err_msg="member {} differs from the sequential solve".format(i))
+            self.assertEqual(bool(bat.success), bool(seq.success))
+            self.assertAlmostEqual(float(bat.cost), float(seq.cost), places=6)
+
+
 class TestFKUtils(unittest.TestCase):
 
     @classmethod
