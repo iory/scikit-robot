@@ -9,7 +9,30 @@ from skrobot.kinematics.differentiable import pose_error_se3_log as pose_error_l
 from skrobot.kinematics.differentiable import rotation_error_so3_log as rotation_error_log
 
 
-def build_fk_functions(fk_data, backend):
+def fk_runtime_arrays(fk_data):
+    """Return only the array-valued entries of ``fk_data``.
+
+    The dict also holds ``n_joints`` (int) and ``joint_types`` (list of str),
+    which cannot be passed to a jitted function. Those describe the structure
+    of the computation rather than its inputs, so ``build_fk_functions``
+    captures them at build time and only the arrays need to travel.
+
+    Parameters
+    ----------
+    fk_data : dict
+        Output of :func:`prepare_fk_data`.
+
+    Returns
+    -------
+    dict
+        Array-valued entries, ready to pass to a jitted or vmapped function.
+    """
+    return {key: value for key, value in fk_data.items()
+            if value is not None
+            and hasattr(value, 'shape') and hasattr(value, 'dtype')}
+
+
+def build_fk_functions(fk_data, backend, parameterized=False):
     """Build forward kinematics helper functions.
 
     Parameters
@@ -32,36 +55,43 @@ def build_fk_functions(fk_data, backend):
         - collision_link_indices: (n_spheres,) link index per sphere
     backend : module
         Array module (numpy, jax.numpy, or skrobot backend).
+    parameterized : bool
+        If ``False`` (default) the returned functions take ``(angles)`` and
+        read the arrays from ``fk_data``, which is the historical contract.
+        If ``True`` they take ``(angles, fk)`` and read the arrays from
+        ``fk``, so a single traced function serves every problem with the
+        same structure. Use :func:`fk_runtime_arrays` to build ``fk``.
+
+        Only values may vary between calls. The structure -- joint count,
+        joint types, and which optional entries are present -- is still read
+        from ``fk_data`` when the functions are built, because it decides
+        the shape of the computation graph.
 
     Returns
     -------
     tuple
-        (get_link_transforms, get_sphere_positions) functions.
+        (get_link_transforms, get_sphere_positions, get_ee_position,
+        get_ee_pose) functions.
     """
     xp = backend
 
-    link_trans = fk_data['link_translations']
-    link_rots = fk_data['link_rotations']
-    joint_axes = fk_data['joint_axes']
-    base_pos = fk_data['base_position']
-    base_rot = fk_data['base_rotation']
+    # Structure: fixes the shape of the graph, so it stays constant.
     n_joints = fk_data['n_joints']
-    ref_angles = fk_data.get('ref_angles')
     joint_types = fk_data.get('joint_types')
+    has_ref = fk_data.get('ref_angles') is not None
+    has_ee_pos = fk_data.get('ee_offset_position') is not None
+    has_ee_rot = fk_data.get('ee_offset_rotation') is not None
+    has_spheres = fk_data.get('sphere_centers_local') is not None
 
-    coll_link_idx = fk_data.get('collision_link_to_chain_idx')
-    coll_offsets_pos = fk_data.get('collision_link_offsets_pos')
-    coll_offsets_rot = fk_data.get('collision_link_offsets_rot')
-    sphere_centers = fk_data.get('sphere_centers_local')
-    sphere_link_indices = fk_data.get('collision_link_indices')
-
-    def get_link_transforms(angles):
+    def get_link_transforms(angles, fk):
         """Compute link transforms for given joint angles.
 
         Parameters
         ----------
         angles : array
             Joint angles (n_joints,).
+        fk : dict
+            FK arrays.
 
         Returns
         -------
@@ -69,10 +99,15 @@ def build_fk_functions(fk_data, backend):
             (positions, rotations) arrays of shape
             (n_joints, 3) and (n_joints, 3, 3).
         """
+        link_trans = fk['link_translations']
+        link_rots = fk['link_rotations']
+        joint_axes = fk['joint_axes']
+        ref_angles = fk['ref_angles'] if has_ref else None
+
         positions = []
         rotations = []
-        current_pos = base_pos
-        current_rot = base_rot
+        current_pos = fk['base_position']
+        current_rot = fk['base_rotation']
 
         for i in range(n_joints):
             current_pos = current_pos + current_rot @ link_trans[i]
@@ -93,32 +128,15 @@ def build_fk_functions(fk_data, backend):
 
         return xp.stack(positions), xp.stack(rotations)
 
-    ee_offset_pos = fk_data.get('ee_offset_position')
-    ee_offset_rot = fk_data.get('ee_offset_rotation')
-
-    def get_ee_position(angles):
-        """Compute end-effector position for given joint angles.
+    def get_ee_pose(angles, fk):
+        """Compute end-effector position and rotation.
 
         Parameters
         ----------
         angles : array
             Joint angles (n_joints,).
-
-        Returns
-        -------
-        array
-            End-effector position in world frame (3,).
-        """
-        pos, _ = get_ee_pose(angles)
-        return pos
-
-    def get_ee_pose(angles):
-        """Compute end-effector position and rotation for given joint angles.
-
-        Parameters
-        ----------
-        angles : array
-            Joint angles (n_joints,).
+        fk : dict
+            FK arrays.
 
         Returns
         -------
@@ -127,20 +145,38 @@ def build_fk_functions(fk_data, backend):
         rotation : array
             End-effector rotation matrix in world frame (3, 3).
         """
-        positions, rotations = get_link_transforms(angles)
+        positions, rotations = get_link_transforms(angles, fk)
         last_pos = positions[-1]
         last_rot = rotations[-1]
-        if ee_offset_pos is not None:
-            ee_pos = last_pos + last_rot @ ee_offset_pos
+        if has_ee_pos:
+            ee_pos = last_pos + last_rot @ fk['ee_offset_position']
         else:
             ee_pos = last_pos
-        if ee_offset_rot is not None:
-            ee_rot = last_rot @ ee_offset_rot
+        if has_ee_rot:
+            ee_rot = last_rot @ fk['ee_offset_rotation']
         else:
             ee_rot = last_rot
         return ee_pos, ee_rot
 
-    def get_sphere_positions(angles):
+    def get_ee_position(angles, fk):
+        """Compute end-effector position for given joint angles.
+
+        Parameters
+        ----------
+        angles : array
+            Joint angles (n_joints,).
+        fk : dict
+            FK arrays.
+
+        Returns
+        -------
+        array
+            End-effector position in world frame (3,).
+        """
+        pos, _ = get_ee_pose(angles, fk)
+        return pos
+
+    def get_sphere_positions(angles, fk):
         """Compute collision sphere positions for given joint angles.
 
         Spheres approximate collision geometries (spheres or capsules)
@@ -150,31 +186,46 @@ def build_fk_functions(fk_data, backend):
         ----------
         angles : array
             Joint angles (n_joints,).
+        fk : dict
+            FK arrays.
 
         Returns
         -------
         array
             Sphere positions in world frame (n_spheres, 3).
         """
-        if sphere_centers is None:
+        if not has_spheres:
             return xp.zeros((0, 3))
 
-        link_positions, link_rotations = get_link_transforms(angles)
+        link_positions, link_rotations = get_link_transforms(angles, fk)
 
-        chain_idx = coll_link_idx[sphere_link_indices]
+        sphere_link_indices = fk['collision_link_indices']
+        chain_idx = fk['collision_link_to_chain_idx'][sphere_link_indices]
         sphere_link_pos = link_positions[chain_idx]
         sphere_link_rot = link_rotations[chain_idx]
 
-        offsets_pos = coll_offsets_pos[sphere_link_indices]
-        offsets_rot = coll_offsets_rot[sphere_link_indices]
+        offsets_pos = fk['collision_link_offsets_pos'][sphere_link_indices]
+        offsets_rot = fk['collision_link_offsets_rot'][sphere_link_indices]
 
-        local = xp.einsum('ijk,ik->ij', offsets_rot, sphere_centers) \
-            + offsets_pos
+        local = xp.einsum('ijk,ik->ij', offsets_rot,
+                          fk['sphere_centers_local']) + offsets_pos
         world = sphere_link_pos \
             + xp.einsum('ijk,ik->ij', sphere_link_rot, local)
         return world
 
-    return get_link_transforms, get_sphere_positions, get_ee_position, get_ee_pose
+    if parameterized:
+        return (get_link_transforms, get_sphere_positions, get_ee_position,
+                get_ee_pose)
+
+    def _bind(fn):
+        def bound(angles):
+            return fn(angles, fk_data)
+        bound.__name__ = fn.__name__
+        bound.__doc__ = fn.__doc__
+        return bound
+
+    return (_bind(get_link_transforms), _bind(get_sphere_positions),
+            _bind(get_ee_position), _bind(get_ee_pose))
 
 
 def compute_sphere_obstacle_distances(sphere_positions, sphere_radii,
