@@ -29,8 +29,116 @@ if platform.system() == 'Darwin':
 
 import numpy as np
 
+from skrobot.planner.trajectory_optimization.fk_utils import fk_runtime_arrays
 from skrobot.planner.trajectory_optimization.solvers.base import BaseSolver
 from skrobot.planner.trajectory_optimization.solvers.base import SolverResult
+
+
+def _build_inner_step(problem, objective_fn, constraint_fn, jax, jnp):
+    """Build the augmented Lagrangian and the Adam inner loop for a problem.
+
+    Returned as plain functions rather than compiled ones so the caller
+    decides how to stage them: :meth:`AugmentedLagrangianSolver.solve` jits
+    the inner loop directly, while
+    :meth:`AugmentedLagrangianSolver.solve_batched` wraps it in
+    :func:`jax.vmap` first. Both then run the same arithmetic, so a fix to
+    the Adam step cannot reach one path and miss the other.
+
+    Every value that may differ between problems of one structure -- the
+    trajectory, the multipliers, the penalty, the FK arrays, the joint
+    limits -- is an argument. What stays in the closure is what shapes the
+    traced graph: the residual functions and which endpoints are pinned.
+
+    Parameters
+    ----------
+    problem : TrajectoryProblem
+        Supplies the endpoint and waypoint constraints.
+    objective_fn, constraint_fn : callable
+        ``(trajectory, fk) -> value``, from
+        :meth:`AugmentedLagrangianSolver._build_functions`.
+    jax, jnp : module
+        Passed in because JAX is imported lazily by the caller.
+
+    Returns
+    -------
+    augmented_lagrangian : callable
+        ``(traj, lam, penalty, fk) -> scalar``.
+    inner_loop : callable
+        ``(traj, lam, penalty, lr, n_iters, fk, lo, hi)`` returning
+        ``(best_traj, best_cost)``.
+    """
+    def augmented_lagrangian(traj, lam, penalty, fk):
+        obj = objective_fn(traj, fk)
+        g = constraint_fn(traj, fk)  # g >= 0 is satisfied
+
+        # For inequality g >= 0:
+        # AL term = (rho/2) * ||max(0, lambda/rho - g)||^2
+        violation = jnp.maximum(0.0, lam / penalty - g)
+        return obj + (penalty / 2.0) * jnp.sum(violation ** 2)
+
+    al_grad = jax.grad(augmented_lagrangian)
+
+    # Adam optimizer parameters
+    beta1 = 0.9
+    beta2 = 0.999
+    eps = 1e-8
+
+    wp_constraints = [
+        (idx, jnp.array(angles, dtype=jnp.float32))
+        for idx, angles in problem.waypoint_constraints
+    ]
+
+    def inner_loop(traj, lam, penalty, lr, n_iters, fk, lo, hi):
+        def body_fn(i, state):
+            t, m, v, best_t, best_cost = state
+            grad = al_grad(t, lam, penalty, fk)
+
+            # Gradient clipping
+            grad_norm = jnp.sqrt(jnp.sum(grad ** 2) + 1e-10)
+            grad = jnp.where(grad_norm > 100.0,
+                             grad * (100.0 / grad_norm),
+                             grad)
+
+            # Adam update
+            m_new = beta1 * m + (1 - beta1) * grad
+            v_new = beta2 * v + (1 - beta2) * (grad ** 2)
+
+            # Bias correction
+            step = i + 1
+            m_hat = m_new / (1 - beta1 ** step)
+            v_hat = v_new / (1 - beta2 ** step)
+
+            new_t = t - lr * m_hat / (jnp.sqrt(v_hat) + eps)
+
+            # Clip to joint limits
+            new_t = jnp.clip(new_t, lo, hi)
+
+            # Fix endpoints
+            if problem.fixed_start:
+                new_t = new_t.at[0].set(traj[0])
+            if problem.fixed_end:
+                new_t = new_t.at[-1].set(traj[-1])
+
+            # Fix intermediate waypoints
+            for wp_idx, wp_angles in wp_constraints:
+                new_t = new_t.at[wp_idx].set(wp_angles)
+
+            # Track best
+            new_cost = augmented_lagrangian(new_t, lam, penalty, fk)
+            is_better = new_cost < best_cost
+            return (new_t, m_new, v_new,
+                    jnp.where(is_better, new_t, best_t),
+                    jnp.where(is_better, new_cost, best_cost))
+
+        init_cost = augmented_lagrangian(traj, lam, penalty, fk)
+        m_init = jnp.zeros(traj.shape, dtype=jnp.float32)
+        v_init = jnp.zeros(traj.shape, dtype=jnp.float32)
+        _, _, _, best_traj, best_cost = jax.lax.fori_loop(
+            0, n_iters, body_fn,
+            (traj, m_init, v_init, traj, init_cost))
+        return best_traj, best_cost
+
+    return augmented_lagrangian, inner_loop
 
 
 class AugmentedLagrangianSolver(BaseSolver):
@@ -175,8 +283,11 @@ class AugmentedLagrangianSolver(BaseSolver):
                 'functions': self._build_functions(problem),
             }
 
-        objective_fn, constraint_fn, n_constraints = \
+        objective_fn, constraint_fn, n_constraints, fk_data = \
             self._jit_cache[structure_key]['functions']
+        # The FK arrays travel as an argument; the structure that shapes the
+        # graph stays in the closure built above.
+        fk = fk_runtime_arrays(fk_data) if fk_data is not None else {}
 
         # Initialize (use float32 for consistency with JAX JIT)
         trajectory = jnp.array(initial_trajectory, dtype=jnp.float32)
@@ -188,90 +299,9 @@ class AugmentedLagrangianSolver(BaseSolver):
         lambdas = jnp.zeros(n_constraints, dtype=jnp.float32)
         rho = jnp.float32(self.initial_penalty)
 
-        # Build augmented Lagrangian and its gradient
-        def augmented_lagrangian(traj, lam, penalty):
-            obj = objective_fn(traj)
-            g = constraint_fn(traj)  # g >= 0 is satisfied
-
-            # For inequality g >= 0:
-            # AL term = (ρ/2) * ||max(0, λ/ρ - g)||²
-            # This is equivalent to the standard formulation
-            violation = jnp.maximum(0.0, lam / penalty - g)
-            al_penalty = (penalty / 2.0) * jnp.sum(violation ** 2)
-
-            return obj + al_penalty
-
-        al_grad = jax.grad(augmented_lagrangian)
-
-        # Adam optimizer parameters
-        beta1 = 0.9
-        beta2 = 0.999
-        eps = 1e-8
-
-        # Collect waypoint constraints as JAX arrays (float32 for consistency)
-        wp_constraints = [
-            (idx, jnp.array(angles, dtype=jnp.float32))
-            for idx, angles in problem.waypoint_constraints
-        ]
-
-        # JIT compile inner loop with Adam optimizer
-        @jax.jit
-        def inner_loop(traj, lam, penalty, lr, n_iters):
-            traj_shape = traj.shape
-
-            def body_fn(i, state):
-                t, m, v, best_t, best_cost = state
-                grad = al_grad(t, lam, penalty)
-
-                # Gradient clipping
-                grad_norm = jnp.sqrt(jnp.sum(grad ** 2) + 1e-10)
-                grad = jnp.where(
-                    grad_norm > 100.0,
-                    grad * (100.0 / grad_norm),
-                    grad
-                )
-
-                # Adam update
-                m_new = beta1 * m + (1 - beta1) * grad
-                v_new = beta2 * v + (1 - beta2) * (grad ** 2)
-
-                # Bias correction
-                step = i + 1
-                m_hat = m_new / (1 - beta1 ** step)
-                v_hat = v_new / (1 - beta2 ** step)
-
-                # Update trajectory
-                new_t = t - lr * m_hat / (jnp.sqrt(v_hat) + eps)
-
-                # Clip to joint limits
-                new_t = jnp.clip(new_t, lower, upper)
-
-                # Fix endpoints
-                if problem.fixed_start:
-                    new_t = new_t.at[0].set(traj[0])
-                if problem.fixed_end:
-                    new_t = new_t.at[-1].set(traj[-1])
-
-                # Fix intermediate waypoints
-                for wp_idx, wp_angles in wp_constraints:
-                    new_t = new_t.at[wp_idx].set(wp_angles)
-
-                # Track best
-                new_cost = augmented_lagrangian(new_t, lam, penalty)
-                is_better = new_cost < best_cost
-                new_best_t = jnp.where(is_better, new_t, best_t)
-                new_best_cost = jnp.where(is_better, new_cost, best_cost)
-
-                return (new_t, m_new, v_new, new_best_t, new_best_cost)
-
-            init_cost = augmented_lagrangian(traj, lam, penalty)
-            m_init = jnp.zeros(traj_shape, dtype=jnp.float32)
-            v_init = jnp.zeros(traj_shape, dtype=jnp.float32)
-            _, _, _, best_traj, best_cost = jax.lax.fori_loop(
-                0, n_iters, body_fn,
-                (traj, m_init, v_init, traj, init_cost)
-            )
-            return best_traj, best_cost
+        augmented_lagrangian, inner_step = _build_inner_step(
+            problem, objective_fn, constraint_fn, jax, jnp)
+        inner_loop = jax.jit(inner_step)
 
         # Outer loop: update multipliers
         total_inner_iters = 0
@@ -283,17 +313,17 @@ class AugmentedLagrangianSolver(BaseSolver):
         for outer_iter in range(max_outer):
             # Inner loop: minimize AL
             trajectory, al_cost = inner_loop(
-                trajectory, lambdas, rho, lr_f32, max_inner
+                trajectory, lambdas, rho, lr_f32, max_inner, fk, lower, upper
             )
             total_inner_iters += max_inner
 
             # Compute constraint violations
-            g = constraint_fn(trajectory)
+            g = constraint_fn(trajectory, fk)
             violations = jnp.maximum(0.0, -g)  # violation = max(0, -g)
             max_violation = float(jnp.max(violations))
 
             if self.verbose:
-                obj_val = float(objective_fn(trajectory))
+                obj_val = float(objective_fn(trajectory, fk))
                 print(f"Outer iter {outer_iter + 1}: "
                       f"obj={obj_val:.6f}, "
                       f"max_violation={max_violation:.6f}, "
@@ -316,8 +346,8 @@ class AugmentedLagrangianSolver(BaseSolver):
             prev_max_violation = max_violation
 
         # Final evaluation
-        final_cost = float(objective_fn(trajectory))
-        g_final = constraint_fn(trajectory)
+        final_cost = float(objective_fn(trajectory, fk))
+        g_final = constraint_fn(trajectory, fk)
         final_violation = float(jnp.max(jnp.maximum(0.0, -g_final)))
 
         success = final_violation < self.constraint_tolerance
@@ -334,6 +364,124 @@ class AugmentedLagrangianSolver(BaseSolver):
                 'final_penalty': rho,
             }
         )
+
+    def solve_batched(self, problem, initial_trajectory, fk_batch,
+                      lower_batch, upper_batch, **kwargs):
+        """Solve many problems of one structure in a single vmapped pass.
+
+        Compiling once and letting ``jax.vmap`` widen the inner loop is much
+        cheaper than calling :meth:`solve` per problem, which recompiles
+        every time. How much cheaper depends on the batch width.
+
+        ``problem`` supplies the structure and everything shared: the
+        residual set and weights, the targets, the obstacles. Only the FK
+        arrays and the joint limits may differ between members, so every
+        member must agree on the array shapes and on which joints are
+        prismatic -- those decide the traced graph.
+
+        The outer loop's two Python branches, breaking on convergence and
+        raising the penalty on poor progress, become per-problem decisions
+        here and are handled by masking. A converged problem is frozen and
+        never updated again, which leaves exactly the trajectory the
+        sequential break would have left. Every member therefore runs the
+        full outer count, so nothing is saved on problems that converge
+        early.
+
+        Parameters
+        ----------
+        problem : TrajectoryProblem
+            Representative problem giving the structure and shared values.
+        initial_trajectory : array
+            Initial trajectory (n_waypoints, n_joints), shared by all.
+        fk_batch : dict
+            Output of
+            :func:`~skrobot.planner.trajectory_optimization.fk_utils.fk_runtime_arrays`
+            for each member, stacked along a leading axis.
+        lower_batch, upper_batch : array
+            Joint limits, (n_problems, n_joints).
+        kwargs : dict
+            Same overrides :meth:`solve` accepts.
+
+        Returns
+        -------
+        list of SolverResult
+            One per member, in input order.
+        """
+        import jax
+        import jax.numpy as jnp
+
+        max_outer = kwargs.get(
+            'max_outer_iterations', self.max_outer_iterations)
+        max_inner = kwargs.get(
+            'max_inner_iterations', self.max_inner_iterations)
+        learning_rate = kwargs.get('learning_rate', self.learning_rate)
+
+        objective_fn, constraint_fn, n_constraints, _ = \
+            self._build_functions(problem)
+
+        n = int(np.asarray(lower_batch).shape[0])
+        traj0 = jnp.asarray(initial_trajectory, dtype=jnp.float32)
+        trajectory = jnp.broadcast_to(
+            traj0, (n,) + traj0.shape).astype(jnp.float32)
+        lower = jnp.asarray(lower_batch, dtype=jnp.float32)
+        upper = jnp.asarray(upper_batch, dtype=jnp.float32)
+        lambdas = jnp.zeros((n, n_constraints), dtype=jnp.float32)
+        rho = jnp.full((n,), self.initial_penalty, dtype=jnp.float32)
+
+        augmented_lagrangian, inner_step = _build_inner_step(
+            problem, objective_fn, constraint_fn, jax, jnp)
+
+        batched_inner = jax.jit(
+            jax.vmap(inner_step, in_axes=(0, 0, 0, None, None, 0, 0, 0)))
+        batched_constraint = jax.jit(jax.vmap(constraint_fn, in_axes=(0, 0)))
+        batched_objective = jax.jit(jax.vmap(objective_fn, in_axes=(0, 0)))
+
+        lr_f32 = jnp.float32(learning_rate)
+        tol = self.constraint_tolerance
+        done = jnp.zeros((n,), dtype=bool)
+        prev_violation = jnp.full((n,), jnp.inf, dtype=jnp.float32)
+        total_inner_iters = 0
+
+        for _ in range(max_outer):
+            new_traj, _ = batched_inner(
+                trajectory, lambdas, rho, lr_f32, max_inner,
+                fk_batch, lower, upper)
+            trajectory = jnp.where(done[:, None, None], trajectory, new_traj)
+            total_inner_iters += max_inner
+
+            g = batched_constraint(trajectory, fk_batch)
+            violation = jnp.max(jnp.maximum(0.0, -g), axis=1)
+            done = jnp.logical_or(done, violation < tol)
+            if bool(jnp.all(done)):
+                break
+
+            active = jnp.logical_not(done)
+            new_lambdas = jnp.maximum(
+                jnp.float32(0.0), lambdas - rho[:, None] * g)
+            lambdas = jnp.where(active[:, None], new_lambdas, lambdas)
+
+            grow = jnp.logical_and(active, violation > 0.25 * prev_violation)
+            rho = jnp.where(
+                grow,
+                jnp.minimum(rho * self.penalty_multiplier, self.max_penalty),
+                rho)
+            prev_violation = jnp.where(active, violation, prev_violation)
+
+        g_final = batched_constraint(trajectory, fk_batch)
+        final_violation = np.asarray(
+            jnp.max(jnp.maximum(0.0, -g_final), axis=1))
+        final_cost = np.asarray(batched_objective(trajectory, fk_batch))
+        traj_np = np.asarray(trajectory)
+
+        return [
+            SolverResult(
+                trajectory=traj_np[i],
+                success=bool(final_violation[i] < tol),
+                cost=float(final_cost[i]),
+                iterations=total_inner_iters,
+            )
+            for i in range(n)
+        ]
 
     def _build_functions(self, problem):
         """Build objective and constraint functions.
@@ -366,6 +514,7 @@ class AugmentedLagrangianSolver(BaseSolver):
 
         get_sphere_positions = None
         get_ee_pose = None
+        fk_data = None
         sphere_radii = None
 
         if has_collision or has_cartesian or has_ee_waypoints:
@@ -373,7 +522,7 @@ class AugmentedLagrangianSolver(BaseSolver):
             if has_collision:
                 sphere_radii = fk_data['sphere_radii']
             _, get_sphere_positions_fn, _, get_ee_pose_fn = \
-                build_fk_functions(fk_data, jnp)
+                build_fk_functions(fk_data, jnp, parameterized=True)
             get_sphere_positions = get_sphere_positions_fn
             get_ee_pose = get_ee_pose_fn
 
@@ -428,7 +577,7 @@ class AugmentedLagrangianSolver(BaseSolver):
             n_constraints = 1
 
         # Build objective function (soft costs only)
-        def objective_fn(trajectory):
+        def objective_fn(trajectory, fk):
             total_cost = 0.0
 
             for spec in soft_costs:
@@ -468,7 +617,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                         obs_radii = jnp.array([o['radius'] for o in sphere_obs])
 
                         def coll_cost_single(angles):
-                            sphere_pos = get_sphere_positions(angles)
+                            sphere_pos = get_sphere_positions(angles, fk)
                             signed_dists = compute_sphere_obstacle_distances(
                                 sphere_pos, sphere_radii,
                                 obs_centers, obs_radii, jnp
@@ -491,7 +640,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                         pairs_j_arr = jnp.array(pairs_j)
 
                         def self_coll_cost_single(angles):
-                            sphere_pos = get_sphere_positions(angles)
+                            sphere_pos = get_sphere_positions(angles, fk)
                             signed_dists = compute_self_collision_distances(
                                 sphere_pos, sphere_radii,
                                 pairs_i_arr, pairs_j_arr, jnp
@@ -517,7 +666,7 @@ class AugmentedLagrangianSolver(BaseSolver):
 
                         def cart_cost_single(args):
                             angles, t_pos, t_rot = args
-                            ee_pos, ee_rot = get_ee_pose(angles)
+                            ee_pos, ee_rot = get_ee_pose(angles, fk)
                             pose_err = pose_error_log(
                                 ee_pos, ee_rot, t_pos, t_rot)
                             pos_err = jnp.sum(pose_err[:3] ** 2)
@@ -530,7 +679,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                     else:
                         def cart_cost_pos_only(args):
                             angles, t_pos = args
-                            ee_pos, _ = get_ee_pose(angles)
+                            ee_pos, _ = get_ee_pose(angles, fk)
                             return jnp.sum((ee_pos - t_pos) ** 2)
 
                         cart_costs = jax.vmap(cart_cost_pos_only)(
@@ -555,7 +704,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                     pw = c['position_weight']
                     rw = c['rotation_weight']
                     angles = trajectory[wp_idx]
-                    ee_pos, ee_rot = get_ee_pose(angles)
+                    ee_pos, ee_rot = get_ee_pose(angles, fk)
                     pose_err = pose_error_log(ee_pos, ee_rot, t_pos, t_rot)
                     pos_err = jnp.sum(pose_err[:3] ** 2)
                     rot_err = jnp.sum(pose_err[3:] ** 2)
@@ -564,7 +713,7 @@ class AugmentedLagrangianSolver(BaseSolver):
             return total_cost
 
         # Build constraint function: g(x) >= 0 means satisfied
-        def constraint_fn(trajectory):
+        def constraint_fn(trajectory, fk):
             all_constraints = []
 
             for name, spec, _ in constraint_specs:
@@ -582,7 +731,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                         obs_radii = jnp.array([o['radius'] for o in sphere_obs])
 
                         def coll_dist_single(angles):
-                            sphere_pos = get_sphere_positions(angles)
+                            sphere_pos = get_sphere_positions(angles, fk)
                             signed_dists = compute_sphere_obstacle_distances(
                                 sphere_pos, sphere_radii,
                                 obs_centers, obs_radii, jnp
@@ -606,7 +755,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                         pairs_j_arr = jnp.array(pairs_j)
 
                         def self_coll_dist_single(angles):
-                            sphere_pos = get_sphere_positions(angles)
+                            sphere_pos = get_sphere_positions(angles, fk)
                             signed_dists = compute_self_collision_distances(
                                 sphere_pos, sphere_radii,
                                 pairs_i_arr, pairs_j_arr, jnp
@@ -649,4 +798,5 @@ class AugmentedLagrangianSolver(BaseSolver):
                 # No constraints: return dummy satisfied constraint
                 return jnp.array([1.0])
 
-        return jax.jit(objective_fn), jax.jit(constraint_fn), n_constraints
+        return (jax.jit(objective_fn), jax.jit(constraint_fn),
+                n_constraints, fk_data)
