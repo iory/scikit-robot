@@ -245,6 +245,48 @@ class TestTrajectoryProblem(unittest.TestCase):
             self.assertIn(key, fk, msg=f"Missing key: {key}")
 
 
+class TestPrismaticFK(unittest.TestCase):
+    """A prismatic joint must slide along its axis, not rotate about it.
+
+    Fetch is used because its torso lift is prismatic while the arm joints
+    are rotational, so one chain exercises both branches.
+    """
+
+    def test_link_transforms_match_robot_with_prismatic_joint(self):
+        robot = skrobot.models.Fetch()
+        joint_names = [
+            'torso_lift_joint',      # prismatic
+            'shoulder_pan_joint',
+            'shoulder_lift_joint',
+            'upperarm_roll_joint',
+            'elbow_flex_joint',
+        ]
+        link_list = [getattr(robot, n.replace('_joint', '_link'))
+                     for n in joint_names]
+        # A raised torso is what separates translation from rotation here:
+        # at zero lift both interpretations agree.
+        angles = np.array([0.3, 0.2, -0.3, 0.4, 0.5])
+        for link, angle in zip(link_list, angles):
+            link.joint.joint_angle(angle)
+
+        problem = TrajectoryProblem(
+            robot, link_list, n_waypoints=3,
+            move_target=robot.rarm_end_coords)
+        fk_data = prepare_fk_data(problem, np)
+        get_link_transforms, _, _, _ = build_fk_functions(fk_data, np)
+        positions, _ = get_link_transforms(angles)
+
+        # Assert the positions first. Treating the lift as rotational puts
+        # the tip about 0.35 m away, and that is the failure this guards
+        # against; checking joint_types first would hide it behind a
+        # KeyError.
+        for i, link in enumerate(link_list):
+            testing.assert_almost_equal(
+                positions[i], link.worldpos(), decimal=4,
+                err_msg="Position mismatch at {}".format(link.joint.name))
+        self.assertEqual(fk_data['joint_types'][0], 'prismatic')
+
+
 class TestFKUtils(unittest.TestCase):
 
     @classmethod

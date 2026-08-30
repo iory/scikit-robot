@@ -19,6 +19,9 @@ def build_fk_functions(fk_data, backend):
         - link_translations: (n_joints, 3) link translations
         - link_rotations: (n_joints, 3, 3) link rotations
         - joint_axes: (n_joints, 3) joint axes
+        - joint_types: (n_joints,) joint type strings. A 'prismatic' joint
+          translates along its axis; anything else rotates about it. If the
+          key is absent every joint is treated as rotational.
         - base_position: (3,) base position
         - base_rotation: (3, 3) base rotation
         - n_joints: int
@@ -44,6 +47,7 @@ def build_fk_functions(fk_data, backend):
     base_rot = fk_data['base_rotation']
     n_joints = fk_data['n_joints']
     ref_angles = fk_data.get('ref_angles')
+    joint_types = fk_data.get('joint_types')
 
     coll_link_idx = fk_data.get('collision_link_to_chain_idx')
     coll_offsets_pos = fk_data.get('collision_link_offsets_pos')
@@ -78,8 +82,12 @@ def build_fk_functions(fk_data, backend):
             delta = angles[i]
             if ref_angles is not None:
                 delta = delta - ref_angles[i]
-            joint_rot = rodrigues_rotation(xp, joint_axes[i], delta)
-            current_rot = current_rot @ joint_rot
+            if joint_types is not None and joint_types[i] == 'prismatic':
+                current_pos = current_pos \
+                    + current_rot @ (joint_axes[i] * delta)
+            else:
+                joint_rot = rodrigues_rotation(xp, joint_axes[i], delta)
+                current_rot = current_rot @ joint_rot
             positions.append(current_pos)
             rotations.append(current_rot)
 
@@ -384,6 +392,9 @@ def prepare_fk_data(problem, backend):
         'link_translations': xp.array(fk_params['link_translations']),
         'link_rotations': xp.array(fk_params['link_rotations']),
         'joint_axes': xp.array(fk_params['joint_axes']),
+        # Kept as a Python list: it selects the branch in
+        # build_fk_functions rather than taking part in the arithmetic.
+        'joint_types': list(fk_params['joint_types']),
         'base_position': xp.array(fk_params['base_position']),
         'base_rotation': xp.array(fk_params['base_rotation']),
         'n_joints': fk_params['n_joints'],
