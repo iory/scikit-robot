@@ -82,6 +82,7 @@ def build_fk_functions(fk_data, backend, parameterized=False):
     has_ee_pos = fk_data.get('ee_offset_position') is not None
     has_ee_rot = fk_data.get('ee_offset_rotation') is not None
     has_spheres = fk_data.get('sphere_centers_local') is not None
+    has_static = fk_data.get('collision_link_is_static') is not None
 
     def get_link_transforms(angles, fk):
         """Compute link transforms for given joint angles.
@@ -176,6 +177,45 @@ def build_fk_functions(fk_data, backend, parameterized=False):
         pos, _ = get_ee_pose(angles, fk)
         return pos
 
+    def get_collision_link_transforms(angles, fk):
+        """Compute world transforms of the collision links.
+
+        Links that the optimized chain cannot move (see
+        ``collision_link_is_static``) are placed from the base frame instead
+        of from a chain link.
+
+        Parameters
+        ----------
+        angles : array
+            Joint angles (n_joints,).
+        fk : dict
+            FK arrays.
+
+        Returns
+        -------
+        tuple
+            (positions, rotations) arrays of shape (n_coll_links, 3) and
+            (n_coll_links, 3, 3) in the world frame.
+        """
+        link_positions, link_rotations = get_link_transforms(angles, fk)
+        coll_link_idx = fk['collision_link_to_chain_idx']
+        chain_pos = link_positions[coll_link_idx]
+        chain_rot = link_rotations[coll_link_idx]
+
+        if has_static:
+            static = fk['collision_link_is_static'][:, None]
+            base_pos = fk['base_position']
+            base_rot = fk['base_rotation']
+            chain_pos = xp.where(static, base_pos[None, :], chain_pos)
+            chain_rot = xp.where(static[:, :, None], base_rot[None, :, :],
+                                 chain_rot)
+
+        world_pos = chain_pos + xp.einsum(
+            'cij,cj->ci', chain_rot, fk['collision_link_offsets_pos'])
+        world_rot = xp.einsum(
+            'cij,cjk->cik', chain_rot, fk['collision_link_offsets_rot'])
+        return world_pos, world_rot
+
     def get_sphere_positions(angles, fk):
         """Compute collision sphere positions for given joint angles.
 
@@ -197,21 +237,17 @@ def build_fk_functions(fk_data, backend, parameterized=False):
         if not has_spheres:
             return xp.zeros((0, 3))
 
-        link_positions, link_rotations = get_link_transforms(angles, fk)
-
+        link_pos, link_rot = get_collision_link_transforms(angles, fk)
         sphere_link_indices = fk['collision_link_indices']
-        chain_idx = fk['collision_link_to_chain_idx'][sphere_link_indices]
-        sphere_link_pos = link_positions[chain_idx]
-        sphere_link_rot = link_rotations[chain_idx]
+        sphere_pos = link_pos[sphere_link_indices]
+        sphere_rot = link_rot[sphere_link_indices]
+        return sphere_pos + xp.einsum(
+            'ijk,ik->ij', sphere_rot, fk['sphere_centers_local'])
 
-        offsets_pos = fk['collision_link_offsets_pos'][sphere_link_indices]
-        offsets_rot = fk['collision_link_offsets_rot'][sphere_link_indices]
-
-        local = xp.einsum('ijk,ik->ij', offsets_rot,
-                          fk['sphere_centers_local']) + offsets_pos
-        world = sphere_link_pos \
-            + xp.einsum('ijk,ik->ij', sphere_link_rot, local)
-        return world
+    # Exposed through build_collision_link_transform_fn rather than the return
+    # tuple, whose arity is part of this module's public API.
+    get_sphere_positions.collision_link_transforms = \
+        get_collision_link_transforms
 
     if parameterized:
         return (get_link_transforms, get_sphere_positions, get_ee_position,
@@ -224,8 +260,41 @@ def build_fk_functions(fk_data, backend, parameterized=False):
         bound.__doc__ = fn.__doc__
         return bound
 
-    return (_bind(get_link_transforms), _bind(get_sphere_positions),
-            _bind(get_ee_position), _bind(get_ee_pose))
+    bound_link = _bind(get_link_transforms)
+    bound_spheres = _bind(get_sphere_positions)
+    bound_ee_pos = _bind(get_ee_position)
+    bound_ee_pose = _bind(get_ee_pose)
+    bound_spheres.collision_link_transforms = _bind(
+        get_collision_link_transforms)
+    return bound_link, bound_spheres, bound_ee_pos, bound_ee_pose
+
+
+def build_collision_link_transform_fn(fk_data, backend,
+                                      parameterized=False):
+    """Build ``angles -> (positions, rotations)`` for the collision links.
+
+    The returned callable applies each collision link's offset from its
+    kinematic-chain ancestor, and places links the chain cannot move (see
+    ``collision_link_is_static``) from the base frame instead.
+
+    Parameters
+    ----------
+    fk_data : dict
+        Output of :func:`prepare_fk_data`.  Must contain the collision link
+        entries, i.e. ``add_collision_cost`` must have been called.
+    backend : module
+        Array module (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    callable
+        ``f(angles) -> (positions, rotations)`` of shape (n_coll_links, 3)
+        and (n_coll_links, 3, 3) in the world frame. With
+        ``parameterized=True`` the signature is ``f(angles, fk)``.
+    """
+    _, get_sphere_positions, _, _ = build_fk_functions(
+        fk_data, backend, parameterized=parameterized)
+    return get_sphere_positions.collision_link_transforms
 
 
 def compute_sphere_obstacle_distances(sphere_positions, sphere_radii,
@@ -462,6 +531,8 @@ def prepare_fk_data(problem, backend):
             problem.collision_link_offsets_pos)
         fk_data['collision_link_offsets_rot'] = xp.array(
             problem.collision_link_offsets_rot)
+        fk_data['collision_link_is_static'] = xp.array(
+            problem.collision_link_is_static)
         fk_data['sphere_centers_local'] = xp.array(
             problem.collision_spheres['sphere_centers_local'])
         fk_data['sphere_radii'] = xp.array(
@@ -473,6 +544,7 @@ def prepare_fk_data(problem, backend):
 
 
 __all__ = [
+    'build_collision_link_transform_fn',
     'build_fk_functions',
     'rotation_error_vector',
     'rotation_error_log',

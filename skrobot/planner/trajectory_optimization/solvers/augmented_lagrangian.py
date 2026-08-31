@@ -504,6 +504,7 @@ class AugmentedLagrangianSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import build_gridsdf_self_distance_fn
 
         dt = problem.dt
 
@@ -516,6 +517,7 @@ class AugmentedLagrangianSolver(BaseSolver):
         get_ee_pose = None
         fk_data = None
         sphere_radii = None
+        gridsdf_self_distances = None
 
         if has_collision or has_cartesian or has_ee_waypoints:
             fk_data = prepare_fk_data(problem, jnp)
@@ -525,6 +527,8 @@ class AugmentedLagrangianSolver(BaseSolver):
                 build_fk_functions(fk_data, jnp, parameterized=True)
             get_sphere_positions = get_sphere_positions_fn
             get_ee_pose = get_ee_pose_fn
+            gridsdf_self_distances = build_gridsdf_self_distance_fn(
+                problem, fk_data, jnp, parameterized=True)
 
         # Separate soft costs and hard constraints based on 'kind' attribute
         # kind='soft' -> soft costs (in objective)
@@ -553,8 +557,12 @@ class AugmentedLagrangianSolver(BaseSolver):
                 n_constraints += n_coll
 
             elif spec.name == 'self_collision' and has_collision:
-                pairs_i, pairs_j = spec.params['pair_indices']
-                n_pairs = len(pairs_i)
+                if spec.params.get('mode') == 'gridsdf':
+                    grids = spec.params['gridsdf_data']
+                    n_pairs = (len(grids['pairs_a'])
+                               * grids['surface_points'].shape[1])
+                else:
+                    n_pairs = len(spec.params['pair_indices'][0])
                 n_self = n_pairs * problem.n_waypoints
                 constraint_specs.append(('self_collision', spec, n_self))
                 n_constraints += n_self
@@ -631,9 +639,25 @@ class AugmentedLagrangianSolver(BaseSolver):
                         total_cost = total_cost + weight * jnp.sum(coll_costs)
 
                 elif name == 'self_collision' and has_collision:
-                    pair_indices = params['pair_indices']
                     activation = params['activation_distance']
-                    pairs_i, pairs_j = pair_indices
+
+                    if params.get('mode') == 'gridsdf':
+                        def gridsdf_self_coll_cost_single(angles):
+                            signed_dists = gridsdf_self_distances(
+                                angles, fk)
+                            residuals = compute_collision_residuals(
+                                signed_dists, activation, jnp
+                            )
+                            return jnp.sum(residuals ** 2)
+
+                        self_coll_costs = jax.vmap(
+                            gridsdf_self_coll_cost_single
+                        )(trajectory)
+                        total_cost = (total_cost
+                                      + weight * jnp.sum(self_coll_costs))
+                        continue
+
+                    pairs_i, pairs_j = params['pair_indices']
 
                     if len(pairs_i) > 0:
                         pairs_i_arr = jnp.array(pairs_i)
@@ -747,8 +771,17 @@ class AugmentedLagrangianSolver(BaseSolver):
                         all_constraints.append(g)
 
                 elif name == 'self_collision':
-                    pairs_i, pairs_j = params['pair_indices']
                     activation = params['activation_distance']
+
+                    if params.get('mode') == 'gridsdf':
+                        dists = jax.vmap(
+                            gridsdf_self_distances,
+                            in_axes=(0, None))(trajectory, fk)
+                        # Constraint: dist - activation >= 0
+                        all_constraints.append(dists.flatten() - activation)
+                        continue
+
+                    pairs_i, pairs_j = params['pair_indices']
 
                     if len(pairs_i) > 0:
                         pairs_i_arr = jnp.array(pairs_i)

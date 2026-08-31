@@ -14,6 +14,7 @@ https://github.com/iory/scikit-robot/tree/main/examples
    robot_models
    pr2_inverse_kinematics
    collision_free_trajectory
+   self_collision_free_trajectory
    trimesh_scene_viewer
    pybullet_interface
    signed_distance_functions
