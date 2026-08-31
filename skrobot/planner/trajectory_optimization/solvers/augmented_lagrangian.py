@@ -684,6 +684,14 @@ class AugmentedLagrangianSolver(BaseSolver):
                     target_pos = jnp.array(params['target_positions'])
                     target_rots = params.get('target_rotations')
                     rot_w = params.get('rotation_weight', 1.0)
+                    pmask = jnp.array(
+                        params.get('position_mask', [1, 1, 1]),
+                        dtype=jnp.float64)
+                    rmask = jnp.array(
+                        params.get('rotation_mask', [1, 1, 1]
+                                   if target_rots is not None
+                                   else [0, 0, 0]),
+                        dtype=jnp.float64)
 
                     if target_rots is not None:
                         target_rots = jnp.array(target_rots)
@@ -693,8 +701,8 @@ class AugmentedLagrangianSolver(BaseSolver):
                             ee_pos, ee_rot = get_ee_pose(angles, fk)
                             pose_err = pose_error_log(
                                 ee_pos, ee_rot, t_pos, t_rot)
-                            pos_err = jnp.sum(pose_err[:3] ** 2)
-                            rot_err = jnp.sum(pose_err[3:] ** 2)
+                            pos_err = jnp.sum((pose_err[:3] * pmask) ** 2)
+                            rot_err = jnp.sum((pose_err[3:] * rmask) ** 2)
                             return pos_err + rot_w * rot_err
 
                         cart_costs = jax.vmap(cart_cost_single)(
@@ -704,7 +712,7 @@ class AugmentedLagrangianSolver(BaseSolver):
                         def cart_cost_pos_only(args):
                             angles, t_pos = args
                             ee_pos, _ = get_ee_pose(angles, fk)
-                            return jnp.sum((ee_pos - t_pos) ** 2)
+                            return jnp.sum(((ee_pos - t_pos) * pmask) ** 2)
 
                         cart_costs = jax.vmap(cart_cost_pos_only)(
                             (trajectory, target_pos)

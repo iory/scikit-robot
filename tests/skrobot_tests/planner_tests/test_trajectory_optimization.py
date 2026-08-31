@@ -1574,3 +1574,114 @@ class TestGridSDFSelfCollision(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestBoxToSpheres(unittest.TestCase):
+    """The lattice must cover the box it stands in for."""
+
+    def test_lattice_covers_the_box(self):
+        from skrobot.planner import box_to_spheres
+
+        center = np.array([0.4, -0.1, 0.3])
+        extents = np.array([0.2, 0.4, 0.6])
+        spheres = box_to_spheres(center, extents, n_per_axis=2)
+
+        self.assertEqual(len(spheres), 8)
+        centers = np.array([s['center'] for s in spheres])
+        radii = np.array([s['radius'] for s in spheres])
+
+        # Every lattice point sits inside the box.
+        self.assertTrue(
+            np.all(np.abs(centers - center) <= extents / 2.0 + 1e-9))
+
+        # Cover, not just touch: the union has to contain the corners, which
+        # is what makes the approximation conservative rather than optimistic.
+        signs = np.array([[sx, sy, sz]
+                          for sx in (-1, 1) for sy in (-1, 1)
+                          for sz in (-1, 1)], dtype=float)
+        corners = center + signs * extents / 2.0
+        for corner in corners:
+            covered = np.linalg.norm(centers - corner, axis=1) <= radii + 1e-9
+            self.assertTrue(covered.any(),
+                            'corner {} left uncovered'.format(corner))
+
+    def test_rotation_is_applied_about_the_centre(self):
+        from skrobot.coordinates.math import rotation_matrix
+        from skrobot.planner import box_to_spheres
+
+        center = np.array([1.0, 0.0, 0.0])
+        extents = np.array([0.4, 0.2, 0.2])
+        rot = rotation_matrix(np.pi / 2.0, [0, 0, 1])
+
+        plain = np.array([s['center']
+                          for s in box_to_spheres(center, extents, 2)])
+        turned = np.array([s['center'] for s in box_to_spheres(
+            center, extents, 2, rotation=rot)])
+
+        # A rotation about the box centre leaves the centroid alone but must
+        # move the lattice, otherwise the argument is being ignored.
+        testing.assert_allclose(turned.mean(axis=0), plain.mean(axis=0),
+                                atol=1e-9)
+        self.assertGreater(np.abs(turned - plain).max(), 1e-3)
+
+
+class TestCartesianAxisMasks(unittest.TestCase):
+    """A masked axis must drop out of the Cartesian residual."""
+
+    def _problem(self, position_mask=None, rotation_mask=None):
+        robot, link_list, _ = _make_kuka()
+        problem = TrajectoryProblem(robot, link_list, n_waypoints=2,
+                                    move_target=robot.rarm_end_coords)
+        target = robot.rarm_end_coords.worldpos() + np.array([0.1, 0.0, 0.2])
+        problem.add_cartesian_path_cost(
+            np.tile(target, (2, 1)),
+            np.tile(np.eye(3), (2, 1, 1)),
+            weight=1.0, rotation_weight=1.0,
+            position_mask=position_mask, rotation_mask=rotation_mask)
+        return problem
+
+    def test_masks_default_to_all_axes(self):
+        spec = self._problem().residuals[-1]
+        self.assertEqual(list(spec.params['position_mask']), [1, 1, 1])
+        self.assertEqual(list(spec.params['rotation_mask']), [1, 1, 1])
+
+    def test_masked_axis_is_stored(self):
+        spec = self._problem(position_mask=[1, 1, 0],
+                             rotation_mask=[0, 0, 0]).residuals[-1]
+        self.assertEqual(list(spec.params['position_mask']), [1, 1, 0])
+        self.assertEqual(list(spec.params['rotation_mask']), [0, 0, 0])
+
+    @unittest.skipUnless(HAS_JAX, 'jax is not installed')
+    def test_masked_axis_does_not_change_the_cost(self):
+        """Moving the target along a masked axis must not move the cost.
+
+        This is the property the mask exists for: a ``:translation-axis :z``
+        style request should leave z free. Comparing two problems that differ
+        only in the masked coordinate catches a mask that is stored but never
+        applied.
+
+        Position-only tracking is used deliberately. With a rotation target
+        the residual is the SE(3) log map, whose first three components mix
+        translation with rotation, so ``position_mask`` frees a log-map
+        coordinate rather than a world axis.
+        """
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+
+        robot, link_list, n_joints = _make_kuka()
+        base = robot.rarm_end_coords.worldpos()
+        traj = interpolate_trajectory(np.zeros(n_joints),
+                                      np.ones(n_joints) * 0.1, 2)
+
+        def cost_for(dz):
+            robot2, links2, _ = _make_kuka()
+            problem = TrajectoryProblem(robot2, links2, n_waypoints=2,
+                                        move_target=robot2.rarm_end_coords)
+            target = base + np.array([0.1, 0.0, dz])
+            problem.add_cartesian_path_cost(
+                np.tile(target, (2, 1)),
+                weight=1.0, position_mask=[1, 1, 0])
+            solver = AugmentedLagrangianSolver(max_outer_iterations=1,
+                                               max_inner_iterations=1)
+            return float(solver.solve(problem, traj).cost)
+
+        self.assertAlmostEqual(cost_for(0.0), cost_for(5.0), places=6)

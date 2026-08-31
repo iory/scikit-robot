@@ -126,6 +126,13 @@ class TrajectoryProblem:
         # End-effector waypoint costs: list of dicts
         self.ee_waypoint_costs = []
 
+        # Extra EE costs that share the variable space with the main
+        # chain (used for branched / Y-shape multi-EE problems where
+        # the legacy multi_ee_waypoint cost cannot be applied because
+        # chains overlap). Each entry is a dict captured by
+        # :meth:`add_extra_ee_cost`.
+        self.extra_ee_costs = []
+
     @property
     def fk_params(self):
         """Get FK parameters for the FIRST chain (legacy single-chain access)."""
@@ -603,6 +610,7 @@ class TrajectoryProblem:
         weight=100.0,
         activation_distance=0.05,
         as_constraint=True,
+        n_spheres_per_link=3,
     ):
         """Add world collision avoidance cost.
 
@@ -619,6 +627,11 @@ class TrajectoryProblem:
         as_constraint : bool
             If True (default), treat as hard constraint for Augmented Lagrangian
             solver (collision distance >= 0). If False, treat as soft cost.
+        n_spheres_per_link : int
+            Number of swept spheres approximating each collision link.
+            Higher values mean tighter collision approximation at the
+            cost of more residuals. 3 is the historical default; values
+            up to ~7 are reasonable for elongated links.
         """
         self.collision_link_list = collision_link_list
         self.world_obstacles = world_obstacles
@@ -626,7 +639,8 @@ class TrajectoryProblem:
         # Extract collision spheres
         from skrobot.planner.trajectory_optimization.collision import extract_collision_spheres
         self.collision_spheres = extract_collision_spheres(
-            self.robot_model, collision_link_list, n_spheres_per_link=3
+            self.robot_model, collision_link_list,
+            n_spheres_per_link=n_spheres_per_link,
         )
 
         # Compute collision link offsets
@@ -819,6 +833,10 @@ class TrajectoryProblem:
     ):
         """Add end-effector pose tracking cost.
 
+        Equivalent to :meth:`add_cartesian_path_cost`; kept as a
+        convenience name for IK-style use where every waypoint shares
+        the same target pose.
+
         Parameters
         ----------
         target_positions : ndarray
@@ -830,18 +848,12 @@ class TrajectoryProblem:
         rotation_weight : float
             Rotation tracking weight.
         """
-        self.residuals.append(ResidualSpec(
-            name='pose',
-            residual_fn='pose',
-            params={
-                'target_positions': target_positions,
-                'target_rotations': target_rotations,
-                'position_weight': position_weight,
-                'rotation_weight': rotation_weight,
-            },
-            kind='soft',
-            weight=1.0,  # Weights are in params
-        ))
+        self.add_cartesian_path_cost(
+            target_positions=target_positions,
+            target_rotations=target_rotations,
+            weight=position_weight,
+            rotation_weight=rotation_weight / max(position_weight, 1e-12),
+        )
 
     def add_joint_velocity_limit(self, scale=1.0):
         """Add joint velocity limit constraint.
@@ -875,6 +887,8 @@ class TrajectoryProblem:
         target_rotations=None,
         weight=10.0,
         rotation_weight=1.0,
+        position_mask=None,
+        rotation_mask=None,
     ):
         """Add end-effector pose tracking cost for Cartesian path.
 
@@ -893,7 +907,28 @@ class TrajectoryProblem:
             Position tracking weight.
         rotation_weight : float
             Rotation tracking weight relative to position weight.
+        position_mask : array-like length 3 (in {0, 1}), optional
+            Per-axis selection of which translational error components
+            to penalise. ``[1, 1, 1]`` (default) enforces the full
+            position. ``[0, 0, 1]`` keeps only Z (the equivalent of
+            optmotiongen's ``:translation-axis :z``). Eliminated axes
+            contribute no residual at all.
+        rotation_mask : array-like length 3, optional
+            Per-axis selection of which rotational error components
+            (in the SE(3) log map basis) to penalise. ``[0, 0, 0]``
+            disables rotation tracking entirely (equivalent to
+            ``rotation_weight=0``).
         """
+        if position_mask is None:
+            position_mask = [1, 1, 1]
+        if rotation_mask is None:
+            rotation_mask = ([1, 1, 1] if target_rotations is not None
+                             else [0, 0, 0])
+        position_mask = list(position_mask)
+        rotation_mask = list(rotation_mask)
+        if len(position_mask) != 3 or len(rotation_mask) != 3:
+            raise ValueError(
+                'position_mask and rotation_mask must be length 3')
         self.residuals.append(ResidualSpec(
             name='cartesian_path',
             residual_fn='cartesian_path',
@@ -901,10 +936,106 @@ class TrajectoryProblem:
                 'target_positions': target_positions,
                 'target_rotations': target_rotations,
                 'rotation_weight': rotation_weight,
+                'position_mask': position_mask,
+                'rotation_mask': rotation_mask,
             },
             kind='soft',
             weight=weight,
         ))
+
+    def add_extra_ee_cost(
+        self,
+        move_target,
+        sub_chain_link_list,
+        target_positions,
+        target_rotations=None,
+        weight=10.0,
+        rotation_weight=1.0,
+        position_mask=None,
+        rotation_mask=None,
+    ):
+        """Add a Cartesian-path tracking cost for a *secondary* EE.
+
+        Use this when several end-effectors share the same articulated
+        chain (e.g. branches of a Y-shape robot) and you want all of
+        them tracked at once in a single trajectory-optimization pass.
+        The variable space stays the union chain
+        (``self.link_list``); each call to ``add_extra_ee_cost``
+        contributes one residual whose FK is built against
+        ``sub_chain_link_list`` (a subset of ``self.link_list`` whose
+        joints are the ancestor chain of ``move_target``).
+
+        Parameters
+        ----------
+        move_target : skrobot.coordinates.CascadedCoords
+            EE frame for this extra task.
+        sub_chain_link_list : list of skrobot.model.Link
+            Links from ``self.link_list`` (or a subset of them, in
+            root-to-tip order) whose joints feed this EE. The cost
+            gathers angles from the union waypoint vector via the
+            joint-name match.
+        target_positions : array
+            Target positions, as in :meth:`add_cartesian_path_cost`.
+        target_rotations : array, optional
+            Target rotations, as in :meth:`add_cartesian_path_cost`.
+        weight : float
+            Position weight, as in :meth:`add_cartesian_path_cost`.
+        rotation_weight : float
+            Rotation weight, as in :meth:`add_cartesian_path_cost`.
+        position_mask, rotation_mask : array-like length 3, optional
+            Axis masks, as in :meth:`add_cartesian_path_cost`.
+        """
+        from skrobot.kinematics.differentiable import extract_fk_parameters
+
+        # Extract FK against the sub-chain at construction time. This
+        # snapshot's ref_angles are baked into the JIT graph; the
+        # solver still varies the union waypoint vector and only
+        # gathers the relevant slice for this cost.
+        fk_data = extract_fk_parameters(
+            self.robot_model, sub_chain_link_list, move_target)
+
+        # Map each sub-chain joint to its flat-union index.
+        union_joint_names = [link.joint.name for link in self.link_list]
+        chain_indices = []
+        for link in sub_chain_link_list:
+            try:
+                chain_indices.append(
+                    union_joint_names.index(link.joint.name))
+            except ValueError as err:
+                raise ValueError(
+                    'sub_chain joint {!r} is not in the union chain '
+                    '(self.link_list); add it before calling '
+                    'add_extra_ee_cost'.format(link.joint.name)) from err
+
+        if position_mask is None:
+            position_mask = [1, 1, 1]
+        if rotation_mask is None:
+            rotation_mask = ([1, 1, 1] if target_rotations is not None
+                             else [0, 0, 0])
+
+        target_positions = np.asarray(target_positions, dtype=np.float64)
+        if target_positions.shape != (self.n_waypoints, 3):
+            raise ValueError(
+                'target_positions must have shape ({}, 3); got {}'.format(
+                    self.n_waypoints, target_positions.shape))
+        if target_rotations is not None:
+            target_rotations = np.asarray(target_rotations, dtype=np.float64)
+            if target_rotations.shape != (self.n_waypoints, 3, 3):
+                raise ValueError(
+                    'target_rotations must have shape ({}, 3, 3); '
+                    'got {}'.format(
+                        self.n_waypoints, target_rotations.shape))
+
+        self.extra_ee_costs.append({
+            'fk_data': fk_data,
+            'chain_indices': np.asarray(chain_indices, dtype=np.int64),
+            'target_positions': target_positions,
+            'target_rotations': target_rotations,
+            'position_weight': float(weight),
+            'rotation_weight': float(rotation_weight),
+            'position_mask': list(position_mask),
+            'rotation_mask': list(rotation_mask),
+        })
 
     def set_fixed_endpoints(self, start=True, end=True):
         """Set whether to fix start and end waypoints.
