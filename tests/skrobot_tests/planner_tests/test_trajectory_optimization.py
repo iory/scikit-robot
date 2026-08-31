@@ -1335,18 +1335,26 @@ class TestAugmentedLagrangianSolver(unittest.TestCase):
         end = np.ones(self.n_joints) * 0.3
         initial_traj = interpolate_trajectory(start, end, 3)
 
+        # The cache is module-level, not per-solver, so the assertions read
+        # it there. Clearing first keeps the test independent of whatever an
+        # earlier test left behind.
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import _JIT_CACHE
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import clear_jit_cache
+        clear_jit_cache()
+        self.addCleanup(clear_jit_cache)
+
         solver = AugmentedLagrangianSolver(max_iterations=20)
 
         # First solve builds cache
         solver.solve(problem, initial_traj)
-        cache_keys_after_first = list(solver._jit_cache.keys())
+        cache_keys_after_first = list(_JIT_CACHE.keys())
 
         # Second solve with same structure should reuse cache
         end2 = np.ones(self.n_joints) * 0.4
         initial_traj2 = interpolate_trajectory(start, end2, 3)
         solver.solve(problem, initial_traj2)
 
-        cache_keys_after_second = list(solver._jit_cache.keys())
+        cache_keys_after_second = list(_JIT_CACHE.keys())
         self.assertEqual(cache_keys_after_first, cache_keys_after_second)
 
 
@@ -1825,3 +1833,149 @@ class TestWorldSurfaceData(unittest.TestCase):
             self.skipTest('every Panda link carries a collision mesh')
         with self.assertRaises(ValueError):
             build_world_surface_data(bare)
+
+
+class TestJitCacheKey(unittest.TestCase):
+    """The cache is process-wide, so its key has to separate the values."""
+
+    def _chain(self):
+        robot = skrobot.models.Kuka()
+        robot.reset_manip_pose()
+        return robot, robot.rarm.link_list
+
+    def _cartesian(self, position_mask=None):
+        robot, link_list = self._chain()
+        problem = TrajectoryProblem(robot, link_list, n_waypoints=3,
+                                    move_target=robot.rarm_end_coords)
+        target = robot.rarm_end_coords.worldpos() + np.array([0.05, 0.0, 0.05])
+        problem.add_cartesian_path_cost(
+            np.tile(target, (3, 1)), weight=10.0,
+            position_mask=position_mask)
+        return problem
+
+    def _boxed(self, extents):
+        robot, link_list = self._chain()
+        problem = TrajectoryProblem(robot, link_list, n_waypoints=3,
+                                    move_target=robot.rarm_end_coords)
+        problem.add_collision_cost(
+            link_list,
+            [{'type': 'box', 'center': [0.4, 0.0, 0.4], 'extents': extents}])
+        return problem
+
+    def _key(self, problem):
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_structure_key
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_value_hash
+        return (get_problem_structure_key(problem),
+                get_problem_value_hash(problem))
+
+    def test_same_problem_shares_a_key(self):
+        # Without this the cache never hits and the change is pointless.
+        self.assertEqual(self._key(self._cartesian([1, 1, 0])),
+                         self._key(self._cartesian([1, 1, 0])))
+
+    def test_axis_mask_separates_the_key(self):
+        """A masked axis is baked into the trace, so it must reach the key.
+
+        Structure is identical here, so only the value hash can tell these
+        apart. The field-by-field hash this replaced did not look at the
+        masks, and would have handed one problem's compiled cost to the
+        other.
+        """
+        a = self._cartesian([1, 1, 1])
+        b = self._cartesian([1, 1, 0])
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_structure_key
+        self.assertEqual(get_problem_structure_key(a),
+                         get_problem_structure_key(b))
+        self.assertNotEqual(self._key(a), self._key(b))
+
+    def test_box_extents_separate_the_key(self):
+        """Same as above for a box obstacle's size."""
+        a = self._boxed([0.2, 0.2, 0.2])
+        b = self._boxed([0.2, 0.2, 0.6])
+        from skrobot.planner.trajectory_optimization.solvers.solver_utils import get_problem_structure_key
+        self.assertEqual(get_problem_structure_key(a),
+                         get_problem_structure_key(b))
+        self.assertNotEqual(self._key(a), self._key(b))
+
+    @unittest.skipUnless(HAS_JAX, 'jax is not installed')
+    def test_cache_is_reused_across_solver_instances(self):
+        """solve_ik builds a solver per call, so the cache cannot live on one.
+
+        Two solves of the same problem through two solver objects must leave
+        a single entry behind; one entry per solve is what made a long sweep
+        recompile every time and leak the executables' mmaps.
+        """
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import _JIT_CACHE
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import clear_jit_cache
+
+        clear_jit_cache()
+        self.addCleanup(clear_jit_cache)
+
+        _, link_list = self._chain()
+        n_joints = len(link_list)
+        traj = interpolate_trajectory(
+            np.zeros(n_joints), np.ones(n_joints) * 0.2, 3)
+        kwargs = dict(max_outer_iterations=1, max_inner_iterations=5)
+
+        first = AugmentedLagrangianSolver(**kwargs).solve(
+            self._cartesian(), traj)
+        self.assertEqual(len(_JIT_CACHE), 1)
+        second = AugmentedLagrangianSolver(**kwargs).solve(
+            self._cartesian(), traj)
+        self.assertEqual(len(_JIT_CACHE), 1)
+
+        # Reuse must not change the answer.
+        testing.assert_allclose(second.trajectory, first.trajectory,
+                                rtol=0, atol=0)
+
+    @unittest.skipUnless(HAS_JAX, 'jax is not installed')
+    def test_shared_entry_does_not_carry_the_first_robot_kinematics(self):
+        """A cache hit must not reuse the first problem's FK.
+
+        Two robots at different base positions share a structure key and a
+        value hash -- the targets and residuals are identical, and the key
+        deliberately excludes FK so the compiled functions can be shared.
+        What must not be shared is ``fk_data``: the second solve has to build
+        its own from its own model. Caching it alongside the functions makes
+        the second robot move as if it stood where the first one does, and
+        the trajectory then differs from solving it alone.
+        """
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import AugmentedLagrangianSolver
+        from skrobot.planner.trajectory_optimization.solvers.augmented_lagrangian import clear_jit_cache
+
+        # A fixed world-frame goal, so both problems hold the same values.
+        target = np.array([0.6, 0.2, 0.4])
+
+        def problem_at(dx):
+            robot = skrobot.models.Kuka()
+            robot.reset_manip_pose()
+            robot.translate(np.array([dx, 0.0, 0.0]))
+            link_list = robot.rarm.link_list
+            problem = TrajectoryProblem(robot, link_list, n_waypoints=3,
+                                        move_target=robot.rarm_end_coords)
+            problem.add_cartesian_path_cost(
+                np.tile(target, (3, 1)), weight=10.0)
+            problem.add_smoothness_cost(weight=0.05)
+            return problem, len(link_list)
+
+        kwargs = dict(max_outer_iterations=2, max_inner_iterations=20)
+        _, n_joints = problem_at(0.0)
+        traj = interpolate_trajectory(
+            np.zeros(n_joints), np.ones(n_joints) * 0.2, 3)
+
+        # Solve the moved robot on its own.
+        clear_jit_cache()
+        alone = AugmentedLagrangianSolver(**kwargs).solve(
+            problem_at(0.3)[0], traj)
+
+        # Now solve it after another robot has populated the cache.
+        clear_jit_cache()
+        self.addCleanup(clear_jit_cache)
+        AugmentedLagrangianSolver(**kwargs).solve(problem_at(0.0)[0], traj)
+        after = AugmentedLagrangianSolver(**kwargs).solve(
+            problem_at(0.3)[0], traj)
+
+        testing.assert_allclose(
+            after.trajectory, alone.trajectory, rtol=0, atol=0,
+            err_msg='cache hit changed the answer, so it carried FK across')

@@ -30,8 +30,34 @@ if platform.system() == 'Darwin':
 import numpy as np
 
 from skrobot.planner.trajectory_optimization.fk_utils import fk_runtime_arrays
+from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
 from skrobot.planner.trajectory_optimization.solvers.base import BaseSolver
 from skrobot.planner.trajectory_optimization.solvers.base import SolverResult
+
+
+#: Compiled objective/constraint pairs, shared by every solver instance.
+#:
+#: Keyed by the problem's structure and by a hash of every value the trace
+#: closes over. The FK arrays are deliberately absent from both: they travel
+#: as a runtime argument, so one entry serves every problem with the same
+#: structure whatever its kinematics. That is what makes a process-wide cache
+#: safe here -- while FK was baked into the trace, sharing an entry between
+#: two robots would have returned one robot's motion for the other.
+#:
+#: A solver instance used to own this, and callers that build a solver per
+#: solve (``solve_ik`` does) therefore compiled from scratch every time and
+#: leaked the executable's mmap regions until the process hit
+#: ``vm.max_map_count``.
+_JIT_CACHE = {}
+
+
+def clear_jit_cache():
+    """Drop every compiled objective/constraint pair held by the cache.
+
+    Only useful to reclaim memory in a process that has solved many
+    structurally different problems; correctness never requires it.
+    """
+    _JIT_CACHE.clear()
 
 
 def _build_inner_step(problem, objective_fn, constraint_fn, jax, jnp):
@@ -255,7 +281,6 @@ class AugmentedLagrangianSolver(BaseSolver):
         self.penalty_multiplier = penalty_multiplier
         self.max_penalty = max_penalty
         self.constraint_tolerance = constraint_tolerance
-        self._jit_cache = {}
 
     @property
     def max_iterations(self):
@@ -322,20 +347,22 @@ class AugmentedLagrangianSolver(BaseSolver):
         structure_key = self._get_problem_structure_key(problem)
         value_hash = self._get_problem_value_hash(problem)
 
-        need_rebuild = False
-        if structure_key not in self._jit_cache:
-            need_rebuild = True
-        elif self._jit_cache[structure_key].get('value_hash') != value_hash:
-            need_rebuild = True
+        cache_key = (structure_key, value_hash)
+        entry = _JIT_CACHE.get(cache_key)
+        if entry is None:
+            objective_fn, constraint_fn, n_constraints, fk_data = \
+                self._build_functions(problem)
+            # Only the compiled functions are shared. fk_data belongs to the
+            # problem that happened to build them, and keeping it here would
+            # hand its kinematics to every later problem that hits this entry
+            # -- the compiled functions are FK-agnostic precisely so that they
+            # can be shared, and reusing the arrays would undo that.
+            _JIT_CACHE[cache_key] = (objective_fn, constraint_fn,
+                                     n_constraints, fk_data is not None)
+        else:
+            objective_fn, constraint_fn, n_constraints, has_fk = entry
+            fk_data = prepare_fk_data(problem, jnp) if has_fk else None
 
-        if need_rebuild:
-            self._jit_cache[structure_key] = {
-                'value_hash': value_hash,
-                'functions': self._build_functions(problem),
-            }
-
-        objective_fn, constraint_fn, n_constraints, fk_data = \
-            self._jit_cache[structure_key]['functions']
         # The FK arrays travel as an argument; the structure that shapes the
         # graph stays in the closure built above.
         fk = fk_runtime_arrays(fk_data) if fk_data is not None else {}
