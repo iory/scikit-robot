@@ -46,6 +46,15 @@ Examples:
                              'with ground but not itself)')
     parser.add_argument('--no-actuator-forcerange', action='store_true',
                         help='Do not cap actuator torque to the URDF effort limit')
+    parser.add_argument('--joint-damping', default='0',
+                        help="Viscous damping on every joint: a number, or "
+                             "'backemf' to give each joint its own "
+                             "effort/velocity -- the torque-speed slope of that "
+                             "joint's own servo")
+    parser.add_argument('--home', action='store_true',
+                        help="Emit a 'home' keyframe at all-zero joint angles, "
+                             "with the base height measured so nothing starts "
+                             'below the floor')
     parser.add_argument('--convex-decompose-collision', action='store_true',
                         help='CoACD-decompose collision meshes into convex parts '
                              '(accurate but slow; needs the coacd package)')
@@ -61,6 +70,16 @@ Examples:
         return 1
     out_path = args.output or str(urdf_path.with_suffix('.xml'))
 
+    if args.joint_damping == 'backemf':
+        joint_damping = 'backemf'
+    else:
+        try:
+            joint_damping = float(args.joint_damping)
+        except ValueError:
+            print("error: --joint-damping takes a number or 'backemf', not "
+                  '{!r}'.format(args.joint_damping), file=sys.stderr)
+            return 1
+
     urdf_to_mjcf(
         str(urdf_path), out_path,
         mesh_dir=args.mesh_dir,
@@ -70,6 +89,9 @@ Examples:
         add_ground=not args.no_ground,
         self_collision=args.self_collision,
         add_actuator_forcerange=not args.no_actuator_forcerange,
+        joint_damping=joint_damping,
+        home={} if args.home else None,
+        home_base_height='auto',
         convex_decompose_collision=args.convex_decompose_collision,
         coacd_quality=args.coacd_quality,
     )

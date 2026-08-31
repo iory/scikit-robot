@@ -12,9 +12,15 @@ mimic couplings) and emits a clean MJCF:
 * revolute/continuous -> ``hinge``, prismatic -> ``slide`` (limits -> range).
 * URDF ``<inertial>`` -> MJCF ``<inertial ... fullinertia=...>``.
 * box/cylinder/sphere primitives and meshes -> geoms; meshes exported to STL
-  assets and referenced from ``<asset>``. Empty geometry is skipped.
+  assets and referenced from ``<asset>``. Empty geometry is skipped, as is a
+  sub-mesh MuJoCo cannot compile (fewer than 4 vertices); a flat sub-mesh that
+  encloses no volume is marked ``inertia="shell"``.
 * ``mimic`` -> ``<equality><joint polycoef=...>``.
 * one ``<position>`` actuator per actuated (non-mimic) joint (optional).
+* ``joint_damping='backemf'`` -> each joint's own ``effort / velocity``, so a
+  robot built from several motor types is not damped as if it had one.
+* ``home_base_height='auto'`` -> the home keyframe's base height measured from
+  the emitted geometry, so the model rests on the floor.
 * ``<compiler angle="radian">`` so radians match ROS.
 
 Entry point: :func:`urdf_to_mjcf`.
@@ -28,6 +34,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
+from skrobot.coordinates.math import quaternion2matrix
 
 
 def _fmt(values):
@@ -40,10 +47,40 @@ class _MeshAssets:
     # MuJoCo's STL decoder rejects meshes with more than this many faces.
     MAX_FACES = 200000
 
+    # MuJoCo's mesh compiler rejects three shapes a CAD export routinely
+    # contains, none of which is a modelling mistake -- they are visual detail:
+    #
+    #   3 vertices      a COLLADA/glTF file split by material yields
+    #                   single-triangle "sub-meshes"    -> dropped
+    #   zero volume     a stamped part (servo horn, shim) is a sheet that
+    #                   encloses nothing                -> inertia="shell"
+    #   coplanar        a perfectly flat sheet has no convex hull, so MuJoCo
+    #                   refuses it as a COLLISION geom  -> visual only
+    #
+    # Handling them here keeps one unusable sub-mesh from taking the whole
+    # robot down with it at compile time.
+    MIN_VERTICES = 4     # "Error: at least 4 vertices required"
+    # "Error: mesh volume is too small ... Try setting inertia to shell".
+    # MuJoCo's own floor is mjMINVAL (1e-15 m^3); 1e-12 m^3 is a 0.1 mm cube,
+    # far below any real solid part, so this never mislabels a genuine solid.
+    MIN_VOLUME = 1e-12
+    # "Error: mesh ... has coplanar vertices, cannot compute convex hull".
+    # Flatness is measured as the thinnest extent divided by the largest, so
+    # the test scales with the part: below this the sheet has no thickness
+    # qhull could work with.
+    MIN_FLATNESS = 1e-6
+
     def __init__(self, mesh_dir):
         self.mesh_dir = mesh_dir
         self._by_id = {}      # id(trimesh) -> asset name
-        self.entries = []     # (name, filename, scale)
+        self.entries = []     # (name, filename, scale, shell)
+        # asset names MuJoCo will not accept on a collision geom (see
+        # MIN_FLATNESS); they stay available as visual geoms.
+        self.coplanar = set()
+        # asset name -> the trimesh it was written from, so a caller can measure
+        # the emitted geometry without re-reading the STLs. These are references
+        # to meshes the URDF already holds, so the common path costs nothing.
+        self.meshes = {}
         # collision-only: run CoACD on collision meshes so MuJoCo gets accurate
         # convex parts instead of one coarse convex hull. Set by urdf_to_mjcf.
         self.convex_decompose = False
@@ -65,6 +102,44 @@ class _MeshAssets:
         except Exception:
             return mesh
 
+    @classmethod
+    def _meshable(cls, mesh):
+        """True if MuJoCo's mesh compiler can accept this sub-mesh at all."""
+        return (len(mesh.faces) > 0
+                and len(mesh.vertices) >= cls.MIN_VERTICES)
+
+    @classmethod
+    def _is_shell(cls, mesh):
+        """True if the mesh encloses no usable volume, so MuJoCo has to treat it
+        as a surface (``inertia="shell"``) instead of a solid."""
+        try:
+            # a zero-volume mesh is exactly the case being detected here, and
+            # trimesh divides the first moment by that volume to get the centre
+            # of mass -- so the 0/0 warning is expected, not a problem
+            with np.errstate(divide="ignore", invalid="ignore"):
+                volume = float(mesh.volume)
+        except Exception:
+            return True
+        return not np.isfinite(volume) or abs(volume) < cls.MIN_VOLUME
+
+    @classmethod
+    def _is_coplanar(cls, mesh):
+        """True if every vertex lies in one plane, so the mesh has no convex
+        hull and MuJoCo cannot use it as a collision geom."""
+        try:
+            vertices = np.asarray(mesh.vertices, dtype=float)
+            if len(vertices) < cls.MIN_VERTICES:
+                return True
+            # singular values of the centred vertices = the extent of the point
+            # cloud along its three principal axes
+            extents = np.linalg.svd(
+                vertices - vertices.mean(axis=0), compute_uv=False)
+            if extents[0] <= 0.0:
+                return True
+            return extents[-1] / extents[0] < cls.MIN_FLATNESS
+        except Exception:
+            return True
+
     def add(self, mesh_geometry):
         """Return a list of ``(asset_name, scale, rgba)`` -- one entry PER
         sub-mesh. A single URDF visual mesh (e.g. a .glb) often bundles several
@@ -74,7 +149,7 @@ class _MeshAssets:
         from trimesh.exchange.stl import export_stl
 
         submeshes = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
-                     if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
+                     if isinstance(m, trimesh.Trimesh) and self._meshable(m)]
         scale = getattr(mesh_geometry, "scale", None)
         base = os.path.splitext(os.path.basename(
             getattr(mesh_geometry, "filename", "") or "mesh"))[0]
@@ -95,14 +170,17 @@ class _MeshAssets:
                 name = self._by_id[key]
             else:
                 mesh = self._decimate(sub)
-                if len(mesh.faces) == 0:
+                if not self._meshable(mesh):
                     continue
                 name = "{}_{}".format(base or "mesh", len(self.entries))
                 fname = name + ".stl"
                 with open(os.path.join(self.mesh_dir, fname), "wb") as f:
                     f.write(export_stl(mesh))  # MuJoCo needs BINARY STL
                 self._by_id[key] = name
-                self.entries.append((name, fname, scale))
+                self.entries.append((name, fname, scale, self._is_shell(mesh)))
+                self.meshes[name] = mesh
+                if self._is_coplanar(mesh):
+                    self.coplanar.add(name)
             out.append((name, scale, color))
         return out
 
@@ -117,7 +195,7 @@ class _MeshAssets:
         from skrobot.utils.convex_decomposition import convex_decomposition
 
         submeshes = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
-                     if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
+                     if isinstance(m, trimesh.Trimesh) and self._meshable(m)]
         scale = getattr(mesh_geometry, "scale", None)
         base = os.path.splitext(os.path.basename(
             getattr(mesh_geometry, "filename", "") or "mesh"))[0]
@@ -135,13 +213,16 @@ class _MeshAssets:
                 parts = [sub.convex_hull]
             names = []
             for part in parts:
-                if len(part.faces) == 0:
+                # these parts are collision geometry by construction, so a
+                # coplanar one is unusable rather than merely visual-only
+                if not self._meshable(part) or self._is_coplanar(part):
                     continue
                 name = "{}_col{}".format(base or "mesh", len(self.entries))
                 fname = name + ".stl"
                 with open(os.path.join(self.mesh_dir, fname), "wb") as f:
                     f.write(export_stl(part))  # MuJoCo needs BINARY STL
-                self.entries.append((name, fname, scale))
+                self.entries.append((name, fname, scale, self._is_shell(part)))
+                self.meshes[name] = part
                 names.append(name)
             self._by_id[key] = names
             for name in names:
@@ -215,14 +296,20 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
             subs = assets.add(geom.mesh)
         if not subs:
             return False
+        emitted = False
         for name, scale, mesh_color in subs:
+            if collision and name in getattr(assets, "coplanar", ()):
+                # a flat sheet has no convex hull for MuJoCo to collide with;
+                # it stays in the model as a visual geom only
+                continue
+            emitted = True
             a = dict(base_attrib, type="mesh", mesh=name)
             # URDF <material> colour wins; else the sub-mesh's own colour.
             eff = rgba if rgba is not None else mesh_color
             if eff is not None:
                 a["rgba"] = _fmt(eff)
             ET.SubElement(parent_el, "geom", _named(a))
-        return True
+        return emitted
     return False
 
 
@@ -233,8 +320,30 @@ def _visual_rgba(visual):
     return None
 
 
+def _backemf_damping(limit):
+    """Viscous damping (N*m*s/rad) implied by a joint's own ``<limit>``.
+
+    A geared DC servo's available torque falls linearly from stall torque at
+    zero speed to zero at its no-load speed, and those two numbers are exactly
+    the URDF's ``effort`` and ``velocity``. Their ratio is the slope, so a joint
+    driven at full torque coasts out at precisely the datasheet no-load speed.
+    Leaving it out is the classic servo-robot sim2real failure: the simulation
+    swings a limb far faster than the real motor ever could.
+
+    Returns None when the URDF does not carry a usable pair.
+    """
+    if limit is None:
+        return None
+    effort = getattr(limit, "effort", None)
+    velocity = getattr(limit, "velocity", None)
+    if not effort or not velocity or velocity <= 0.0:
+        return None
+    return float(effort) / float(velocity)
+
+
 def _emit_body(link, joint_from_parent, urdf, assets, children_map,
-               parent_el, actuated, qpos_layout, add_free_joint=False):
+               parent_el, actuated, qpos_layout, add_free_joint=False,
+               backemf_damping=False):
     """Recursively emit <body> for `link` under `parent_el`.
 
     When ``add_free_joint`` is True a ``<freejoint>`` is emitted on this body,
@@ -266,6 +375,10 @@ def _emit_body(link, joint_from_parent, urdf, assets, children_map,
         if jt != "continuous" and limit is not None and \
                 limit.lower is not None and limit.upper is not None:
             j["range"] = _fmt([limit.lower, limit.upper])
+        if backemf_damping:
+            damping = _backemf_damping(limit)
+            if damping is not None:
+                j["damping"] = "{:.9g}".format(damping)
         ET.SubElement(body, "joint", j)
         # every movable joint (mimic included) contributes one qpos entry, in
         # this creation order -- used to lay out the optional home keyframe.
@@ -279,7 +392,104 @@ def _emit_body(link, joint_from_parent, urdf, assets, children_map,
     for child_joint in children_map.get(link.name, []):
         child_link = urdf.link_map[child_joint.child]
         _emit_body(child_link, child_joint, urdf, assets, children_map,
-                   body, actuated, qpos_layout)
+                   body, actuated, qpos_layout,
+                   backemf_damping=backemf_damping)
+
+
+def _axis_rotation(axis, angle):
+    """Rotation of ``angle`` radians about ``axis`` (Rodrigues)."""
+    axis = np.asarray(axis, dtype=float)
+    norm = np.linalg.norm(axis)
+    if norm == 0.0:
+        return np.eye(3)
+    axis = axis / norm
+    skew = np.array([[0.0, -axis[2], axis[1]],
+                     [axis[2], 0.0, -axis[0]],
+                     [-axis[1], axis[0], 0.0]])
+    return (np.eye(3) + np.sin(angle) * skew
+            + (1.0 - np.cos(angle)) * (skew @ skew))
+
+
+def _attr_floats(el, name, default):
+    return np.asarray([float(v) for v in (el.get(name) or default).split()],
+                      dtype=float)
+
+
+def _collision_extreme_z(body_el, rot, pos, assets, scales):
+    """Lowest world z reached by ``body_el``'s own collision geoms, or None."""
+    lowest = None
+    for geom in body_el.findall("geom"):
+        if geom.get("group") != "3":                    # 3 = collision
+            continue
+        geom_rot = quaternion2matrix(_attr_floats(geom, "quat", "1 0 0 0"))
+        geom_pos = _attr_floats(geom, "pos", "0 0 0")
+        size = _attr_floats(geom, "size", "0")
+        gtype = geom.get("type")
+        if gtype == "mesh":
+            mesh = assets.meshes.get(geom.get("mesh"))
+            if mesh is None:
+                continue
+            local = np.asarray(mesh.vertices, dtype=float)
+            scale = scales.get(geom.get("mesh"))
+            if scale is not None:
+                local = local * np.asarray(scale, dtype=float)
+        elif gtype == "box":
+            local = np.array([[sx * size[0], sy * size[1], sz * size[2]]
+                              for sx in (-1, 1) for sy in (-1, 1)
+                              for sz in (-1, 1)], dtype=float)
+        elif gtype == "sphere":
+            # a sphere's lowest point is its centre minus the radius along
+            # world -z whatever the rotation, so subtract after transforming
+            centre = rot @ geom_pos + pos
+            z = float(centre[2] - size[0])
+            lowest = z if lowest is None else min(lowest, z)
+            continue
+        elif gtype == "cylinder":
+            local = np.array([[sx * size[0], sy * size[0], sz * size[1]]
+                              for sx in (-1, 1) for sy in (-1, 1)
+                              for sz in (-1, 1)], dtype=float)
+        else:
+            continue
+        if len(local) == 0:
+            continue
+        world = (rot @ (geom_rot @ local.T + geom_pos[:, None])).T + pos
+        z = float(world[:, 2].min())
+        lowest = z if lowest is None else min(lowest, z)
+    return lowest
+
+
+def _ground_clearance(worldbody, assets, home):
+    """Base height at which nothing sits below ``z = 0`` in the ``home`` pose.
+
+    Walks the emitted body tree with the base at the origin, so what is measured
+    is the geometry that actually reached the MJCF -- not the URDF's, which may
+    carry sub-meshes MuJoCo could not compile.  Measured over every collision
+    geom rather than a guessed set of feet, so a low-slung belly does not spawn
+    inside the floor either.
+    """
+    scales = {name: scale for name, _fname, scale, _shell in assets.entries}
+    lowest = [None]
+
+    def walk(parent_el, parent_rot, parent_pos):
+        for body in parent_el.findall("body"):
+            rot = parent_rot @ quaternion2matrix(
+                _attr_floats(body, "quat", "1 0 0 0"))
+            pos = parent_pos + parent_rot @ _attr_floats(body, "pos", "0 0 0")
+            joint = body.find("joint")
+            if joint is not None:
+                angle = float(home.get(joint.get("name"), 0.0))
+                axis = _attr_floats(joint, "axis", "0 0 1")
+                if joint.get("type") == "slide":
+                    pos = pos + rot @ (axis * angle)
+                else:
+                    rot = rot @ _axis_rotation(axis, angle)
+            z = _collision_extreme_z(body, rot, pos, assets, scales)
+            if z is not None and (lowest[0] is None or z < lowest[0]):
+                lowest[0] = z
+            walk(body, rot, pos)
+
+    walk(worldbody, np.eye(3), np.zeros(3))
+    return 0.0 if lowest[0] is None else -lowest[0]
 
 
 def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
@@ -318,13 +528,22 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         If True (default) position/velocity actuators get a ``forcerange`` taken
         from the URDF joint effort limit, so RL policies cannot command
         physically impossible torques (a classic "the humanoid flies" exploit).
+    joint_damping : float or 'backemf'
+        Viscous damping on every joint. A number goes on ``<default><joint>``,
+        the same value everywhere. ``'backemf'`` instead gives each joint its
+        own ``effort / velocity`` -- the torque-speed slope of that joint's
+        actual servo -- which is what a robot built from more than one motor
+        type needs (see :func:`_backemf_damping`).
     home : dict[str, float] or None
         Optional joint-name -> angle (rad) map. When given, a ``<keyframe>``
         named ``home`` is emitted so callers can reset to a known stable pose.
         Joints absent from the map default to 0.
-    home_base_height : float
+    home_base_height : float or 'auto'
         Base-link height (m) used for the free-joint part of the home keyframe
-        when ``floating_base`` is True.
+        when ``floating_base`` is True. ``'auto'`` measures it instead: the
+        height at which no collision geom sits below the floor in the home pose,
+        so the model rests on the ground rather than starting inside it or
+        dropping into it.
     convex_decompose_collision : bool
         If True, run CoACD on every *collision* mesh and emit its convex parts
         as separate geoms, instead of letting MuJoCo collapse the mesh to a
@@ -363,17 +582,22 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         "meshdir": os.path.relpath(mesh_dir, out_dir)})
     ET.SubElement(root, "option", {"gravity": _fmt(gravity)})
 
+    # 'backemf' damping is per joint, so it is written on each <joint> as the
+    # tree is emitted rather than once on <default>.
+    backemf = joint_damping == "backemf"
+    global_damping = 0.0 if backemf else joint_damping
+
     # A little rotor inertia (armature) and damping on every joint models real
     # geared servos and keeps velocity/position actuators numerically stable --
     # bare URDF inertias are often too small for a stiff servo at these timesteps.
-    if joint_armature or joint_damping or not self_collision:
+    if joint_armature or global_damping or not self_collision:
         default = ET.SubElement(root, "default")
-        if joint_armature or joint_damping:
+        if joint_armature or global_damping:
             jd = {}
             if joint_armature:
                 jd["armature"] = "{:.9g}".format(joint_armature)
-            if joint_damping:
-                jd["damping"] = "{:.9g}".format(joint_damping)
+            if global_damping:
+                jd["damping"] = "{:.9g}".format(global_damping)
             ET.SubElement(default, "joint", jd)
         if not self_collision:
             # Default mask for every geom: contype=2 conaffinity=1. Collision
@@ -426,13 +650,23 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         child_link = urdf.link_map[child_joint.child]
         _emit_body(child_link, child_joint, urdf, assets, children_map,
                    base_body, actuated, qpos_layout,
-                   add_free_joint=free_world_children)
+                   add_free_joint=free_world_children,
+                   backemf_damping=backemf)
 
-    # mesh assets
-    for name, fname, scale in assets.entries:
+    # mesh assets -- only the ones a geom actually ended up referencing, since
+    # a coplanar sub-mesh used solely as collision geometry is dropped above
+    referenced = {g.get("mesh") for g in root.iter("geom")}
+    for name, fname, scale, shell in assets.entries:
+        if name not in referenced:
+            continue
         attrs = {"name": name, "file": fname}
         if scale is not None:
             attrs["scale"] = _fmt(scale)
+        if shell:
+            # a flat/open mesh encloses no volume, so MuJoCo cannot derive a
+            # solid inertia from it and refuses to compile the model; shell
+            # inertia spreads the mass over the surface instead
+            attrs["inertia"] = "shell"
         ET.SubElement(asset_el, "mesh", attrs)
 
     # mimic joints -> equality constraints
@@ -484,6 +718,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     # home keyframe: qpos = [free-joint (7)] + one entry per movable joint,
     # in creation order (qpos_layout). Joints absent from `home` default to 0.
     if home is not None:
+        if home_base_height == "auto":
+            home_base_height = _ground_clearance(worldbody, assets, home)
         qpos = []
         if has_free_joint:
             qpos += [0.0, 0.0, float(home_base_height), 1.0, 0.0, 0.0, 0.0]
