@@ -933,7 +933,8 @@ class JaxlsSolver(BaseSolver):
 
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
         from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
-        from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_world_obstacle_distances
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
 
         T = problem.n_waypoints
         obstacles = spec.params['obstacles']
@@ -941,11 +942,9 @@ class JaxlsSolver(BaseSolver):
         weight = jnp.sqrt(spec.weight)
 
         # Parse obstacles
-        sphere_obs = [
-            obs for obs in obstacles if obs['type'] == 'sphere'
-        ]
+        obs_arrays = prepare_world_obstacle_arrays(obstacles)
 
-        if not sphere_obs:
+        if not obstacles:
             # No obstacles, return dummy cost
             @jaxls.Cost.factory(name='world_collision_dummy')
             def dummy_cost(vals, var):
@@ -953,8 +952,6 @@ class JaxlsSolver(BaseSolver):
 
             return dummy_cost(TrajectoryVar(jnp.array([0])))
 
-        obs_centers = jnp.stack([jnp.array(o['center']) for o in sphere_obs])
-        obs_radii = jnp.array([o['radius'] for o in sphere_obs])
         sphere_radii = fk_data['sphere_radii']
 
         _, get_sphere_positions, _, _ = build_fk_functions(fk_data, jnp)
@@ -972,8 +969,8 @@ class JaxlsSolver(BaseSolver):
             def world_collision_geq(vals, var):
                 angles = vals[var]
                 sphere_pos = get_sphere_positions(angles)
-                signed_dists = compute_sphere_obstacle_distances(
-                    sphere_pos, sphere_radii, obs_centers, obs_radii, jnp
+                signed_dists = compute_world_obstacle_distances(
+                    sphere_pos, sphere_radii, obs_arrays, jnp
                 )
                 # Slack: distance beyond the activation buffer.
                 return (signed_dists - activation_dist).flatten()
@@ -986,8 +983,8 @@ class JaxlsSolver(BaseSolver):
             sphere_pos = get_sphere_positions(angles)
 
             # Use helper functions for distance computation
-            signed_dists = compute_sphere_obstacle_distances(
-                sphere_pos, sphere_radii, obs_centers, obs_radii, jnp
+            signed_dists = compute_world_obstacle_distances(
+                sphere_pos, sphere_radii, obs_arrays, jnp
             )
             residuals = compute_collision_residuals(
                 signed_dists, activation_dist, jnp

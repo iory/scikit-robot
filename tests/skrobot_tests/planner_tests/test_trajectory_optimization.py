@@ -1685,3 +1685,143 @@ class TestCartesianAxisMasks(unittest.TestCase):
             return float(solver.solve(problem, traj).cost)
 
         self.assertAlmostEqual(cost_for(0.0), cost_for(5.0), places=6)
+
+
+class TestBoxObstacles(unittest.TestCase):
+    """A box obstacle must use the exact SDF, not an inflated stand-in."""
+
+    def test_prepare_splits_by_type(self):
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
+
+        arrays = prepare_world_obstacle_arrays([
+            {'type': 'sphere', 'center': [0.0, 0.0, 0.0], 'radius': 0.1},
+            {'type': 'box', 'center': [1.0, 0.0, 0.0],
+             'extents': [0.2, 0.4, 0.6]},
+        ])
+        self.assertEqual(arrays['sphere_centers'].shape, (1, 3))
+        self.assertEqual(arrays['box_centers'].shape, (1, 3))
+        # extents are full side lengths; the residual wants half extents
+        testing.assert_allclose(arrays['box_half_extents'][0],
+                                [0.1, 0.2, 0.3])
+        testing.assert_allclose(arrays['box_rotations'][0], np.eye(3))
+
+    def test_unknown_type_is_rejected(self):
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
+
+        with self.assertRaises(ValueError):
+            prepare_world_obstacle_arrays([{'type': 'cone', 'center': [0] * 3}])
+
+    def test_signed_distance_matches_the_analytic_box(self):
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_box_obstacle_distances
+
+        centers = np.array([[0.0, 0.0, 0.0]])
+        half = np.array([[0.1, 0.2, 0.3]])
+        rots = np.array([np.eye(3)])
+        radii = np.array([0.0])
+
+        # face, corner, and a point strictly inside
+        points = np.array([
+            [0.5, 0.0, 0.0],     # 0.4 clear of the +x face
+            [0.1 + 0.3, 0.2 + 0.4, 0.3],  # (0.3, 0.4, 0) from the corner
+            [0.0, 0.0, 0.0],     # centre: -min(h) inside
+        ])
+        d = compute_box_obstacle_distances(points, radii, centers, half,
+                                           rots, np)
+        testing.assert_allclose(d[0, 0], 0.4, atol=1e-6)
+        testing.assert_allclose(d[1, 0], 0.5, atol=1e-6)
+        self.assertLess(d[2, 0], 0.0)
+        # Inside the box the exact value is -min(h) = -0.1. The residual
+        # keeps an epsilon under the sqrt so the gradient stays finite at
+        # the surface, which shifts an interior distance by sqrt(1e-10).
+        testing.assert_allclose(d[2, 0], -0.1 + 1e-5, atol=1e-7)
+
+    def test_sphere_radius_shrinks_the_clearance(self):
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_box_obstacle_distances
+
+        centers = np.array([[0.0, 0.0, 0.0]])
+        half = np.array([[0.1, 0.1, 0.1]])
+        rots = np.array([np.eye(3)])
+        point = np.array([[0.5, 0.0, 0.0]])
+
+        bare = compute_box_obstacle_distances(point, np.array([0.0]),
+                                              centers, half, rots, np)
+        fat = compute_box_obstacle_distances(point, np.array([0.05]),
+                                             centers, half, rots, np)
+        testing.assert_allclose(bare[0, 0] - fat[0, 0], 0.05, atol=1e-6)
+
+    def test_rotation_turns_the_box(self):
+        from skrobot.coordinates.math import rotation_matrix
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_box_obstacle_distances
+
+        centers = np.array([[0.0, 0.0, 0.0]])
+        half = np.array([[0.4, 0.05, 0.05]])
+        radii = np.array([0.0])
+        point = np.array([[0.0, 0.3, 0.0]])
+
+        upright = compute_box_obstacle_distances(
+            point, radii, centers, half, np.array([np.eye(3)]), np)
+        # Turning the long axis to +y puts the slab under the query point.
+        turned = compute_box_obstacle_distances(
+            point, radii, centers, half,
+            np.array([rotation_matrix(np.pi / 2.0, [0, 0, 1])]), np)
+        self.assertGreater(upright[0, 0], turned[0, 0])
+        # Turned, the box-local query point is (0.3, 0, 0) against half
+        # extents (0.4, 0.05, 0.05): inside on every axis, and the signed
+        # distance is the least-negative slack, -0.05.
+        testing.assert_allclose(turned[0, 0], -0.05 + 1e-5, atol=1e-7)
+
+
+class TestWorldSurfaceData(unittest.TestCase):
+    """Surface points come from the convex hull, not raw mesh vertices."""
+
+    def _links(self):
+        robot = skrobot.models.Panda()
+        return [ln for ln in robot.link_list
+                if ln.collision_mesh is not None][:3]
+
+    def test_points_are_hull_vertices(self):
+        from skrobot.planner.trajectory_optimization.world_surface_collision import build_world_surface_data
+
+        links = self._links()
+        data = build_world_surface_data(links)
+        points = data['surface_points']
+        self.assertEqual(points.shape[0], len(links))
+        self.assertEqual(points.shape[2], 3)
+
+        # Sampling raw vertices would miss the extreme points that decide a
+        # near miss. Every hull vertex must be present for each link.
+        for i, link in enumerate(links):
+            hull = np.asarray(link.collision_mesh.convex_hull.vertices)
+            kept = points[i]
+            for v in hull:
+                self.assertTrue(
+                    np.isclose(kept, v, atol=1e-9).all(axis=1).any(),
+                    'hull vertex {} missing for {}'.format(v, link.name))
+
+    def test_n_surface_caps_each_link(self):
+        from skrobot.planner.trajectory_optimization.world_surface_collision import build_world_surface_data
+
+        links = self._links()
+        data = build_world_surface_data(links, n_surface=8)
+        self.assertLessEqual(data['surface_points'].shape[1], 8)
+        testing.assert_array_equal(data['link_indices'],
+                                   np.arange(len(links)))
+
+    def test_subset_is_deterministic(self):
+        from skrobot.planner.trajectory_optimization.world_surface_collision import build_world_surface_data
+
+        links = self._links()
+        first = build_world_surface_data(links, n_surface=8)
+        second = build_world_surface_data(links, n_surface=8)
+        testing.assert_array_equal(first['surface_points'],
+                                   second['surface_points'])
+
+    def test_links_without_a_mesh_are_rejected_when_none_has_one(self):
+        from skrobot.planner.trajectory_optimization.world_surface_collision import build_world_surface_data
+
+        robot = skrobot.models.Panda()
+        bare = [ln for ln in robot.link_list if ln.collision_mesh is None]
+        if not bare:
+            self.skipTest('every Panda link carries a collision mesh')
+        with self.assertRaises(ValueError):
+            build_world_surface_data(bare)
