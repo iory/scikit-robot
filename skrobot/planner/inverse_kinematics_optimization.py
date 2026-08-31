@@ -76,6 +76,8 @@ def solve_ik(
     collision_activation=0.05,
     collision_as_constraint=True,
     n_spheres_per_link=5,
+    world_collision_mode='sphere',
+    n_surface=None,
     position_mask=None,
     rotation_mask=None,
     apply_result=True,
@@ -259,6 +261,8 @@ def solve_ik(
             activation_distance=collision_activation,
             as_constraint=collision_as_constraint,
             n_spheres_per_link=n_spheres_per_link,
+            mode=world_collision_mode,
+            n_surface=n_surface,
         )
 
     init_traj = np.tile(initial_angles, (n_waypoints, 1))

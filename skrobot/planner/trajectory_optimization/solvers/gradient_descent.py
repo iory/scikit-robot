@@ -238,9 +238,10 @@ class GradientDescentSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
         from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
         from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances
-        from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_world_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
         from skrobot.planner.trajectory_optimization.solvers.solver_utils import build_gridsdf_self_distance_fn
 
         dt = problem.dt
@@ -313,18 +314,13 @@ class GradientDescentSolver(BaseSolver):
                     obstacles = params['obstacles']
                     activation = params['activation_distance']
 
-                    sphere_obs = [o for o in obstacles if o['type'] == 'sphere']
-                    if sphere_obs:
-                        obs_centers = jnp.stack(
-                            [jnp.array(o['center']) for o in sphere_obs]
-                        )
-                        obs_radii = jnp.array([o['radius'] for o in sphere_obs])
+                    obs_arrays = prepare_world_obstacle_arrays(obstacles)
+                    if obstacles:
 
                         def coll_cost_single(angles):
                             sphere_pos = get_sphere_positions(angles)
-                            signed_dists = compute_sphere_obstacle_distances(
-                                sphere_pos, sphere_radii,
-                                obs_centers, obs_radii, jnp
+                            signed_dists = compute_world_obstacle_distances(
+                                sphere_pos, sphere_radii, obs_arrays, jnp
                             )
                             residuals = compute_collision_residuals(
                                 signed_dists, activation, jnp

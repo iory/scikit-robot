@@ -141,6 +141,57 @@ def _build_inner_step(problem, objective_fn, constraint_fn, jax, jnp):
     return augmented_lagrangian, inner_loop
 
 
+def _world_distance_fn(params, fk_data, obstacle_arrays, backend,
+                       get_sphere_positions, sphere_radii,
+                       parameterized=False):
+    """Build ``angles -> (n_points, n_obstacles)`` world-collision distances.
+
+    Dispatches on the robot-side representation chosen in
+    :meth:`TrajectoryProblem.add_collision_cost`: swept spheres (default) or
+    link surface samples.
+
+    Parameters
+    ----------
+    params : dict
+        ``world_collision`` residual params.
+    fk_data : dict
+        Output of :func:`prepare_fk_data`.
+    obstacle_arrays : dict
+        Output of :func:`prepare_world_obstacle_arrays`.
+    backend : module
+        Array module.
+    get_sphere_positions : callable
+        ``angles -> (n_spheres, 3)``; used by ``mode='sphere'``.
+    sphere_radii : array
+        Collision sphere radii; used by ``mode='sphere'``.
+
+    Returns
+    -------
+    callable
+        ``f(angles) -> signed distances``.
+    """
+    from skrobot.planner.trajectory_optimization.fk_utils import compute_world_obstacle_distances
+    from skrobot.planner.trajectory_optimization.world_surface_collision import make_world_surface_distance_fn
+
+    if params.get('mode') == 'surface':
+        return make_world_surface_distance_fn(
+            fk_data, params['surface_data'], obstacle_arrays, backend,
+            parameterized=parameterized)
+
+    if parameterized:
+        def sphere_fn(angles, fk):
+            return compute_world_obstacle_distances(
+                get_sphere_positions(angles, fk), sphere_radii,
+                obstacle_arrays, backend)
+    else:
+        def sphere_fn(angles):
+            return compute_world_obstacle_distances(
+                get_sphere_positions(angles), sphere_radii,
+                obstacle_arrays, backend)
+
+    return sphere_fn
+
+
 class AugmentedLagrangianSolver(BaseSolver):
     """Augmented Lagrangian solver for trajectory optimization.
 
@@ -501,9 +552,9 @@ class AugmentedLagrangianSolver(BaseSolver):
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
         from skrobot.planner.trajectory_optimization.fk_utils import compute_collision_residuals
         from skrobot.planner.trajectory_optimization.fk_utils import compute_self_collision_distances
-        from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
         from skrobot.planner.trajectory_optimization.solvers.solver_utils import build_gridsdf_self_distance_fn
 
         dt = problem.dt
@@ -548,11 +599,15 @@ class AugmentedLagrangianSolver(BaseSolver):
 
         for spec in hard_constraints:
             if spec.name == 'world_collision' and has_collision:
-                n_spheres = len(sphere_radii)
                 n_obstacles = len(spec.params['obstacles'])
-                # One constraint per sphere-obstacle pair per waypoint
+                if spec.params.get('mode') == 'surface':
+                    surf = spec.params['surface_data']['surface_points']
+                    n_points = int(surf.shape[0] * surf.shape[1])
+                else:
+                    n_points = len(sphere_radii)
+                # One constraint per (robot point, obstacle) per waypoint
                 n_waypoints = problem.n_waypoints
-                n_coll = n_spheres * n_obstacles * n_waypoints
+                n_coll = n_points * n_obstacles * n_waypoints
                 constraint_specs.append(('world_collision', spec, n_coll))
                 n_constraints += n_coll
 
@@ -617,19 +672,15 @@ class AugmentedLagrangianSolver(BaseSolver):
                     obstacles = params['obstacles']
                     activation = params['activation_distance']
 
-                    sphere_obs = [o for o in obstacles if o['type'] == 'sphere']
-                    if sphere_obs:
-                        obs_centers = jnp.stack(
-                            [jnp.array(o['center']) for o in sphere_obs]
-                        )
-                        obs_radii = jnp.array([o['radius'] for o in sphere_obs])
+                    obs_arrays = prepare_world_obstacle_arrays(obstacles)
+                    if obstacles:
+                        world_dist_fn = _world_distance_fn(
+                            params, fk_data, obs_arrays, jnp,
+                            get_sphere_positions, sphere_radii,
+                            parameterized=True)
 
                         def coll_cost_single(angles):
-                            sphere_pos = get_sphere_positions(angles, fk)
-                            signed_dists = compute_sphere_obstacle_distances(
-                                sphere_pos, sphere_radii,
-                                obs_centers, obs_radii, jnp
-                            )
+                            signed_dists = world_dist_fn(angles, fk)
                             residuals = compute_collision_residuals(
                                 signed_dists, activation, jnp
                             )
@@ -755,21 +806,16 @@ class AugmentedLagrangianSolver(BaseSolver):
                     obstacles = params['obstacles']
                     activation = params['activation_distance']
 
-                    sphere_obs = [o for o in obstacles if o['type'] == 'sphere']
-                    if sphere_obs:
-                        obs_centers = jnp.stack(
-                            [jnp.array(o['center']) for o in sphere_obs]
-                        )
-                        obs_radii = jnp.array([o['radius'] for o in sphere_obs])
+                    obs_arrays = prepare_world_obstacle_arrays(obstacles)
+                    if obstacles:
+                        world_dist_fn = _world_distance_fn(
+                            params, fk_data, obs_arrays, jnp,
+                            get_sphere_positions, sphere_radii,
+                            parameterized=True)
 
                         def coll_dist_single(angles):
-                            sphere_pos = get_sphere_positions(angles, fk)
-                            signed_dists = compute_sphere_obstacle_distances(
-                                sphere_pos, sphere_radii,
-                                obs_centers, obs_radii, jnp
-                            )
                             # Return signed distance (>= 0 is no collision)
-                            return signed_dists.flatten()
+                            return world_dist_fn(angles, fk).flatten()
 
                         # (n_waypoints, n_spheres * n_obstacles)
                         dists = jax.vmap(coll_dist_single)(trajectory)

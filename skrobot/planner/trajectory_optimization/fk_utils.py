@@ -4,6 +4,8 @@ This module provides backend-agnostic FK computation functions
 shared across different solvers (scipy, jaxls, gradient_descent).
 """
 
+import numpy as np
+
 from skrobot.backend import rodrigues_rotation
 from skrobot.kinematics.differentiable import pose_error_se3_log as pose_error_log
 from skrobot.kinematics.differentiable import rotation_error_so3_log as rotation_error_log
@@ -328,6 +330,156 @@ def compute_sphere_obstacle_distances(sphere_positions, sphere_radii,
     dists = xp.sqrt(xp.sum(diff ** 2, axis=-1) + 1e-10)
     signed_dists = dists - sphere_radii[:, None] - obstacle_radii[None, :]
     return signed_dists
+
+
+def prepare_world_obstacle_arrays(obstacles):
+    """Split a world-obstacle list into per-type static arrays.
+
+    The trajectory residuals need fixed-shape arrays, so the obstacle
+    dicts are turned into arrays once (outside the traced/compiled cost).
+
+    Parameters
+    ----------
+    obstacles : list[dict]
+        Obstacle dicts. ``{'type': 'sphere', 'center', 'radius'}`` and
+        ``{'type': 'box', 'center', 'extents'[, 'rotation']}`` are
+        supported; ``extents`` are the *full* side lengths and
+        ``rotation`` is a (3, 3) world-from-box matrix (identity if
+        omitted). Unknown types raise.
+
+    Returns
+    -------
+    dict
+        ``sphere_centers`` (Ns, 3), ``sphere_radii`` (Ns,),
+        ``box_centers`` (Nb, 3), ``box_half_extents`` (Nb, 3),
+        ``box_rotations`` (Nb, 3, 3). Empty arrays keep the trailing
+        dimensions so ``backend`` code can branch on ``len``.
+
+    Raises
+    ------
+    ValueError
+        If an obstacle has an unsupported ``type``.
+    """
+    sphere_centers, sphere_radii = [], []
+    box_centers, box_half_extents, box_rotations = [], [], []
+    for o in obstacles:
+        kind = o.get('type')
+        if kind == 'sphere':
+            sphere_centers.append(np.asarray(o['center'], dtype=np.float64))
+            sphere_radii.append(float(o['radius']))
+        elif kind == 'box':
+            box_centers.append(np.asarray(o['center'], dtype=np.float64))
+            box_half_extents.append(
+                0.5 * np.asarray(o['extents'], dtype=np.float64))
+            rot = o.get('rotation')
+            box_rotations.append(
+                np.eye(3) if rot is None
+                else np.asarray(rot, dtype=np.float64))
+        else:
+            raise ValueError(
+                'unsupported obstacle type {!r}; expected '
+                "'sphere' or 'box'".format(kind))
+    return {
+        'sphere_centers': (np.asarray(sphere_centers, dtype=np.float64)
+                           if sphere_centers else np.zeros((0, 3))),
+        'sphere_radii': (np.asarray(sphere_radii, dtype=np.float64)
+                         if sphere_radii else np.zeros((0,))),
+        'box_centers': (np.asarray(box_centers, dtype=np.float64)
+                        if box_centers else np.zeros((0, 3))),
+        'box_half_extents': (np.asarray(box_half_extents, dtype=np.float64)
+                             if box_half_extents else np.zeros((0, 3))),
+        'box_rotations': (np.asarray(box_rotations, dtype=np.float64)
+                          if box_rotations else np.zeros((0, 3, 3))),
+    }
+
+
+def compute_box_obstacle_distances(sphere_positions, sphere_radii,
+                                   box_centers, box_half_extents,
+                                   box_rotations, backend):
+    """Signed distances between collision spheres and box obstacles.
+
+    Uses the exact box signed-distance function, so a box is *not*
+    inflated the way a sphere-lattice approximation of it would be::
+
+        d(p) = ||max(|p| - h, 0)|| + min(max_i(|p|_i - h_i), 0)
+
+    evaluated in the box frame, then reduced by the sphere radius.
+
+    Parameters
+    ----------
+    sphere_positions : array
+        Collision sphere positions (n_spheres, 3), world frame.
+    sphere_radii : array
+        Collision sphere radii (n_spheres,).
+    box_centers : array
+        Box centres (n_boxes, 3), world frame.
+    box_half_extents : array
+        Box half side lengths (n_boxes, 3).
+    box_rotations : array
+        World-from-box rotation matrices (n_boxes, 3, 3).
+    backend : module
+        Array module (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    array
+        Signed distances (n_spheres, n_boxes).
+        Positive = separated, negative = penetrating.
+    """
+    xp = backend
+    # (n_spheres, n_boxes, 3) in world frame, then rotated into each box frame
+    # by R^T (einsum indices: R is world-from-box, so transpose via 'bji').
+    diff = sphere_positions[:, None, :] - box_centers[None, :, :]
+    local = xp.einsum('bji,sbj->sbi', box_rotations, diff)
+
+    q = xp.abs(local) - box_half_extents[None, :, :]
+    outside = xp.sqrt(xp.sum(xp.maximum(q, 0.0) ** 2, axis=-1) + 1e-10)
+    inside = xp.minimum(xp.max(q, axis=-1), 0.0)
+    return outside + inside - sphere_radii[:, None]
+
+
+def compute_world_obstacle_distances(sphere_positions, sphere_radii,
+                                     obstacle_arrays, backend):
+    """Signed distances to every world obstacle, spheres then boxes.
+
+    Concatenates :func:`compute_sphere_obstacle_distances` and
+    :func:`compute_box_obstacle_distances` so the total column count
+    equals the number of obstacles handed to ``add_collision_cost``.
+
+    Parameters
+    ----------
+    sphere_positions : array
+        Collision sphere positions (n_spheres, 3).
+    sphere_radii : array
+        Collision sphere radii (n_spheres,).
+    obstacle_arrays : dict
+        Output of :func:`prepare_world_obstacle_arrays`.
+    backend : module
+        Array module.
+
+    Returns
+    -------
+    array
+        Signed distances (n_spheres, n_obstacles).
+    """
+    xp = backend
+    blocks = []
+    if len(obstacle_arrays['sphere_radii']):
+        blocks.append(compute_sphere_obstacle_distances(
+            sphere_positions, sphere_radii,
+            xp.asarray(obstacle_arrays['sphere_centers']),
+            xp.asarray(obstacle_arrays['sphere_radii']), xp))
+    if len(obstacle_arrays['box_half_extents']):
+        blocks.append(compute_box_obstacle_distances(
+            sphere_positions, sphere_radii,
+            xp.asarray(obstacle_arrays['box_centers']),
+            xp.asarray(obstacle_arrays['box_half_extents']),
+            xp.asarray(obstacle_arrays['box_rotations']), xp))
+    if not blocks:
+        return xp.zeros((sphere_positions.shape[0], 0))
+    if len(blocks) == 1:
+        return blocks[0]
+    return xp.concatenate(blocks, axis=1)
 
 
 def compute_self_collision_distances(sphere_positions, sphere_radii,

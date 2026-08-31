@@ -205,18 +205,17 @@ class ScipySolver(BaseSolver):
             Constraint function returning (values, jacobian).
         """
         from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
-        from skrobot.planner.trajectory_optimization.fk_utils import compute_sphere_obstacle_distances
+        from skrobot.planner.trajectory_optimization.fk_utils import compute_world_obstacle_distances
         from skrobot.planner.trajectory_optimization.fk_utils import prepare_fk_data
+        from skrobot.planner.trajectory_optimization.fk_utils import prepare_world_obstacle_arrays
 
         # Parse obstacles
-        sphere_obs = [o for o in problem.world_obstacles if o['type'] == 'sphere']
-        if not sphere_obs:
+        if not problem.world_obstacles:
             def dummy_constraint(x):
                 return np.array([1.0]), np.zeros((1, n_wp * n_dof))
             return dummy_constraint
 
-        obs_centers = np.array([o['center'] for o in sphere_obs])
-        obs_radii = np.array([o['radius'] for o in sphere_obs])
+        obs_arrays = prepare_world_obstacle_arrays(problem.world_obstacles)
 
         # Build FK functions using shared module
         fk_data = prepare_fk_data(problem, np)
@@ -236,8 +235,8 @@ class ScipySolver(BaseSolver):
                 sphere_pos = get_sphere_positions(angles)
 
                 # Compute distances to all obstacles
-                signed_dists = compute_sphere_obstacle_distances(
-                    sphere_pos, sphere_radii, obs_centers, obs_radii, np
+                signed_dists = compute_world_obstacle_distances(
+                    sphere_pos, sphere_radii, obs_arrays, np
                 )
                 min_dist = np.min(signed_dists)
                 min_dists.append(min_dist)

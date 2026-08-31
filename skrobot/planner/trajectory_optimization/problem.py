@@ -611,6 +611,8 @@ class TrajectoryProblem:
         activation_distance=0.05,
         as_constraint=True,
         n_spheres_per_link=3,
+        mode='sphere',
+        n_surface=None,
     ):
         """Add world collision avoidance cost.
 
@@ -632,7 +634,27 @@ class TrajectoryProblem:
             Higher values mean tighter collision approximation at the
             cost of more residuals. 3 is the historical default; values
             up to ~7 are reasonable for elongated links.
+            (``mode='sphere'`` only.)
+        mode : str
+            Robot-side shape representation. ``'sphere'`` (default) wraps
+            each link in swept spheres: cheap, but the spheres stick out
+            beyond a boxy link, so a link that physically fits through a
+            narrow gap can read as colliding. ``'surface'`` samples points
+            on each link's own collision mesh and evaluates the obstacle
+            distance there, which is not inflated; combined with box
+            obstacles neither side of the pair is approximated outward.
+            Requires a collision mesh on every collision link.
+        n_surface : int
+            Surface sample points kept per link (``mode='surface'`` only).
+
+        Raises
+        ------
+        ValueError
+            If ``mode`` is not one of ``'sphere'`` / ``'surface'``.
         """
+        if mode not in ('sphere', 'surface'):
+            raise ValueError(
+                "mode must be 'sphere' or 'surface', got {}".format(mode))
         self.collision_link_list = collision_link_list
         self.world_obstacles = world_obstacles
 
@@ -650,13 +672,20 @@ class TrajectoryProblem:
         # Use 'soft' for soft cost (gradient descent, etc.)
         kind = 'geq' if as_constraint else 'soft'
 
+        params = {
+            'obstacles': world_obstacles,
+            'activation_distance': activation_distance,
+            'mode': mode,
+        }
+        if mode == 'surface':
+            from skrobot.planner.trajectory_optimization.world_surface_collision import build_world_surface_data
+            params['surface_data'] = build_world_surface_data(
+                collision_link_list, n_surface=n_surface)
+
         self.residuals.append(ResidualSpec(
             name='world_collision',
             residual_fn='world_collision',
-            params={
-                'obstacles': world_obstacles,
-                'activation_distance': activation_distance,
-            },
+            params=params,
             kind=kind,
             weight=weight,
         ))
@@ -668,7 +697,7 @@ class TrajectoryProblem:
         as_constraint=True,
         mode='sphere',
         dim_grid=40,
-        n_surface=48,
+        n_surface=None,
     ):
         """Add self-collision avoidance cost.
 
