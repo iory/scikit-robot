@@ -2,6 +2,8 @@
 
 import hashlib
 
+import numpy as np
+
 
 def get_problem_structure_key(problem):
     """Generate cache key from problem structure.
@@ -79,10 +81,47 @@ def _self_collision_structure(spec):
     return (mode, len(data['pairs_a']), data['surface_points'].shape[1])
 
 
-def get_problem_value_hash(problem):
-    """Generate hash of problem values (obstacle positions, targets, etc.).
+def _feed_value(md5, value):
+    """Fold one problem value into ``md5``.
 
-    Combined with structure key to detect when functions need rebuilding.
+    Walks containers so a residual's params are covered whatever shape they
+    take. Anything that is not a container is folded in through ``repr``,
+    which is stable for the scalars and strings these params hold.
+    """
+    if isinstance(value, np.ndarray):
+        md5.update(b'a')
+        md5.update(repr((value.shape, value.dtype.str)).encode())
+        md5.update(np.ascontiguousarray(value).tobytes())
+    elif isinstance(value, dict):
+        md5.update(b'd')
+        for key in sorted(value, key=repr):
+            md5.update(repr(key).encode())
+            _feed_value(md5, value[key])
+    elif isinstance(value, (list, tuple)):
+        md5.update(b'l')
+        for item in value:
+            _feed_value(md5, item)
+    else:
+        md5.update(b's')
+        md5.update(repr(value).encode())
+
+
+def get_problem_value_hash(problem):
+    """Hash every problem value the compiled functions close over.
+
+    Combined with the structure key this decides whether a cached pair of
+    compiled functions may serve a problem. The FK arrays are excluded: they
+    travel as a runtime argument, so one executable serves every problem with
+    the same structure regardless of kinematics.
+
+    Everything else the residuals hold -- targets, obstacle geometry, sphere
+    radii, axis masks, activation distances, grid contents -- is still baked
+    into the trace, so it has to be part of the key. Rather than listing those
+    fields, this walks the residual params wholesale: a field added by a later
+    residual is then covered without anyone remembering to extend this
+    function. Two earlier additions (the box obstacles' extents and rotation,
+    and the Cartesian axis masks) were missed by the field-by-field version
+    that came before, which would have let one problem's values serve another.
 
     Parameters
     ----------
@@ -92,43 +131,37 @@ def get_problem_value_hash(problem):
     Returns
     -------
     str or None
-        MD5 hash of problem values, or None if no values to hash.
+        Hash of the problem's values, or None when it holds none.
     """
-    hash_parts = []
+    md5 = hashlib.md5()
+    empty = True
 
-    # Hash obstacle positions
     if problem.world_obstacles:
-        for obs in problem.world_obstacles:
-            hash_parts.append(str(obs.get('center', [])))
-            hash_parts.append(str(obs.get('radius', 0)))
+        empty = False
+        _feed_value(md5, problem.world_obstacles)
 
-    # Hash EE waypoint targets
-    for c in problem.ee_waypoint_costs:
-        hash_parts.append(c['target_position'].tobytes())
-        hash_parts.append(c['target_rotation'].tobytes())
-
-    # Hash cartesian path targets
     for spec in problem.residuals:
-        if spec.name == 'cartesian_path':
-            params = spec.params
-            target_pos = params.get('target_positions')
-            if target_pos is not None:
-                hash_parts.append(target_pos.tobytes())
-            target_rot = params.get('target_rotations')
-            if target_rot is not None:
-                hash_parts.append(target_rot.tobytes())
+        empty = False
+        md5.update(repr(spec.name).encode())
+        _feed_value(md5, spec.weight)
+        _feed_value(md5, spec.params)
 
-    # Hash waypoint constraint values
-    for _, angles in problem.waypoint_constraints:
-        hash_parts.append(angles.tobytes())
+    for cost in problem.ee_waypoint_costs:
+        empty = False
+        _feed_value(md5, cost)
 
-    if not hash_parts:
+    for idx, angles in problem.waypoint_constraints:
+        empty = False
+        _feed_value(md5, idx)
+        _feed_value(md5, angles)
+
+    if problem.collision_spheres is not None:
+        empty = False
+        _feed_value(md5, problem.collision_spheres)
+
+    if empty:
         return None
-
-    combined = b''.join(
-        p if isinstance(p, bytes) else p.encode() for p in hash_parts
-    )
-    return hashlib.md5(combined).hexdigest()[:16]
+    return md5.hexdigest()[:16]
 
 
 def build_gridsdf_self_distance_fn(problem, fk_data, backend,
