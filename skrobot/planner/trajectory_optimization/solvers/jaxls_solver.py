@@ -208,6 +208,23 @@ class JaxlsSolver(BaseSolver):
             for c in problem.ee_waypoint_costs
         )
 
+        # Extra EE costs structure: each entry's chain length, weights,
+        # and whether rotation is tracked. Targets themselves are
+        # captured in closure inside the cost factory so they
+        # invalidate the structure key implicitly via the closure
+        # identity below.
+        extra_ee_key = tuple(
+            (
+                int(len(entry['chain_indices'])),
+                float(entry['position_weight']),
+                float(entry['rotation_weight']),
+                tuple(entry['position_mask']),
+                tuple(entry['rotation_mask']),
+                bool(entry['target_rotations'] is not None),
+            )
+            for entry in getattr(problem, 'extra_ee_costs', [])
+        )
+
         # Include obstacle positions in cache key
         # (obstacles change position, so compiled problem must be invalidated)
         obstacle_key = tuple()
@@ -233,6 +250,7 @@ class JaxlsSolver(BaseSolver):
             has_cart_rot,
             ee_wp_key,
             obstacle_key,  # Include obstacle positions
+            extra_ee_key,
         )
         return key
 
@@ -426,6 +444,12 @@ class JaxlsSolver(BaseSolver):
                     problem, TrajectoryVar,
                     EEWpPosParamVar, EEWpRotParamVar,
                     fk_data,
+                ))
+
+            # --- Extra EE costs (shared-variable multi-EE) ---
+            for entry in getattr(problem, 'extra_ee_costs', []):
+                costs.append(self._make_extra_ee_cost(
+                    problem, TrajectoryVar, entry,
                 ))
 
             # --- Constraint targets as frozen ParamVars ---
@@ -801,8 +825,109 @@ class JaxlsSolver(BaseSolver):
             EEWpRotParamVar(jnp.arange(n_ee_wps)),
         )
 
+    def _make_extra_ee_cost(self, problem, TrajectoryVar, entry):
+        """Per-waypoint Cartesian cost for a *secondary* EE that
+        shares variables with the main chain.
+
+        Builds a sub-chain FK from the snapshot stored in
+        ``entry['fk_data']`` and gathers the relevant joint angles
+        from the union waypoint vector via ``entry['chain_indices']``
+        before evaluating pose error.
+        """
+        import jax
+        import jax.numpy as jnp
+        import jaxls
+
+        from skrobot.planner.trajectory_optimization.fk_utils import build_fk_functions
+        from skrobot.planner.trajectory_optimization.fk_utils import pose_error_log
+
+        T = problem.n_waypoints
+        fk_data = entry['fk_data']
+        chain_indices = jnp.asarray(entry['chain_indices'])
+        target_pos = jnp.asarray(entry['target_positions'])
+        target_rot = entry['target_rotations']
+        pos_w = entry['position_weight']
+        rot_w = entry['rotation_weight']
+        pmask = jnp.asarray(entry['position_mask'], dtype=jnp.float64)
+        rmask = jnp.asarray(entry['rotation_mask'], dtype=jnp.float64)
+        pos_scale = jnp.sqrt(pos_w)
+
+        _, _, _, get_ee_pose = build_fk_functions(fk_data, jnp)
+
+        if target_rot is not None:
+            target_rot = jnp.asarray(target_rot)
+            rot_scale = jnp.sqrt(pos_w * rot_w)
+
+            @jaxls.Cost.factory(name='extra_ee_full')
+            def extra_ee_full(vals, var, t_pos_param, t_rot_param):
+                full_angles = vals[var]
+                sub_angles = full_angles[chain_indices]
+                ee_pos, ee_rot = get_ee_pose(sub_angles)
+                pose_err = pose_error_log(
+                    ee_pos, ee_rot,
+                    vals[t_pos_param], vals[t_rot_param].reshape(3, 3))
+                pos_err = pos_scale * (pose_err[:3] * pmask)
+                rot_err = rot_scale * (pose_err[3:] * rmask)
+                return jnp.concatenate([pos_err, rot_err]).flatten()
+
+            # Bake target arrays directly as constants by registering as
+            # frozen ParamVars. To keep it simple, we make a per-call
+            # ParamVar class and pass values via a small helper closure.
+            class _ExtraPosParam(
+                jaxls.Var[jax.Array],
+                default_factory=lambda: jnp.zeros(3),
+                tangent_dim=0,
+            ):
+                pass
+
+            class _ExtraRotParam(
+                jaxls.Var[jax.Array],
+                default_factory=lambda: jnp.eye(3).flatten(),
+                tangent_dim=0,
+            ):
+                pass
+
+            # We construct the cost factory WITHOUT param vars by
+            # capturing the targets in closure, since they are
+            # immutable for a single solve. (TrajectoryProblem callers
+            # rebuild the problem when targets change.)
+            @jaxls.Cost.factory(name='extra_ee_full_closure')
+            def extra_ee_full_closure(vals, var, wp_idx):
+                full_angles = vals[var]
+                sub_angles = full_angles[chain_indices]
+                ee_pos, ee_rot = get_ee_pose(sub_angles)
+                tp = target_pos[wp_idx]
+                tr = target_rot[wp_idx]
+                pose_err = pose_error_log(ee_pos, ee_rot, tp, tr)
+                pos_err = pos_scale * (pose_err[:3] * pmask)
+                rot_err = rot_scale * (pose_err[3:] * rmask)
+                return jnp.concatenate([pos_err, rot_err]).flatten()
+
+            return extra_ee_full_closure(
+                TrajectoryVar(jnp.arange(T)),
+                jnp.arange(T),
+            )
+
+        @jaxls.Cost.factory(name='extra_ee_pos')
+        def extra_ee_pos(vals, var, wp_idx):
+            full_angles = vals[var]
+            sub_angles = full_angles[chain_indices]
+            ee_pos, _ = get_ee_pose(sub_angles)
+            err = (ee_pos - target_pos[wp_idx]) * pmask
+            return (pos_scale * err).flatten()
+
+        return extra_ee_pos(
+            TrajectoryVar(jnp.arange(T)),
+            jnp.arange(T),
+        )
+
     def _make_world_collision_cost(self, problem, TrajectoryVar, fk_data, spec):
-        """Create world collision avoidance cost."""
+        """Create world collision avoidance cost or constraint.
+
+        ``spec.kind == 'geq'`` produces a per-sphere/per-obstacle hard
+        ``signed_distance >= 0`` constraint. Any other kind keeps the
+        legacy soft hinge penalty.
+        """
         import jax.numpy as jnp
         import jaxls
 
@@ -833,6 +958,27 @@ class JaxlsSolver(BaseSolver):
         sphere_radii = fk_data['sphere_radii']
 
         _, get_sphere_positions, _, _ = build_fk_functions(fk_data, jnp)
+
+        if spec.kind == 'geq':
+            # Hard constraint: signed_dist - safety_margin >= 0 for every
+            # (sphere, obstacle) pair at every waypoint. The safety
+            # margin is the activation distance so we keep at least
+            # ``activation_dist`` clearance to mirror optmotiongen's
+            # ``collision-distance-limit`` behaviour.
+            @jaxls.Cost.factory(
+                kind='constraint_geq_zero',
+                name='world_collision_geq',
+            )
+            def world_collision_geq(vals, var):
+                angles = vals[var]
+                sphere_pos = get_sphere_positions(angles)
+                signed_dists = compute_sphere_obstacle_distances(
+                    sphere_pos, sphere_radii, obs_centers, obs_radii, jnp
+                )
+                # Slack: distance beyond the activation buffer.
+                return (signed_dists - activation_dist).flatten()
+
+            return world_collision_geq(TrajectoryVar(jnp.arange(T)))
 
         @jaxls.Cost.factory(name='world_collision')
         def world_collision_cost(vals, var):
@@ -946,6 +1092,12 @@ class JaxlsSolver(BaseSolver):
         _, _, _, get_ee_pose = build_fk_functions(fk_data, jnp)
 
         has_rot = spec.params.get('target_rotations') is not None
+        pmask = jnp.array(
+            spec.params.get('position_mask', [1, 1, 1]), dtype=jnp.float64)
+        rmask = jnp.array(
+            spec.params.get('rotation_mask',
+                            [1, 1, 1] if has_rot else [0, 0, 0]),
+            dtype=jnp.float64)
 
         if has_rot:
             rot_weight = jnp.sqrt(spec.weight * rotation_weight)
@@ -958,8 +1110,8 @@ class JaxlsSolver(BaseSolver):
                 target_rot = vals[rot_param].reshape(3, 3)
                 # Use SE(3) logarithmic map for pose error
                 pose_err = pose_error_log(ee_pos, ee_rot, target_pos, target_rot)
-                pos_err = pos_weight * pose_err[:3]
-                rot_err = rot_weight * pose_err[3:]
+                pos_err = pos_weight * (pose_err[:3] * pmask)
+                rot_err = rot_weight * (pose_err[3:] * rmask)
                 return jnp.concatenate([pos_err, rot_err]).flatten()
 
             return cartesian_path_cost(
@@ -973,7 +1125,7 @@ class JaxlsSolver(BaseSolver):
                 angles = vals[var]
                 ee_pos, _ = get_ee_pose(angles)
                 target_pos = vals[pos_param]
-                return (pos_weight * (ee_pos - target_pos)).flatten()
+                return (pos_weight * ((ee_pos - target_pos) * pmask)).flatten()
 
             return cartesian_path_cost(
                 TrajectoryVar(jnp.arange(T)),
