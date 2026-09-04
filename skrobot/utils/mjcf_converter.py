@@ -158,12 +158,7 @@ class _MeshAssets:
         for sub in submeshes:
             # colour from the ORIGINAL sub-mesh (decimation's convex-hull
             # fallback drops vertex colours); STL cannot carry it either.
-            color = None
-            try:
-                mc = sub.visual.main_color  # RGBA uint8
-                color = [c / 255.0 for c in mc]
-            except Exception:
-                pass
+            color = _submesh_rgba(sub)
 
             key = id(sub)
             if key in self._by_id:
@@ -311,6 +306,30 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
             ET.SubElement(parent_el, "geom", _named(a))
         return emitted
     return False
+
+
+def _submesh_rgba(mesh):
+    """Dominant colour of a trimesh sub-mesh as [r, g, b, a] in 0..1, or None.
+
+    trimesh keeps the colour in a different place per visual kind:
+    ``ColorVisuals`` (glb/ply/obj vertex or face colours) has ``main_color``
+    on the visual itself, while ``TextureVisuals`` (COLLADA/.dae, textured
+    glTF) has it on ``visual.material``. Reading only the former silently
+    turned every .dae robot uniform grey -- the AttributeError was swallowed
+    and the geom got no ``rgba`` at all.
+    """
+    visual = getattr(mesh, "visual", None)
+    if visual is None:
+        return None
+    mc = getattr(visual, "main_color", None)
+    if mc is None:
+        mc = getattr(getattr(visual, "material", None), "main_color", None)
+    if mc is None:
+        return None
+    try:
+        return [float(c) / 255.0 for c in mc]
+    except (TypeError, ValueError):
+        return None
 
 
 def _visual_rgba(visual):
