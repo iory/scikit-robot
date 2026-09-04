@@ -1,5 +1,8 @@
 name: Release
 
+# Deny by default; every job below grants only what it needs.
+permissions: {}
+
 on:
   workflow_dispatch:
   workflow_run:
@@ -61,7 +64,12 @@ jobs:
   tag-release:
     runs-on: ubuntu-latest
     needs: auto-merge
+    permissions:
+      # pushes the vX.Y.Z tag
+      contents: write
     if: github.event_name == 'workflow_run' && needs.auto-merge.outputs.mergeResult == 'merged' && contains(fromJson(needs.auto-merge.outputs.prLabels || '[]'), 'release')
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,29 +112,124 @@ jobs:
           git tag "v${{ steps.get_version.outputs.version }}"
           git push origin "v${{ steps.get_version.outputs.version }}"
 
-  pypi:
-    name: Release To PyPi
+  # Everything fallible happens here, before anything is published anywhere:
+  # build the tagged tree, prove the built version is the one the tag names, and
+  # prove the metadata renders.  The artifacts are handed to the publish jobs, so
+  # what reaches PyPI is byte-for-byte what passed these checks rather than a
+  # rebuild.
+  build:
+    name: Build & check the distribution
     needs: tag-release
     if: always() && (github.event_name == 'workflow_dispatch' || needs.tag-release.result == 'success')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          # Build the tagged commit, not whatever main happens to be.  main can
+          # move between the bump PR merging and this job starting, and a PyPI
+          # version is immutable -- publishing a different tree under that
+          # version cannot be undone.  workflow_dispatch has no tag to build,
+          # so it falls back to main.
+          ref: ${{ needs.tag-release.result == 'success' && format('v{0}', needs.tag-release.outputs.version) || 'main' }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # nothing here pushes, so do not leave the token in .git/config
+          persist-credentials: false
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install publishing dependencies
+
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install build twine
+
+      # `build` makes the sdist first and then builds the wheel FROM that sdist,
+      # so anything missing from MANIFEST.in fails here rather than shipping as
+      # a wheel with files missing.
+      # Without SOURCE_DATE_EPOCH the wheel embeds wall-clock timestamps and two
+      # builds of the same commit differ byte for byte; pinning them to the
+      # commit date makes the wheel reproducible from the tag alone.  It does
+      # not fix the sdist -- setuptools pins neither the gzip header mtime nor
+      # the directory entries it generates -- so only the wheel is verifiable.
       - name: Build
+        run: SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)" python -m build
+
+      # The version is baked into the artifact filenames, so this compares what
+      # is actually about to be uploaded against the tag -- not a string read
+      # back out of pyproject.toml.
+      - name: Check the built version matches the tag
+        if: needs.tag-release.result == 'success'
         run: |
-          python -m build
-      - name: Upload to PyPI
-        uses: pypa/gh-action-pypi-publish@master
+          set -- dist/*.tar.gz
+          built=$(basename "$1" .tar.gz)
+          built=${built#scikit_robot-}
+          want="${{ needs.tag-release.outputs.version }}"
+          if [ "$built" != "$want" ]; then
+            echo "built $built but the tag is v$want" >&2
+            exit 1
+          fi
+          echo "built version $built matches tag v$want"
+
+      # --strict so a README that renders badly on PyPI fails the run, instead
+      # of landing as an unreadable project page on an immutable version.
+      - name: Check the built metadata
+        run: twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
         with:
-          password: ${{ secrets.PYPI_TOKEN }}
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # LAST of the two publishes, but everything that can actually fail already ran
+  # in `build`.  Creating the Release validates nothing about the package, so
+  # putting it first would not protect the irreversible upload from anything --
+  # it would only leave a window where the notes are public and `pip install`
+  # still returns the previous version.  That window gets long if the pypi
+  # environment ever gains a required-reviewer rule and the upload waits on a
+  # human.
+  #
+  # It is a `uses:` rather than a tag-push trigger because the tag is pushed
+  # with GITHUB_TOKEN, and a tag pushed by GITHUB_TOKEN does not trigger other
+  # workflows.
+  github-release:
+    needs: [tag-release, build, pypi]
+    if: needs.tag-release.result == 'success' && needs.pypi.result == 'success'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yml
+    with:
+      tag: v${{ needs.tag-release.outputs.version }}
+
+  # The one step here that can never be taken back, so it runs only once the
+  # distribution has been built, matched against the tag and checked.  It
+  # uploads those exact artifacts rather than rebuilding them.
+  pypi:
+    name: Release To PyPi
+    needs: [tag-release, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    # Naming an environment that does not exist creates it on the first run.  It
+    # starts with no protection rules; adding a required reviewer here is what
+    # puts a human in front of the irreversible upload, and its history shows up
+    # under the repo's Deployments -> pypi.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/scikit-robot
+    permissions:
+      # OIDC token for PyPI Trusted Publishing -- no API token is stored in the
+      # repo any more.  Downloading a same-run artifact needs no scope of its
+      # own; it goes through the Actions runtime token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
