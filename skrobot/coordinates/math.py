@@ -2532,6 +2532,31 @@ def quaternion_norm(q):
     return norm_q
 
 
+def normalize_angle(angle):
+    """Wrap angles to the range ``[-pi, pi)``.
+
+    Parameters
+    ----------
+    angle : float or numpy.ndarray
+        Angle(s) in radians, in any range.
+
+    Returns
+    -------
+    numpy.float64 or numpy.ndarray
+        The same angle(s) folded into ``[-pi, pi)``; an array keeps its shape.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from skrobot.coordinates.math import normalize_angle
+    >>> float(normalize_angle(3 * np.pi / 2))
+    -1.5707963267948966
+    >>> normalize_angle([0.0, np.pi, -np.pi, 2 * np.pi])
+    array([ 0.        , -3.14159265, -3.14159265,  0.        ])
+    """
+    return (np.asarray(angle, dtype=np.float64) + np.pi) % (2 * np.pi) - np.pi
+
+
 def quaternion_normalize(q):
     """Return the normalized quaternion.
 
