@@ -25,6 +25,7 @@ from skrobot.coordinates.math import matrix2translation_quaternion_xyzw
 from skrobot.coordinates.math import matrix2xyzrpy
 from skrobot.coordinates.math import matrix2ypr
 from skrobot.coordinates.math import matrix_relative
+from skrobot.coordinates.math import normalize_angle
 from skrobot.coordinates.math import normalize_vector
 from skrobot.coordinates.math import orthonormalize_rotation_matrix
 from skrobot.coordinates.math import quaternion2matrix
@@ -682,6 +683,20 @@ class TestMath(unittest.TestCase):
 
         q = np.array([0, 0, 0, 0])
         self.assertEqual(quaternion_norm(q), 0.0)
+
+    def test_normalize_angle(self):
+        testing.assert_almost_equal(normalize_angle(0.0), 0.0)
+        testing.assert_almost_equal(normalize_angle(3 * pi / 2), -pi / 2)
+        testing.assert_almost_equal(normalize_angle(-3 * pi / 2), pi / 2)
+        # the boundary pi maps to -pi (half-open interval)
+        testing.assert_almost_equal(normalize_angle(pi), -pi)
+        testing.assert_almost_equal(normalize_angle(-pi), -pi)
+        angles = np.array([[0.0, 2 * pi], [5 * pi, -7 * pi / 2]])
+        result = normalize_angle(angles)
+        self.assertEqual(result.shape, angles.shape)
+        testing.assert_almost_equal(result, [[0.0, 0.0], [-pi, pi / 2]])
+        self.assertTrue(np.all(result >= -pi))
+        self.assertTrue(np.all(result < pi))
 
     def test_quaternion_normalize(self):
         q = np.array([1, 0, 0, 0])
