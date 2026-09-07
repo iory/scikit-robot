@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from contextlib import contextmanager
 from functools import cached_property as _functools_cached_property
+import inspect
 import threading
 import time
 from typing import Dict
@@ -30,6 +31,8 @@ from skrobot.model.robot_model import CascadedLink
 from skrobot.model.robot_model import RobotModel
 from skrobot.viewers._base import _InteractiveViewerMixin
 from skrobot.viewers._manipulability_ellipse import ManipulabilityEllipse
+from skrobot.viewers._path_utils import polyline_segment_colors
+from skrobot.viewers._path_utils import polyline_segments
 
 
 try:
@@ -41,6 +44,16 @@ except ImportError:
 
 
 _CHECK_INTERVAL_NOT_GIVEN = object()
+
+# ``SceneApi.add_line_segments`` took a screen-space ``line_width`` (in
+# pixels) until viser 1.1, which replaced it with a world-space
+# ``thickness``. Only the latter can express a line width in metres.
+_LINE_SEGMENTS_SUPPORTS_THICKNESS = 'thickness' in inspect.signature(
+    viser.SceneApi.add_line_segments).parameters
+
+# Color used for a ``LineString`` that carries no color of its own, matching
+# the fallback used for uncolored point clouds.
+_DEFAULT_LINE_COLOR = (0, 0, 0)
 
 
 class ViserViewer(_InteractiveViewerMixin):
@@ -58,6 +71,12 @@ class ViserViewer(_InteractiveViewerMixin):
         Whether to enable motion planning controls. When enabled,
         users can save waypoints, plan trajectories between them,
         and animate the results. Implicitly enables IK. Default is False.
+    line_thickness : float
+        World-space thickness, in metres, used to draw
+        :class:`~skrobot.model.primitives.LineString` primitives.
+        Default is 0.005. Requires viser >= 1.1; older viser draws
+        lines with a fixed screen-space width and this value is
+        ignored (a warning is emitted when a ``LineString`` is added).
     """
 
     _LIMB_ATTR_MAP = {
@@ -91,8 +110,10 @@ class ViserViewer(_InteractiveViewerMixin):
         draw_grid: bool = True,
         enable_ik: bool = False,
         enable_motion_planning: bool = False,
+        line_thickness: float = 0.005,
     ):
         self._server = viser.ViserServer()
+        self._line_thickness = float(line_thickness)
         self._linkid_to_handle = dict()
         self._linkid_to_link = dict()
         self._is_active = True
@@ -3433,6 +3454,61 @@ class ViserViewer(_InteractiveViewerMixin):
             position=np.array([0.0, 0.0, -0.01]),
         )
 
+    def _add_line_string(self, name: str, link: LineString):
+        """Add a ``LineString`` to the scene as viser line segments.
+
+        The polyline is stored as a :class:`trimesh.path.Path3D`, whose
+        vertices live in the link frame; the segments are handed to viser
+        as-is and the link's world pose is applied to the scene node so
+        that :meth:`redraw` can keep it in sync.
+
+        Parameters
+        ----------
+        name : str
+            Scene node name.
+        link : skrobot.model.primitives.LineString
+            The polyline to render.
+
+        Returns
+        -------
+        viser.LineSegmentsHandle or None
+            The created handle, or ``None`` when the polyline holds no
+            drawable segment.
+        """
+        mesh = link.visual_mesh
+        segments, entity_indices = polyline_segments(mesh)
+        if len(segments) == 0:
+            warnings.warn(
+                "LineString '{}' has no drawable segment; skipping.".format(
+                    link.name),
+                UserWarning)
+            return None
+
+        colors = polyline_segment_colors(mesh, entity_indices)
+        if colors is None:
+            colors = np.array(_DEFAULT_LINE_COLOR, dtype=np.uint8)
+        else:
+            # viser wants a color per segment endpoint.
+            colors = np.repeat(colors[:, None, :], 2, axis=1)
+
+        kwargs = {}
+        if _LINE_SEGMENTS_SUPPORTS_THICKNESS:
+            kwargs['thickness'] = self._line_thickness
+        else:
+            warnings.warn(
+                'viser {} draws line segments with a screen-space width; '
+                'line_thickness={} is ignored. Upgrade to viser >= 1.1 for '
+                'world-space line thickness.'.format(
+                    viser.__version__, self._line_thickness),
+                UserWarning)
+        return self._server.scene.add_line_segments(
+            name,
+            points=segments,
+            colors=colors,
+            wxyz=matrix2quaternion(link.worldrot()),
+            position=link.worldpos(),
+            **kwargs)
+
     def _add_link(self, link: Link, is_obstacle: bool = False):
         from skrobot.model.primitives import Box
         from skrobot.model.primitives import Cylinder
@@ -3485,7 +3561,7 @@ class ViserViewer(_InteractiveViewerMixin):
                     point_size=0.002,  # TODO(HiroIshida): configurable
                 )
         elif isinstance(link, LineString):
-            raise NotImplementedError("not implemented yet")
+            handle = self._add_line_string(link_id, link)
         else:
             mesh = link.concatenated_visual_mesh
             if mesh is not None:

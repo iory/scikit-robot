@@ -6,14 +6,29 @@ import time
 import unittest
 import warnings
 
+import numpy as np
+
+from skrobot.model.primitives import LineString
+from skrobot.viewers import _viser as viser_module
 from skrobot.viewers import ViserViewer
 from skrobot.viewers._base import _InteractiveViewerMixin
+
+
+class _RecordingScene(object):
+
+    def __init__(self):
+        self.line_segments_calls = []
+
+    def add_line_segments(self, name, **kwargs):
+        self.line_segments_calls.append((name, kwargs))
+        return object()
 
 
 class _DummyServer(object):
 
     def __init__(self):
         self.stop_count = 0
+        self.scene = _RecordingScene()
 
     def stop(self):
         self.stop_count += 1
@@ -88,6 +103,57 @@ class TestViserViewer(unittest.TestCase):
         self.assertEqual(viewer.has_exit, not viewer.is_active)
         viewer._is_active = False
         self.assertEqual(viewer.has_exit, not viewer.is_active)
+
+
+class TestViserLineString(unittest.TestCase):
+
+    def setUp(self):
+        self.viewer = _viewer()
+        self.viewer._line_thickness = 0.004
+        self.viewer._linkid_to_handle = dict()
+        self.viewer._linkid_to_link = dict()
+        self.viewer._obstacle_link_ids = set()
+        self.viewer._obstacle_original_colors = dict()
+        self.points = np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [1.0, 1.0, 0.0]])
+
+    def _add(self, line):
+        self.viewer._add_link(line)
+        self.assertEqual(len(self.viewer._server.scene.line_segments_calls), 1)
+        return self.viewer._server.scene.line_segments_calls[0][1]
+
+    def test_line_string_is_added_as_line_segments(self):
+        line = LineString(self.points, color=[255, 0, 0, 255])
+        kwargs = self._add(line)
+
+        segments = kwargs['points']
+        self.assertEqual(segments.shape, (2, 2, 3))
+        np.testing.assert_allclose(segments[0], self.points[:2])
+        np.testing.assert_allclose(segments[1], self.points[1:])
+        np.testing.assert_array_equal(
+            kwargs['colors'],
+            np.tile(np.array([255, 0, 0], dtype=np.uint8), (2, 2, 1)))
+        self.assertIn(str(id(line)), self.viewer._linkid_to_handle)
+
+    def test_line_string_uses_link_world_pose(self):
+        line = LineString(self.points, pos=(0.0, 0.0, 0.5))
+        kwargs = self._add(line)
+        np.testing.assert_allclose(kwargs['position'], [0.0, 0.0, 0.5])
+
+    def test_line_string_without_color_falls_back_to_default(self):
+        line = LineString(self.points)
+        kwargs = self._add(line)
+        np.testing.assert_array_equal(
+            kwargs['colors'], np.array(viser_module._DEFAULT_LINE_COLOR))
+
+    def test_line_thickness_is_forwarded_when_supported(self):
+        line = LineString(self.points)
+        kwargs = self._add(line)
+        if viser_module._LINE_SEGMENTS_SUPPORTS_THICKNESS:
+            self.assertEqual(kwargs['thickness'], 0.004)
+        else:
+            self.assertNotIn('thickness', kwargs)
 
 
 if __name__ == '__main__':

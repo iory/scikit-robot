@@ -321,15 +321,13 @@ def add_ground_with_stripes(viewer, segments_data, viewer_name,
         viewer.add(stripe)
 
     # Planned CoG trail as a polyline plus per-segment endpoint markers
-    # so the walk's progress is easy to read off. ViserViewer does not
-    # implement LineString rendering, so we skip the polyline there.
-    if viewer_name != 'viser':
-        all_pts = np.concatenate(
-            [np.column_stack([s['com_pos'][:, 0], s['com_pos'][:, 1],
-                              np.full(s['com_pos'].shape[0], 0.005)])
-             for s in segments_data], axis=0)
-        if all_pts.shape[0] > 1:
-            viewer.add(skrobot.model.LineString(points=all_pts))
+    # so the walk's progress is easy to read off.
+    all_pts = np.concatenate(
+        [np.column_stack([s['com_pos'][:, 0], s['com_pos'][:, 1],
+                          np.full(s['com_pos'].shape[0], 0.005)])
+         for s in segments_data], axis=0)
+    if all_pts.shape[0] > 1:
+        viewer.add(skrobot.model.LineString(points=all_pts))
     palette = [(0.85, 0.30, 0.20),
                (0.20, 0.55, 0.95),
                (0.25, 0.80, 0.35),
