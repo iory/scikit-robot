@@ -7,7 +7,9 @@ import unittest
 import warnings
 
 import numpy as np
+import trimesh
 
+from skrobot.model.primitives import Box
 from skrobot.model.primitives import LineString
 from skrobot.viewers import _viser as viser_module
 from skrobot.viewers import ViserViewer
@@ -18,9 +20,14 @@ class _RecordingScene(object):
 
     def __init__(self):
         self.line_segments_calls = []
+        self.mesh_trimesh_calls = []
 
     def add_line_segments(self, name, **kwargs):
         self.line_segments_calls.append((name, kwargs))
+        return object()
+
+    def add_mesh_trimesh(self, name, **kwargs):
+        self.mesh_trimesh_calls.append((name, kwargs))
         return object()
 
 
@@ -154,6 +161,61 @@ class TestViserLineString(unittest.TestCase):
             self.assertEqual(kwargs['thickness'], 0.004)
         else:
             self.assertNotIn('thickness', kwargs)
+
+
+class TestViserAlphaBlending(unittest.TestCase):
+
+    def _mesh(self, face_colors):
+        return Box(extents=(0.2, 0.2, 0.2), face_colors=face_colors).visual_mesh
+
+    def test_opaque_mesh_is_passed_through_untouched(self):
+        mesh = self._mesh((255, 0, 0, 255))
+        self.assertIs(viser_module._alpha_blended_mesh(mesh), mesh)
+
+    def test_translucent_color_visuals_get_blend_material(self):
+        mesh = self._mesh((255, 0, 0, 128))
+        blended = viser_module._alpha_blended_mesh(mesh)
+
+        self.assertIsNot(blended, mesh)
+        self.assertEqual(blended.visual.material.alphaMode, 'BLEND')
+        # The original RGBA survives as a vertex attribute, so it is still
+        # exported as COLOR_0 alongside the new material.
+        np.testing.assert_array_equal(
+            blended.visual.vertex_attributes['color'], mesh.visual.vertex_colors)
+        # The link's own mesh must not be modified.
+        self.assertIsInstance(mesh.visual, trimesh.visual.ColorVisuals)
+
+    def test_translucent_material_is_copied_before_blending(self):
+        mesh = trimesh.creation.box((1.0, 1.0, 1.0))
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[255, 0, 0, 90])
+        mesh.visual = trimesh.visual.TextureVisuals(material=material)
+
+        blended = viser_module._alpha_blended_mesh(mesh)
+
+        self.assertEqual(blended.visual.material.alphaMode, 'BLEND')
+        self.assertIsNone(material.alphaMode)
+
+    def test_already_blended_mesh_is_passed_through_untouched(self):
+        mesh = trimesh.creation.box((1.0, 1.0, 1.0))
+        mesh.visual = trimesh.visual.TextureVisuals(
+            material=trimesh.visual.material.PBRMaterial(
+                baseColorFactor=[255, 0, 0, 90], alphaMode='BLEND'))
+        self.assertIs(viser_module._alpha_blended_mesh(mesh), mesh)
+
+    def test_add_link_blends_translucent_primitive(self):
+        viewer = _viewer()
+        viewer._linkid_to_handle = dict()
+        viewer._linkid_to_link = dict()
+        viewer._obstacle_link_ids = set()
+        viewer._obstacle_original_colors = dict()
+
+        box = Box(extents=(0.2, 0.2, 0.2), face_colors=(0, 0, 255, 100))
+        viewer._add_link(box)
+
+        calls = viewer._server.scene.mesh_trimesh_calls
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1]['mesh'].visual.material.alphaMode, 'BLEND')
 
 
 if __name__ == '__main__':
