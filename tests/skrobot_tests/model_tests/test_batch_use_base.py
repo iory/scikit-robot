@@ -397,3 +397,45 @@ def test_batch_invariant_joint_list_holds_joint_fixed():
             joint_list=[link_list[0].joint],
             invariant_joint_list=[link_list[0].joint],
             rotation_mask=False, backend='numpy')
+
+
+def test_batch_use_base_result_attributes():
+    """use_base keeps its 4-tuple shape; the attributes do not move."""
+    robot = _build_fetch()
+    ee = robot.rarm_end_coords.worldpos()
+    targets = [Coordinates(pos=ee + np.array([0.8, 0.0, 0.0]))]
+    attempts_per_pose = 3
+
+    result = robot.batch_inverse_kinematics(
+        target_coords=targets,
+        move_target=robot.rarm_end_coords,
+        link_list=robot.rarm.link_list,
+        rotation_mask=False,
+        use_base='planar',
+        attempts_per_pose=attempts_per_pose,
+        stop=100, thre=0.01,
+        backend='numpy',
+    )
+    # Historical unpacking is unchanged.
+    solutions, base_poses, success_flags, _ = result
+    assert len(result) == 4
+    assert result.solutions is solutions
+    assert result.base_poses is base_poses
+    assert result.success_flags is success_flags
+
+    attempts = result.attempts
+    n_dof = len(robot.angle_vector())
+    assert attempts.angle_vectors.shape == (1, attempts_per_pose, n_dof)
+    assert len(attempts.base_poses) == 1
+    assert len(attempts.base_poses[0]) == attempts_per_pose
+    assert all(isinstance(c, Coordinates) for c in attempts.base_poses[0])
+
+    # The selected angle vector and base pose must come from one attempt.
+    distances = np.linalg.norm(
+        attempts.angle_vectors[0] - solutions[0], axis=1)
+    best = int(np.argmin(distances))
+    assert distances[best] < 1e-8
+    np.testing.assert_allclose(
+        attempts.base_poses[0][best].worldpos(),
+        base_poses[0].worldpos(), atol=1e-8)
+    assert bool(attempts.success[0, best]) == success_flags[0]

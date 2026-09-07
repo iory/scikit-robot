@@ -116,6 +116,73 @@ For multiple target poses, batch IK provides significant performance improvement
         else:
             print(f"Pose {i}: Failed after {attempts} attempts")
 
+Reading the Result
+~~~~~~~~~~~~~~~~~~
+
+``batch_inverse_kinematics`` returns a ``BatchIKResult``. It unpacks
+exactly like the tuple it has always returned, so existing code is
+unaffected, but the attributes are the better way to read it: they are
+named the same whatever options the solve used, while the tuple positions
+shift when ``use_base`` inserts the base poses.
+
+.. code-block:: python
+
+    result = robot.batch_inverse_kinematics(target_poses, link_list=link_list,
+                                            move_target=robot.rarm.end_coords)
+
+    result.solutions       # list of angle vectors
+    result.success_flags   # list of bools
+    result.base_poses      # None unless use_base was requested
+    result.attempts        # every attempt the solve ran
+
+Every Attempt
+~~~~~~~~~~~~~
+
+``attempts_per_pose`` solves each pose several times from different seeds
+and keeps the best one per pose. The other attempts are computed all the
+same, and on a redundant arm they are alternative configurations reaching
+the same pose. ``result.attempts`` holds them -- there is nothing to
+enable, and the arrays are built on first access:
+
+.. code-block:: python
+
+    attempts = robot.batch_inverse_kinematics(
+        target_poses,
+        link_list=link_list,
+        move_target=robot.rarm.end_coords,
+        attempts_per_pose=20,
+    ).attempts
+
+    attempts.angle_vectors   # (n_poses, attempts_per_pose, n_dof)
+    attempts.success         # (n_poses, attempts_per_pose)
+    attempts.errors          # (n_poses, attempts_per_pose)
+    attempts.base_poses      # per-attempt base poses, with use_base
+
+    for pose_index in range(len(target_poses)):
+        reached = attempts.angle_vectors[pose_index][
+            attempts.success[pose_index]]
+        print("pose {}: {} attempts reached the target".format(
+            pose_index, len(reached)))
+
+Attempts are ordered by attempt index, not by quality, and failed attempts
+are kept -- filter on ``attempts.success``. Attempt 0 is the one seeded
+from the current angles when ``initial_angles='current'``.
+
+Note that the successful attempts are **not** distinct configurations.
+``attempts_per_pose`` is a retry mechanism seeded with random
+perturbations, not a sampler that covers the solution manifold, so
+different seeds routinely converge to the same configuration. In one
+measurement on a Fetch arm, 50 attempts produced 25 successes but only 11
+configurations that differed by more than 0.5 rad in any joint. Cluster
+the results yourself if you need genuinely different postures:
+
+.. code-block:: python
+
+    representatives = []
+    for q in attempts.angle_vectors[0][attempts.success[0]]:
+        if not any(np.abs(q - r).max() < 0.5 for r in representatives):
+            representatives.append(q)
+
 Axis Constraints
 ~~~~~~~~~~~~~~~~
 

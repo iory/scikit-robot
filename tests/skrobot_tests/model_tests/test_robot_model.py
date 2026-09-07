@@ -1,5 +1,6 @@
 import copy
 import os
+import pickle
 import sys
 import unittest
 
@@ -981,6 +982,92 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(len(success_flags), 1)
         self.assertEqual(len(attempt_counts), 1)
         self.assertLessEqual(attempt_counts[0], 5)
+
+    def test_batch_inverse_kinematics_result_unpacks_as_legacy_tuple(self):
+        """The result object is still the tuple callers have always got."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        result = fetch.batch_inverse_kinematics(
+            [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])],
+            move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list,
+            stop=10)
+
+        solutions, success_flags, attempt_counts = result
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        self.assertIs(result[0], solutions)
+        self.assertIs(result.solutions, solutions)
+        self.assertIs(result.success_flags, success_flags)
+        self.assertIs(result.attempt_counts, attempt_counts)
+        # Present but empty rather than absent, so callers need not branch.
+        self.assertIsNone(result.base_poses)
+        self.assertIsNotNone(result.attempts)
+
+    def test_batch_inverse_kinematics_result_survives_pickle_and_copy(self):
+        """A tuple subclass needs __getnewargs__ or these raise."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        result = fetch.batch_inverse_kinematics(
+            [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])],
+            move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list,
+            attempts_per_pose=3,
+            stop=10)
+
+        for restored in (copy.deepcopy(result),
+                         pickle.loads(pickle.dumps(result))):
+            self.assertEqual(len(restored), len(result))
+            np.testing.assert_allclose(restored.solutions[0],
+                                       result.solutions[0])
+            self.assertEqual(list(restored.success_flags),
+                             list(result.success_flags))
+            # The lazily-built attempts must still be reachable.
+            np.testing.assert_allclose(
+                restored.attempts.angle_vectors,
+                result.attempts.angle_vectors)
+
+    def test_batch_inverse_kinematics_attempts_always_available(self):
+        """Attempts need no opt-in and always carry an attempt axis."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        targets = [
+            skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9]),
+            skrobot.coordinates.Coordinates(pos=[0.8, -0.3, 0.8]),
+        ]
+        n_dof = len(fetch.angle_vector())
+
+        single = fetch.batch_inverse_kinematics(
+            targets, move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list, stop=10).attempts
+        self.assertEqual(single.n_attempts, 1)
+        self.assertEqual(single.angle_vectors.shape, (2, 1, n_dof))
+
+        result = fetch.batch_inverse_kinematics(
+            targets, move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list, attempts_per_pose=4)
+        attempts = result.attempts
+        self.assertEqual(attempts.angle_vectors.shape, (2, 4, n_dof))
+        self.assertEqual(attempts.success.shape, (2, 4))
+        self.assertEqual(attempts.errors.shape, (2, 4))
+        self.assertEqual(attempts.success.dtype, np.bool_)
+        self.assertIsNone(attempts.base_poses)
+        # Built once, then cached.
+        self.assertIs(attempts.angle_vectors, attempts.angle_vectors)
+
+        for i, target in enumerate(targets):
+            distances = np.linalg.norm(
+                attempts.angle_vectors[i] - result.solutions[i], axis=1)
+            self.assertAlmostEqual(distances.min(), 0.0, places=6)
+            if not result.success_flags[i]:
+                continue
+            for a in range(attempts.n_attempts):
+                if not attempts.success[i, a]:
+                    continue
+                fetch.angle_vector(attempts.angle_vectors[i, a])
+                error = np.linalg.norm(
+                    fetch.rarm.end_coords.worldpos() - target.worldpos())
+                self.assertLess(error, 1e-2)
 
     def test_batch_inverse_kinematics_rejects_unknown_kwargs(self):
         """A misspelled parameter raises instead of being dropped."""

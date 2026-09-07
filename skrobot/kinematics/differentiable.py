@@ -202,6 +202,46 @@ def _get_mimic_joint_info(fk_params):
     return mimic_parent_indices, mimic_multipliers, mimic_offsets, non_mimic_indices, n_opt
 
 
+def _group_attempts(solutions, success_flags, errors, n_targets,
+                    attempts_per_pose):
+    """Group a solver's flat per-attempt output by target.
+
+    Solvers expand ``attempts_per_pose`` by repeating each target, so the
+    flat arrays are laid out as ``target 0 attempt 0, target 0 attempt 1,
+    ..., target 1 attempt 0, ...``. This restores the attempt axis so a
+    caller can look at every attempt instead of only the selected one.
+
+    Parameters
+    ----------
+    solutions : array-like
+        Joint angles of every attempt, ``(n_targets * attempts, n_cols)``.
+    success_flags : array-like
+        Per-attempt success flags, ``(n_targets * attempts,)``.
+    errors : array-like
+        Per-attempt combined errors, ``(n_targets * attempts,)``.
+    n_targets : int
+        Number of target poses.
+    attempts_per_pose : int
+        Number of attempts per target.
+
+    Returns
+    -------
+    dict
+        ``{'solutions': (n_targets, attempts, n_cols) float array,
+        'success': (n_targets, attempts) bool array,
+        'errors': (n_targets, attempts) float array}``.
+    """
+    solutions = np.asarray(solutions)
+    return {
+        'solutions': solutions.reshape(
+            n_targets, attempts_per_pose, solutions.shape[-1]),
+        'success': np.asarray(success_flags).reshape(
+            n_targets, attempts_per_pose).astype(bool),
+        'errors': np.asarray(errors).reshape(
+            n_targets, attempts_per_pose).astype(np.float64),
+    }
+
+
 def _select_best_attempts(solutions, success_flags, errors, n_targets, attempts_per_pose,
                           n_joints, select_closest_to_initial=False, initial_angles=None):
     """Select the best solution from multiple attempts per target.
@@ -1540,6 +1580,7 @@ def _create_numpy_optimized_solver(fk_params):
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
+              return_all_attempts=False,
               **kwargs):
         """Solve batch IK using Jacobian-based damped least-squares in NumPy.
 
@@ -1567,6 +1608,12 @@ def _create_numpy_optimized_solver(fk_params):
             Applied as ``δq = W J^T (J W J^T + λI)^{-1} e``.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as JAX solver.
+        return_all_attempts : bool
+            If True, append a fourth return value: a dict with the result
+            of *every* attempt, keyed ``'solutions'``
+            ``(n_targets, attempts_per_pose, n_cols)``, ``'success'`` and
+            ``'errors'`` ``(n_targets, attempts_per_pose)``. The first three
+            return values are unchanged.
         """
         target_positions = np.asarray(target_positions)
         target_rotations = np.asarray(target_rotations)
@@ -1812,6 +1859,10 @@ def _create_numpy_optimized_solver(fk_params):
             success_out = success
             errors_out = combined_err
 
+        if return_all_attempts:
+            return solutions, success_out, errors_out, _group_attempts(
+                full_angles, success, combined_err, n_targets,
+                attempts_per_pose)
         return solutions, success_out, errors_out
 
     # Attach metadata
@@ -1946,6 +1997,7 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
+              return_all_attempts=False,
               **kwargs):
         """Solve multi-EE batch IK.
 
@@ -1971,6 +2023,12 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
             Per-task weights. Default uniform 1.0.
         attempts_per_pose, use_current_angles, select_closest_to_initial :
             As in single-EE solvers.
+        return_all_attempts : bool
+            If True, append a fourth return value: a dict with the result
+            of *every* attempt, keyed ``'solutions'``
+            ``(n_targets, attempts_per_pose, n_cols)``, ``'success'`` and
+            ``'errors'`` ``(n_targets, attempts_per_pose)``. The first three
+            return values are unchanged.
 
         Returns
         -------
@@ -2304,8 +2362,16 @@ def _create_numpy_multi_ee_solver(fk_params_list, union_info):
             solutions_out = opt_rs[np.arange(n_targets), best_idx]
             success_out = success_rs[np.arange(n_targets), best_idx]
             errors_out = err_rs[np.arange(n_targets), best_idx]
+            if return_all_attempts:
+                return (solutions_out, success_out, errors_out,
+                        _group_attempts(opt_angles, success, combined_weighted,
+                                        n_targets, attempts_per_pose))
             return solutions_out, success_out, errors_out
 
+        if return_all_attempts:
+            return (opt_angles, success, combined_weighted,
+                    _group_attempts(opt_angles, success, combined_weighted,
+                                    n_targets, attempts_per_pose))
         return opt_angles, success, combined_weighted
 
     solve.union_n_opt = union_n_opt
@@ -3017,6 +3083,7 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_limit_avoidance=0.0,
+              return_all_attempts=False,
               **kwargs):
         """Solve multi-EE batch IK on JAX.
 
@@ -3193,10 +3260,19 @@ def _create_jax_multi_ee_solver(fk_params_list, union_info):
             sols = opt_rs[np.arange(n_targets), best_idx]
             succ = success_rs[np.arange(n_targets), best_idx]
             errs = err_rs[np.arange(n_targets), best_idx]
+            if return_all_attempts:
+                return sols, succ, errs, _group_attempts(
+                    opt_np, success_np, err_np, n_targets, attempts_per_pose)
             return sols, succ, errs
 
-        return (np.asarray(final_opt), np.asarray(success),
-                np.asarray(combined_err))
+        final_opt_np = np.asarray(final_opt)
+        success_np_out = np.asarray(success)
+        err_np_out = np.asarray(combined_err)
+        if return_all_attempts:
+            return (final_opt_np, success_np_out, err_np_out,
+                    _group_attempts(final_opt_np, success_np_out, err_np_out,
+                                    n_targets, attempts_per_pose))
+        return final_opt_np, success_np_out, err_np_out
 
     solve.union_n_opt = union_n_opt
     solve.joint_limits_lower = np.asarray(
@@ -3819,6 +3895,7 @@ def _create_jax_jacobian_solver(fk_params, backend):
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
+              return_all_attempts=False,
               **kwargs):
         """Solve batch IK using Jacobian-based method.
 
@@ -3840,6 +3917,12 @@ def _create_jax_jacobian_solver(fk_params, backend):
             Rotation error threshold for success.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as gradient descent solver.
+        return_all_attempts : bool
+            If True, append a fourth return value: a dict with the result
+            of *every* attempt, keyed ``'solutions'``
+            ``(n_targets, attempts_per_pose, n_cols)``, ``'success'`` and
+            ``'errors'`` ``(n_targets, attempts_per_pose)``. The first three
+            return values are unchanged.
 
         Returns
         -------
@@ -3942,11 +4025,21 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 n_targets, attempts_per_pose, n_joints,
                 select_closest_to_initial, initial_angles)
 
-            return (backend.array(solutions),
-                    backend.array(success_flags),
-                    backend.array(errors))
+            selected = (backend.array(solutions),
+                        backend.array(success_flags),
+                        backend.array(errors))
         else:
-            return all_solutions, all_success, all_errors
+            selected = (all_solutions, all_success, all_errors)
+
+        if return_all_attempts:
+            # Only pay for the device -> host transfer when it is asked for;
+            # with a single attempt the arrays are still on the device here.
+            return selected + (_group_attempts(
+                backend.to_numpy(all_solutions),
+                backend.to_numpy(all_success),
+                backend.to_numpy(all_errors),
+                n_targets, attempts_per_pose),)
+        return selected
 
     # Attach metadata
     solve.n_joints = n_joints
