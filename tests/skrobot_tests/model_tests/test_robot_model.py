@@ -982,6 +982,60 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(len(attempt_counts), 1)
         self.assertLessEqual(attempt_counts[0], 5)
 
+    def test_batch_inverse_kinematics_rejects_unknown_kwargs(self):
+        """A misspelled parameter raises instead of being dropped."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+        kwargs = dict(move_target=fetch.rarm.end_coords,
+                      link_list=fetch.rarm.link_list, stop=2)
+
+        with self.assertRaises(TypeError) as ctx:
+            fetch.batch_inverse_kinematics(
+                target_coords,
+                attemps_per_pose=25,  # spellchecker:disable-line
+                **kwargs)
+        message = str(ctx.exception)
+        self.assertIn('attemps_per_pose', message)  # spellchecker:disable-line
+        # The message should point at the intended parameter.
+        self.assertIn('attempts_per_pose', message)
+
+        with self.assertRaises(TypeError):
+            fetch.batch_inverse_kinematics(
+                target_coords, definitely_not_a_parameter=1, **kwargs)
+
+        # A multi-EE-only option is rejected on the single-EE path rather
+        # than silently ignored.
+        with self.assertRaises(TypeError):
+            fetch.batch_inverse_kinematics(
+                target_coords, task_weights=[1.0], **kwargs)
+
+    def test_batch_inverse_kinematics_accepts_legacy_axis_kwargs(self):
+        """The forwarded legacy aliases keep working."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        target_coords = [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])]
+
+        solutions, _, _ = fetch.batch_inverse_kinematics(
+            target_coords,
+            move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list,
+            translation_axis=True,
+            rotation_axis=False,
+            stop=10)
+        self.assertEqual(len(solutions), 1)
+
+    def test_batch_inverse_kinematics_docstring_example_arity(self):
+        """The documented unpacking matches what the method returns."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        result = fetch.batch_inverse_kinematics(
+            [skrobot.coordinates.Coordinates(pos=[0.7, -0.2, 0.9])],
+            move_target=fetch.rarm.end_coords,
+            link_list=fetch.rarm.link_list,
+            stop=2)
+        self.assertEqual(len(result), 3)
+
     def test_batch_inverse_kinematics_axis_constraints(self):
         """Test batch IK with different mask constraints."""
         fetch = self.fetch

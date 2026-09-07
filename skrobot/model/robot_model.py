@@ -1,3 +1,5 @@
+import difflib
+import inspect
 import io
 import itertools
 from logging import getLogger
@@ -2768,6 +2770,67 @@ class CascadedLink(CascadedCoords):
         return self._collision_manager.in_collision_internal(return_names=True)
 
 
+# Keyword arguments ``batch_inverse_kinematics`` forwards rather than naming
+# in its own signature. Everything else is a typo: forwarding it silently
+# would run a different solve than the caller asked for.
+_BATCH_IK_FORWARDED_KWARGS = frozenset((
+    'translation_axis',       # legacy alias for position_mask
+    'rotation_axis',          # legacy alias for rotation_mask/rotation_mirror
+    'task_weights',           # multi-EE only
+    'joint_limit_avoidance',  # multi-EE + JAX only
+))
+
+_batch_ik_known_kwargs_cache = None
+
+
+def _check_batch_ik_kwargs(kwargs):
+    """Raise ``TypeError`` for keyword arguments batch IK does not understand.
+
+    ``batch_inverse_kinematics`` takes ``**kwargs`` so it can forward a few
+    options it does not name itself, which also means a misspelled parameter
+    used to be dropped without a word -- the solve then quietly ran with the
+    default instead of what the caller asked for.
+
+    Parameters
+    ----------
+    kwargs : dict
+        The extra keyword arguments the caller passed.
+
+    Raises
+    ------
+    TypeError
+        If any key is neither a named parameter of
+        :meth:`RobotModel.batch_inverse_kinematics` nor one of the options
+        it forwards. The message names the closest known parameter when
+        there is one.
+    """
+    global _batch_ik_known_kwargs_cache
+    unknown = sorted(set(kwargs) - _BATCH_IK_FORWARDED_KWARGS)
+    if not unknown:
+        return
+
+    if _batch_ik_known_kwargs_cache is None:
+        parameters = inspect.signature(
+            RobotModel.batch_inverse_kinematics).parameters
+        _batch_ik_known_kwargs_cache = frozenset(
+            name for name, parameter in parameters.items()
+            if parameter.kind is not parameter.VAR_KEYWORD
+            and name != 'self') | _BATCH_IK_FORWARDED_KWARGS
+
+    name = unknown[0]
+    message = (
+        "batch_inverse_kinematics() got an unexpected keyword argument "
+        "'{}'".format(name))
+    close = difflib.get_close_matches(
+        name, _batch_ik_known_kwargs_cache, n=1, cutoff=0.6)
+    if close:
+        message += ". Did you mean '{}'?".format(close[0])
+    if len(unknown) > 1:
+        message += " (also unexpected: {})".format(
+            ', '.join(repr(other) for other in unknown[1:]))
+    raise TypeError(message)
+
+
 class RobotModel(CascadedLink):
 
     def __init__(self, link_list=None, joint_list=None,
@@ -3714,10 +3777,15 @@ class RobotModel(CascadedLink):
 
         Returns
         -------
-        Tuple[List[np.ndarray], List[bool], List[int]] or Tuple[List[np.ndarray], List[bool]]
+        Tuple[List[np.ndarray], List[bool], List[int]]
             - List of joint angle solutions (each is ndarray matching self.angle_vector())
             - List of success flags indicating if IK was solved
-            - List of attempt counts (only returned when attempts_per_pose > 1)
+            - List of attempt counts, always ``[attempts_per_pose] * n_poses``
+
+            Every attempt is always run, so the attempt counts carry no
+            per-pose information; they are kept for backwards compatibility.
+            With ``use_base``, the per-pose base poses are inserted as the
+            second element, making the tuple four long.
 
         See Also
         --------
@@ -3735,7 +3803,8 @@ class RobotModel(CascadedLink):
         ...     [0.8, -0.3, 0.8, 0.0, np.deg2rad(30), np.deg2rad(-30)],
         ...     [0.7, -0.2, 0.9, 0.0, np.deg2rad(45), np.deg2rad(-15)],
         ... ])
-        >>> solutions, success_flags = robot.batch_inverse_kinematics(target_poses)
+        >>> solutions, success_flags, attempt_counts = \
+        ...     robot.batch_inverse_kinematics(target_poses)
         >>>
         >>> # Apply first successful solution
         >>> for i, (solution, success) in enumerate(zip(solutions, success_flags)):
@@ -3743,6 +3812,8 @@ class RobotModel(CascadedLink):
         ...         robot.angle_vector(solution)
         ...         break
         """
+        _check_batch_ik_kwargs(kwargs)
+
         # Handle legacy parameters for backwards compatibility
         if 'translation_axis' in kwargs:
             if position_mask is None:
@@ -3886,6 +3957,17 @@ class RobotModel(CascadedLink):
             link_list = link_list[0]
         if isinstance(move_target, list) and len(move_target) == 1:
             move_target = move_target[0]
+
+        # Past the multi-EE dispatch above, so anything still here is an
+        # option only that path accepts (task_weights, ...). Silently
+        # dropping it would solve something other than what was asked for.
+        if kwargs:
+            raise TypeError(
+                "batch_inverse_kinematics() got {} for a single "
+                "end-effector solve; {} only accepted when move_target and "
+                "link_list are matching lists (multi-EE)".format(
+                    ', '.join(repr(k) for k in sorted(kwargs)),
+                    'they are' if len(kwargs) > 1 else 'it is'))
 
         single_link_list = link_list
 
@@ -4208,6 +4290,13 @@ class RobotModel(CascadedLink):
             target_rotations_list.append(rot)
 
         task_weights = kwargs.pop('task_weights', None)
+        joint_limit_avoidance = float(
+            kwargs.pop('joint_limit_avoidance', 0.0))
+        if kwargs:
+            raise TypeError(
+                "batch_inverse_kinematics() got an unexpected keyword "
+                "argument {}".format(
+                    ', '.join(repr(k) for k in sorted(kwargs))))
 
         # Cached solver keyed by per-task link/move-target identities.
         # Bypass the cache when a virtual base chain is attached: its
@@ -4267,8 +4356,7 @@ class RobotModel(CascadedLink):
             task_weights=task_weights,
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
-            joint_limit_avoidance=float(
-                kwargs.pop('joint_limit_avoidance', 0.0)),
+            joint_limit_avoidance=joint_limit_avoidance,
         )
 
         # Per-union-variable weights when use_base + base_weight is set.
