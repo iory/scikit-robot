@@ -3780,10 +3780,10 @@ class RobotModel(CascadedLink):
         Tuple[List[np.ndarray], List[bool], List[int]]
             - List of joint angle solutions (each is ndarray matching self.angle_vector())
             - List of success flags indicating if IK was solved
-            - List of attempt counts. Every attempt is always run, so this
-              is ``[attempts_per_pose] * n_poses``; it is kept for backwards
-              compatibility and carries no per-pose information.
+            - List of attempt counts, always ``[attempts_per_pose] * n_poses``
 
+            Every attempt is always run, so the attempt counts carry no
+            per-pose information; they are kept for backwards compatibility.
             With ``use_base``, the per-pose base poses are inserted as the
             second element, making the tuple four long.
 

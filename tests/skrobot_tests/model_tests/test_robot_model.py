@@ -992,9 +992,11 @@ class TestRobotModel(unittest.TestCase):
 
         with self.assertRaises(TypeError) as ctx:
             fetch.batch_inverse_kinematics(
-                target_coords, attemps_per_pose=25, **kwargs)
+                target_coords,
+                attemps_per_pose=25,  # spellchecker:disable-line
+                **kwargs)
         message = str(ctx.exception)
-        self.assertIn('attemps_per_pose', message)
+        self.assertIn('attemps_per_pose', message)  # spellchecker:disable-line
         # The message should point at the intended parameter.
         self.assertIn('attempts_per_pose', message)
 
