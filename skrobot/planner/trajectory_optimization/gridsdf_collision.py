@@ -43,7 +43,7 @@ from skrobot.planner.trajectory_optimization.collision import create_self_collis
 
 
 def build_gridsdf_self_data(robot_model, collision_link_list,
-                            dim_grid=40, n_surface=48):
+                            dim_grid=40, n_surface=48, link_pairs=None):
     """Precompute per-collision-link GridSDFs and surface samples.
 
     Parameters
@@ -64,6 +64,12 @@ def build_gridsdf_self_data(robot_model, collision_link_list,
         it.
     n_surface : int
         Number of surface sample points kept per link.
+    link_pairs : list[tuple[int, int]] or None
+        Unordered pairs of indices into ``collision_link_list`` to check.
+        ``None`` (default) keeps the historical list-adjacency rule, which
+        ignores the kinematic tree and the pairs that touch by design;
+        :attr:`skrobot.model.RobotModel.collision_model` derives a better
+        set and passes it here.
 
     Returns
     -------
@@ -123,7 +129,8 @@ def build_gridsdf_self_data(robot_model, collision_link_list,
 
     # Ordered pairs: the lookup is asymmetric (surface points of A against the
     # field of B), so each unordered pair is evaluated in both directions.
-    link_pairs = create_self_collision_pairs(collision_link_list)
+    if link_pairs is None:
+        link_pairs = create_self_collision_pairs(collision_link_list)
     pa = [a for a, b in link_pairs] + [b for a, b in link_pairs]
     pb = [b for a, b in link_pairs] + [a for a, b in link_pairs]
 

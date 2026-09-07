@@ -2990,6 +2990,44 @@ class RobotModel(CascadedLink):
         self._cached_inverse_dynamics_link_list = None
         self._cached_inverse_dynamics_mass_hash = None
 
+        # Built on first access to ``collision_model``.
+        self._collision_model = None
+
+    @property
+    def collision_model(self):
+        """RobotCollisionModel: the robot's collision proxies and pairs.
+
+        Built on first access and reused after that, so the derivation --
+        which tests link contacts at the default pose and over random
+        configurations -- runs once per robot (and is persisted, so once
+        per machine). Use :meth:`build_collision_model` to rebuild it with
+        other settings or after changing a link's collision mesh.
+
+        See :class:`skrobot.collision.RobotCollisionModel`.
+        """
+        if getattr(self, '_collision_model', None) is None:
+            self.build_collision_model()
+        return self._collision_model
+
+    def build_collision_model(self, **kwargs):
+        """Rebuild :attr:`collision_model`, optionally with other settings.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to :class:`skrobot.collision.RobotCollisionModel`
+            (``n_samples``, ``always_fraction``, ``margin``, ``seed``,
+            ``cache_dir``, ``use_cache``).
+
+        Returns
+        -------
+        skrobot.collision.RobotCollisionModel
+            The new model, also stored as :attr:`collision_model`.
+        """
+        from skrobot.collision.collision_model import RobotCollisionModel
+        self._collision_model = RobotCollisionModel(self, **kwargs)
+        return self._collision_model
+
     def reset_pose(self):
         raise NotImplementedError()
 
