@@ -56,6 +56,85 @@ _LINE_SEGMENTS_SUPPORTS_THICKNESS = 'thickness' in inspect.signature(
 _DEFAULT_LINE_COLOR = (0, 0, 0)
 
 
+def _visual_alpha(visual):
+    """Return the smallest alpha (0-255) carried by a trimesh visual.
+
+    Parameters
+    ----------
+    visual : trimesh.visual.ColorVisuals or trimesh.visual.TextureVisuals
+        Visual to inspect.
+
+    Returns
+    -------
+    int
+        Minimum alpha found, or 255 when the visual carries no alpha
+        this function knows how to read (an alpha channel inside a base
+        color texture is not inspected).
+    """
+    material = getattr(visual, 'material', None)
+    if material is not None:
+        color = getattr(material, 'main_color', None)
+        if color is None or len(color) < 4:
+            return 255
+        return int(color[3])
+
+    if getattr(visual, 'kind', None) not in ('face', 'vertex'):
+        return 255
+    colors = np.asarray(getattr(visual, 'vertex_colors', None))
+    if colors.ndim != 2 or colors.shape[0] == 0 or colors.shape[1] < 4:
+        return 255
+    return int(colors[:, 3].min())
+
+
+def _alpha_blended_mesh(mesh):
+    """Make a translucent trimesh actually render translucent in viser.
+
+    Viser ships meshes to the browser as GLB, and a glTF material
+    defaults to ``alphaMode="OPAQUE"``: the alpha of ``face_colors`` or
+    ``vertex_colors`` survives the export as ``COLOR_0`` but the renderer
+    ignores it, so ``face_colors=(r, g, b, 128)`` comes out solid. This
+    attaches a :class:`trimesh.visual.material.PBRMaterial` with
+    ``alphaMode='BLEND'`` so the exported GLB asks for blending.
+
+    Parameters
+    ----------
+    mesh : trimesh.Trimesh
+        Mesh about to be handed to viser.
+
+    Returns
+    -------
+    trimesh.Trimesh
+        ``mesh`` itself when it is opaque or already blended, otherwise a
+        copy carrying the blending material. The input is never modified.
+    """
+    visual = getattr(mesh, 'visual', None)
+    if visual is None or _visual_alpha(visual) >= 255:
+        return mesh
+
+    material = getattr(visual, 'material', None)
+    if material is not None:
+        if getattr(material, 'alphaMode', None) == 'BLEND':
+            return mesh
+        if hasattr(material, 'to_pbr'):
+            pbr = material.to_pbr()
+        else:
+            pbr = material.copy()
+        pbr.alphaMode = 'BLEND'
+        blended = mesh.copy()
+        blended.visual.material = pbr
+        return blended
+
+    # ColorVisuals carries no material at all, so keep the RGBA as a
+    # vertex attribute (still exported as COLOR_0) and put the blending
+    # material beside it.
+    vertex_colors = np.array(visual.vertex_colors, copy=True)
+    blended = mesh.copy()
+    blended.visual = trimesh.visual.TextureVisuals(
+        material=trimesh.visual.material.PBRMaterial(alphaMode='BLEND'))
+    blended.visual.vertex_attributes['color'] = vertex_colors
+    return blended
+
+
 class ViserViewer(_InteractiveViewerMixin):
     """Viser-based 3D viewer for scikit-robot.
 
@@ -3581,7 +3660,7 @@ class ViserViewer(_InteractiveViewerMixin):
                             100, 100, 100)
                 handle = self._server.scene.add_mesh_trimesh(
                         link_id,
-                        mesh=mesh,
+                        mesh=_alpha_blended_mesh(mesh),
                         wxyz=matrix2quaternion(link.worldrot()),
                         position=link.worldpos(),
                     )
