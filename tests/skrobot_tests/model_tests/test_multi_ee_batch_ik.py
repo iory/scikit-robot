@@ -517,3 +517,45 @@ def test_jax_ik_joint_limit_avoidance_opt_in():
         joint_limit_avoidance=0.5)
     assert np.all(np.isfinite(np.asarray(sol_on)))
     assert np.all(np.isfinite(np.asarray(err_on)))
+
+
+@pytest.mark.parametrize('backend', ['numpy', 'jax'])
+def test_multi_ee_result_attempts(backend):
+    """Multi-EE batch IK reports every attempt it ran."""
+    if backend == 'jax' and not _HAS_JAX:
+        pytest.skip('JAX not installed or incompatible with numpy')
+
+    robot = _build_pr2()
+    rarm_mt = robot.rarm.end_coords
+    larm_mt = robot.larm.end_coords
+    rarm_ll = robot.link_lists(rarm_mt.parent)
+    larm_ll = robot.link_lists(larm_mt.parent)
+
+    targets = [
+        [Coordinates(pos=rarm_mt.worldpos() + np.array([0.05, 0.0, 0.0]))],
+        [Coordinates(pos=larm_mt.worldpos() + np.array([0.05, 0.0, 0.0]))],
+    ]
+    attempts_per_pose = 3
+
+    result = robot.batch_inverse_kinematics(
+        targets,
+        move_target=[rarm_mt, larm_mt],
+        link_list=[rarm_ll, larm_ll],
+        rotation_mask=False,
+        attempts_per_pose=attempts_per_pose,
+        backend=backend)
+
+    assert len(result) == 3
+    assert result.base_poses is None
+
+    attempts = result.attempts
+    n_dof = len(robot.angle_vector())
+    assert attempts.angle_vectors.shape == (1, attempts_per_pose, n_dof)
+    assert attempts.success.shape == (1, attempts_per_pose)
+    assert attempts.errors.shape == (1, attempts_per_pose)
+
+    distances = np.linalg.norm(
+        attempts.angle_vectors[0] - result.solutions[0], axis=1)
+    assert distances.min() < 1e-8
+    if result.success_flags[0]:
+        assert bool(attempts.success[0].any())

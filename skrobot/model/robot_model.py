@@ -2770,6 +2770,137 @@ class CascadedLink(CascadedCoords):
         return self._collision_manager.in_collision_internal(return_names=True)
 
 
+class BatchIKAttempts(object):
+    """Every attempt a batch IK solve ran, including the discarded ones.
+
+    ``attempts_per_pose`` solves each pose several times from different
+    seeds and keeps only the best result per pose. The other attempts are
+    computed all the same, and on a redundant arm they are often useful --
+    they are alternative configurations reaching the same pose. This holds
+    them.
+
+    Attempts are ordered by attempt index, not by quality, and the ones
+    that never converged are kept too, so filter on :attr:`success`.
+    Attempt 0 is the one seeded from the model's current angles when
+    ``initial_angles='current'``.
+
+    Successful attempts are *not* guaranteed to be distinct: the seeds are
+    random perturbations meant to retry until convergence, not to cover
+    the solution manifold, so different seeds routinely land on the same
+    configuration. Cluster them yourself if you need different postures.
+
+    Attributes
+    ----------
+    success : numpy.ndarray
+        ``(n_poses, attempts_per_pose)`` bool array.
+    errors : numpy.ndarray
+        ``(n_poses, attempts_per_pose)`` float array of the combined
+        position + rotation error each attempt reached.
+    """
+
+    def __init__(self, solutions, success, errors, angle_vector,
+                 robot_joint_indices, solution_indices,
+                 use_base=None, base_solution_indices=None):
+        self._solutions = solutions
+        self.success = success
+        self.errors = errors
+        self._angle_vector = angle_vector
+        self._robot_joint_indices = robot_joint_indices
+        self._solution_indices = solution_indices
+        self._use_base = use_base
+        self._base_solution_indices = base_solution_indices
+        self._angle_vectors = None
+        self._base_poses = None
+
+    @property
+    def n_attempts(self):
+        """int: Number of attempts run per pose."""
+        return self._solutions.shape[1]
+
+    @property
+    def angle_vectors(self):
+        """numpy.ndarray: ``(n_poses, attempts_per_pose, n_dof)``.
+
+        One full angle vector per attempt, with the joints the solve did
+        not actuate left at the model's angles at solve time. Expanded on
+        first access -- the solver works in its own reduced joint space,
+        and this array is the largest thing a solve produces.
+        """
+        if self._angle_vectors is None:
+            solutions = self._solutions
+            n_poses, n_attempts, n_cols = solutions.shape
+            pairs = [(robot_index, solution_index) for robot_index,
+                     solution_index in zip(self._robot_joint_indices,
+                                           self._solution_indices)
+                     if solution_index < n_cols]
+            angle_vectors = np.tile(
+                self._angle_vector, (n_poses, n_attempts, 1))
+            if pairs:
+                robot_index = np.asarray([p[0] for p in pairs],
+                                         dtype=np.int64)
+                solution_index = np.asarray([p[1] for p in pairs],
+                                            dtype=np.int64)
+                angle_vectors[:, :, robot_index] = \
+                    solutions[:, :, solution_index]
+            self._angle_vectors = angle_vectors
+        return self._angle_vectors
+
+    @property
+    def base_poses(self):
+        """list or None: ``n_poses`` lists of per-attempt base poses.
+
+        ``None`` when the solve did not use ``use_base``. Built on first
+        access, since it is a Python-level list of
+        :class:`~skrobot.coordinates.Coordinates`.
+        """
+        if self._use_base is None:
+            return None
+        if self._base_poses is None:
+            indices = self._base_solution_indices
+            self._base_poses = [
+                [RobotModel._virtual_chain_angles_to_base_pose(
+                    self._solutions[pose][attempt][indices], self._use_base)
+                 for attempt in range(self.n_attempts)]
+                for pose in range(self._solutions.shape[0])
+            ]
+        return self._base_poses
+
+
+class BatchIKResult(tuple):
+    """Result of :meth:`RobotModel.batch_inverse_kinematics`.
+
+    Unpacks and indexes exactly like the tuple this method has always
+    returned -- ``(solutions, success_flags, attempt_counts)``, or
+    ``(solutions, base_poses, success_flags, attempt_counts)`` with
+    ``use_base`` -- so existing callers are unaffected.
+
+    Prefer the attributes over the tuple positions: they are named the
+    same whatever options the solve used, so nothing has to know that
+    ``use_base`` shifts the tuple. :attr:`base_poses` is ``None`` when
+    ``use_base`` was not requested, rather than absent.
+    """
+
+    def __new__(cls, solutions, success_flags, attempt_counts,
+                base_poses=None, attempts=None):
+        if base_poses is None:
+            items = (solutions, success_flags, attempt_counts)
+        else:
+            items = (solutions, base_poses, success_flags, attempt_counts)
+        self = super(BatchIKResult, cls).__new__(cls, items)
+        self.solutions = solutions
+        self.success_flags = success_flags
+        self.attempt_counts = attempt_counts
+        self.base_poses = base_poses
+        self.attempts = attempts
+        return self
+
+    # tuple.__new__ takes the items positionally, so pickle and copy must
+    # be told how to rebuild the instance; without this they raise.
+    def __getnewargs__(self):
+        return (self.solutions, self.success_flags, self.attempt_counts,
+                self.base_poses, self.attempts)
+
+
 # Keyword arguments ``batch_inverse_kinematics`` forwards rather than naming
 # in its own signature. Everything else is a typo: forwarding it silently
 # would run a different solve than the caller asked for.
@@ -3777,15 +3908,22 @@ class RobotModel(CascadedLink):
 
         Returns
         -------
-        Tuple[List[np.ndarray], List[bool], List[int]]
-            - List of joint angle solutions (each is ndarray matching self.angle_vector())
-            - List of success flags indicating if IK was solved
-            - List of attempt counts, always ``[attempts_per_pose] * n_poses``
+        BatchIKResult
+            A tuple subclass. Read it through its attributes, which are
+            named the same whatever options the solve used:
 
-            Every attempt is always run, so the attempt counts carry no
-            per-pose information; they are kept for backwards compatibility.
-            With ``use_base``, the per-pose base poses are inserted as the
-            second element, making the tuple four long.
+            - ``solutions``: list of joint angle solutions (each an ndarray matching self.angle_vector())
+            - ``success_flags``: list of bools, whether each pose was solved
+            - ``base_poses``: list of per-pose base poses, or ``None`` when ``use_base`` was not used
+            - ``attempts``: every attempt the solve ran, see :class:`BatchIKAttempts`
+            - ``attempt_counts``: always ``[attempts_per_pose] * n_poses``, kept for backwards compatibility
+
+            Unpacking still yields the historical tuple --
+            ``(solutions, success_flags, attempt_counts)``, or
+            ``(solutions, base_poses, success_flags, attempt_counts)``
+            with ``use_base`` -- so existing callers keep working. New code
+            should use the attributes: they do not move when ``use_base``
+            shifts the tuple.
 
         See Also
         --------
@@ -3803,14 +3941,19 @@ class RobotModel(CascadedLink):
         ...     [0.8, -0.3, 0.8, 0.0, np.deg2rad(30), np.deg2rad(-30)],
         ...     [0.7, -0.2, 0.9, 0.0, np.deg2rad(45), np.deg2rad(-15)],
         ... ])
-        >>> solutions, success_flags, attempt_counts = \
-        ...     robot.batch_inverse_kinematics(target_poses)
+        >>> result = robot.batch_inverse_kinematics(target_poses)
         >>>
         >>> # Apply first successful solution
-        >>> for i, (solution, success) in enumerate(zip(solutions, success_flags)):
+        >>> for solution, success in zip(result.solutions,
+        ...                              result.success_flags):
         ...     if success:
         ...         robot.angle_vector(solution)
         ...         break
+        >>>
+        >>> # Alternative configurations that also reached pose 0
+        >>> attempts = robot.batch_inverse_kinematics(
+        ...     target_poses, attempts_per_pose=20).attempts
+        >>> reached = attempts.angle_vectors[0][attempts.success[0]]
         """
         _check_batch_ik_kwargs(kwargs)
 
@@ -4108,7 +4251,10 @@ class RobotModel(CascadedLink):
             joint_weights[:n_dof] = base_weight_vec
             solver_kwargs['joint_weights'] = joint_weights
 
-        solutions_array, success_array, errors_array = solver(
+        # Every attempt is solved regardless; asking for them costs only the
+        # reshape (and, on JAX, a transfer the selection step already does).
+        solver_kwargs['return_all_attempts'] = True
+        solutions_array, success_array, errors_array, attempts_result = solver(
             target_positions,
             target_rotations,
             **solver_kwargs,
@@ -4144,19 +4290,34 @@ class RobotModel(CascadedLink):
         # Compute attempt counts (backend always uses all attempts, return attempts_per_pose)
         attempt_counts = [attempts_per_pose] * n_poses
 
+        base_poses = None
+        base_solution_indices = None
+        use_base = None
         if _base_state is not None:
             # Virtual chain joints occupy the first n_dof positions of
             # single_link_list; their angles in the fk solution vector are
             # interpreted per use_base to synthesize the per-pose base pose.
             n_dof = _base_state['n_dof']
+            use_base = _base_state['use_base']
+            base_solution_indices = np.arange(n_dof, dtype=np.int64)
             base_poses = [
                 self._virtual_chain_angles_to_base_pose(
-                    solutions_np[i, :n_dof], _base_state['use_base'])
+                    solutions_np[i, :n_dof], use_base)
                 for i in range(n_poses)
             ]
-            return full_solutions, base_poses, success_flags, attempt_counts
 
-        return full_solutions, success_flags, attempt_counts
+        attempts = BatchIKAttempts(
+            attempts_result['solutions'],
+            attempts_result['success'],
+            attempts_result['errors'],
+            full_av_org,
+            joint_indices,
+            fk_indices_for_actual_joints,
+            use_base=use_base,
+            base_solution_indices=base_solution_indices)
+
+        return BatchIKResult(full_solutions, success_flags, attempt_counts,
+                             base_poses=base_poses, attempts=attempts)
 
     @staticmethod
     def _virtual_chain_angles_to_base_pose(joint_angles, use_base):
@@ -4391,7 +4552,8 @@ class RobotModel(CascadedLink):
                 base_weight_vec)
             solver_kwargs['joint_weights'] = joint_weights
 
-        solutions_array, success_array, errors_array = solver(
+        solver_kwargs['return_all_attempts'] = True
+        solutions_array, success_array, errors_array, attempts_result = solver(
             target_positions_list, target_rotations_list, **solver_kwargs)
         solutions_np = np.asarray(solutions_array)
         success_np = np.asarray(success_array)
@@ -4422,6 +4584,9 @@ class RobotModel(CascadedLink):
         success_flags = [bool(s) for s in success_np]
         attempt_counts = [attempts_per_pose] * n_poses
 
+        base_poses = None
+        virtual_idx_arr = None
+        use_base = None
         if _base_state is not None:
             # Extract virtual-chain joint angles from the union solution by
             # looking up each virtual joint in union_refs.
@@ -4440,15 +4605,26 @@ class RobotModel(CascadedLink):
                         len(virtual_union_indices), n_dof))
             virtual_idx_arr = np.asarray(virtual_union_indices,
                                          dtype=np.int64)
+            use_base = _base_state['use_base']
             virtual_angles = solutions_np[:, virtual_idx_arr]
             base_poses = [
                 self._virtual_chain_angles_to_base_pose(
-                    virtual_angles[i], _base_state['use_base'])
+                    virtual_angles[i], use_base)
                 for i in range(n_poses)
             ]
-            return full_solutions, base_poses, success_flags, attempt_counts
 
-        return full_solutions, success_flags, attempt_counts
+        attempts = BatchIKAttempts(
+            attempts_result['solutions'],
+            attempts_result['success'],
+            attempts_result['errors'],
+            full_av_org,
+            robot_idx_arr.tolist(),
+            union_idx_arr.tolist(),
+            use_base=use_base,
+            base_solution_indices=virtual_idx_arr)
+
+        return BatchIKResult(full_solutions, success_flags, attempt_counts,
+                             base_poses=base_poses, attempts=attempts)
 
     def inverse_kinematics_loop(self,
                                 dif_pos,
