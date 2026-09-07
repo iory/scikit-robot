@@ -8,6 +8,7 @@ import numpy as np
 
 from skrobot.coordinates import Coordinates
 import skrobot.model as model_module
+from skrobot.viewers._path_utils import polyline_segments
 
 
 def _load_mitsuba(variant):
@@ -471,49 +472,8 @@ class MitsubaViewer(object):
 
     @staticmethod
     def _polyline_segments(mesh):
-        vertices = getattr(mesh, 'vertices', None)
-        if vertices is None:
-            return []
-        vertices = np.asarray(vertices, dtype=np.float64)
-        if vertices.ndim != 2 or vertices.shape[1] != 3:
-            return []
-        if len(vertices) < 2:
-            return []
-
-        segments = []
-
-        def append_segment(i, j):
-            if i < 0 or j < 0 or i >= len(vertices) or j >= len(vertices):
-                return
-            segments.append((vertices[i], vertices[j]))
-
-        entities = getattr(mesh, 'entities', None)
-        if entities is not None:
-            for entity in entities:
-                points = np.asarray(
-                    getattr(entity, 'points', []), dtype=np.int64).reshape(-1)
-                if len(points) < 2:
-                    continue
-                for i in range(len(points) - 1):
-                    append_segment(int(points[i]), int(points[i + 1]))
-                if getattr(entity, 'closed', False) and len(points) > 2:
-                    append_segment(int(points[-1]), int(points[0]))
-
-        if not segments:
-            vertex_nodes = getattr(mesh, 'vertex_nodes', None)
-            if vertex_nodes is None:
-                return segments
-            vertex_nodes = np.asarray(vertex_nodes, dtype=np.int64)
-            if vertex_nodes.ndim == 1:
-                if len(vertex_nodes) % 2 != 0:
-                    return segments
-                vertex_nodes = vertex_nodes.reshape(-1, 2)
-            if vertex_nodes.ndim != 2 or vertex_nodes.shape[1] < 2:
-                return segments
-            for node in vertex_nodes:
-                append_segment(int(node[0]), int(node[1]))
-
-        return segments
+        segments, _ = polyline_segments(mesh)
+        return [(segment[0], segment[1]) for segment in segments]
 
     def _path_to_tube_mesh(self, mesh):
         segments = self._polyline_segments(mesh)
