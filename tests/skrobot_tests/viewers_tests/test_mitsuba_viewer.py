@@ -338,7 +338,13 @@ class TestMitsubaViewerRender(unittest.TestCase):
         self.viewer.set_camera(eye=[1.5, -1.5, 1.0], target=[0.0, 0.0, 0.5])
         start = [0.30, -0.20, 0.30]
         goal = [0.52, 0.20, 0.34]
-        extents = [0.08, 0.08, 0.08]
+        # Sized to move about as many pixels as the sibling marker tests do.
+        # At 0.08 m the box was the odd one out: moving it changed the frame
+        # by a mean of 1.36 against the 1.0 asserted below, where the sphere
+        # marker moves 4.21 and the joint 5.35, so the margin here was a
+        # twentieth of theirs and CI measured 0.76 and failed. 0.16 m brings
+        # it to 5.01, in line with the other two.
+        extents = [0.16, 0.16, 0.16]
         color = (0.85, 0.15, 0.15)
         self.viewer.add_box(start, extents, color=color, name='cube')
         before = self.viewer.render()
@@ -352,7 +358,11 @@ class TestMitsubaViewerRender(unittest.TestCase):
         full = fresh.render()
 
         moved = np.abs(incremental.astype(int) - before.astype(int)).mean()
-        self.assertGreater(moved, 1.0)
+        rebuilt = np.abs(full.astype(int) - before.astype(int)).mean()
+        self.assertGreater(
+            moved, 1.0,
+            'incremental render moved the frame by {:.4f}; a full rebuild of '
+            'the same move gives {:.4f}'.format(moved, rebuilt))
         diff = np.abs(incremental.astype(int) - full.astype(int)).mean()
         self.assertLess(diff, 3.0)
 
@@ -1058,15 +1068,26 @@ class TestMitsubaViewerRender(unittest.TestCase):
             (skrobot.models.PR2(), [2.5, -2.4, 1.8], [0.0, 0.0, 0.9]),
         ]
         for robot, eye, target in scenes:
-            viewer = MitsubaViewer(resolution=(64, 48), spp=1)
-            viewer.add(robot)
-            viewer.set_camera(eye=eye, target=target)
-            key = viewer._scene_dict()['key']['to_world']
-            scale = _transform_uniform_scale(key)
-            height = _transform_matrix_element(
-                key, 2, 3) - float(np.asarray(viewer._camera[1])[2])
-            self.assertAlmostEqual(scale, 1.5, places=6)
-            self.assertAlmostEqual(height, 2.0, places=6)
+            with self.subTest(robot=type(robot).__name__):
+                viewer = MitsubaViewer(resolution=(64, 48), spp=1)
+                viewer.add(robot)
+                viewer.set_camera(eye=eye, target=target)
+                key = viewer._scene_dict()['key']['to_world']
+                scale = _transform_uniform_scale(key)
+                height = _transform_matrix_element(
+                    key, 2, 3) - float(np.asarray(viewer._camera[1])[2])
+                # Both constants hold only while the scene radius stays under
+                # the 1.0 m floor of the one-sided clamp, and PR2 clears it by
+                # 0.7% (0.9930 m) against Panda's 0.5575 m. So a failure here
+                # says the scene was bigger than the model should be, not that
+                # the light maths changed -- report the geometry that produced
+                # the radius so the next failure names the culprit.
+                points = viewer._collect_world_points()
+                detail = 'radius={:.5f} shapes={} extent={}'.format(
+                    viewer._auto_light_radius(), len(viewer._links),
+                    np.ptp(points, axis=0))
+                self.assertAlmostEqual(scale, 1.5, places=6, msg=detail)
+                self.assertAlmostEqual(height, 2.0, places=6, msg=detail)
 
     def test_key_light_radius_is_clamped_for_tiny_scenes(self):
         viewer = MitsubaViewer(resolution=(64, 48), spp=1)

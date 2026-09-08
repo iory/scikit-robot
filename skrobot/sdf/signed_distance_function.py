@@ -410,6 +410,21 @@ class GridSDF(SignedDistanceFunction):
             fill_value=fill_value)
         self.origin = origin
 
+    @property
+    def resolution(self):
+        """Edge length of one grid cell, in the SDF's own frame.
+
+        This is the finest detail the grid can represent, so it is also the
+        scale of the error to expect from a query: a point on the surface
+        comes back within roughly one cell of zero, not exactly zero.
+
+        Returns
+        -------
+        resolution : float
+            Grid spacing the SDF was built with.
+        """
+        return self._resolution
+
     def is_out_of_bounds(self, points_world):
         """check if the the input points is out of bounds
 

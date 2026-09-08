@@ -296,11 +296,25 @@ class TestSDF(unittest.TestCase):
         vertices = bunny_mesh.vertices * 10.0
         sd_vals = robot_sdf(vertices)
 
-        # If sdf is properly computed, abs(sdf) for all vertices
-        # must be small enough
-        lb, lu = np.min(vertices, axis=0), np.max(vertices, axis=0)
-        eps = np.min(lu - lb) * 1e-2
-        self.assertTrue(np.all(np.abs(sd_vals) < eps))
+        # If sdf is properly computed, abs(sdf) for all vertices must be
+        # small enough. "Small enough" is one grid cell: a GridSDF samples the
+        # distance field on a dim_grid**3 lattice and interpolates, so a point
+        # on the surface comes back within about one cell of zero and no
+        # tolerance below that is meaningful. The old tolerance -- 1% of the
+        # smallest bounding-box side -- worked out to 0.012 against a 0.0172
+        # cell, i.e. 0.70 of a cell, tighter than the grid itself, which left
+        # the measured worst vertex (0.0094, 0.55 of a cell) passing by 22%
+        # and flipping between CI runs. The regression this guards, the URDF
+        # mesh scale being ignored, misses by far more than a cell: the
+        # vertices land outside the grid entirely and come back inf.
+        resolution = max(sdf.resolution for sdf in robot_sdf.sdf_list
+                         if isinstance(sdf, GridSDF))
+        eps = 1.5 * resolution
+        worst = np.max(np.abs(sd_vals))
+        self.assertTrue(
+            np.all(np.abs(sd_vals) < eps),
+            'worst |sdf| is {} ({:.2f} grid cells of {}), tolerance {}'.format(
+                worst, worst / resolution, resolution, eps))
 
     def test_trimesh2sdf(self):
         # non-primitive mesh with file_path
