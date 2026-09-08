@@ -116,6 +116,45 @@ For multiple target poses, batch IK provides significant performance improvement
         else:
             print(f"Pose {i}: Failed after {attempts} attempts")
 
+Collision Model
+~~~~~~~~~~~~~~~
+
+Every robot carries a collision model, built the first time it is asked for
+and reused (and persisted, so once per machine):
+
+.. code-block:: python
+
+    model = robot.collision_model
+    print(model.describe())
+    # 20 collision links, 167 self-collision pairs (method=fcl, derived now);
+    # excluded 19 adjacent, 4 touching at the default pose, 0 always
+    # colliding; the sphere/capsule proxies already overlap for 9 of the
+    # checked pairs at the default pose
+
+    robot.reset_pose()
+    model.in_self_collision()       # False, on the exact meshes
+    model.self_colliding_pairs()    # []
+
+It holds two things every collision-aware routine needs: a sphere/capsule
+proxy for each link that has a collision mesh, and the pairs of links worth
+checking against each other. The pairs are derived the way MoveIt's setup
+assistant fills in an SRDF -- parent/child pairs are dropped, so are pairs
+already in contact at the default pose (parts that touch by design) and
+pairs that collide in nearly every random configuration -- so a legitimate
+rest pose no longer reads as "in collision" on robots like the PR2 whose
+links overlap at rest. ``model.excluded`` lists what was dropped and why.
+
+Two query surfaces come out of it. ``model.checker`` is a
+``RobotCollisionChecker`` over the proxies: cheap and usable from a
+differentiable cost, but conservative, since a proxy is fatter than its
+mesh. ``model.proxy_overlap_pairs`` tells you how conservative for your
+robot. ``model.in_self_collision()`` answers on the meshes instead and
+needs the optional ``python-fcl`` package; without it the pair derivation
+also falls back to the proxies and says so with a warning.
+
+``robot.build_collision_model(...)`` rebuilds it with other settings, or
+after you change a link's collision mesh.
+
 Reading the Result
 ~~~~~~~~~~~~~~~~~~
 

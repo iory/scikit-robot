@@ -238,10 +238,19 @@ class SelfCollision:
                 tf = cache[link] = self._link[link].worldcoords().T()
             self.cm.set_transform(oid, tf)
 
+    def colliding_pairs(self) -> set:
+        """Every colliding link pair at the current pose, baseline included.
+
+        :meth:`new_pairs` is the usual query; this one is for callers that
+        classify pairs themselves, such as a sampling pass that wants to
+        know how often each pair collides regardless of the rest pose.
+        """
+        self._sync()
+        return self._pairs(self.margin)
+
     def new_pairs(self) -> set:
         """Colliding link pairs (beyond the rest baseline) at the current pose."""
-        self._sync()
-        return self._pairs(self.margin) - self.baseline
+        return self.colliding_pairs() - self.baseline
 
     def offenders(self):
         """``(new_pairs, offending_link_names)`` at the current pose -- the live

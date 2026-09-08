@@ -33,6 +33,9 @@ Example
 
 # Geometry primitives
 # Distance functions
+# Robot collision
+from skrobot.collision.collision_model import kinematic_distance
+from skrobot.collision.collision_model import RobotCollisionModel
 from skrobot.collision.distance import box_halfspace_distance
 from skrobot.collision.distance import capsule_box_distance
 from skrobot.collision.distance import capsule_capsule_distance
@@ -48,8 +51,6 @@ from skrobot.collision.geometry import Capsule
 from skrobot.collision.geometry import CollisionGeometry
 from skrobot.collision.geometry import HalfSpace
 from skrobot.collision.geometry import Sphere
-
-# Robot collision
 from skrobot.collision.robot_collision import LinkCollisionGeometry
 from skrobot.collision.robot_collision import RobotCollisionChecker
 
@@ -82,7 +83,9 @@ __all__ = [
     'colldist_from_sdf',
     # Robot collision
     'RobotCollisionChecker',
+    'RobotCollisionModel',
     'LinkCollisionGeometry',
+    'kinematic_distance',
     # Mesh self-collision + joint-limit sweep
     'SelfCollision',
     'sweep_limits',
