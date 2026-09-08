@@ -148,8 +148,34 @@ def _axis_tuple(axis):
     return tuple(values)
 
 
-def _structure_from_xml(xml_bytes):
-    root = ET.fromstring(xml_bytes)
+def _parse_urdf_root(source):
+    """Parse ``source`` into the ``<robot>`` element it describes.
+
+    Parameters
+    ----------
+    source : str or bytes
+        A URDF file path, or raw URDF XML as a string or bytes.
+
+    Returns
+    -------
+    root : xml.etree.ElementTree.Element
+        The document's root element.
+    """
+    if isinstance(source, bytes):
+        return ET.fromstring(source)
+    if isinstance(source, str):
+        if source.lstrip().startswith('<'):
+            return ET.fromstring(source.encode('utf-8'))
+        if not os.path.exists(source):
+            raise IOError('URDF file not found: {}'.format(source))
+        with open(source, 'rb') as f:
+            return ET.fromstring(f.read())
+    raise TypeError(
+        'source must be a URDF path or XML string/bytes, got {}'
+        .format(type(source)))
+
+
+def _structure_from_root(root):
     if root.tag != 'robot':
         raise ValueError(
             "Expected 'robot' root element, got '{}'".format(root.tag))
@@ -271,19 +297,11 @@ def _load_structure(source, with_objects=False):
         return _structure_from_robot_model(source)
     if with_objects:
         return _structure_from_robot_model(_load_robot_model(source))
-    if isinstance(source, bytes):
-        return _structure_from_xml(source)
-    if isinstance(source, str):
-        stripped = source.lstrip()
-        if stripped.startswith('<'):
-            return _structure_from_xml(source.encode('utf-8'))
-        if not os.path.exists(source):
-            raise IOError('URDF file not found: {}'.format(source))
-        with open(source, 'rb') as f:
-            return _structure_from_xml(f.read())
-    raise TypeError(
-        'source must be a URDF path, XML string/bytes or a RobotModel, '
-        'got {}'.format(type(source)))
+    if not isinstance(source, (str, bytes)):
+        raise TypeError(
+            'source must be a URDF path, XML string/bytes or a RobotModel, '
+            'got {}'.format(type(source)))
+    return _structure_from_root(_parse_urdf_root(source))
 
 
 # ============================================================================
