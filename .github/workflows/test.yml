@@ -222,22 +222,30 @@ jobs:
         fi
     - name: Run Pytest
       run: |
-        for i in {1..3}; do
-          # --timeout: per-test timeout in seconds (300s = 5 minutes)
-          # --durations=0: show duration of all tests to identify slow ones
-          if xvfb-run pytest -v -n auto --dist loadscope --timeout=300 --durations=0 tests; then
-            echo "Tests passed on attempt $i"
-            break
-          else
-            echo "Tests failed on attempt $i"
-            if [ "$i" -eq 3 ]; then
-              echo "All retry attempts failed"
-              exit 1
-            fi
-            echo "Retrying in 10 seconds..."
-            sleep 10
+        # --timeout: per-test timeout in seconds (300s = 5 minutes)
+        # --durations=0: show duration of all tests to identify slow ones
+        PYTEST="xvfb-run pytest -v -n auto --dist loadscope --timeout=300 --durations=0"
+        if $PYTEST tests; then
+          exit 0
+        fi
+        # Retry only the tests that just failed (--last-failed) rather than the
+        # whole suite. A genuinely flaky test clears in seconds instead of
+        # costing another full ~3 min run, and a real failure still fails the
+        # job. The rerun keeps the same '-n auto --dist loadscope' setup on
+        # purpose: dropping to a serial rerun would turn every parallel-execution
+        # bug into a green tick.
+        failed=""
+        for attempt in 2 3; do
+          failed=$(python -c "import json; print(' '.join(json.load(open('.pytest_cache/v/cache/lastfailed'))))" 2>/dev/null || true)
+          echo "::warning::attempt $((attempt - 1)) failed; rerunning only: ${failed:-<no lastfailed record, rerunning everything>}"
+          sleep 10
+          if $PYTEST --last-failed tests; then
+            echo "::warning::FLAKY: failed on attempt $((attempt - 1)), passed on attempt $attempt: $failed"
+            exit 0
           fi
         done
+        echo "::error::the same tests failed on all 3 attempts, so this is not flakiness: $failed"
+        exit 1
 
   ros2-tests:
     name: Run ROS 2 Unit Tests (${{ matrix.ros-distribution }})
