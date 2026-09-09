@@ -2990,6 +2990,48 @@ class RobotModel(CascadedLink):
         self._cached_inverse_dynamics_link_list = None
         self._cached_inverse_dynamics_mass_hash = None
 
+    def _default_move_target(self, caller):
+        """The model's ``end_coords``, or a message saying where to find one.
+
+        Parameters
+        ----------
+        caller : str
+            Name of the method asking, for the message.
+
+        Returns
+        -------
+        skrobot.coordinates.CascadedCoords or list
+            This model's ``end_coords``.
+
+        Raises
+        ------
+        AttributeError
+            When the model has none, naming a sub-model that does. A
+            two-armed robot has no single end-effector to default to, so
+            ``robot.inverse_kinematics(target)`` used to fail with a bare
+            ``'PR2' object has no attribute 'end_coords'``.
+        """
+        target = getattr(self, 'end_coords', None)
+        if target is not None:
+            return target
+        groups = []
+        for name in ('rarm', 'larm', 'rleg', 'lleg', 'head', 'torso'):
+            try:
+                group = getattr(self, name)
+            except Exception:
+                continue
+            if getattr(group, 'end_coords', None) is not None:
+                groups.append(name)
+        hint = ''
+        if groups:
+            hint = (' Call it on the group that has one, for example '
+                    'robot.{}.{}(...), or pass move_target='
+                    'robot.{}_end_coords.'.format(groups[0], caller,
+                                                  groups[0]))
+        raise AttributeError(
+            '{} has no end_coords, so {}() has no end-effector to move.{}'
+            .format(type(self).__name__, caller, hint))
+
     def reset_pose(self):
         raise NotImplementedError()
 
@@ -3790,7 +3832,7 @@ class RobotModel(CascadedLink):
             Batch/retrying IK with configurable initial seeds.
         """
         if move_target is None:
-            move_target = self.end_coords
+            move_target = self._default_move_target('inverse_kinematics')
         if link_list is None and joint_list is None:
             if not isinstance(move_target, list):
                 link_list = self.link_lists(move_target.parent)
@@ -4064,7 +4106,8 @@ class RobotModel(CascadedLink):
             use_current_angles = False
 
         if move_target is None:
-            move_target = self.end_coords
+            move_target = self._default_move_target(
+                'batch_inverse_kinematics')
         if link_list is None:
             if not isinstance(move_target, list):
                 link_list = self.link_lists(move_target.parent)

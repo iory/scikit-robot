@@ -354,6 +354,21 @@ class TestRobotModel(unittest.TestCase):
                           fetch.wrist_flex_link,
                           fetch.wrist_roll_link])
 
+    def test_default_move_target_names_a_group_to_call(self):
+        pr2 = self.pr2
+        target = pr2.rarm.end_coords.copy_worldcoords()
+        for call in ('inverse_kinematics', 'batch_inverse_kinematics'):
+            argument = target if call == 'inverse_kinematics' else [target]
+            with self.assertRaises(AttributeError) as ctx:
+                getattr(pr2, call)(argument)
+            message = str(ctx.exception)
+            self.assertIn('has no end_coords', message)
+            self.assertIn('robot.rarm.{}'.format(call), message)
+        # A model that has one is unaffected.
+        fetch = self.fetch
+        self.assertIs(fetch._default_move_target('inverse_kinematics'),
+                      fetch.end_coords)
+
     def test_inverse_kinematics_args(self):
         kuka = self.kuka
         kuka.inverse_kinematics_args()
