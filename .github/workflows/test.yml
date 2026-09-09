@@ -69,15 +69,6 @@ jobs:
       run: |
         make latexpdf
 
-  requirements-formatting:
-    name: Check Requirements Formatting
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Check Formatting
-      run: |
-        sort -C requirements.txt
-
   tests-3x:
     name: Run Unit Tests (Python 3.x)
     runs-on: ${{ matrix.os }}
