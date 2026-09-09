@@ -49,6 +49,18 @@ def remove_from_requirements(install_requires, remove_req):
     install_requires.remove(delete_requirement.pop())
 
 
+# Mesh-exact self-collision queries (skrobot.collision.SelfCollision,
+# skrobot.collision.sweep_limits), which raise with this install line in
+# the message when the package is missing.
+#
+# The trajectory optimizer's jaxls solver cannot be declared alongside it:
+# jaxls is not on PyPI (the name there belongs to an unrelated project)
+# and a direct URL requirement cannot be published, so it is installed
+# separately with
+#     pip install "git+https://github.com/brentyi/jaxls.git"
+# and skrobot.planner.trajectory_optimization says so when it is missing.
+collision_requires = ['python-fcl']
+
 extra_all_requires = ['pybullet>=2.1.9']
 if (sys.version_info.major > 2):
     # open3d doesn't support Python 3.13 yet
@@ -64,6 +76,7 @@ if (sys.version_info.major > 2):
     # JAX requires Python 3.10+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 10):
         extra_all_requires.extend(['jax', 'jaxlib', 'jaxlie'])
+    extra_all_requires.extend(collision_requires)
     # mitsuba powers the headless MitsubaViewer; wheels are cp39+
     if (sys.version_info.major, sys.version_info.minor) >= (3, 9):
         extra_all_requires.append('mitsuba')
@@ -144,6 +157,9 @@ setup(
         # Pair it with 'coacd': without CoACD the exporter can only author a
         # single convex hull per link.
         'usd': ['usd-core'],
+        # Mesh-exact collision queries.  Also part of 'all'; this dedicated
+        # extra allows a minimal install.
+        'collision': collision_requires,
         'all': extra_all_requires,
     },
 )
