@@ -1,0 +1,30 @@
+# Groups the notes GitHub generates for a Release (see
+# .github/workflows/github-release.yml, `generate_release_notes: true`).
+# Categories with no matching PR are dropped, so listing a label the repo does
+# not use yet costs nothing.
+changelog:
+  exclude:
+    labels:
+      # The "Bump version to X.Y.Z" PR is what cuts the release; it is not a
+      # change anyone reading the notes cares about.
+      - release
+      - auto-merge-ok
+      - duplicate
+      - invalid
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+    - title: New Features
+      labels:
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    # Most PRs here carry no label at all, so this catch-all is where they land.
+    - title: Other Changes
+      labels:
+        - '*'

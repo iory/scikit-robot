@@ -49,6 +49,12 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/iory/scikit-robot"
+# PyPI has no per-version release-notes field -- every version's page renders
+# the same README -- so the GitHub Releases page is the changelog, and this is
+# what links to it.  "Changelog" is a well-known project URL name, so PyPI gives
+# it its own sidebar icon rather than listing it as a plain link.
+# https://packaging.python.org/en/latest/specifications/well-known-project-urls/
+Changelog = "https://github.com/iory/scikit-robot/releases"
 
 [project.optional-dependencies]
 docs = ["sphinx>=1.8.2", "sphinx_rtd_theme"]
