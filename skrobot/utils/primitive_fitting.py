@@ -132,13 +132,22 @@ def fit_box_to_mesh(mesh, oriented=False):
     return extents, center, np.eye(3)
 
 
-def fit_sphere_to_mesh(mesh):
+def fit_sphere_to_mesh(mesh, enclosing=True):
     """Fit a sphere primitive to a mesh.
 
     Parameters
     ----------
     mesh : trimesh.Trimesh
         Input mesh to fit a sphere to.
+    enclosing : bool, optional
+        If True (default), the returned sphere **contains** the whole mesh:
+        the radius is the largest distance from the bounding-box center to
+        any vertex. If False, the radius is half of the largest bounding-box
+        extent, which is a volume-like fit that does **not** contain the
+        mesh -- a unit cube gives 0.5 while its corners sit at 0.866. Only
+        pass False when the sphere is used as a visual or volumetric proxy;
+        a non-enclosing sphere silently misses contacts when used for
+        collision checking.
 
     Returns
     -------
@@ -146,12 +155,26 @@ def fit_sphere_to_mesh(mesh):
         Radius of the sphere.
     center : np.ndarray
         Center position of the sphere.
+
+    Notes
+    -----
+    Enclosing all vertices encloses the whole mesh, since every triangle
+    lies in the convex hull of its own vertices.
     """
     bounds = mesh.bounds
     center = (bounds[0] + bounds[1]) / 2
     extents = bounds[1] - bounds[0]
 
-    radius = np.max(extents) / 2
+    if not enclosing:
+        return np.max(extents) / 2, center
+
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    if vertices.size == 0:
+        # No geometry to enclose; the half-diagonal of the (degenerate)
+        # bounding box is the only defensible answer.
+        return float(np.linalg.norm(extents) / 2), center
+
+    radius = float(np.sqrt(np.max(np.sum((vertices - center) ** 2, axis=1))))
 
     return radius, center
 
@@ -333,7 +356,13 @@ def _fit_type_variants(mesh, primitive_type, oriented=None):
     fit so the caller can keep whichever scores better; ``True`` builds only
     the oriented fit; ``False`` builds only the axis-aligned fit. Spheres and
     capsules yield a single candidate regardless. Failing fitters are skipped
-    rather than raising.    """
+    rather than raising.
+
+    Every candidate encloses the mesh, so the IoU comparison in
+    :func:`_select_best_primitive` ranks like against like: a shape that
+    scored well only because it left part of the mesh outside itself would
+    otherwise beat the shapes that cover it.
+    """
     orientations = (False, True) if oriented is None else (bool(oriented),)
     variants = []
     if primitive_type == 'box':
