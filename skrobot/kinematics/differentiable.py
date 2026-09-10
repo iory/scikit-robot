@@ -280,18 +280,16 @@ def _select_best_attempts(solutions, success_flags, errors, n_targets, attempts_
             init_angles = np.tile(init_angles, (n_targets, 1))
 
         best_indices = []
-        err_threshold = 0.02  # a near miss still beats a far-away solution
         for i in range(n_targets):
-            # Attempt 0 is the one seeded from the initial angles, so it is
-            # usually the nearest, but never prefer it over an attempt that
-            # actually solved the pose.
-            candidates = np.where(success_flags[i])[0]
-            if candidates.size == 0:
-                candidates = np.where(errors[i] < err_threshold)[0]
-            if candidates.size:
+            # What counts as solved is the caller's thresholds and
+            # tolerances, already folded into success_flags. Attempt 0 is
+            # the one seeded from the initial angles, so it is usually the
+            # nearest, but it wins on distance like any other attempt.
+            solved = np.where(success_flags[i])[0]
+            if solved.size:
                 distances = np.linalg.norm(
-                    solutions[i, candidates] - init_angles[i], axis=1)
-                best_idx = candidates[np.argmin(distances)]
+                    solutions[i, solved] - init_angles[i], axis=1)
+                best_idx = solved[np.argmin(distances)]
             else:
                 best_idx = np.argmin(errors[i])
             best_indices.append(best_idx)
@@ -4715,54 +4713,13 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
             all_success_np = backend.to_numpy(all_success)
             all_errors_np = backend.to_numpy(all_errors)
 
-            # Reshape to (n_targets, attempts_per_pose, ...)
-            all_solutions_np = all_solutions_np.reshape(
-                n_targets, attempts_per_pose, n_joints
-            )
-            all_success_np = all_success_np.reshape(n_targets, attempts_per_pose)
-            all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
+            solutions, success_flags, errors = _select_best_attempts(
+                all_solutions_np, all_success_np, all_errors_np,
+                n_targets, attempts_per_pose, n_joints,
+                select_closest_to_initial, initial_angles)
 
-            if select_closest_to_initial and initial_angles is not None:
-                # Prefer first attempt (starts from current angles) if successful
-                # Otherwise select from successful solutions the one closest to initial
-                init_angles_np = np.asarray(initial_angles)
-                if init_angles_np.ndim == 1:
-                    init_angles_np = np.tile(init_angles_np, (n_targets, 1))
-
-                best_indices = []
-                err_threshold = 0.02  # Consider solutions with error < 2cm as valid
-                for i in range(n_targets):
-                    # First attempt (index 0) starts from current angles
-                    first_success = all_success_np[i, 0] or all_errors_np[i, 0] < err_threshold
-                    if first_success:
-                        # Use first attempt if it succeeded
-                        best_idx = 0
-                    else:
-                        # Find other successful attempts
-                        valid_mask = all_success_np[i] | (all_errors_np[i] < err_threshold)
-                        if np.any(valid_mask):
-                            # Select the one closest to initial angles
-                            distances = np.linalg.norm(
-                                all_solutions_np[i, valid_mask] - init_angles_np[i], axis=1
-                            )
-                            valid_indices = np.where(valid_mask)[0]
-                            best_idx = valid_indices[np.argmin(distances)]
-                        else:
-                            # Fall back to minimum error
-                            best_idx = np.argmin(all_errors_np[i])
-                    best_indices.append(best_idx)
-                best_indices = np.array(best_indices)
-            else:
-                # Select best attempt for each target (lowest error) - vectorized
-                best_indices = np.argmin(all_errors_np, axis=1)
-
-            # Use advanced indexing instead of Python loop
-            target_indices = np.arange(n_targets)
-            solutions = all_solutions_np[target_indices, best_indices]
-            success_flags = all_success_np[target_indices, best_indices]
-            errors = all_errors_np[target_indices, best_indices]
-
-            return backend.array(solutions), backend.array(success_flags), backend.array(errors)
+            return (backend.array(solutions), backend.array(success_flags),
+                    backend.array(errors))
         else:
             return all_solutions, all_success, all_errors
 
