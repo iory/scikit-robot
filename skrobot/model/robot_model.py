@@ -3909,7 +3909,7 @@ class RobotModel(CascadedLink):
             initial_angles="current",
             alpha=1.0,
             attempts_per_pose=1,
-            random_initial_range=0.7,
+            random_initial_range=0.2,
             translation_tolerance=None,
             rotation_tolerance=None,
             backend=None,
@@ -3919,7 +3919,7 @@ class RobotModel(CascadedLink):
             invariant_joint_list=None,
             select_closest_to_initial=True,
             joint_weights=None,
-            retry_seed='random',
+            retry_seed='current',
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -3980,21 +3980,28 @@ class RobotModel(CascadedLink):
         alpha : float
             Step size for gradient descent (0 < alpha <= 1)
         attempts_per_pose : int
-            Number of attempts with different random initial poses per target (default: 1)
+            Number of attempts per target (default 1, so a solve depends
+            on nothing but its seed). Above 1, attempt 0 still starts from
+            the seed and ``retry_seed`` says where the rest start; the
+            result then depends on the random state, since which retry
+            wins is drawn.
         random_initial_range : float
             Width of a retry's draw, as a fraction of each joint's span
-            (0.0-1.0, default 0.7). Only used when ``attempts_per_pose``
+            (0.0-1.0, default 0.2). Only used when ``attempts_per_pose``
             is greater than 1.
         retry_seed : str
             Where the retries start from when ``attempts_per_pose`` is
-            greater than 1. 'random' (default) draws them from the middle
-            of each joint's range, which explores the whole arm and is
-            what you want when hunting for any reachable configuration.
-            'current' draws them around the pose the solve started from,
-            so every candidate stays in that region of configuration
-            space; combined with ``select_closest_to_initial`` it gives
-            several nearby solutions and returns the nearest one. Attempt
-            0 is the seed itself either way.
+            greater than 1. 'current' (default) draws them around the pose
+            the solve started from, so every candidate stays in that
+            region of configuration space; with
+            ``select_closest_to_initial`` that yields several nearby
+            solutions and returns the nearest, which is what keeps a
+            servo loop from jumping between arm configurations. 'random'
+            draws them from the middle of each joint's range instead,
+            which explores the whole arm and is what you want when
+            hunting for any reachable configuration at all; pair it with
+            ``random_initial_range=0.7`` for the behaviour retries used to
+            have. Attempt 0 is the seed itself either way.
         translation_tolerance : list or None
             Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
             in meters. If error on an axis is within tolerance, it's treated

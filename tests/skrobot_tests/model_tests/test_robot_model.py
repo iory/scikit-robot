@@ -1145,6 +1145,7 @@ class TestRobotModel(unittest.TestCase):
                     result = fetch.batch_inverse_kinematics(
                         [target], move_target=fetch.rarm.end_coords,
                         stop=60, attempts_per_pose=5, backend=backend,
+                        retry_seed='random', random_initial_range=0.7,
                         select_closest_to_initial=closest)
                     if not result.success_flags[0]:
                         # Whether the random restarts find this pose at all
