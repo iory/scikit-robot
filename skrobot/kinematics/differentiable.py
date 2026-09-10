@@ -1243,6 +1243,134 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
+def rotation_error_so3_log_batch_numpy(actual_rot, target_rot):
+    """Rotation error as the SO(3) logarithm of ``actual^T @ target``, in NumPy.
+
+    The anti-symmetric part of a rotation matrix is ``sin(theta) * axis``,
+    which shrinks back towards zero once the error passes a quarter turn
+    and vanishes at a half turn. This returns ``theta * axis`` instead, so
+    the magnitude is the rotation angle over the whole range.
+
+    Parameters
+    ----------
+    actual_rot : numpy.ndarray
+        Current rotation matrices, ``(batch, 3, 3)``.
+    target_rot : numpy.ndarray
+        Target rotation matrices, ``(batch, 3, 3)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(batch, 3)`` axis-angle error in the actual (body) frame.
+    """
+    r = np.matmul(np.transpose(actual_rot, (0, 2, 1)), target_rot)
+    vee = 0.5 * np.stack([
+        r[:, 2, 1] - r[:, 1, 2],
+        r[:, 0, 2] - r[:, 2, 0],
+        r[:, 1, 0] - r[:, 0, 1]
+    ], axis=1)  # sin(theta) * axis
+    cos_theta = np.clip(
+        (np.trace(r, axis1=1, axis2=2) - 1.0) / 2.0, -1.0, 1.0)
+    sin_theta = np.linalg.norm(vee, axis=1)
+    theta = np.arctan2(sin_theta, cos_theta)
+
+    # theta / sin(theta) rescales the anti-symmetric part into the log.
+    # Below the guard sin(theta) is either a genuine zero rotation, where
+    # the ratio tends to 1 and vee is already the answer, or a half turn,
+    # handled separately below.
+    safe = sin_theta > 1e-6
+    scale = np.where(safe, theta / np.where(safe, sin_theta, 1.0), 1.0)
+    log = vee * scale[:, None]
+
+    # At a half turn the anti-symmetric part carries no axis, but every
+    # column of the symmetric part is parallel to it.
+    near_pi = np.logical_and(np.logical_not(safe), cos_theta < 0)
+    if np.any(near_pi):
+        idx = np.where(near_pi)[0]
+        sym = (r[idx] + np.eye(3)) / 2.0
+        col = np.argmax(np.diagonal(sym, axis1=1, axis2=2), axis=1)
+        axis = sym[np.arange(idx.shape[0]), :, col]
+        axis = axis / np.maximum(
+            np.linalg.norm(axis, axis=1, keepdims=True), 1e-12)
+        # Either sign is a valid logarithm; keep the one the residual
+        # anti-symmetric part points at so the step stays continuous.
+        sign = np.sign(np.sum(axis * vee[idx], axis=1))
+        sign = np.where(sign == 0, 1.0, sign)
+        log[idx] = theta[idx][:, None] * axis * sign[:, None]
+    return log
+
+
+def _normalize_axis_tolerance(tolerance):
+    """Normalise a per-axis IK tolerance into a length-3 array.
+
+    Parameters
+    ----------
+    tolerance : sequence of (float or None), or None
+        Per-axis tolerance. ``None`` entries, and entries that are not
+        strictly positive, mean "no tolerance on this axis".
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(3,)`` array of tolerances, or ``None`` when no axis has one.
+    """
+    if tolerance is None:
+        return None
+    tol = np.asarray([0.0 if t is None or t <= 0 else float(t)
+                      for t in tolerance], dtype=np.float64)
+    if not np.any(tol > 0):
+        return None
+    return tol
+
+
+def _apply_translation_tolerance(pos_err, target_rot, tol, xp=np):
+    """Drop the position error along target axes that are already close enough.
+
+    The error is resolved in the target frame, the axes whose error is
+    within ``tol`` are zeroed, and the remainder is rotated back to the
+    world frame.
+
+    Parameters
+    ----------
+    pos_err : array
+        World-frame position error, ``(batch, 3)``.
+    target_rot : array
+        Target rotation matrices, ``(batch, 3, 3)``.
+    tol : numpy.ndarray
+        Per-axis tolerance, ``(3,)``.
+    xp : module
+        Array module to compute with (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    array
+        World-frame position error with the tolerated axes removed.
+    """
+    local_err = xp.einsum('bji,bj->bi', target_rot, pos_err)
+    local_err = xp.where(xp.abs(local_err) <= tol, 0.0, local_err)
+    return xp.einsum('bij,bj->bi', target_rot, local_err)
+
+
+def _apply_rotation_tolerance(rot_err, tol, xp=np):
+    """Zero the rotation error components that are already within tolerance.
+
+    Parameters
+    ----------
+    rot_err : array
+        Rotation error in the move target's local frame, ``(batch, 3)``.
+    tol : numpy.ndarray
+        Per-axis tolerance, ``(3,)``.
+    xp : module
+        Array module to compute with (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    array
+        Rotation error with the tolerated axes removed.
+    """
+    return xp.where(xp.abs(rot_err) <= tol, 0.0, rot_err)
+
+
 def _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices):
     """Create a function that applies dynamic joint limit clipping in NumPy.
 
@@ -1576,6 +1704,8 @@ def _create_numpy_optimized_solver(fk_params):
               position_mask=True,
               rotation_mask=True,
               rotation_mirror=None,
+              translation_tolerance=None,
+              rotation_tolerance=None,
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
@@ -1606,6 +1736,14 @@ def _create_numpy_optimized_solver(fk_params):
             (preferred for motion); smaller entries make it "heavier"
             (discouraged). None (default) is uniform weighting (identity).
             Applied as ``δq = W J^T (J W J^T + λI)^{-1} e``.
+        translation_tolerance : sequence of 3 floats or None
+            Per-axis position tolerance, in metres, measured along the
+            target frame's own axes. An axis whose error is within its
+            tolerance is treated as reached.
+        rotation_tolerance : sequence of 3 floats or None
+            Per-axis rotation tolerance, in radians, measured in the move
+            target's local frame. An axis whose error is within its
+            tolerance is treated as reached.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as JAX solver.
         return_all_attempts : bool
@@ -1632,6 +1770,9 @@ def _create_numpy_optimized_solver(fk_params):
         rot_mask_sum = np.sum(rot_mask_arr)
         has_pos_constraint = pos_mask_sum > 0
         has_rot_constraint = rot_mask_sum > 0
+
+        trans_tol = _normalize_axis_tolerance(translation_tolerance)
+        rot_tol = _normalize_axis_tolerance(rotation_tolerance)
 
         # Determine active Jacobian rows
         # Position: rows 0,1,2; Rotation: rows 3,4,5
@@ -1721,26 +1862,19 @@ def _create_numpy_optimized_solver(fk_params):
             # Build error vector: (batch, 6)
             # Position error
             pos_err = (target_pos - pos) * pos_mask_arr  # (batch, 3)
+            if trans_tol is not None:
+                pos_err = _apply_translation_tolerance(
+                    pos_err, target_rot, trans_tol)
 
             # Rotation error in local frame, masked, then rotated to world
             if has_rot_constraint:
-                rot_T = np.transpose(rot, axes=(0, 2, 1))
-                r_diff = np.matmul(rot_T, target_rot)
-
-                rot_err_local = 0.5 * np.stack([
-                    r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                    r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                    r_diff[:, 1, 0] - r_diff[:, 0, 1]
-                ], axis=1)  # (batch, 3)
+                rot_err_local = rotation_error_so3_log_batch_numpy(
+                    rot, target_rot)  # (batch, 3)
 
                 if mirror_rot is not None:
                     target_rot_m = target_rot @ mirror_rot
-                    r_diff_m = np.matmul(rot_T, target_rot_m)
-                    rot_err_local_m = 0.5 * np.stack([
-                        r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                        r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                        r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                    ], axis=1)
+                    rot_err_local_m = rotation_error_so3_log_batch_numpy(
+                        rot, target_rot_m)
 
                     # Select mirrored where closer
                     frob_direct = np.sum((target_rot - rot) ** 2, axis=(1, 2))
@@ -1751,6 +1885,9 @@ def _create_numpy_optimized_solver(fk_params):
 
                 # Mask in local frame, then rotate to world for Jacobian
                 rot_err_local_masked = rot_err_local * rot_mask_arr
+                if rot_tol is not None:
+                    rot_err_local_masked = _apply_rotation_tolerance(
+                        rot_err_local_masked, rot_tol)
                 rot_err_world = np.einsum(
                     'bij,bj->bi', rot, rot_err_local_masked)
             else:
@@ -1789,11 +1926,16 @@ def _create_numpy_optimized_solver(fk_params):
             if dynamic_clipper is not None:
                 opt_angles = dynamic_clipper(opt_angles)
 
-            # Early stopping: check convergence
-            pos_err_sq = np.sum(
-                ((target_pos - pos) * pos_mask_arr) ** 2, axis=1)
-            if np.all(pos_err_sq < pos_threshold * pos_threshold):
-                # Need to also check rotation for final convergence
+            # Early stopping: every pose has to satisfy both halves of the
+            # task, otherwise a pose whose position lands first would stop
+            # the loop with its orientation still unsolved.
+            converged = np.sum(pos_err ** 2, axis=1) < pos_threshold ** 2
+            if has_rot_constraint:
+                converged = np.logical_and(
+                    converged,
+                    np.sum(rot_err_local_masked ** 2, axis=1)
+                    < rot_threshold ** 2)
+            if np.all(converged):
                 break
 
         # Final clipping to ensure dynamic limits are satisfied
@@ -1807,32 +1949,32 @@ def _create_numpy_optimized_solver(fk_params):
 
         # Position error
         if has_pos_constraint:
-            pos_err_final = np.sqrt(np.sum(
-                ((target_pos - pos_final) * pos_mask_arr) ** 2, axis=1))
+            pos_err_vec = (target_pos - pos_final) * pos_mask_arr
+            if trans_tol is not None:
+                pos_err_vec = _apply_translation_tolerance(
+                    pos_err_vec, target_rot, trans_tol)
+            pos_err_final = np.sqrt(np.sum(pos_err_vec ** 2, axis=1))
         else:
             pos_err_final = np.zeros(n_expanded)
 
         # Rotation error
         if has_rot_constraint:
-            rot_T = np.transpose(rot_final, axes=(0, 2, 1))
-            r_diff = np.matmul(rot_T, target_rot)
-            rot_err_local = 0.5 * np.stack([
-                r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                r_diff[:, 1, 0] - r_diff[:, 0, 1]
-            ], axis=1)
+            rot_err_local = rotation_error_so3_log_batch_numpy(
+                rot_final, target_rot)
             rot_err_masked = rot_err_local * rot_mask_arr
+            if rot_tol is not None:
+                rot_err_masked = _apply_rotation_tolerance(
+                    rot_err_masked, rot_tol)
             rot_err_final = np.sqrt(np.sum(rot_err_masked ** 2, axis=1))
 
             if mirror_rot is not None:
                 target_rot_m = target_rot @ mirror_rot
-                r_diff_m = np.matmul(rot_T, target_rot_m)
-                rot_err_local_m = 0.5 * np.stack([
-                    r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                    r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                    r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                ], axis=1)
+                rot_err_local_m = rotation_error_so3_log_batch_numpy(
+                    rot_final, target_rot_m)
                 rot_err_masked_m = rot_err_local_m * rot_mask_arr
+                if rot_tol is not None:
+                    rot_err_masked_m = _apply_rotation_tolerance(
+                        rot_err_masked_m, rot_tol)
                 rot_err_m = np.sqrt(np.sum(rot_err_masked_m ** 2, axis=1))
                 rot_err_final = np.minimum(rot_err_final, rot_err_m)
         else:
@@ -3615,15 +3757,24 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
     def _create_batched_solver_fn(max_iterations, damping, pos_threshold,
                                   rot_threshold, pos_mask_arr, rot_mask_arr,
-                                  rotation_mirror, weight_diag_tuple=None):
+                                  rotation_mirror, weight_diag_tuple=None,
+                                  trans_tol_tuple=None, rot_tol_tuple=None):
         """Create JIT-compiled batched Jacobian solver using fori_loop.
 
         ``weight_diag_tuple`` is either None (unweighted DLS) or a tuple
         of floats of length ``n_opt`` specifying the per-opt-variable
         weights for a weighted DLS update ``Δq = W J^T (J W J^T + λI)^-1 e``.
+
+        ``trans_tol_tuple`` and ``rot_tol_tuple`` are either None or
+        3-tuples of per-axis tolerances; an axis whose error is within its
+        tolerance is treated as reached and stops driving the solve.
         """
         pos_mask = jnp.array(pos_mask_arr)
         rot_mask = jnp.array(rot_mask_arr)
+        trans_tol = (None if trans_tol_tuple is None
+                     else jnp.array(trans_tol_tuple))
+        rot_tol = (None if rot_tol_tuple is None
+                   else jnp.array(rot_tol_tuple))
 
         pos_mask_sum = float(np.sum(pos_mask_arr))
         rot_mask_sum = float(np.sum(rot_mask_arr))
@@ -3776,6 +3927,9 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
                 # Position error: (batch, 3)
                 pos_err = (target_pos - pos) * pos_mask
+                if trans_tol is not None:
+                    pos_err = _apply_translation_tolerance(
+                        pos_err, target_rot, trans_tol, xp=jnp)
 
                 # Rotation error in local frame, masked, rotated to world
                 # Use SO(3) logarithmic map for better accuracy
@@ -3796,6 +3950,9 @@ def _create_jax_jacobian_solver(fk_params, backend):
                             use_mirror, rot_err_local_m, rot_err_local)
 
                     rot_err_local_masked = rot_err_local * rot_mask
+                    if rot_tol is not None:
+                        rot_err_local_masked = _apply_rotation_tolerance(
+                            rot_err_local_masked, rot_tol, xp=jnp)
                     rot_err_world = jnp.einsum(
                         'bij,bj->bi', rot, rot_err_local_masked)
                 else:
@@ -3846,13 +4003,19 @@ def _create_jax_jacobian_solver(fk_params, backend):
             _, pos_final, rot_final, final_full = _compute_jac_fk(final_opt)
 
             # Position error
-            pos_err_final = jnp.sqrt(jnp.sum(
-                ((target_pos - pos_final) * pos_mask) ** 2, axis=1))
+            pos_err_vec = (target_pos - pos_final) * pos_mask
+            if trans_tol is not None:
+                pos_err_vec = _apply_translation_tolerance(
+                    pos_err_vec, target_rot, trans_tol, xp=jnp)
+            pos_err_final = jnp.sqrt(jnp.sum(pos_err_vec ** 2, axis=1))
 
             # Rotation error using SO(3) logarithmic map
             if has_rot_constraint:
                 rot_err_local = rotation_error_so3_log_batch(rot_final, target_rot)
                 rot_err_masked = rot_err_local * rot_mask
+                if rot_tol is not None:
+                    rot_err_masked = _apply_rotation_tolerance(
+                        rot_err_masked, rot_tol, xp=jnp)
                 rot_err_final = jnp.sqrt(jnp.sum(
                     rot_err_masked ** 2, axis=1))
 
@@ -3860,8 +4023,12 @@ def _create_jax_jacobian_solver(fk_params, backend):
                     target_rot_m = target_rot @ mirror_rot
                     rot_err_local_m = rotation_error_so3_log_batch(
                         rot_final, target_rot_m)
+                    rot_err_masked_m = rot_err_local_m * rot_mask
+                    if rot_tol is not None:
+                        rot_err_masked_m = _apply_rotation_tolerance(
+                            rot_err_masked_m, rot_tol, xp=jnp)
                     rot_err_m = jnp.sqrt(jnp.sum(
-                        (rot_err_local_m * rot_mask) ** 2, axis=1))
+                        rot_err_masked_m ** 2, axis=1))
                     rot_err_final = jnp.minimum(rot_err_final, rot_err_m)
             else:
                 rot_err_final = jnp.zeros_like(pos_err_final)
@@ -3891,6 +4058,8 @@ def _create_jax_jacobian_solver(fk_params, backend):
               position_mask=True,
               rotation_mask=True,
               rotation_mirror=None,
+              translation_tolerance=None,
+              rotation_tolerance=None,
               attempts_per_pose=1,
               use_current_angles=True,
               select_closest_to_initial=False,
@@ -3915,6 +4084,14 @@ def _create_jax_jacobian_solver(fk_params, backend):
             Position error threshold for success.
         rot_threshold : float
             Rotation error threshold for success.
+        translation_tolerance : sequence of 3 floats or None
+            Per-axis position tolerance, in metres, measured along the
+            target frame's own axes. An axis whose error is within its
+            tolerance is treated as reached.
+        rotation_tolerance : sequence of 3 floats or None
+            Per-axis rotation tolerance, in radians, measured in the move
+            target's local frame. An axis whose error is within its
+            tolerance is treated as reached.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as gradient descent solver.
         return_all_attempts : bool
@@ -3999,14 +4176,22 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 weight_diag_tuple = tuple(float(w) for w in weight_diag_arr)
 
         # Get or create JIT-compiled solver
+        trans_tol = _normalize_axis_tolerance(translation_tolerance)
+        rot_tol = _normalize_axis_tolerance(rotation_tolerance)
+        trans_tol_tuple = None if trans_tol is None else tuple(trans_tol)
+        rot_tol_tuple = None if rot_tol is None else tuple(rot_tol)
+
         cache_key = (max_iterations, damping, pos_threshold, rot_threshold,
                      tuple(pos_mask_arr), tuple(rot_mask_arr),
-                     rotation_mirror, weight_diag_tuple)
+                     rotation_mirror, weight_diag_tuple,
+                     trans_tol_tuple, rot_tol_tuple)
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_batched_solver_fn(
                 max_iterations, damping, pos_threshold, rot_threshold,
                 pos_mask_arr, rot_mask_arr, rotation_mirror,
-                weight_diag_tuple=weight_diag_tuple)
+                weight_diag_tuple=weight_diag_tuple,
+                trans_tol_tuple=trans_tol_tuple,
+                rot_tol_tuple=rot_tol_tuple)
 
         solver_fn = _jit_cache[cache_key]
 

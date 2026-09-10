@@ -998,6 +998,70 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(len(attempt_counts), 1)
         self.assertLessEqual(attempt_counts[0], 5)
 
+    def _batch_ik_backends(self):
+        backends = ['numpy']
+        # HAS_JAX is the library's own answer to "is JAX usable here", and
+        # it already covers a JAX that imports but does not work against
+        # the installed NumPy. jaxlie is a separate import the batch
+        # solver needs, and a broken wheel raises more than ImportError.
+        from skrobot.pycompat import HAS_JAX
+        if HAS_JAX:
+            try:
+                import jaxlie  # noqa: F401
+            except Exception:
+                pass
+            else:
+                backends.append('jax')
+        return backends
+
+    def test_batch_inverse_kinematics_rotation_tolerance(self):
+        """A rotation already inside the tolerance must not move the arm."""
+        fetch = self.fetch
+        for backend in self._batch_ik_backends():
+            fetch.reset_pose()
+            seed = fetch.angle_vector().copy()
+            target = fetch.rarm.end_coords.copy_worldcoords()
+            target.rotate(np.deg2rad(10), 'z')
+
+            tolerated = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                rthre=np.deg2rad(1),
+                rotation_tolerance=[np.deg2rad(30)] * 3,
+                backend=backend)
+            self.assertTrue(tolerated.success_flags[0])
+            # "did not move": the angle vector is float32 and the solver
+            # recomputes its own forward kinematics, so a run leaves noise
+            # a few orders of magnitude below any motion worth the name.
+            testing.assert_allclose(
+                tolerated.solutions[0], seed, atol=1e-4)
+
+            fetch.angle_vector(seed.copy())
+            corrected = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                rthre=np.deg2rad(1), backend=backend)
+            self.assertGreater(
+                np.abs(corrected.solutions[0] - seed).max(), 1e-3)
+
+    def test_batch_inverse_kinematics_translation_tolerance(self):
+        """A translation already inside the tolerance must not move the arm."""
+        fetch = self.fetch
+        for backend in self._batch_ik_backends():
+            fetch.reset_pose()
+            seed = fetch.angle_vector().copy()
+            target = fetch.rarm.end_coords.copy_worldcoords()
+            target.translate([0.02, 0.0, 0.0])
+
+            tolerated = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                translation_tolerance=[0.05, 0.05, 0.05],
+                backend=backend)
+            self.assertTrue(tolerated.success_flags[0])
+            # "did not move": the angle vector is float32 and the solver
+            # recomputes its own forward kinematics, so a run leaves noise
+            # a few orders of magnitude below any motion worth the name.
+            testing.assert_allclose(
+                tolerated.solutions[0], seed, atol=1e-4)
+
     def test_batch_inverse_kinematics_result_unpacks_as_legacy_tuple(self):
         """The result object is still the tuple callers have always got."""
         fetch = self.fetch

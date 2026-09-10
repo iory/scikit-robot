@@ -4269,6 +4269,8 @@ class RobotModel(CascadedLink):
             position_mask=position_mask,
             rotation_mask=rotation_mask,
             rotation_mirror=rotation_mirror,
+            translation_tolerance=translation_tolerance,
+            rotation_tolerance=rotation_tolerance,
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
         )
@@ -4547,6 +4549,12 @@ class RobotModel(CascadedLink):
             raise ValueError(
                 "initial_angles must be None, 'random', 'current', or "
                 "np.ndarray, got {}".format(type(initial_angles)))
+
+        if translation_tolerance is not None or rotation_tolerance is not None:
+            raise ValueError(
+                "translation_tolerance and rotation_tolerance are not "
+                "supported by multi-end-effector batch IK; pass a single "
+                "move_target, or widen thre/rthre instead")
 
         solver_kwargs = dict(
             initial_angles=initial_angles_for_solver,
