@@ -1,3 +1,123 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scikit-robot"
+version = "0.3.35"
+description = "A Flexible Framework for Robot Control in Python"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "iory", email = "ab.ioryz@gmail.com"}]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+    "cached-property",
+    "filelock",
+    "lxml",
+    "networkx>=2.5",
+    "numpy>=1.21.0",
+    "ordered_set",
+    "packaging",
+    "pillow",
+    "pooch>=1.5.0",
+    # required for robot model using collada
+    "pycollada>=0.8",
+    "pyglet<2.0",
+    "pysdfgen>=0.2.0",
+    "pyyaml",
+    # need rtree for simplify_quadric_decimation
+    "rtree",
+    "scikit-learn>=0.24.0",
+    "scikit-robot-pyrender>=0.1.50",
+    "scipy>=1.6.3",
+    "trimesh>=3.9.0,!=3.23.0",
+    "viser",
+]
+
+[project.urls]
+Homepage = "https://github.com/iory/scikit-robot"
+
+[project.optional-dependencies]
+docs = ["sphinx>=1.8.2", "sphinx_rtd_theme"]
+# CoACD approximate convex decomposition
+# (skrobot.utils.convex_decomposition).  Also part of 'all'; this
+# dedicated extra allows a minimal install.  The API raises a clear
+# error when coacd is not installed.
+coacd = ["coacd"]
+# USD authoring for Isaac Sim (skrobot.export.usd imports `pxr`).
+# Pair it with 'coacd': without CoACD the exporter can only author a
+# single convex hull per link.
+usd = ["usd-core"]
+# Mesh-exact self-collision queries (skrobot.collision.SelfCollision,
+# skrobot.collision.sweep_limits), which raise with this install line in
+# the message when the package is missing.
+#
+# The trajectory optimizer's jaxls solver cannot be declared alongside it:
+# jaxls is not on PyPI (the name there belongs to an unrelated project)
+# and a direct URL requirement cannot be published, so it is installed
+# separately with
+#     pip install "git+https://github.com/brentyi/jaxls.git"
+# and skrobot.planner.trajectory_optimization says so when it is missing.
+collision = ["python-fcl"]
+all = [
+    "pybullet>=2.1.9",
+    # open3d has no wheels for Python 3.13 yet
+    "open3d; python_version < '3.13'",
+    "fast-simplification",
+    "DracoPy",
+    "coacd",
+    "usd-core",
+    "jax",
+    "jaxlib",
+    "jaxlie",
+    "python-fcl",
+    # mitsuba powers the headless MitsubaViewer
+    "mitsuba",
+    # matplotlib backs MitsubaViewer.show()/pause() (the interactive window)
+    "matplotlib",
+    # imageio (+ffmpeg) backs the examples' --save-video / VideoRecorder
+    "imageio",
+    "imageio-ffmpeg",
+    # 'all' has always pulled the documentation requirements in too.
+    "sphinx>=1.8.2",
+    "sphinx_rtd_theme",
+]
+
+[project.scripts]
+skr = "skrobot.apps.cli:main"
+visualize-urdf = "skrobot.apps.visualize_urdf:main"
+convert-urdf-mesh = "skrobot.apps.convert_urdf_mesh:main"
+modularize-urdf = "skrobot.apps.modularize_urdf:main"
+change-urdf-root = "skrobot.apps.change_urdf_root:main"
+visualize-mesh = "skrobot.apps.visualize_mesh:main"
+urdf-hash = "skrobot.apps.urdf_hash:main"
+convert-wheel-collision = "skrobot.apps.convert_wheel_collision:main"
+urdf-tree = "skrobot.apps.urdf_tree:main"
+convert-urdf-to-mjcf = "skrobot.apps.convert_urdf_to_mjcf:main"
+canonicalize-urdf = "skrobot.apps.canonicalize_urdf:main"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+include = ["skrobot*"]
+
+[tool.setuptools.package-data]
+skrobot = ["data/**"]
+
 [tool.ruff]
 # Exclude directories and file types from linting
 extend-exclude = [".?*", "src/", "build", "docs", "*.ipynb"]
