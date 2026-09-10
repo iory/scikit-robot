@@ -3870,6 +3870,7 @@ class RobotModel(CascadedLink):
             base_weight=None,
             joint_list=None,
             invariant_joint_list=None,
+            select_closest_to_initial=True,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -3945,6 +3946,15 @@ class RobotModel(CascadedLink):
             Backend solver to use ('numpy' or 'jax'). Default is None,
             which auto-selects JAX if available, otherwise falls back to NumPy.
             JAX backend provides faster computation through JIT compilation.
+        select_closest_to_initial : bool
+            How to pick between attempts when ``attempts_per_pose`` is
+            greater than 1. True (default) keeps the attempt seeded from
+            the current pose whenever it solved, and otherwise takes the
+            solved attempt nearest that seed, so the arm does not swing to
+            a far branch just because a random restart landed a fraction of
+            a millimetre closer. False takes the smallest error whatever it
+            costs in motion. No effect with a single attempt, or when the
+            seeds are random.
         **kwargs : dict
             Additional keyword arguments
 
@@ -4073,6 +4083,7 @@ class RobotModel(CascadedLink):
                 rthre, initial_angles, alpha, attempts_per_pose,
                 random_initial_range, translation_tolerance,
                 rotation_tolerance, backend=backend,
+                select_closest_to_initial=select_closest_to_initial,
                 _base_state=_base_state,
                 base_weight=base_weight,
                 **kwargs)
@@ -4085,7 +4096,8 @@ class RobotModel(CascadedLink):
             self, target_coords, move_target, link_list,
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, backend=None, **kwargs):
+            translation_tolerance, rotation_tolerance, backend=None,
+            select_closest_to_initial=True, **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
 
@@ -4130,6 +4142,7 @@ class RobotModel(CascadedLink):
                 rthre, initial_angles, alpha, attempts_per_pose,
                 random_initial_range, translation_tolerance,
                 rotation_tolerance, backend=backend,
+                select_closest_to_initial=select_closest_to_initial,
                 _base_state=_base_state, **kwargs)
         if link_list_is_nested and len(link_list) > 1:
             raise ValueError(
@@ -4273,6 +4286,8 @@ class RobotModel(CascadedLink):
             rotation_tolerance=rotation_tolerance,
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
+            select_closest_to_initial=(select_closest_to_initial
+                                       and use_current_angles),
         )
         solver_kwargs['damping'] = 0.01
 
@@ -4439,7 +4454,8 @@ class RobotModel(CascadedLink):
             self, target_coords, move_target, link_list,
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
-            translation_tolerance, rotation_tolerance, backend=None, **kwargs):
+            translation_tolerance, rotation_tolerance, backend=None,
+            select_closest_to_initial=True, **kwargs):
         """Multi-end-effector batch IK.
 
         ``link_list`` is ``list[list[Link]]`` (one chain per task) and
@@ -4568,6 +4584,8 @@ class RobotModel(CascadedLink):
             task_weights=task_weights,
             attempts_per_pose=attempts_per_pose,
             use_current_angles=use_current_angles,
+            select_closest_to_initial=(select_closest_to_initial
+                                       and use_current_angles),
             joint_limit_avoidance=joint_limit_avoidance,
         )
 

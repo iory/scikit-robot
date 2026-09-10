@@ -1014,6 +1014,30 @@ class TestRobotModel(unittest.TestCase):
                 backends.append('jax')
         return backends
 
+    def test_batch_inverse_kinematics_select_closest_to_initial(self):
+        """Retries must not swing the arm to a far branch to save a hair."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = skrobot.coordinates.Coordinates(
+            pos=fetch.rarm.end_coords.worldpos() + [0.05, -0.25, 0.30])
+        target.rotate(np.pi * 0.9, 'y')
+
+        for backend in self._batch_ik_backends():
+            for random_seed in (0, 2, 4):
+                moved = {}
+                for closest in (True, False):
+                    fetch.angle_vector(seed.copy())
+                    np.random.seed(random_seed)
+                    result = fetch.batch_inverse_kinematics(
+                        [target], move_target=fetch.rarm.end_coords,
+                        stop=60, attempts_per_pose=5, backend=backend,
+                        select_closest_to_initial=closest)
+                    self.assertTrue(result.success_flags[0])
+                    moved[closest] = np.abs(
+                        np.asarray(result.solutions[0]) - seed).max()
+                self.assertLessEqual(moved[True], moved[False] + 1e-9)
+
     def test_batch_inverse_kinematics_rotation_tolerance(self):
         """A rotation already inside the tolerance must not move the arm."""
         fetch = self.fetch

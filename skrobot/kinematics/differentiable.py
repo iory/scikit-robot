@@ -280,21 +280,20 @@ def _select_best_attempts(solutions, success_flags, errors, n_targets, attempts_
             init_angles = np.tile(init_angles, (n_targets, 1))
 
         best_indices = []
-        err_threshold = 0.02  # Consider solutions with error < 2cm as valid
+        err_threshold = 0.02  # a near miss still beats a far-away solution
         for i in range(n_targets):
-            # First attempt (index 0) starts from current angles
-            first_success = success_flags[i, 0] or errors[i, 0] < err_threshold
-            if first_success:
-                best_idx = 0
+            # Attempt 0 is the one seeded from the initial angles, so it is
+            # usually the nearest, but never prefer it over an attempt that
+            # actually solved the pose.
+            candidates = np.where(success_flags[i])[0]
+            if candidates.size == 0:
+                candidates = np.where(errors[i] < err_threshold)[0]
+            if candidates.size:
+                distances = np.linalg.norm(
+                    solutions[i, candidates] - init_angles[i], axis=1)
+                best_idx = candidates[np.argmin(distances)]
             else:
-                valid_mask = success_flags[i] | (errors[i] < err_threshold)
-                if np.any(valid_mask):
-                    distances = np.linalg.norm(
-                        solutions[i, valid_mask] - init_angles[i], axis=1)
-                    valid_indices = np.where(valid_mask)[0]
-                    best_idx = valid_indices[np.argmin(distances)]
-                else:
-                    best_idx = np.argmin(errors[i])
+                best_idx = np.argmin(errors[i])
             best_indices.append(best_idx)
         best_indices = np.array(best_indices)
     else:
