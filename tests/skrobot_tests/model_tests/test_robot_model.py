@@ -998,6 +998,216 @@ class TestRobotModel(unittest.TestCase):
         self.assertEqual(len(attempt_counts), 1)
         self.assertLessEqual(attempt_counts[0], 5)
 
+    def _batch_ik_backends(self):
+        backends = ['numpy']
+        # HAS_JAX is the library's own answer to "is JAX usable here", and
+        # it already covers a JAX that imports but does not work against
+        # the installed NumPy. jaxlie is a separate import the batch
+        # solver needs, and a broken wheel raises more than ImportError.
+        from skrobot.pycompat import HAS_JAX
+        if HAS_JAX:
+            try:
+                import jaxlie  # noqa: F401
+            except Exception:
+                pass
+            else:
+                backends.append('jax')
+        return backends
+
+    def test_batch_inverse_kinematics_retry_seed(self):
+        """Retries can be drawn near the seed instead of across the range."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        target.rotate(0.5, 'x')
+
+        def spread(retry_seed, backend):
+            fetch.angle_vector(seed.copy())
+            np.random.seed(0)
+            result = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, stop=100, backend=backend,
+                attempts_per_pose=20, retry_seed=retry_seed,
+                random_initial_range=0.3)
+            attempts = np.asarray(result.attempts.angle_vectors)[0]
+            solved = result.attempts.success[0]
+            self.assertTrue(np.any(solved))
+            return np.linalg.norm(attempts[solved] - seed, axis=1).max()
+
+        for backend in self._batch_ik_backends():
+            self.assertLess(spread('current', backend),
+                            spread('random', backend))
+
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, attempts_per_pose=2,
+                retry_seed='nearby')
+
+    def test_batch_inverse_kinematics_keeps_continuous_joint_in_place(self):
+        """A continuous joint past half a turn must not be dragged back."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+        self.assertEqual(fetch.wrist_roll_joint.joint_type, 'continuous')
+
+        for backend in self._batch_ik_backends():
+            for start in (0.0, 4.0, 5.5, -5.5):
+                fetch.reset_pose()
+                fetch.wrist_roll_joint.joint_angle(start)
+                seed = fetch.angle_vector().copy()
+                here = fetch.rarm.end_coords.copy_worldcoords()
+
+                fetch.angle_vector(seed.copy())
+                result = fetch.batch_inverse_kinematics(
+                    [here], move_target=fetch.rarm.end_coords, stop=60,
+                    backend=backend)
+                self.assertTrue(result.success_flags[0])
+                self.assertAlmostEqual(
+                    result.solutions[0][index], start, places=3)
+
+    def test_batch_inverse_kinematics_continuous_joint_crosses_half_turn(self):
+        """The shorter way round must stay open across the half turn."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+
+        fetch.reset_pose()
+        fetch.wrist_roll_joint.joint_angle(3.30)
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        fetch.reset_pose()
+        fetch.wrist_roll_joint.joint_angle(3.00)
+        seed = fetch.angle_vector().copy()
+
+        for backend in self._batch_ik_backends():
+            fetch.angle_vector(seed.copy())
+            result = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=100,
+                backend=backend)
+            self.assertTrue(result.success_flags[0])
+            # np.pi would mean the joint stopped at the edge of a box that
+            # has no business being there.
+            self.assertGreater(result.solutions[0][index], np.pi + 1e-3)
+
+    def test_batch_inverse_kinematics_joint_weights(self):
+        """A joint held back takes less of the task."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        target.rotate(0.5, 'x')
+
+        for backend in self._batch_ik_backends():
+            moved = {}
+            for weights in (None, {'wrist_roll_joint': 0.1}):
+                fetch.angle_vector(seed.copy())
+                result = fetch.batch_inverse_kinematics(
+                    [target], move_target=fetch.rarm.end_coords,
+                    link_list=fetch.rarm.link_list, stop=100,
+                    backend=backend, joint_weights=weights)
+                self.assertTrue(result.success_flags[0])
+                moved[weights is None] = abs(
+                    result.solutions[0][index] - seed[index])
+            self.assertLess(moved[False], moved[True])
+
+        fetch.angle_vector(seed.copy())
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list,
+                joint_weights={'no_such_joint': 0.1})
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, joint_weights=[1.0, 2.0])
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list,
+                joint_weights={'wrist_roll_joint': 0.0})
+
+    def test_batch_inverse_kinematics_select_closest_to_initial(self):
+        """Retries must not swing the arm to a far branch to save a hair."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = skrobot.coordinates.Coordinates(
+            pos=fetch.rarm.end_coords.worldpos() + [0.05, -0.25, 0.30])
+        target.rotate(np.pi * 0.9, 'y')
+
+        compared = 0
+        for backend in self._batch_ik_backends():
+            for random_seed in (0, 1, 2, 3, 4):
+                moved = {}
+                for closest in (True, False):
+                    fetch.angle_vector(seed.copy())
+                    np.random.seed(random_seed)
+                    result = fetch.batch_inverse_kinematics(
+                        [target], move_target=fetch.rarm.end_coords,
+                        stop=60, attempts_per_pose=5, backend=backend,
+                        retry_seed='random', random_initial_range=0.7,
+                        select_closest_to_initial=closest)
+                    if not result.success_flags[0]:
+                        # Whether the random restarts find this pose at all
+                        # is not what is under test.
+                        break
+                    # The picker ranks attempts by Euclidean distance, so
+                    # that is the distance the guarantee is about.
+                    moved[closest] = np.linalg.norm(
+                        np.asarray(result.solutions[0]) - seed)
+                if len(moved) == 2:
+                    self.assertLessEqual(moved[True], moved[False] + 1e-5)
+                    compared += 1
+        self.assertGreater(compared, 0)
+
+    def test_batch_inverse_kinematics_rotation_tolerance(self):
+        """A rotation already inside the tolerance must not move the arm."""
+        fetch = self.fetch
+        for backend in self._batch_ik_backends():
+            fetch.reset_pose()
+            seed = fetch.angle_vector().copy()
+            target = fetch.rarm.end_coords.copy_worldcoords()
+            target.rotate(np.deg2rad(10), 'z')
+
+            tolerated = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                rthre=np.deg2rad(1),
+                rotation_tolerance=[np.deg2rad(30)] * 3,
+                backend=backend)
+            self.assertTrue(tolerated.success_flags[0])
+            # "did not move": the angle vector is float32 and the solver
+            # recomputes its own forward kinematics, so a run leaves noise
+            # a few orders of magnitude below any motion worth the name.
+            testing.assert_allclose(
+                tolerated.solutions[0], seed, atol=1e-4)
+
+            fetch.angle_vector(seed.copy())
+            corrected = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                rthre=np.deg2rad(1), backend=backend)
+            self.assertGreater(
+                np.abs(corrected.solutions[0] - seed).max(), 1e-3)
+
+    def test_batch_inverse_kinematics_translation_tolerance(self):
+        """A translation already inside the tolerance must not move the arm."""
+        fetch = self.fetch
+        for backend in self._batch_ik_backends():
+            fetch.reset_pose()
+            seed = fetch.angle_vector().copy()
+            target = fetch.rarm.end_coords.copy_worldcoords()
+            target.translate([0.02, 0.0, 0.0])
+
+            tolerated = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=50,
+                translation_tolerance=[0.05, 0.05, 0.05],
+                backend=backend)
+            self.assertTrue(tolerated.success_flags[0])
+            # "did not move": the angle vector is float32 and the solver
+            # recomputes its own forward kinematics, so a run leaves noise
+            # a few orders of magnitude below any motion worth the name.
+            testing.assert_allclose(
+                tolerated.solutions[0], seed, atol=1e-4)
+
     def test_batch_inverse_kinematics_result_unpacks_as_legacy_tuple(self):
         """The result object is still the tuple callers have always got."""
         fetch = self.fetch

@@ -280,21 +280,18 @@ def _select_best_attempts(solutions, success_flags, errors, n_targets, attempts_
             init_angles = np.tile(init_angles, (n_targets, 1))
 
         best_indices = []
-        err_threshold = 0.02  # Consider solutions with error < 2cm as valid
         for i in range(n_targets):
-            # First attempt (index 0) starts from current angles
-            first_success = success_flags[i, 0] or errors[i, 0] < err_threshold
-            if first_success:
-                best_idx = 0
+            # What counts as solved is the caller's thresholds and
+            # tolerances, already folded into success_flags. Attempt 0 is
+            # the one seeded from the initial angles, so it is usually the
+            # nearest, but it wins on distance like any other attempt.
+            solved = np.where(success_flags[i])[0]
+            if solved.size:
+                distances = np.linalg.norm(
+                    solutions[i, solved] - init_angles[i], axis=1)
+                best_idx = solved[np.argmin(distances)]
             else:
-                valid_mask = success_flags[i] | (errors[i] < err_threshold)
-                if np.any(valid_mask):
-                    distances = np.linalg.norm(
-                        solutions[i, valid_mask] - init_angles[i], axis=1)
-                    valid_indices = np.where(valid_mask)[0]
-                    best_idx = valid_indices[np.argmin(distances)]
-                else:
-                    best_idx = np.argmin(errors[i])
+                best_idx = np.argmin(errors[i])
             best_indices.append(best_idx)
         best_indices = np.array(best_indices)
     else:
@@ -383,6 +380,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     ref_angles = []
     joint_limits_lower = []
     joint_limits_upper = []
+    joint_limits_unbounded = []
+    joint_names = []
 
     for i, link in enumerate(link_list):
         joint = link.joint
@@ -391,6 +390,11 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         min_angle = getattr(joint, 'min_angle', None)
         max_angle = getattr(joint, 'max_angle', None)
 
+        # A continuous joint has no limits of its own. The solver still
+        # needs a box, so it gets one half a turn wide; where the box sits
+        # is decided per solve, around the seed, by _seed_centred_limits.
+        unbounded = (min_angle is None or not np.isfinite(min_angle)
+                     or max_angle is None or not np.isfinite(max_angle))
         if min_angle is None or not np.isfinite(min_angle):
             min_angle = -np.pi
         if max_angle is None or not np.isfinite(max_angle):
@@ -398,6 +402,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
 
         joint_limits_lower.append(min_angle)
         joint_limits_upper.append(max_angle)
+        joint_limits_unbounded.append(unbounded)
+        joint_names.append(getattr(joint, 'name', None))
 
         # For mimic joints, ref_angle is computed from parent's ref_angle
         parent_idx, multiplier, offset = mimic_info[i]
@@ -528,6 +534,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         'joint_types': joint_types,
         'joint_limits_lower': np.array(joint_limits_lower),
         'joint_limits_upper': np.array(joint_limits_upper),
+        'joint_limits_unbounded': np.array(joint_limits_unbounded, dtype=bool),
+        'joint_names': joint_names,
         'ref_angles': ref_angles,
         'base_position': base_position,
         'base_rotation': base_rotation,
@@ -1243,6 +1251,226 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
+def rotation_error_so3_log_batch_numpy(actual_rot, target_rot):
+    """Rotation error as the SO(3) logarithm of ``actual^T @ target``, in NumPy.
+
+    The anti-symmetric part of a rotation matrix is ``sin(theta) * axis``,
+    which shrinks back towards zero once the error passes a quarter turn
+    and vanishes at a half turn. This returns ``theta * axis`` instead, so
+    the magnitude is the rotation angle over the whole range.
+
+    Parameters
+    ----------
+    actual_rot : numpy.ndarray
+        Current rotation matrices, ``(batch, 3, 3)``.
+    target_rot : numpy.ndarray
+        Target rotation matrices, ``(batch, 3, 3)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(batch, 3)`` axis-angle error in the actual (body) frame.
+    """
+    r = np.matmul(np.transpose(actual_rot, (0, 2, 1)), target_rot)
+    vee = 0.5 * np.stack([
+        r[:, 2, 1] - r[:, 1, 2],
+        r[:, 0, 2] - r[:, 2, 0],
+        r[:, 1, 0] - r[:, 0, 1]
+    ], axis=1)  # sin(theta) * axis
+    cos_theta = np.clip(
+        (np.trace(r, axis1=1, axis2=2) - 1.0) / 2.0, -1.0, 1.0)
+    sin_theta = np.linalg.norm(vee, axis=1)
+    theta = np.arctan2(sin_theta, cos_theta)
+
+    # theta / sin(theta) rescales the anti-symmetric part into the log.
+    # Below the guard sin(theta) is either a genuine zero rotation, where
+    # the ratio tends to 1 and vee is already the answer, or a half turn,
+    # handled separately below.
+    safe = sin_theta > 1e-6
+    scale = np.where(safe, theta / np.where(safe, sin_theta, 1.0), 1.0)
+    log = vee * scale[:, None]
+
+    # At a half turn the anti-symmetric part carries no axis, but every
+    # column of the symmetric part is parallel to it.
+    near_pi = np.logical_and(np.logical_not(safe), cos_theta < 0)
+    if np.any(near_pi):
+        idx = np.where(near_pi)[0]
+        sym = (r[idx] + np.eye(3)) / 2.0
+        col = np.argmax(np.diagonal(sym, axis1=1, axis2=2), axis=1)
+        axis = sym[np.arange(idx.shape[0]), :, col]
+        axis = axis / np.maximum(
+            np.linalg.norm(axis, axis=1, keepdims=True), 1e-12)
+        # Either sign is a valid logarithm; keep the one the residual
+        # anti-symmetric part points at so the step stays continuous.
+        sign = np.sign(np.sum(axis * vee[idx], axis=1))
+        sign = np.where(sign == 0, 1.0, sign)
+        log[idx] = theta[idx][:, None] * axis * sign[:, None]
+    return log
+
+
+def _seed_centred_limits(lower, upper, unbounded, seed, n_rows):
+    """Box the continuous joints around the seed instead of around zero.
+
+    A joint the URDF declares ``continuous`` has no limits, so the solver
+    substitutes half a turn either side of zero. That box makes the solve
+    refuse to cross a half turn, and yanks back any joint already sitting
+    outside it. Centring the box on the seed removes both: the seed is
+    always inside, and the nearer way round is always reachable.
+
+    Parameters
+    ----------
+    lower, upper : numpy.ndarray
+        Per-joint limits, ``(n_opt,)``.
+    unbounded : numpy.ndarray
+        Boolean mask of the joints with no limits of their own, ``(n_opt,)``.
+    seed : numpy.ndarray or None
+        Seed angles, ``(n_targets, n_opt)``. ``None`` when the solve starts
+        from random angles, in which case there is nothing to centre on.
+    n_rows : int
+        Number of rows to return.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(lower, upper)``, each ``(n_rows, n_opt)``.
+    """
+    lo = np.broadcast_to(np.asarray(lower, dtype=np.float64),
+                         (n_rows, len(lower))).copy()
+    hi = np.broadcast_to(np.asarray(upper, dtype=np.float64),
+                         (n_rows, len(upper))).copy()
+    if seed is None or unbounded is None or not np.any(unbounded):
+        return lo, hi
+    seed = np.asarray(seed, dtype=np.float64)
+    if seed.shape[0] != n_rows:
+        raise ValueError(
+            "seed has {} rows but {} were expected".format(
+                seed.shape[0], n_rows))
+    lo[:, unbounded] = seed[:, unbounded] - np.pi
+    hi[:, unbounded] = seed[:, unbounded] + np.pi
+    return lo, hi
+
+
+def _retry_seed_angles(row_lower, row_upper, base_seed, attempts_per_pose,
+                       random_initial_range, retry_seed):
+    """Build the seed angles for every attempt of a batch IK solve.
+
+    Attempt 0 of each pose is the caller's seed, when there is one. The
+    retries are drawn either from the joint range at large, or from a
+    neighbourhood of that seed.
+
+    Parameters
+    ----------
+    row_lower, row_upper : numpy.ndarray
+        Per-attempt joint box, ``(n_expanded, n_opt)``.
+    base_seed : numpy.ndarray or None
+        Seed angles per pose, ``(n_targets, n_opt)``, or ``None`` to draw
+        every attempt at random.
+    attempts_per_pose : int
+        Attempts per pose; the rows of the box are grouped by pose.
+    random_initial_range : float
+        Width of the draw as a fraction of each joint's span, in (0, 1].
+    retry_seed : str
+        ``'random'`` centres the draw on the middle of each joint's range,
+        the way retries have always worked. ``'current'`` centres it on
+        the caller's seed instead, so the retries stay in the same region
+        of configuration space as the pose the robot is already in.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_expanded, n_opt)`` seed angles.
+    """
+    if retry_seed not in ('random', 'current'):
+        raise ValueError(
+            "retry_seed must be 'random' or 'current', got {!r}".format(
+                retry_seed))
+    span = np.asarray(row_upper, dtype=np.float64) - np.asarray(
+        row_lower, dtype=np.float64)
+    half = float(random_initial_range) * span / 2.0
+    if retry_seed == 'current' and base_seed is not None:
+        centre = np.repeat(np.asarray(base_seed, dtype=np.float64),
+                           attempts_per_pose, axis=0)
+    else:
+        centre = (np.asarray(row_lower, dtype=np.float64)
+                  + np.asarray(row_upper, dtype=np.float64)) / 2.0
+    angles = centre + np.random.uniform(-half, half)
+    angles = np.clip(angles, row_lower, row_upper)
+    if base_seed is not None:
+        angles[::attempts_per_pose] = base_seed
+    return angles
+
+
+def _normalize_axis_tolerance(tolerance):
+    """Normalise a per-axis IK tolerance into a length-3 array.
+
+    Parameters
+    ----------
+    tolerance : sequence of (float or None), or None
+        Per-axis tolerance. ``None`` entries, and entries that are not
+        strictly positive, mean "no tolerance on this axis".
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(3,)`` array of tolerances, or ``None`` when no axis has one.
+    """
+    if tolerance is None:
+        return None
+    tol = np.asarray([0.0 if t is None or t <= 0 else float(t)
+                      for t in tolerance], dtype=np.float64)
+    if not np.any(tol > 0):
+        return None
+    return tol
+
+
+def _apply_translation_tolerance(pos_err, target_rot, tol, xp=np):
+    """Drop the position error along target axes that are already close enough.
+
+    The error is resolved in the target frame, the axes whose error is
+    within ``tol`` are zeroed, and the remainder is rotated back to the
+    world frame.
+
+    Parameters
+    ----------
+    pos_err : array
+        World-frame position error, ``(batch, 3)``.
+    target_rot : array
+        Target rotation matrices, ``(batch, 3, 3)``.
+    tol : numpy.ndarray
+        Per-axis tolerance, ``(3,)``.
+    xp : module
+        Array module to compute with (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    array
+        World-frame position error with the tolerated axes removed.
+    """
+    local_err = xp.einsum('bji,bj->bi', target_rot, pos_err)
+    local_err = xp.where(xp.abs(local_err) <= tol, 0.0, local_err)
+    return xp.einsum('bij,bj->bi', target_rot, local_err)
+
+
+def _apply_rotation_tolerance(rot_err, tol, xp=np):
+    """Zero the rotation error components that are already within tolerance.
+
+    Parameters
+    ----------
+    rot_err : array
+        Rotation error in the move target's local frame, ``(batch, 3)``.
+    tol : numpy.ndarray
+        Per-axis tolerance, ``(3,)``.
+    xp : module
+        Array module to compute with (``numpy`` or ``jax.numpy``).
+
+    Returns
+    -------
+    array
+        Rotation error with the tolerated axes removed.
+    """
+    return xp.where(xp.abs(rot_err) <= tol, 0.0, rot_err)
+
+
 def _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices):
     """Create a function that applies dynamic joint limit clipping in NumPy.
 
@@ -1545,6 +1773,9 @@ def _create_numpy_optimized_solver(fk_params):
 
     joint_limits_lower = fk_params['joint_limits_lower'][non_mimic_indices]
     joint_limits_upper = fk_params['joint_limits_upper'][non_mimic_indices]
+    unbounded_opt = fk_params.get(
+        'joint_limits_unbounded',
+        np.zeros(len(joint_limits_lower), dtype=bool))[non_mimic_indices]
 
     # Create dynamic limit clipper if there are dynamic limits
     dynamic_clipper = _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices)
@@ -1576,7 +1807,11 @@ def _create_numpy_optimized_solver(fk_params):
               position_mask=True,
               rotation_mask=True,
               rotation_mirror=None,
+              translation_tolerance=None,
+              rotation_tolerance=None,
               attempts_per_pose=1,
+              random_initial_range=0.7,
+              retry_seed='random',
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
@@ -1606,6 +1841,19 @@ def _create_numpy_optimized_solver(fk_params):
             (preferred for motion); smaller entries make it "heavier"
             (discouraged). None (default) is uniform weighting (identity).
             Applied as ``δq = W J^T (J W J^T + λI)^{-1} e``.
+        translation_tolerance : sequence of 3 floats or None
+            Per-axis position tolerance, in metres, measured along the
+            target frame's own axes. An axis whose error is within its
+            tolerance is treated as reached.
+        rotation_tolerance : sequence of 3 floats or None
+            Per-axis rotation tolerance, in radians, measured in the move
+            target's local frame. An axis whose error is within its
+            tolerance is treated as reached.
+        random_initial_range : float
+            Width of a retry's draw as a fraction of each joint's span.
+        retry_seed : str
+            ``'random'`` draws retries from the middle of the joint range,
+            ``'current'`` draws them around the caller's seed.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as JAX solver.
         return_all_attempts : bool
@@ -1633,6 +1881,9 @@ def _create_numpy_optimized_solver(fk_params):
         has_pos_constraint = pos_mask_sum > 0
         has_rot_constraint = rot_mask_sum > 0
 
+        trans_tol = _normalize_axis_tolerance(translation_tolerance)
+        rot_tol = _normalize_axis_tolerance(rotation_tolerance)
+
         # Determine active Jacobian rows
         # Position: rows 0,1,2; Rotation: rows 3,4,5
         # For rotation, always include all 3 rows when there's any constraint
@@ -1650,42 +1901,42 @@ def _create_numpy_optimized_solver(fk_params):
         # Create mirror rotation if specified
         mirror_rot = _create_mirror_rotation_matrix(rotation_mirror)
 
+        # Seed angles, in opt-variable order, before anything is expanded.
+        base_seed = None
+        if initial_angles is not None:
+            init_angles = np.asarray(initial_angles)
+            if init_angles.ndim == 1:
+                init_angles = np.tile(init_angles, (n_targets, 1))
+            base_seed = init_angles[:, non_mimic_indices]
+
         # Handle attempts_per_pose
+        n_expanded = n_targets * attempts_per_pose
+        seed_for_box = base_seed if (
+            base_seed is not None
+            and (attempts_per_pose == 1 or use_current_angles)) else None
+        row_lower, row_upper = _seed_centred_limits(
+            joint_limits_lower, joint_limits_upper, unbounded_opt,
+            seed_for_box, n_targets)
         if attempts_per_pose > 1:
             target_positions_expanded = np.repeat(
                 target_positions, attempts_per_pose, axis=0)
             target_rotations_expanded = np.repeat(
                 target_rotations, attempts_per_pose, axis=0)
+            row_lower = np.repeat(row_lower, attempts_per_pose, axis=0)
+            row_upper = np.repeat(row_upper, attempts_per_pose, axis=0)
 
-            n_expanded = n_targets * attempts_per_pose
-            if initial_angles is not None and use_current_angles:
-                init_angles = np.asarray(initial_angles)
-                if init_angles.ndim == 1:
-                    init_angles = np.tile(init_angles, (n_targets, 1))
-                init_opt_angles = np.zeros((n_expanded, n_opt))
-                for t in range(n_targets):
-                    init_opt_angles[t * attempts_per_pose] = (
-                        init_angles[t, non_mimic_indices])
-                    for a in range(1, attempts_per_pose):
-                        idx = t * attempts_per_pose + a
-                        init_opt_angles[idx] = np.random.uniform(
-                            joint_limits_lower, joint_limits_upper)
-            else:
-                init_opt_angles = np.random.uniform(
-                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt))
+            init_opt_angles = _retry_seed_angles(
+                row_lower, row_upper,
+                base_seed if use_current_angles else None,
+                attempts_per_pose, random_initial_range, retry_seed)
         else:
             target_positions_expanded = target_positions
             target_rotations_expanded = target_rotations
-            n_expanded = n_targets
 
-            if initial_angles is not None:
-                init_angles = np.asarray(initial_angles)
-                if init_angles.ndim == 1:
-                    init_angles = np.tile(init_angles, (n_targets, 1))
-                init_opt_angles = init_angles[:, non_mimic_indices]
+            if base_seed is not None:
+                init_opt_angles = base_seed
             else:
-                init_opt_angles = np.random.uniform(
-                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt))
+                init_opt_angles = np.random.uniform(row_lower, row_upper)
 
         target_pos = target_positions_expanded
         target_rot = target_rotations_expanded
@@ -1721,26 +1972,19 @@ def _create_numpy_optimized_solver(fk_params):
             # Build error vector: (batch, 6)
             # Position error
             pos_err = (target_pos - pos) * pos_mask_arr  # (batch, 3)
+            if trans_tol is not None:
+                pos_err = _apply_translation_tolerance(
+                    pos_err, target_rot, trans_tol)
 
             # Rotation error in local frame, masked, then rotated to world
             if has_rot_constraint:
-                rot_T = np.transpose(rot, axes=(0, 2, 1))
-                r_diff = np.matmul(rot_T, target_rot)
-
-                rot_err_local = 0.5 * np.stack([
-                    r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                    r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                    r_diff[:, 1, 0] - r_diff[:, 0, 1]
-                ], axis=1)  # (batch, 3)
+                rot_err_local = rotation_error_so3_log_batch_numpy(
+                    rot, target_rot)  # (batch, 3)
 
                 if mirror_rot is not None:
                     target_rot_m = target_rot @ mirror_rot
-                    r_diff_m = np.matmul(rot_T, target_rot_m)
-                    rot_err_local_m = 0.5 * np.stack([
-                        r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                        r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                        r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                    ], axis=1)
+                    rot_err_local_m = rotation_error_so3_log_batch_numpy(
+                        rot, target_rot_m)
 
                     # Select mirrored where closer
                     frob_direct = np.sum((target_rot - rot) ** 2, axis=(1, 2))
@@ -1751,6 +1995,9 @@ def _create_numpy_optimized_solver(fk_params):
 
                 # Mask in local frame, then rotate to world for Jacobian
                 rot_err_local_masked = rot_err_local * rot_mask_arr
+                if rot_tol is not None:
+                    rot_err_local_masked = _apply_rotation_tolerance(
+                        rot_err_local_masked, rot_tol)
                 rot_err_world = np.einsum(
                     'bij,bj->bi', rot, rot_err_local_masked)
             else:
@@ -1783,17 +2030,22 @@ def _create_numpy_optimized_solver(fk_params):
                 delta_q = np.einsum('bji,bj->bi', JW, solved)
 
             opt_angles = opt_angles + delta_q
-            opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
+            opt_angles = np.clip(opt_angles, row_lower, row_upper)
 
             # Apply dynamic joint limits if present
             if dynamic_clipper is not None:
                 opt_angles = dynamic_clipper(opt_angles)
 
-            # Early stopping: check convergence
-            pos_err_sq = np.sum(
-                ((target_pos - pos) * pos_mask_arr) ** 2, axis=1)
-            if np.all(pos_err_sq < pos_threshold * pos_threshold):
-                # Need to also check rotation for final convergence
+            # Early stopping: every pose has to satisfy both halves of the
+            # task, otherwise a pose whose position lands first would stop
+            # the loop with its orientation still unsolved.
+            converged = np.sum(pos_err ** 2, axis=1) < pos_threshold ** 2
+            if has_rot_constraint:
+                converged = np.logical_and(
+                    converged,
+                    np.sum(rot_err_local_masked ** 2, axis=1)
+                    < rot_threshold ** 2)
+            if np.all(converged):
                 break
 
         # Final clipping to ensure dynamic limits are satisfied
@@ -1807,32 +2059,32 @@ def _create_numpy_optimized_solver(fk_params):
 
         # Position error
         if has_pos_constraint:
-            pos_err_final = np.sqrt(np.sum(
-                ((target_pos - pos_final) * pos_mask_arr) ** 2, axis=1))
+            pos_err_vec = (target_pos - pos_final) * pos_mask_arr
+            if trans_tol is not None:
+                pos_err_vec = _apply_translation_tolerance(
+                    pos_err_vec, target_rot, trans_tol)
+            pos_err_final = np.sqrt(np.sum(pos_err_vec ** 2, axis=1))
         else:
             pos_err_final = np.zeros(n_expanded)
 
         # Rotation error
         if has_rot_constraint:
-            rot_T = np.transpose(rot_final, axes=(0, 2, 1))
-            r_diff = np.matmul(rot_T, target_rot)
-            rot_err_local = 0.5 * np.stack([
-                r_diff[:, 2, 1] - r_diff[:, 1, 2],
-                r_diff[:, 0, 2] - r_diff[:, 2, 0],
-                r_diff[:, 1, 0] - r_diff[:, 0, 1]
-            ], axis=1)
+            rot_err_local = rotation_error_so3_log_batch_numpy(
+                rot_final, target_rot)
             rot_err_masked = rot_err_local * rot_mask_arr
+            if rot_tol is not None:
+                rot_err_masked = _apply_rotation_tolerance(
+                    rot_err_masked, rot_tol)
             rot_err_final = np.sqrt(np.sum(rot_err_masked ** 2, axis=1))
 
             if mirror_rot is not None:
                 target_rot_m = target_rot @ mirror_rot
-                r_diff_m = np.matmul(rot_T, target_rot_m)
-                rot_err_local_m = 0.5 * np.stack([
-                    r_diff_m[:, 2, 1] - r_diff_m[:, 1, 2],
-                    r_diff_m[:, 0, 2] - r_diff_m[:, 2, 0],
-                    r_diff_m[:, 1, 0] - r_diff_m[:, 0, 1]
-                ], axis=1)
+                rot_err_local_m = rotation_error_so3_log_batch_numpy(
+                    rot_final, target_rot_m)
                 rot_err_masked_m = rot_err_local_m * rot_mask_arr
+                if rot_tol is not None:
+                    rot_err_masked_m = _apply_rotation_tolerance(
+                        rot_err_masked_m, rot_tol)
                 rot_err_m = np.sqrt(np.sum(rot_err_masked_m ** 2, axis=1))
                 rot_err_final = np.minimum(rot_err_final, rot_err_m)
         else:
@@ -3604,6 +3856,11 @@ def _create_jax_jacobian_solver(fk_params, backend):
     # Joint limits for non-mimic joints
     joint_limits_lower = jnp.array(fk_params['joint_limits_lower'][non_mimic_indices])
     joint_limits_upper = jnp.array(fk_params['joint_limits_upper'][non_mimic_indices])
+    joint_limits_lower_np = fk_params['joint_limits_lower'][non_mimic_indices]
+    joint_limits_upper_np = fk_params['joint_limits_upper'][non_mimic_indices]
+    unbounded_opt = fk_params.get(
+        'joint_limits_unbounded',
+        np.zeros(len(joint_limits_lower_np), dtype=bool))[non_mimic_indices]
 
     non_mimic_indices_jax = jnp.array(non_mimic_indices.astype(np.int32))
 
@@ -3615,15 +3872,24 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
     def _create_batched_solver_fn(max_iterations, damping, pos_threshold,
                                   rot_threshold, pos_mask_arr, rot_mask_arr,
-                                  rotation_mirror, weight_diag_tuple=None):
+                                  rotation_mirror, weight_diag_tuple=None,
+                                  trans_tol_tuple=None, rot_tol_tuple=None):
         """Create JIT-compiled batched Jacobian solver using fori_loop.
 
         ``weight_diag_tuple`` is either None (unweighted DLS) or a tuple
         of floats of length ``n_opt`` specifying the per-opt-variable
         weights for a weighted DLS update ``Δq = W J^T (J W J^T + λI)^-1 e``.
+
+        ``trans_tol_tuple`` and ``rot_tol_tuple`` are either None or
+        3-tuples of per-axis tolerances; an axis whose error is within its
+        tolerance is treated as reached and stops driving the solve.
         """
         pos_mask = jnp.array(pos_mask_arr)
         rot_mask = jnp.array(rot_mask_arr)
+        trans_tol = (None if trans_tol_tuple is None
+                     else jnp.array(trans_tol_tuple))
+        rot_tol = (None if rot_tol_tuple is None
+                   else jnp.array(rot_tol_tuple))
 
         pos_mask_sum = float(np.sum(pos_mask_arr))
         rot_mask_sum = float(np.sum(rot_mask_arr))
@@ -3768,7 +4034,8 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
             return J_opt, ee_pos, ee_rot, full_angles
 
-        def solve_batched(init_opt_angles, target_pos, target_rot):
+        def solve_batched(init_opt_angles, target_pos, target_rot,
+                          box_lower, box_upper):
             """Solve batch IK using fori_loop with batched operations."""
 
             def body_fn(i, opt_angles):
@@ -3776,6 +4043,9 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
                 # Position error: (batch, 3)
                 pos_err = (target_pos - pos) * pos_mask
+                if trans_tol is not None:
+                    pos_err = _apply_translation_tolerance(
+                        pos_err, target_rot, trans_tol, xp=jnp)
 
                 # Rotation error in local frame, masked, rotated to world
                 # Use SO(3) logarithmic map for better accuracy
@@ -3796,6 +4066,9 @@ def _create_jax_jacobian_solver(fk_params, backend):
                             use_mirror, rot_err_local_m, rot_err_local)
 
                     rot_err_local_masked = rot_err_local * rot_mask
+                    if rot_tol is not None:
+                        rot_err_local_masked = _apply_rotation_tolerance(
+                            rot_err_local_masked, rot_tol, xp=jnp)
                     rot_err_world = jnp.einsum(
                         'bij,bj->bi', rot, rot_err_local_masked)
                 else:
@@ -3825,8 +4098,7 @@ def _create_jax_jacobian_solver(fk_params, backend):
                     delta_q = jnp.einsum('bji,bj->bi', JW, solved)
 
                 new_opt = opt_angles + delta_q
-                new_opt = jnp.clip(
-                    new_opt, joint_limits_lower, joint_limits_upper)
+                new_opt = jnp.clip(new_opt, box_lower, box_upper)
 
                 # Apply dynamic joint limits if present
                 if dynamic_clipper is not None:
@@ -3846,13 +4118,19 @@ def _create_jax_jacobian_solver(fk_params, backend):
             _, pos_final, rot_final, final_full = _compute_jac_fk(final_opt)
 
             # Position error
-            pos_err_final = jnp.sqrt(jnp.sum(
-                ((target_pos - pos_final) * pos_mask) ** 2, axis=1))
+            pos_err_vec = (target_pos - pos_final) * pos_mask
+            if trans_tol is not None:
+                pos_err_vec = _apply_translation_tolerance(
+                    pos_err_vec, target_rot, trans_tol, xp=jnp)
+            pos_err_final = jnp.sqrt(jnp.sum(pos_err_vec ** 2, axis=1))
 
             # Rotation error using SO(3) logarithmic map
             if has_rot_constraint:
                 rot_err_local = rotation_error_so3_log_batch(rot_final, target_rot)
                 rot_err_masked = rot_err_local * rot_mask
+                if rot_tol is not None:
+                    rot_err_masked = _apply_rotation_tolerance(
+                        rot_err_masked, rot_tol, xp=jnp)
                 rot_err_final = jnp.sqrt(jnp.sum(
                     rot_err_masked ** 2, axis=1))
 
@@ -3860,8 +4138,12 @@ def _create_jax_jacobian_solver(fk_params, backend):
                     target_rot_m = target_rot @ mirror_rot
                     rot_err_local_m = rotation_error_so3_log_batch(
                         rot_final, target_rot_m)
+                    rot_err_masked_m = rot_err_local_m * rot_mask
+                    if rot_tol is not None:
+                        rot_err_masked_m = _apply_rotation_tolerance(
+                            rot_err_masked_m, rot_tol, xp=jnp)
                     rot_err_m = jnp.sqrt(jnp.sum(
-                        (rot_err_local_m * rot_mask) ** 2, axis=1))
+                        rot_err_masked_m ** 2, axis=1))
                     rot_err_final = jnp.minimum(rot_err_final, rot_err_m)
             else:
                 rot_err_final = jnp.zeros_like(pos_err_final)
@@ -3891,7 +4173,11 @@ def _create_jax_jacobian_solver(fk_params, backend):
               position_mask=True,
               rotation_mask=True,
               rotation_mirror=None,
+              translation_tolerance=None,
+              rotation_tolerance=None,
               attempts_per_pose=1,
+              random_initial_range=0.7,
+              retry_seed='random',
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
@@ -3915,6 +4201,19 @@ def _create_jax_jacobian_solver(fk_params, backend):
             Position error threshold for success.
         rot_threshold : float
             Rotation error threshold for success.
+        translation_tolerance : sequence of 3 floats or None
+            Per-axis position tolerance, in metres, measured along the
+            target frame's own axes. An axis whose error is within its
+            tolerance is treated as reached.
+        rotation_tolerance : sequence of 3 floats or None
+            Per-axis rotation tolerance, in radians, measured in the move
+            target's local frame. An axis whose error is within its
+            tolerance is treated as reached.
+        random_initial_range : float
+            Width of a retry's draw as a fraction of each joint's span.
+        retry_seed : str
+            ``'random'`` draws retries from the middle of the joint range,
+            ``'current'`` draws them around the caller's seed.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as gradient descent solver.
         return_all_attempts : bool
@@ -3937,11 +4236,21 @@ def _create_jax_jacobian_solver(fk_params, backend):
         if initial_angles is None:
             init = (joint_limits_lower + joint_limits_upper) / 2
             base_initial_opt_angles = backend.stack([init] * n_targets)
+            base_seed_np = None
         else:
             initial_angles = backend.array(np.asarray(initial_angles, dtype=np.float64))
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
             base_initial_opt_angles = initial_angles[:, non_mimic_indices]
+            base_seed_np = backend.to_numpy(base_initial_opt_angles)
+
+        # Continuous joints get their half-turn box centred on the seed.
+        seed_for_box = base_seed_np if (
+            base_seed_np is not None
+            and (attempts_per_pose == 1 or use_current_angles)) else None
+        row_lower_np, row_upper_np = _seed_centred_limits(
+            joint_limits_lower_np, joint_limits_upper_np, unbounded_opt,
+            seed_for_box, n_targets)
 
         # Handle multiple attempts
         if attempts_per_pose > 1:
@@ -3952,20 +4261,14 @@ def _create_jax_jacobian_solver(fk_params, backend):
             expanded_target_rotations_np = np.repeat(
                 target_rotations_np, attempts_per_pose, axis=0)
 
-            lower_np = backend.to_numpy(joint_limits_lower)
-            upper_np = backend.to_numpy(joint_limits_upper)
             base_initial_np = backend.to_numpy(base_initial_opt_angles)
 
-            n_expanded = n_targets * attempts_per_pose
-            if use_current_angles:
-                all_initial = np.random.uniform(
-                    lower_np, upper_np,
-                    size=(n_targets, attempts_per_pose, n_opt))
-                all_initial[:, 0, :] = base_initial_np
-                all_initial = all_initial.reshape(n_expanded, n_opt)
-            else:
-                all_initial = np.random.uniform(
-                    lower_np, upper_np, size=(n_expanded, n_opt))
+            row_lower_np = np.repeat(row_lower_np, attempts_per_pose, axis=0)
+            row_upper_np = np.repeat(row_upper_np, attempts_per_pose, axis=0)
+            all_initial = _retry_seed_angles(
+                row_lower_np, row_upper_np,
+                base_initial_np if use_current_angles else None,
+                attempts_per_pose, random_initial_range, retry_seed)
 
             initial_opt_angles = backend.array(all_initial.astype(np.float64))
             target_positions_solve = backend.array(
@@ -3999,20 +4302,29 @@ def _create_jax_jacobian_solver(fk_params, backend):
                 weight_diag_tuple = tuple(float(w) for w in weight_diag_arr)
 
         # Get or create JIT-compiled solver
+        trans_tol = _normalize_axis_tolerance(translation_tolerance)
+        rot_tol = _normalize_axis_tolerance(rotation_tolerance)
+        trans_tol_tuple = None if trans_tol is None else tuple(trans_tol)
+        rot_tol_tuple = None if rot_tol is None else tuple(rot_tol)
+
         cache_key = (max_iterations, damping, pos_threshold, rot_threshold,
                      tuple(pos_mask_arr), tuple(rot_mask_arr),
-                     rotation_mirror, weight_diag_tuple)
+                     rotation_mirror, weight_diag_tuple,
+                     trans_tol_tuple, rot_tol_tuple)
         if cache_key not in _jit_cache:
             _jit_cache[cache_key] = _create_batched_solver_fn(
                 max_iterations, damping, pos_threshold, rot_threshold,
                 pos_mask_arr, rot_mask_arr, rotation_mirror,
-                weight_diag_tuple=weight_diag_tuple)
+                weight_diag_tuple=weight_diag_tuple,
+                trans_tol_tuple=trans_tol_tuple,
+                rot_tol_tuple=rot_tol_tuple)
 
         solver_fn = _jit_cache[cache_key]
 
         # Solve
         all_solutions, all_success, all_errors = solver_fn(
-            initial_opt_angles, target_positions_solve, target_rotations_solve)
+            initial_opt_angles, target_positions_solve, target_rotations_solve,
+            backend.array(row_lower_np), backend.array(row_upper_np))
 
         # Select best from multiple attempts
         if attempts_per_pose > 1:
@@ -4531,54 +4843,13 @@ def create_batch_ik_solver(robot_model, link_list, move_target,
             all_success_np = backend.to_numpy(all_success)
             all_errors_np = backend.to_numpy(all_errors)
 
-            # Reshape to (n_targets, attempts_per_pose, ...)
-            all_solutions_np = all_solutions_np.reshape(
-                n_targets, attempts_per_pose, n_joints
-            )
-            all_success_np = all_success_np.reshape(n_targets, attempts_per_pose)
-            all_errors_np = all_errors_np.reshape(n_targets, attempts_per_pose)
+            solutions, success_flags, errors = _select_best_attempts(
+                all_solutions_np, all_success_np, all_errors_np,
+                n_targets, attempts_per_pose, n_joints,
+                select_closest_to_initial, initial_angles)
 
-            if select_closest_to_initial and initial_angles is not None:
-                # Prefer first attempt (starts from current angles) if successful
-                # Otherwise select from successful solutions the one closest to initial
-                init_angles_np = np.asarray(initial_angles)
-                if init_angles_np.ndim == 1:
-                    init_angles_np = np.tile(init_angles_np, (n_targets, 1))
-
-                best_indices = []
-                err_threshold = 0.02  # Consider solutions with error < 2cm as valid
-                for i in range(n_targets):
-                    # First attempt (index 0) starts from current angles
-                    first_success = all_success_np[i, 0] or all_errors_np[i, 0] < err_threshold
-                    if first_success:
-                        # Use first attempt if it succeeded
-                        best_idx = 0
-                    else:
-                        # Find other successful attempts
-                        valid_mask = all_success_np[i] | (all_errors_np[i] < err_threshold)
-                        if np.any(valid_mask):
-                            # Select the one closest to initial angles
-                            distances = np.linalg.norm(
-                                all_solutions_np[i, valid_mask] - init_angles_np[i], axis=1
-                            )
-                            valid_indices = np.where(valid_mask)[0]
-                            best_idx = valid_indices[np.argmin(distances)]
-                        else:
-                            # Fall back to minimum error
-                            best_idx = np.argmin(all_errors_np[i])
-                    best_indices.append(best_idx)
-                best_indices = np.array(best_indices)
-            else:
-                # Select best attempt for each target (lowest error) - vectorized
-                best_indices = np.argmin(all_errors_np, axis=1)
-
-            # Use advanced indexing instead of Python loop
-            target_indices = np.arange(n_targets)
-            solutions = all_solutions_np[target_indices, best_indices]
-            success_flags = all_success_np[target_indices, best_indices]
-            errors = all_errors_np[target_indices, best_indices]
-
-            return backend.array(solutions), backend.array(success_flags), backend.array(errors)
+            return (backend.array(solutions), backend.array(success_flags),
+                    backend.array(errors))
         else:
             return all_solutions, all_success, all_errors
 
