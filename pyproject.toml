@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scikit-robot"
-version = "0.3.35"
+version = "0.3.36"
 description = "A Flexible Framework for Robot Control in Python"
 readme = "README.md"
 license = {text = "MIT"}
