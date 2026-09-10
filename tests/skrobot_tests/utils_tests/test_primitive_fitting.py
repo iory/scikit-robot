@@ -125,6 +125,43 @@ class TestAutoTypeSelection(unittest.TestCase):
         self.assertEqual(params['type'], 'cylinder')
 
 
+def _max_distance_to_segment(points, p1, p2):
+    """Largest distance from ``points`` to the segment ``p1 -> p2``."""
+    points = np.asarray(points, dtype=float)
+    axis = p2 - p1
+    length_sq = max(float(axis @ axis), 1e-18)
+    t = np.clip((points - p1) @ axis / length_sq, 0.0, 1.0)
+    closest = p1 + t[:, None] * axis
+    return float(np.max(np.linalg.norm(points - closest, axis=1)))
+
+
+class TestFitCapsule(unittest.TestCase):
+
+    def test_axis_follows_longest_extent(self):
+        # A link-shaped box: the capsule must be swept along the 0.40 m
+        # direction, not collapsed into a sphere across it.
+        extents = np.array([0.40, 0.06, 0.05])
+        mesh = trimesh.creation.box(extents=extents)
+
+        params = fit_primitive_to_mesh(mesh, primitive_type='capsule')
+
+        self.assertEqual(params['type'], 'capsule')
+        np.testing.assert_allclose(params['axis'], [1.0, 0.0, 0.0])
+        self.assertLess(params['radius'], 0.05)
+        self.assertGreater(params['height'], 0.3)
+
+    def test_capsule_encloses_mesh(self):
+        for extents in ([0.40, 0.06, 0.05], [0.02, 0.30, 0.02]):
+            mesh = trimesh.creation.box(extents=extents)
+            params = fit_primitive_to_mesh(mesh, primitive_type='capsule')
+            axis = np.asarray(params['axis'], dtype=float)
+            center = np.asarray(params['center'], dtype=float)
+            half = 0.5 * params['height'] * axis
+            worst = _max_distance_to_segment(
+                mesh.vertices, center - half, center + half)
+            self.assertLessEqual(worst, params['radius'] + 1e-9)
+
+
 class TestPrimitiveParamsToOrigin(unittest.TestCase):
 
     def test_box_roundtrips_center_and_rpy(self):
