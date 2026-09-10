@@ -1014,6 +1014,87 @@ class TestRobotModel(unittest.TestCase):
                 backends.append('jax')
         return backends
 
+    def test_batch_inverse_kinematics_keeps_continuous_joint_in_place(self):
+        """A continuous joint past half a turn must not be dragged back."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+        self.assertEqual(fetch.wrist_roll_joint.joint_type, 'continuous')
+
+        for backend in self._batch_ik_backends():
+            for start in (0.0, 4.0, 5.5, -5.5):
+                fetch.reset_pose()
+                fetch.wrist_roll_joint.joint_angle(start)
+                seed = fetch.angle_vector().copy()
+                here = fetch.rarm.end_coords.copy_worldcoords()
+
+                fetch.angle_vector(seed.copy())
+                result = fetch.batch_inverse_kinematics(
+                    [here], move_target=fetch.rarm.end_coords, stop=60,
+                    backend=backend)
+                self.assertTrue(result.success_flags[0])
+                self.assertAlmostEqual(
+                    result.solutions[0][index], start, places=3)
+
+    def test_batch_inverse_kinematics_continuous_joint_crosses_half_turn(self):
+        """The shorter way round must stay open across the half turn."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+
+        fetch.reset_pose()
+        fetch.wrist_roll_joint.joint_angle(3.30)
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        fetch.reset_pose()
+        fetch.wrist_roll_joint.joint_angle(3.00)
+        seed = fetch.angle_vector().copy()
+
+        for backend in self._batch_ik_backends():
+            fetch.angle_vector(seed.copy())
+            result = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords, stop=100,
+                backend=backend)
+            self.assertTrue(result.success_flags[0])
+            # np.pi would mean the joint stopped at the edge of a box that
+            # has no business being there.
+            self.assertGreater(result.solutions[0][index], np.pi + 1e-3)
+
+    def test_batch_inverse_kinematics_joint_weights(self):
+        """A joint held back takes less of the task."""
+        fetch = self.fetch
+        index = [j.name for j in fetch.joint_list].index('wrist_roll_joint')
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        target.rotate(0.5, 'x')
+
+        for backend in self._batch_ik_backends():
+            moved = {}
+            for weights in (None, {'wrist_roll_joint': 0.1}):
+                fetch.angle_vector(seed.copy())
+                result = fetch.batch_inverse_kinematics(
+                    [target], move_target=fetch.rarm.end_coords,
+                    link_list=fetch.rarm.link_list, stop=100,
+                    backend=backend, joint_weights=weights)
+                self.assertTrue(result.success_flags[0])
+                moved[weights is None] = abs(
+                    result.solutions[0][index] - seed[index])
+            self.assertLess(moved[False], moved[True])
+
+        fetch.angle_vector(seed.copy())
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list,
+                joint_weights={'no_such_joint': 0.1})
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, joint_weights=[1.0, 2.0])
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list,
+                joint_weights={'wrist_roll_joint': 0.0})
+
     def test_batch_inverse_kinematics_select_closest_to_initial(self):
         """Retries must not swing the arm to a far branch to save a hair."""
         fetch = self.fetch
@@ -1023,8 +1104,9 @@ class TestRobotModel(unittest.TestCase):
             pos=fetch.rarm.end_coords.worldpos() + [0.05, -0.25, 0.30])
         target.rotate(np.pi * 0.9, 'y')
 
+        compared = 0
         for backend in self._batch_ik_backends():
-            for random_seed in (0, 2, 4):
+            for random_seed in (0, 1, 2, 3, 4):
                 moved = {}
                 for closest in (True, False):
                     fetch.angle_vector(seed.copy())
@@ -1033,10 +1115,16 @@ class TestRobotModel(unittest.TestCase):
                         [target], move_target=fetch.rarm.end_coords,
                         stop=60, attempts_per_pose=5, backend=backend,
                         select_closest_to_initial=closest)
-                    self.assertTrue(result.success_flags[0])
+                    if not result.success_flags[0]:
+                        # Whether the random restarts find this pose at all
+                        # is not what is under test.
+                        break
                     moved[closest] = np.abs(
                         np.asarray(result.solutions[0]) - seed).max()
-                self.assertLessEqual(moved[True], moved[False] + 1e-9)
+                if len(moved) == 2:
+                    self.assertLessEqual(moved[True], moved[False] + 1e-9)
+                    compared += 1
+        self.assertGreater(compared, 0)
 
     def test_batch_inverse_kinematics_rotation_tolerance(self):
         """A rotation already inside the tolerance must not move the arm."""

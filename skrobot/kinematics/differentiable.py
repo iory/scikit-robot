@@ -380,6 +380,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
     ref_angles = []
     joint_limits_lower = []
     joint_limits_upper = []
+    joint_limits_unbounded = []
+    joint_names = []
 
     for i, link in enumerate(link_list):
         joint = link.joint
@@ -388,6 +390,11 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         min_angle = getattr(joint, 'min_angle', None)
         max_angle = getattr(joint, 'max_angle', None)
 
+        # A continuous joint has no limits of its own. The solver still
+        # needs a box, so it gets one half a turn wide; where the box sits
+        # is decided per solve, around the seed, by _seed_centred_limits.
+        unbounded = (min_angle is None or not np.isfinite(min_angle)
+                     or max_angle is None or not np.isfinite(max_angle))
         if min_angle is None or not np.isfinite(min_angle):
             min_angle = -np.pi
         if max_angle is None or not np.isfinite(max_angle):
@@ -395,6 +402,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
 
         joint_limits_lower.append(min_angle)
         joint_limits_upper.append(max_angle)
+        joint_limits_unbounded.append(unbounded)
+        joint_names.append(getattr(joint, 'name', None))
 
         # For mimic joints, ref_angle is computed from parent's ref_angle
         parent_idx, multiplier, offset = mimic_info[i]
@@ -525,6 +534,8 @@ def extract_fk_parameters(robot_model, link_list, move_target):
         'joint_types': joint_types,
         'joint_limits_lower': np.array(joint_limits_lower),
         'joint_limits_upper': np.array(joint_limits_upper),
+        'joint_limits_unbounded': np.array(joint_limits_unbounded, dtype=bool),
+        'joint_names': joint_names,
         'ref_angles': ref_angles,
         'base_position': base_position,
         'base_rotation': base_rotation,
@@ -1297,6 +1308,48 @@ def rotation_error_so3_log_batch_numpy(actual_rot, target_rot):
     return log
 
 
+def _seed_centred_limits(lower, upper, unbounded, seed, n_rows):
+    """Box the continuous joints around the seed instead of around zero.
+
+    A joint the URDF declares ``continuous`` has no limits, so the solver
+    substitutes half a turn either side of zero. That box makes the solve
+    refuse to cross a half turn, and yanks back any joint already sitting
+    outside it. Centring the box on the seed removes both: the seed is
+    always inside, and the nearer way round is always reachable.
+
+    Parameters
+    ----------
+    lower, upper : numpy.ndarray
+        Per-joint limits, ``(n_opt,)``.
+    unbounded : numpy.ndarray
+        Boolean mask of the joints with no limits of their own, ``(n_opt,)``.
+    seed : numpy.ndarray or None
+        Seed angles, ``(n_targets, n_opt)``. ``None`` when the solve starts
+        from random angles, in which case there is nothing to centre on.
+    n_rows : int
+        Number of rows to return.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(lower, upper)``, each ``(n_rows, n_opt)``.
+    """
+    lo = np.broadcast_to(np.asarray(lower, dtype=np.float64),
+                         (n_rows, len(lower))).copy()
+    hi = np.broadcast_to(np.asarray(upper, dtype=np.float64),
+                         (n_rows, len(upper))).copy()
+    if seed is None or unbounded is None or not np.any(unbounded):
+        return lo, hi
+    seed = np.asarray(seed, dtype=np.float64)
+    if seed.shape[0] != n_rows:
+        raise ValueError(
+            "seed has {} rows but {} were expected".format(
+                seed.shape[0], n_rows))
+    lo[:, unbounded] = seed[:, unbounded] - np.pi
+    hi[:, unbounded] = seed[:, unbounded] + np.pi
+    return lo, hi
+
+
 def _normalize_axis_tolerance(tolerance):
     """Normalise a per-axis IK tolerance into a length-3 array.
 
@@ -1670,6 +1723,9 @@ def _create_numpy_optimized_solver(fk_params):
 
     joint_limits_lower = fk_params['joint_limits_lower'][non_mimic_indices]
     joint_limits_upper = fk_params['joint_limits_upper'][non_mimic_indices]
+    unbounded_opt = fk_params.get(
+        'joint_limits_unbounded',
+        np.zeros(len(joint_limits_lower), dtype=bool))[non_mimic_indices]
 
     # Create dynamic limit clipper if there are dynamic limits
     dynamic_clipper = _create_dynamic_limit_clipper_numpy(fk_params, non_mimic_indices)
@@ -1788,42 +1844,43 @@ def _create_numpy_optimized_solver(fk_params):
         # Create mirror rotation if specified
         mirror_rot = _create_mirror_rotation_matrix(rotation_mirror)
 
+        # Seed angles, in opt-variable order, before anything is expanded.
+        base_seed = None
+        if initial_angles is not None:
+            init_angles = np.asarray(initial_angles)
+            if init_angles.ndim == 1:
+                init_angles = np.tile(init_angles, (n_targets, 1))
+            base_seed = init_angles[:, non_mimic_indices]
+
         # Handle attempts_per_pose
+        n_expanded = n_targets * attempts_per_pose
+        seed_for_box = base_seed if (
+            base_seed is not None
+            and (attempts_per_pose == 1 or use_current_angles)) else None
+        row_lower, row_upper = _seed_centred_limits(
+            joint_limits_lower, joint_limits_upper, unbounded_opt,
+            seed_for_box, n_targets)
         if attempts_per_pose > 1:
             target_positions_expanded = np.repeat(
                 target_positions, attempts_per_pose, axis=0)
             target_rotations_expanded = np.repeat(
                 target_rotations, attempts_per_pose, axis=0)
+            row_lower = np.repeat(row_lower, attempts_per_pose, axis=0)
+            row_upper = np.repeat(row_upper, attempts_per_pose, axis=0)
 
-            n_expanded = n_targets * attempts_per_pose
-            if initial_angles is not None and use_current_angles:
-                init_angles = np.asarray(initial_angles)
-                if init_angles.ndim == 1:
-                    init_angles = np.tile(init_angles, (n_targets, 1))
-                init_opt_angles = np.zeros((n_expanded, n_opt))
-                for t in range(n_targets):
-                    init_opt_angles[t * attempts_per_pose] = (
-                        init_angles[t, non_mimic_indices])
-                    for a in range(1, attempts_per_pose):
-                        idx = t * attempts_per_pose + a
-                        init_opt_angles[idx] = np.random.uniform(
-                            joint_limits_lower, joint_limits_upper)
+            if base_seed is not None and use_current_angles:
+                init_opt_angles = np.random.uniform(row_lower, row_upper)
+                init_opt_angles[::attempts_per_pose] = base_seed
             else:
-                init_opt_angles = np.random.uniform(
-                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt))
+                init_opt_angles = np.random.uniform(row_lower, row_upper)
         else:
             target_positions_expanded = target_positions
             target_rotations_expanded = target_rotations
-            n_expanded = n_targets
 
-            if initial_angles is not None:
-                init_angles = np.asarray(initial_angles)
-                if init_angles.ndim == 1:
-                    init_angles = np.tile(init_angles, (n_targets, 1))
-                init_opt_angles = init_angles[:, non_mimic_indices]
+            if base_seed is not None:
+                init_opt_angles = base_seed
             else:
-                init_opt_angles = np.random.uniform(
-                    joint_limits_lower, joint_limits_upper, (n_expanded, n_opt))
+                init_opt_angles = np.random.uniform(row_lower, row_upper)
 
         target_pos = target_positions_expanded
         target_rot = target_rotations_expanded
@@ -1917,7 +1974,7 @@ def _create_numpy_optimized_solver(fk_params):
                 delta_q = np.einsum('bji,bj->bi', JW, solved)
 
             opt_angles = opt_angles + delta_q
-            opt_angles = np.clip(opt_angles, joint_limits_lower, joint_limits_upper)
+            opt_angles = np.clip(opt_angles, row_lower, row_upper)
 
             # Apply dynamic joint limits if present
             if dynamic_clipper is not None:
@@ -3743,6 +3800,11 @@ def _create_jax_jacobian_solver(fk_params, backend):
     # Joint limits for non-mimic joints
     joint_limits_lower = jnp.array(fk_params['joint_limits_lower'][non_mimic_indices])
     joint_limits_upper = jnp.array(fk_params['joint_limits_upper'][non_mimic_indices])
+    joint_limits_lower_np = fk_params['joint_limits_lower'][non_mimic_indices]
+    joint_limits_upper_np = fk_params['joint_limits_upper'][non_mimic_indices]
+    unbounded_opt = fk_params.get(
+        'joint_limits_unbounded',
+        np.zeros(len(joint_limits_lower_np), dtype=bool))[non_mimic_indices]
 
     non_mimic_indices_jax = jnp.array(non_mimic_indices.astype(np.int32))
 
@@ -3916,7 +3978,8 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
             return J_opt, ee_pos, ee_rot, full_angles
 
-        def solve_batched(init_opt_angles, target_pos, target_rot):
+        def solve_batched(init_opt_angles, target_pos, target_rot,
+                          box_lower, box_upper):
             """Solve batch IK using fori_loop with batched operations."""
 
             def body_fn(i, opt_angles):
@@ -3979,8 +4042,7 @@ def _create_jax_jacobian_solver(fk_params, backend):
                     delta_q = jnp.einsum('bji,bj->bi', JW, solved)
 
                 new_opt = opt_angles + delta_q
-                new_opt = jnp.clip(
-                    new_opt, joint_limits_lower, joint_limits_upper)
+                new_opt = jnp.clip(new_opt, box_lower, box_upper)
 
                 # Apply dynamic joint limits if present
                 if dynamic_clipper is not None:
@@ -4111,11 +4173,21 @@ def _create_jax_jacobian_solver(fk_params, backend):
         if initial_angles is None:
             init = (joint_limits_lower + joint_limits_upper) / 2
             base_initial_opt_angles = backend.stack([init] * n_targets)
+            base_seed_np = None
         else:
             initial_angles = backend.array(np.asarray(initial_angles, dtype=np.float64))
             if len(initial_angles.shape) == 1:
                 initial_angles = backend.stack([initial_angles] * n_targets)
             base_initial_opt_angles = initial_angles[:, non_mimic_indices]
+            base_seed_np = backend.to_numpy(base_initial_opt_angles)
+
+        # Continuous joints get their half-turn box centred on the seed.
+        seed_for_box = base_seed_np if (
+            base_seed_np is not None
+            and (attempts_per_pose == 1 or use_current_angles)) else None
+        row_lower_np, row_upper_np = _seed_centred_limits(
+            joint_limits_lower_np, joint_limits_upper_np, unbounded_opt,
+            seed_for_box, n_targets)
 
         # Handle multiple attempts
         if attempts_per_pose > 1:
@@ -4126,20 +4198,13 @@ def _create_jax_jacobian_solver(fk_params, backend):
             expanded_target_rotations_np = np.repeat(
                 target_rotations_np, attempts_per_pose, axis=0)
 
-            lower_np = backend.to_numpy(joint_limits_lower)
-            upper_np = backend.to_numpy(joint_limits_upper)
             base_initial_np = backend.to_numpy(base_initial_opt_angles)
 
-            n_expanded = n_targets * attempts_per_pose
+            row_lower_np = np.repeat(row_lower_np, attempts_per_pose, axis=0)
+            row_upper_np = np.repeat(row_upper_np, attempts_per_pose, axis=0)
+            all_initial = np.random.uniform(row_lower_np, row_upper_np)
             if use_current_angles:
-                all_initial = np.random.uniform(
-                    lower_np, upper_np,
-                    size=(n_targets, attempts_per_pose, n_opt))
-                all_initial[:, 0, :] = base_initial_np
-                all_initial = all_initial.reshape(n_expanded, n_opt)
-            else:
-                all_initial = np.random.uniform(
-                    lower_np, upper_np, size=(n_expanded, n_opt))
+                all_initial[::attempts_per_pose] = base_initial_np
 
             initial_opt_angles = backend.array(all_initial.astype(np.float64))
             target_positions_solve = backend.array(
@@ -4194,7 +4259,8 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
         # Solve
         all_solutions, all_success, all_errors = solver_fn(
-            initial_opt_angles, target_positions_solve, target_rotations_solve)
+            initial_opt_angles, target_positions_solve, target_rotations_solve,
+            backend.array(row_lower_np), backend.array(row_upper_np))
 
         # Select best from multiple attempts
         if attempts_per_pose > 1:

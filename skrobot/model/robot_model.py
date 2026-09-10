@@ -2962,6 +2962,53 @@ def _check_batch_ik_kwargs(kwargs):
     raise TypeError(message)
 
 
+def _resolve_joint_weights(weights, joint_names, n_opt):
+    """Turn a joint-weight request into the vector the batch solver wants.
+
+    Parameters
+    ----------
+    weights : dict, sequence, or None
+        Either a mapping from joint (or joint name) to weight, with every
+        joint left out defaulting to 1.0, or one weight per moved joint in
+        chain order. A weight above 1 lets that joint take more of the
+        motion; below 1 holds it back.
+    joint_names : list of str
+        Names of the joints the solve moves, in the solver's own order.
+    n_opt : int
+        Number of joints the solve moves.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        ``(n_opt,)`` weights, or ``None`` when nothing was asked for.
+    """
+    if weights is None:
+        return None
+    if isinstance(weights, dict):
+        vec = np.ones(n_opt, dtype=np.float64)
+        index = {}
+        for i, name in enumerate(joint_names):
+            if name is not None and name not in index:
+                index[name] = i
+        for key, value in weights.items():
+            name = getattr(key, 'name', key)
+            if name not in index:
+                raise ValueError(
+                    "joint_weights names {!r}, which is not one of the "
+                    "joints this solve moves: {}".format(
+                        name, ', '.join(str(n) for n in joint_names)))
+            vec[index[name]] = float(value)
+    else:
+        vec = np.array(weights, dtype=np.float64).ravel()
+        if vec.shape != (n_opt,):
+            raise ValueError(
+                "joint_weights must have one entry per moved joint ({}), "
+                "got {}".format(n_opt, vec.shape[0]))
+    if np.any(vec <= 0):
+        raise ValueError("joint_weights must be strictly positive")
+    return vec
+
+
 class RobotModel(CascadedLink):
 
     def __init__(self, link_list=None, joint_list=None,
@@ -3871,6 +3918,7 @@ class RobotModel(CascadedLink):
             joint_list=None,
             invariant_joint_list=None,
             select_closest_to_initial=True,
+            joint_weights=None,
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -3955,6 +4003,14 @@ class RobotModel(CascadedLink):
             a millimetre closer. False takes the smallest error whatever it
             costs in motion. No effect with a single attempt, or when the
             seeds are random.
+        joint_weights : dict, sequence, or None
+            How freely each joint may take up the motion. Either a mapping
+            from joint (or joint name) to weight, everything left out
+            defaulting to 1.0, or one weight per moved joint in chain
+            order. Above 1 the joint moves more, below 1 it is held back
+            and the rest of the chain absorbs the task instead, which is
+            the way to stop a wrist resolving redundancy by spinning.
+            Strictly positive. None (default) weights every joint the same.
         **kwargs : dict
             Additional keyword arguments
 
@@ -4084,6 +4140,7 @@ class RobotModel(CascadedLink):
                 random_initial_range, translation_tolerance,
                 rotation_tolerance, backend=backend,
                 select_closest_to_initial=select_closest_to_initial,
+                joint_weights=joint_weights,
                 _base_state=_base_state,
                 base_weight=base_weight,
                 **kwargs)
@@ -4097,7 +4154,7 @@ class RobotModel(CascadedLink):
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, backend=None,
-            select_closest_to_initial=True, **kwargs):
+            select_closest_to_initial=True, joint_weights=None, **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
 
@@ -4143,6 +4200,7 @@ class RobotModel(CascadedLink):
                 random_initial_range, translation_tolerance,
                 rotation_tolerance, backend=backend,
                 select_closest_to_initial=select_closest_to_initial,
+                joint_weights=joint_weights,
                 _base_state=_base_state, **kwargs)
         if link_list_is_nested and len(link_list) > 1:
             raise ValueError(
@@ -4291,10 +4349,19 @@ class RobotModel(CascadedLink):
         )
         solver_kwargs['damping'] = 0.01
 
-        # Build per-opt-variable weights when use_base + base_weight is
-        # active. The virtual chain joints are always the leading non-mimic
-        # entries of link_list (see _attach_batch_virtual_base_chain), so
-        # they occupy opt indices 0..n_dof-1 in the single-EE solver.
+        # Per-opt-variable weights. The virtual chain joints are always
+        # the leading non-mimic entries of link_list (see
+        # _attach_batch_virtual_base_chain), so base_weight owns opt
+        # indices 0..n_dof-1 and overrides anything asked for there.
+        mimic_parents = np.asarray(solver.fk_params.get(
+            'mimic_parent_indices', np.array([-1])))
+        n_opt = solver.fk_params['n_joints'] - int(np.sum(mimic_parents >= 0))
+        opt_names = [name for name, parent
+                     in zip(solver.fk_params.get(
+                         'joint_names', [None] * len(mimic_parents)),
+                         mimic_parents)
+                     if parent < 0]
+        weight_vec = _resolve_joint_weights(joint_weights, opt_names, n_opt)
         if _base_state is not None and _base_weight is not None:
             n_dof = _base_state['n_dof']
             base_weight_vec = np.broadcast_to(
@@ -4303,13 +4370,11 @@ class RobotModel(CascadedLink):
             if np.any(base_weight_vec <= 0):
                 raise ValueError(
                     "base_weight must be strictly positive")
-            n_opt = solver.fk_params['n_joints'] - int(
-                np.sum(np.asarray(
-                    solver.fk_params.get(
-                        'mimic_parent_indices', np.array([-1])) >= 0)))
-            joint_weights = np.ones(n_opt, dtype=np.float64)
-            joint_weights[:n_dof] = base_weight_vec
-            solver_kwargs['joint_weights'] = joint_weights
+            if weight_vec is None:
+                weight_vec = np.ones(n_opt, dtype=np.float64)
+            weight_vec[:n_dof] = base_weight_vec
+        if weight_vec is not None:
+            solver_kwargs['joint_weights'] = weight_vec
 
         # Every attempt is solved regardless; asking for them costs only the
         # reshape (and, on JAX, a transfer the selection step already does).
@@ -4455,7 +4520,7 @@ class RobotModel(CascadedLink):
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, backend=None,
-            select_closest_to_initial=True, **kwargs):
+            select_closest_to_initial=True, joint_weights=None, **kwargs):
         """Multi-end-effector batch IK.
 
         ``link_list`` is ``list[list[Link]]`` (one chain per task) and
@@ -4589,10 +4654,14 @@ class RobotModel(CascadedLink):
             joint_limit_avoidance=joint_limit_avoidance,
         )
 
-        # Per-union-variable weights when use_base + base_weight is set.
-        # The virtual chain joints always end up at the leading union
-        # indices (first task to register them owns 0..n_dof-1 and later
-        # tasks map to the same slots).
+        # Per-union-variable weights. The virtual chain joints always
+        # end up at the leading union indices (first task to register them
+        # owns 0..n_dof-1 and later tasks map to the same slots), so
+        # base_weight overrides anything asked for there.
+        union_n_opt = solver.union_n_opt
+        weight_vec = _resolve_joint_weights(
+            joint_weights, [getattr(ref, 'name', None) for ref in union_refs],
+            union_n_opt)
         if _base_state is not None and _base_weight is not None:
             n_dof = _base_state['n_dof']
             base_weight_vec = np.broadcast_to(
@@ -4600,8 +4669,8 @@ class RobotModel(CascadedLink):
                 (n_dof,)).copy()
             if np.any(base_weight_vec <= 0):
                 raise ValueError("base_weight must be strictly positive")
-            union_n_opt = solver.union_n_opt
-            joint_weights = np.ones(union_n_opt, dtype=np.float64)
+            if weight_vec is None:
+                weight_vec = np.ones(union_n_opt, dtype=np.float64)
             # Locate each virtual-chain joint in union_refs (they should
             # be at the beginning, but look them up explicitly rather
             # than assuming the position).
@@ -4617,9 +4686,10 @@ class RobotModel(CascadedLink):
                     "could not locate all virtual-chain joints in union "
                     "for base_weight wiring ({} of {})".format(
                         len(located), n_dof))
-            joint_weights[np.asarray(located, dtype=np.int64)] = (
+            weight_vec[np.asarray(located, dtype=np.int64)] = (
                 base_weight_vec)
-            solver_kwargs['joint_weights'] = joint_weights
+        if weight_vec is not None:
+            solver_kwargs['joint_weights'] = weight_vec
 
         solver_kwargs['return_all_attempts'] = True
         solutions_array, success_array, errors_array, attempts_result = solver(
