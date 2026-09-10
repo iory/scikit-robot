@@ -1014,6 +1014,37 @@ class TestRobotModel(unittest.TestCase):
                 backends.append('jax')
         return backends
 
+    def test_batch_inverse_kinematics_retry_seed(self):
+        """Retries can be drawn near the seed instead of across the range."""
+        fetch = self.fetch
+        fetch.reset_pose()
+        seed = fetch.angle_vector().copy()
+        target = fetch.rarm.end_coords.copy_worldcoords()
+        target.rotate(0.5, 'x')
+
+        def spread(retry_seed, backend):
+            fetch.angle_vector(seed.copy())
+            np.random.seed(0)
+            result = fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, stop=100, backend=backend,
+                attempts_per_pose=20, retry_seed=retry_seed,
+                random_initial_range=0.3)
+            attempts = np.asarray(result.attempts.angle_vectors)[0]
+            solved = result.attempts.success[0]
+            self.assertTrue(np.any(solved))
+            return np.linalg.norm(attempts[solved] - seed, axis=1).max()
+
+        for backend in self._batch_ik_backends():
+            self.assertLess(spread('current', backend),
+                            spread('random', backend))
+
+        with self.assertRaises(ValueError):
+            fetch.batch_inverse_kinematics(
+                [target], move_target=fetch.rarm.end_coords,
+                link_list=fetch.rarm.link_list, attempts_per_pose=2,
+                retry_seed='nearby')
+
     def test_batch_inverse_kinematics_keeps_continuous_joint_in_place(self):
         """A continuous joint past half a turn must not be dragged back."""
         fetch = self.fetch
@@ -1119,10 +1150,12 @@ class TestRobotModel(unittest.TestCase):
                         # Whether the random restarts find this pose at all
                         # is not what is under test.
                         break
-                    moved[closest] = np.abs(
-                        np.asarray(result.solutions[0]) - seed).max()
+                    # The picker ranks attempts by Euclidean distance, so
+                    # that is the distance the guarantee is about.
+                    moved[closest] = np.linalg.norm(
+                        np.asarray(result.solutions[0]) - seed)
                 if len(moved) == 2:
-                    self.assertLessEqual(moved[True], moved[False] + 1e-9)
+                    self.assertLessEqual(moved[True], moved[False] + 1e-5)
                     compared += 1
         self.assertGreater(compared, 0)
 

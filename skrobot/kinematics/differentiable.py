@@ -1350,6 +1350,56 @@ def _seed_centred_limits(lower, upper, unbounded, seed, n_rows):
     return lo, hi
 
 
+def _retry_seed_angles(row_lower, row_upper, base_seed, attempts_per_pose,
+                       random_initial_range, retry_seed):
+    """Build the seed angles for every attempt of a batch IK solve.
+
+    Attempt 0 of each pose is the caller's seed, when there is one. The
+    retries are drawn either from the joint range at large, or from a
+    neighbourhood of that seed.
+
+    Parameters
+    ----------
+    row_lower, row_upper : numpy.ndarray
+        Per-attempt joint box, ``(n_expanded, n_opt)``.
+    base_seed : numpy.ndarray or None
+        Seed angles per pose, ``(n_targets, n_opt)``, or ``None`` to draw
+        every attempt at random.
+    attempts_per_pose : int
+        Attempts per pose; the rows of the box are grouped by pose.
+    random_initial_range : float
+        Width of the draw as a fraction of each joint's span, in (0, 1].
+    retry_seed : str
+        ``'random'`` centres the draw on the middle of each joint's range,
+        the way retries have always worked. ``'current'`` centres it on
+        the caller's seed instead, so the retries stay in the same region
+        of configuration space as the pose the robot is already in.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_expanded, n_opt)`` seed angles.
+    """
+    if retry_seed not in ('random', 'current'):
+        raise ValueError(
+            "retry_seed must be 'random' or 'current', got {!r}".format(
+                retry_seed))
+    span = np.asarray(row_upper, dtype=np.float64) - np.asarray(
+        row_lower, dtype=np.float64)
+    half = float(random_initial_range) * span / 2.0
+    if retry_seed == 'current' and base_seed is not None:
+        centre = np.repeat(np.asarray(base_seed, dtype=np.float64),
+                           attempts_per_pose, axis=0)
+    else:
+        centre = (np.asarray(row_lower, dtype=np.float64)
+                  + np.asarray(row_upper, dtype=np.float64)) / 2.0
+    angles = centre + np.random.uniform(-half, half)
+    angles = np.clip(angles, row_lower, row_upper)
+    if base_seed is not None:
+        angles[::attempts_per_pose] = base_seed
+    return angles
+
+
 def _normalize_axis_tolerance(tolerance):
     """Normalise a per-axis IK tolerance into a length-3 array.
 
@@ -1760,6 +1810,8 @@ def _create_numpy_optimized_solver(fk_params):
               translation_tolerance=None,
               rotation_tolerance=None,
               attempts_per_pose=1,
+              random_initial_range=0.7,
+              retry_seed='random',
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
@@ -1797,6 +1849,11 @@ def _create_numpy_optimized_solver(fk_params):
             Per-axis rotation tolerance, in radians, measured in the move
             target's local frame. An axis whose error is within its
             tolerance is treated as reached.
+        random_initial_range : float
+            Width of a retry's draw as a fraction of each joint's span.
+        retry_seed : str
+            ``'random'`` draws retries from the middle of the joint range,
+            ``'current'`` draws them around the caller's seed.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as JAX solver.
         return_all_attempts : bool
@@ -1868,11 +1925,10 @@ def _create_numpy_optimized_solver(fk_params):
             row_lower = np.repeat(row_lower, attempts_per_pose, axis=0)
             row_upper = np.repeat(row_upper, attempts_per_pose, axis=0)
 
-            if base_seed is not None and use_current_angles:
-                init_opt_angles = np.random.uniform(row_lower, row_upper)
-                init_opt_angles[::attempts_per_pose] = base_seed
-            else:
-                init_opt_angles = np.random.uniform(row_lower, row_upper)
+            init_opt_angles = _retry_seed_angles(
+                row_lower, row_upper,
+                base_seed if use_current_angles else None,
+                attempts_per_pose, random_initial_range, retry_seed)
         else:
             target_positions_expanded = target_positions
             target_rotations_expanded = target_rotations
@@ -4120,6 +4176,8 @@ def _create_jax_jacobian_solver(fk_params, backend):
               translation_tolerance=None,
               rotation_tolerance=None,
               attempts_per_pose=1,
+              random_initial_range=0.7,
+              retry_seed='random',
               use_current_angles=True,
               select_closest_to_initial=False,
               joint_weights=None,
@@ -4151,6 +4209,11 @@ def _create_jax_jacobian_solver(fk_params, backend):
             Per-axis rotation tolerance, in radians, measured in the move
             target's local frame. An axis whose error is within its
             tolerance is treated as reached.
+        random_initial_range : float
+            Width of a retry's draw as a fraction of each joint's span.
+        retry_seed : str
+            ``'random'`` draws retries from the middle of the joint range,
+            ``'current'`` draws them around the caller's seed.
         position_mask, rotation_mask, rotation_mirror, attempts_per_pose,
         use_current_angles, select_closest_to_initial : same as gradient descent solver.
         return_all_attempts : bool
@@ -4202,9 +4265,10 @@ def _create_jax_jacobian_solver(fk_params, backend):
 
             row_lower_np = np.repeat(row_lower_np, attempts_per_pose, axis=0)
             row_upper_np = np.repeat(row_upper_np, attempts_per_pose, axis=0)
-            all_initial = np.random.uniform(row_lower_np, row_upper_np)
-            if use_current_angles:
-                all_initial[::attempts_per_pose] = base_initial_np
+            all_initial = _retry_seed_angles(
+                row_lower_np, row_upper_np,
+                base_initial_np if use_current_angles else None,
+                attempts_per_pose, random_initial_range, retry_seed)
 
             initial_opt_angles = backend.array(all_initial.astype(np.float64))
             target_positions_solve = backend.array(

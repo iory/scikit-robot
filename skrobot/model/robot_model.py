@@ -3919,6 +3919,7 @@ class RobotModel(CascadedLink):
             invariant_joint_list=None,
             select_closest_to_initial=True,
             joint_weights=None,
+            retry_seed='random',
             **kwargs):
         """Solve batch inverse kinematics for multiple target poses.
 
@@ -3981,7 +3982,19 @@ class RobotModel(CascadedLink):
         attempts_per_pose : int
             Number of attempts with different random initial poses per target (default: 1)
         random_initial_range : float
-            Range for random initial poses as fraction of joint limits (0.0-1.0, default: 0.7)
+            Width of a retry's draw, as a fraction of each joint's span
+            (0.0-1.0, default 0.7). Only used when ``attempts_per_pose``
+            is greater than 1.
+        retry_seed : str
+            Where the retries start from when ``attempts_per_pose`` is
+            greater than 1. 'random' (default) draws them from the middle
+            of each joint's range, which explores the whole arm and is
+            what you want when hunting for any reachable configuration.
+            'current' draws them around the pose the solve started from,
+            so every candidate stays in that region of configuration
+            space; combined with ``select_closest_to_initial`` it gives
+            several nearby solutions and returns the nearest one. Attempt
+            0 is the seed itself either way.
         translation_tolerance : list or None
             Per-axis position tolerance from target as [x_tol, y_tol, z_tol]
             in meters. If error on an axis is within tolerance, it's treated
@@ -4141,6 +4154,7 @@ class RobotModel(CascadedLink):
                 rotation_tolerance, backend=backend,
                 select_closest_to_initial=select_closest_to_initial,
                 joint_weights=joint_weights,
+                retry_seed=retry_seed,
                 _base_state=_base_state,
                 base_weight=base_weight,
                 **kwargs)
@@ -4154,7 +4168,8 @@ class RobotModel(CascadedLink):
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, backend=None,
-            select_closest_to_initial=True, joint_weights=None, **kwargs):
+            select_closest_to_initial=True, joint_weights=None,
+            retry_seed='random', **kwargs):
         """Internal implementation of batch inverse kinematics using backend solver."""
         from skrobot.kinematics.differentiable import create_batch_ik_solver
 
@@ -4201,6 +4216,7 @@ class RobotModel(CascadedLink):
                 rotation_tolerance, backend=backend,
                 select_closest_to_initial=select_closest_to_initial,
                 joint_weights=joint_weights,
+                retry_seed=retry_seed,
                 _base_state=_base_state, **kwargs)
         if link_list_is_nested and len(link_list) > 1:
             raise ValueError(
@@ -4343,6 +4359,8 @@ class RobotModel(CascadedLink):
             translation_tolerance=translation_tolerance,
             rotation_tolerance=rotation_tolerance,
             attempts_per_pose=attempts_per_pose,
+            random_initial_range=random_initial_range,
+            retry_seed=retry_seed,
             use_current_angles=use_current_angles,
             select_closest_to_initial=(select_closest_to_initial
                                        and use_current_angles),
@@ -4520,7 +4538,8 @@ class RobotModel(CascadedLink):
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
             initial_angles, alpha, attempts_per_pose, random_initial_range,
             translation_tolerance, rotation_tolerance, backend=None,
-            select_closest_to_initial=True, joint_weights=None, **kwargs):
+            select_closest_to_initial=True, joint_weights=None,
+            retry_seed='random', **kwargs):
         """Multi-end-effector batch IK.
 
         ``link_list`` is ``list[list[Link]]`` (one chain per task) and
@@ -4648,6 +4667,8 @@ class RobotModel(CascadedLink):
             rotation_mirrors=rotation_mirror,
             task_weights=task_weights,
             attempts_per_pose=attempts_per_pose,
+            random_initial_range=random_initial_range,
+            retry_seed=retry_seed,
             use_current_angles=use_current_angles,
             select_closest_to_initial=(select_closest_to_initial
                                        and use_current_angles),
