@@ -11,7 +11,43 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+# One lane per pull request, so pushing a fixup cancels the previous run's 16
+# test jobs instead of letting them finish. Every other event falls back to
+# run_id, which is unique, so pushes to main, the cron run and manual
+# dispatches each get their own lane: they are never cancelled and never queue
+# behind each other, because their results are what say whether main is green.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      # Empty when the filter step is skipped (i.e. not a pull request), and
+      # the fallback then runs everything. Pushes to main, the cron run and
+      # workflow_dispatch always get the full suite.
+      code: ${{ steps.filter.outputs.code || 'true' }}
+    steps:
+    - name: Filter changed paths
+      id: filter
+      # No checkout needed: on pull_request the action reads the changed file
+      # list from the API rather than from a working tree.
+      if: github.event_name == 'pull_request'
+      uses: dorny/paths-filter@v4
+      with:
+        # 'some-with-excludes' makes a file count only when it matches a
+        # positive pattern and no negated one. The default 'some' ORs every
+        # pattern together, which would make '!docs/**' match all of docs.
+        predicate-quantifier: 'some-with-excludes'
+        filters: |
+          code:
+            - '**'
+            - '!docs/**'
+            - '!**/*.md'
+            - '!LICENSE'
+
   formatting:
     name: Check Formatting
     runs-on: ubuntu-latest
@@ -51,10 +87,12 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: 3.11
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip setuptools
-        pip install --no-cache-dir .\[all\]
+        pip install .\[all\]
     - name: Build Sphinx Documentation (HTML)
       working-directory: ./docs/source
       run: |
@@ -71,7 +109,11 @@ jobs:
 
   tests-3x:
     name: Run Unit Tests (Python 3.x)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
+    env:
+      BLENDER_VERSION: '4.2.0'
     strategy:
       matrix:
         include:
@@ -153,6 +195,12 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
+        # Persists pip's HTTP/wheel cache across runs, keyed per OS and Python
+        # version. Only third-party downloads land there; pip does not cache a
+        # wheel built from a local directory, so scikit-robot itself is still
+        # built from source in every job.
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
     - name: Wait for apt-get lock
       run: |
         while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
@@ -164,14 +212,30 @@ jobs:
         sudo apt-get update -qq -y
         sudo apt-get install -qq -y libspatialindex-dev freeglut3-dev libsuitesparse-dev libblas-dev liblapack-dev
         sudo apt-get install -qq -y xvfb # for headless testing
+    - name: Cache the Blender archive
+      # ~350MB fetched from download.blender.org by every one of these jobs on
+      # every run. It is keyed by version alone, so one download populates the
+      # cache for the whole matrix. Kept under $HOME rather than /opt because
+      # the cache action restores as the runner user, which cannot write there.
+      uses: actions/cache@v4
+      with:
+        path: ~/blender-archive
+        key: blender-${{ env.BLENDER_VERSION }}-linux-x64
     - name: Install Blender
       run: |
+        set -euo pipefail
         sudo apt-get install -qq -y wget
-        BLENDER_VERSION="4.2.0"
-        BLENDER_URL="https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
-        wget -q ${BLENDER_URL} -O /tmp/blender.tar.xz
-        sudo tar -xf /tmp/blender.tar.xz -C /opt
-        sudo ln -s /opt/blender-${BLENDER_VERSION}-linux-x64/blender /usr/local/bin/blender
+        archive=~/blender-archive/blender-${BLENDER_VERSION}-linux-x64.tar.xz
+        if [ ! -f "$archive" ]; then
+          mkdir -p ~/blender-archive
+          # The release directory carries only major.minor ("Blender4.2"),
+          # while the file name carries the full version.
+          series=${BLENDER_VERSION%.*}
+          wget -q "https://download.blender.org/release/Blender${series}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+            -O "$archive"
+        fi
+        sudo tar -xf "$archive" -C /opt
+        sudo ln -s "/opt/blender-${BLENDER_VERSION}-linux-x64/blender" /usr/local/bin/blender
         blender --version
     - name: Install Pytest
       run: |
@@ -180,11 +244,10 @@ jobs:
         pip install pytest pytest-xdist pytest-timeout ruff
     - name: Install scikit-robot
       run: |
-        pip cache purge
         if [ "${{ matrix.skip-all-extras }}" = "true" ]; then
-          pip install --no-cache-dir .
+          pip install .
         else
-          pip install --no-cache-dir .\[all\]
+          pip install .\[all\]
         fi
 
     - name: Install NumPy and SciPy
@@ -281,6 +344,8 @@ jobs:
 
   ros2-tests:
     name: Run ROS 2 Unit Tests (${{ matrix.ros-distribution }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -371,6 +436,8 @@ jobs:
 
   tests-windows:
     name: Run Unit Tests (Windows)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -382,6 +449,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
     - name: Install Pytest
       run: |
         python -m pip install --upgrade pip setuptools wheel
@@ -389,7 +458,7 @@ jobs:
         python -m pip install pytest pytest-xdist pytest-timeout ruff
     - name: Install scikit-robot
       run: |
-        python -m pip install --no-cache-dir .[all]
+        python -m pip install .[all]
     - name: Run Pytest
       run: |
         python -m pytest -v -n auto --dist loadscope --timeout=300 --durations=0 tests --ignore=tests/skrobot_tests/viewers_tests --ignore=tests/skrobot_tests/test_examples.py
