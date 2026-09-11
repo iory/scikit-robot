@@ -199,6 +199,47 @@ jobs:
         else
           pip install scipy==${{ matrix.scipy-version }}
         fi
+    - name: Work around a wrong OpenBLAS dgemm on some runners
+      # Part of the runner pool -- an Intel Xeon 6973P-C, about one job in
+      # twelve -- returns wrong numbers from numpy's bundled OpenBLAS, which
+      # detects it as Cooperlake.  The (4, 4) by (4, n) product every
+      # trimesh.transform_points call makes comes back as [10*x + 10, 0, 0]
+      # for most rows once n passes roughly 128: the homogeneous row folded
+      # into the first column and the other two zeroed.  Every mesh a URDF
+      # scales goes through that call, so the model loads misshapen and lands
+      # as an unexplained geometry failure somewhere downstream -- it was
+      # showing up as test_sdf_from_robot_with_scale_parameter measuring a
+      # grid 7.4 times too wide, and as the Mitsuba viewer sizing a Panda
+      # scene wrong in the same job.
+      #
+      # Measured on the affected runner: HASWELL, SKYLAKEX and NEHALEM all
+      # give exact results, SAPPHIRERAPIDS does not, and OPENBLAS_NUM_THREADS=1
+      # makes no difference, so it is the kernel and not a race.  HASWELL is
+      # the one to force because this has to be harmless on the runners it is
+      # not aimed at, and SKYLAKEX would put AVX-512 kernels on the EPYC 7763s
+      # that make up much of the pool and do not have it.
+      #
+      # Only set on a runner that actually fails the multiply, so the rest
+      # keep their own kernels. OpenBLAS reads the variable when it loads, so
+      # this cannot be done from inside the test session; it has to be here.
+      run: |
+        if ! python - <<'PY'
+        import sys
+
+        import numpy as np
+
+        n = 2503
+        V = np.random.default_rng(0).random((n, 3))
+        M = np.eye(4)
+        M[:3, :3] = np.diag([10.0, 10.0, 10.0])
+        stack = np.column_stack((V, np.ones(n)))
+        got = np.dot(M, stack.T).T[:, :3]
+        sys.exit(int(np.abs(got - V * 10.0).max() > 1e-9))
+        PY
+        then
+          echo "::warning::$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-) returns wrong results from numpy's BLAS; forcing OPENBLAS_CORETYPE=HASWELL"
+          echo "OPENBLAS_CORETYPE=HASWELL" >> "$GITHUB_ENV"
+        fi
     - name: Install matplotlib for examples
       run: |
         # Required for differential_wrist_joint_limit_demo.py
