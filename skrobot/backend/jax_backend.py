@@ -39,9 +39,6 @@ def _ensure_jax():
         _jnp = jnp
         _lax = lax
 
-        # Enable float64 by default
-        jax.config.update("jax_enable_x64", True)
-
 
 class JaxBackend:
     """JAX backend for differentiable array operations.
@@ -52,7 +49,14 @@ class JaxBackend:
     Parameters
     ----------
     enable_x64 : bool
-        Enable 64-bit floating point precision. Default is True.
+        Turn JAX's 64-bit floating point mode on. Default is True, which
+        is what the rest of scikit-robot's JAX code expects.
+
+        ``jax_enable_x64`` is a process-wide setting, so ``False`` means
+        "leave it as it is" rather than "turn it off": a library has no
+        business switching double precision off underneath whatever else
+        shares the interpreter. Pass ``False`` when the process already
+        chose its own precision.
 
     Examples
     --------

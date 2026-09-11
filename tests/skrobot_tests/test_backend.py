@@ -255,3 +255,36 @@ class TestBackendDynamicsJax(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestJaxBackendPrecision(unittest.TestCase):
+    """The backend must not decide the precision of the whole process."""
+
+    @staticmethod
+    def _in_fresh_process(body):
+        import subprocess
+        import sys
+        code = ('import jax\n'
+                'from skrobot.backend.jax_backend import JaxBackend\n'
+                + body
+                + 'print(jax.config.jax_enable_x64)\n')
+        try:
+            out = subprocess.check_output(
+                [sys.executable, '-c', code], stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            return None
+        return out.decode().strip().splitlines()[-1]
+
+    def test_asking_for_no_x64_leaves_the_process_alone(self):
+        got = self._in_fresh_process(
+            'b = JaxBackend(enable_x64=False)\n'
+            'b.array([1.0, 2.0])\n')
+        if got is None:
+            self.skipTest('JAX not available')
+        self.assertEqual(got, 'False')
+
+    def test_the_default_still_turns_x64_on(self):
+        got = self._in_fresh_process('JaxBackend()\n')
+        if got is None:
+            self.skipTest('JAX not available')
+        self.assertEqual(got, 'True')
