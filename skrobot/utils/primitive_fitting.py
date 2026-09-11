@@ -132,13 +132,22 @@ def fit_box_to_mesh(mesh, oriented=False):
     return extents, center, np.eye(3)
 
 
-def fit_sphere_to_mesh(mesh):
+def fit_sphere_to_mesh(mesh, enclosing=True):
     """Fit a sphere primitive to a mesh.
 
     Parameters
     ----------
     mesh : trimesh.Trimesh
         Input mesh to fit a sphere to.
+    enclosing : bool, optional
+        If True (default), the returned sphere **contains** the whole mesh:
+        the radius is the largest distance from the bounding-box center to
+        any vertex. If False, the radius is half of the largest bounding-box
+        extent, which is a volume-like fit that does **not** contain the
+        mesh -- a unit cube gives 0.5 while its corners sit at 0.866. Only
+        pass False when the sphere is used as a visual or volumetric proxy;
+        a non-enclosing sphere silently misses contacts when used for
+        collision checking.
 
     Returns
     -------
@@ -146,12 +155,26 @@ def fit_sphere_to_mesh(mesh):
         Radius of the sphere.
     center : np.ndarray
         Center position of the sphere.
+
+    Notes
+    -----
+    Enclosing all vertices encloses the whole mesh, since every triangle
+    lies in the convex hull of its own vertices.
     """
     bounds = mesh.bounds
     center = (bounds[0] + bounds[1]) / 2
     extents = bounds[1] - bounds[0]
 
-    radius = np.max(extents) / 2
+    if not enclosing:
+        return np.max(extents) / 2, center
+
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    if vertices.size == 0:
+        # No geometry to enclose; the half-diagonal of the (degenerate)
+        # bounding box is the only defensible answer.
+        return float(np.linalg.norm(extents) / 2), center
+
+    radius = float(np.sqrt(np.max(np.sum((vertices - center) ** 2, axis=1))))
 
     return radius, center
 
@@ -211,7 +234,11 @@ def fit_cylinder_to_mesh(mesh, oriented=False):
 def fit_capsule_to_mesh(mesh):
     """Fit a capsule primitive to a mesh.
 
-    A capsule is represented as a cylinder with hemispherical caps.
+    A capsule is represented as a cylinder with hemispherical caps. The
+    capsule axis is the **longest** bounding-box extent: a link-shaped mesh
+    is long and thin, so sweeping a small sphere along its long direction is
+    what makes a capsule tight. Taking the shortest extent instead collapses
+    the capsule into a sphere as wide as the mesh is long.
 
     Parameters
     ----------
@@ -223,28 +250,50 @@ def fit_capsule_to_mesh(mesh):
     radius : float
         Radius of the capsule (both cylinder and hemisphere).
     height : float
-        Height of the cylindrical section (excluding hemispheres).
+        Height of the cylindrical section (excluding hemispheres). The
+        capsule's total length along ``axis`` is ``height + 2 * radius``.
     axis : np.ndarray
         Unit vector indicating the capsule's axis direction.
     center : np.ndarray
         Center position of the capsule.
+
+    Notes
+    -----
+    The fit **contains** the mesh: the radius is the largest perpendicular
+    distance from the axis line to any vertex, and the cylindrical section
+    is then extended until the hemispherical caps cover every vertex too.
+    So it is safe to use for collision checking, at the cost of being loose
+    on meshes that are not round in cross-section.
     """
     bounds = mesh.bounds
     center = (bounds[0] + bounds[1]) / 2
     dimensions = bounds[1] - bounds[0]
 
-    height_idx = np.argmin(dimensions)
-    total_height = dimensions[height_idx]
-
-    other_dims = [dimensions[i] for i in range(3) if i != height_idx]
-    radius = max(other_dims) / 2
-
-    height = max(0, total_height - 2 * radius)
-
+    axis_idx = int(np.argmax(dimensions))
     axis = np.zeros(3)
-    axis[height_idx] = 1
+    axis[axis_idx] = 1.0
 
-    return radius, height, axis, center
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    if vertices.size == 0:
+        # Nothing to enclose: fall back to the bounding box, using its
+        # cross-section half-diagonal so the result stays enclosing.
+        other = [dimensions[i] for i in range(3) if i != axis_idx]
+        radius = float(np.linalg.norm(other) / 2)
+        height = float(max(0.0, dimensions[axis_idx] - 2 * radius))
+        return radius, height, axis, center
+
+    local = vertices - center
+    along = local[:, axis_idx]
+    perp_sq = np.maximum(np.sum(local ** 2, axis=1) - along ** 2, 0.0)
+    radius = float(np.sqrt(np.max(perp_sq)))
+
+    # A vertex at perpendicular distance p is covered by a cap centred at
+    # half_height when |along| - sqrt(radius^2 - p^2) <= half_height, so the
+    # tightest enclosing half height is the largest such requirement.
+    cap_reach = np.sqrt(np.maximum(radius ** 2 - perp_sq, 0.0))
+    half_height = float(max(0.0, np.max(np.abs(along) - cap_reach)))
+
+    return radius, 2.0 * half_height, axis, center
 
 
 def create_primitive_mesh(primitive_params):
@@ -308,6 +357,11 @@ def _fit_type_variants(mesh, primitive_type, oriented=None):
     the oriented fit; ``False`` builds only the axis-aligned fit. Spheres and
     capsules yield a single candidate regardless. Failing fitters are skipped
     rather than raising.
+
+    Every candidate encloses the mesh, so the IoU comparison in
+    :func:`_select_best_primitive` ranks like against like: a shape that
+    scored well only because it left part of the mesh outside itself would
+    otherwise beat the shapes that cover it.
     """
     orientations = (False, True) if oriented is None else (bool(oriented),)
     variants = []
