@@ -117,40 +117,26 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: 3.10.10
-            os: ubuntu-latest
-            numpy-version: "1.23.5"
-            scipy-version: "1.8.0"
-            remove-setuptools: false
+          # The numpy and scipy apt installs on Ubuntu 22.04 (ROS Humble).
+          # Only the core is installed: pip cannot resolve the extras
+          # against numpy 1.21.5 (it backtracks to a scikit-learn sdist that
+          # no longer builds).
           - python-version: 3.10.10
             os: ubuntu-latest
             numpy-version: "1.21.5"
-            scipy-version: "latest"
-            remove-setuptools: false
-          - python-version: 3.10.10
-            os: ubuntu-latest
-            numpy-version: "latest"
             scipy-version: "1.8.0"
             remove-setuptools: false
+            skip-all-extras: true
           - python-version: 3.10.10
             os: ubuntu-latest
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: false
 
+          # The numpy and scipy apt installs on Ubuntu 24.04 (ROS Jazzy).
           - python-version: 3.12.3
             os: ubuntu-latest
             numpy-version: "1.26.4"
-            scipy-version: "1.11.4"
-            remove-setuptools: false
-          - python-version: 3.12.3
-            os: ubuntu-latest
-            numpy-version: "1.26.4"
-            scipy-version: "latest"
-            remove-setuptools: false
-          - python-version: 3.12.3
-            os: ubuntu-latest
-            numpy-version: "latest"
             scipy-version: "1.11.4"
             remove-setuptools: false
           - python-version: 3.12.3
@@ -242,6 +228,25 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install Cython
         pip install pytest pytest-xdist pytest-timeout ruff
+    - name: Pin NumPy and SciPy
+      # Written before anything that depends on numpy is installed, so every
+      # later pip install resolves against the pins. Pinning after the fact
+      # let a dependency pull numpy back up: contourpy 1.4.0 requires
+      # numpy>=2.0, and `pip install matplotlib` then replaced numpy 1.26.4
+      # with 2.x under a scipy 1.11.4 built for numpy 1.x, which failed to
+      # import.
+      if: matrix.numpy-version != 'latest' || matrix.scipy-version != 'latest'
+      run: |
+        constraints="$RUNNER_TEMP/numpy-scipy-constraints.txt"
+        : > "$constraints"
+        if [ "${{ matrix.numpy-version }}" != "latest" ]; then
+          echo "numpy==${{ matrix.numpy-version }}" >> "$constraints"
+        fi
+        if [ "${{ matrix.scipy-version }}" != "latest" ]; then
+          echo "scipy==${{ matrix.scipy-version }}" >> "$constraints"
+        fi
+        cat "$constraints"
+        echo "PIP_CONSTRAINT=$constraints" >> "$GITHUB_ENV"
     - name: Install scikit-robot
       run: |
         if [ "${{ matrix.skip-all-extras }}" = "true" ]; then
@@ -315,6 +320,23 @@ jobs:
         else
           echo "setuptools is not removed"
         fi
+    - name: Check the NumPy and SciPy under test
+      run: |
+        python - <<'PY'
+        import numpy
+        import scipy
+        import scipy.spatial  # fails when scipy was built for another numpy ABI
+
+        found = {'numpy': numpy.__version__, 'scipy': scipy.__version__}
+        expected = {'numpy': '${{ matrix.numpy-version }}',
+                    'scipy': '${{ matrix.scipy-version }}'}
+        print(found)
+        wrong = {name: (found[name], version)
+                 for name, version in expected.items()
+                 if version != 'latest' and found[name] != version}
+        if wrong:
+            raise SystemExit('installed (found, expected): {}'.format(wrong))
+        PY
     - name: Run Pytest
       run: |
         # --timeout: per-test timeout in seconds (300s = 5 minutes)
