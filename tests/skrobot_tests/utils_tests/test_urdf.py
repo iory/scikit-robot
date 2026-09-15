@@ -1049,3 +1049,62 @@ class TestConvertUrdfMeshesSimplification(unittest.TestCase):
         self._faces_of_the_saved_mesh(overwrite_mesh=True)
         source = trimesh.load(os.path.join(self._tmp, 'ball.stl'))
         self.assertLess(len(source.faces), len(self._source.faces))
+
+
+class TestWriteCollada(unittest.TestCase):
+    """A written DAE has to load in Gazebo classic, not only in trimesh."""
+
+    NS = '{http://www.collada.org/2005/11/COLLADASchema}'
+
+    def setUp(self):
+        import trimesh
+
+        self._tmp = tempfile.mkdtemp()
+        red = trimesh.creation.box(extents=[0.1, 0.1, 0.1])
+        red.visual.face_colors = [255, 0, 0, 255]
+        blue = trimesh.creation.icosphere()
+        blue.visual.face_colors = [0, 0, 255, 255]
+        self._meshes = [red, blue]
+        self._path = os.path.join(self._tmp, 'two.dae')
+        urdf_mesh._write_collada(self._meshes, self._path)
+        self._root = etree.parse(self._path).getroot()
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_ids_are_unique_across_geometries(self):
+        """Gazebo looks ids up document-wide, so a ``verts-array`` in every
+        geometry makes them all read the first one's vertices."""
+        ids = [e.get('id') for e in self._root.iter() if e.get('id')]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_every_reference_resolves(self):
+        ids = {e.get('id') for e in self._root.iter() if e.get('id')}
+        refs = [value[1:] for e in self._root.iter()
+                for value in e.attrib.values() if value.startswith('#')]
+        self.assertTrue(refs)
+        self.assertEqual([ref for ref in refs if ref not in ids], [])
+
+    def test_ambient_follows_diffuse(self):
+        """A black ambient renders every face turned from the light
+        black."""
+        shadings = [s for s in self._root.iter(self.NS + 'phong')]
+        self.assertEqual(len(shadings), 2)
+        for shading in shadings:
+            self.assertEqual(
+                shading.find(self.NS + 'ambient/' + self.NS + 'color').text,
+                shading.find(self.NS + 'diffuse/' + self.NS + 'color').text)
+
+    def test_trimesh_still_reads_the_same_geometry_and_colors(self):
+        import trimesh
+
+        scene = trimesh.load(self._path, force='scene')
+        loaded = sorted(scene.geometry.values(), key=lambda m: len(m.faces))
+        expected = sorted(self._meshes, key=lambda m: len(m.faces))
+        self.assertEqual([len(m.faces) for m in loaded],
+                         [len(m.faces) for m in expected])
+        colors = sorted(tuple(int(c) for c in m.visual.material.main_color[:3])
+                        for m in loaded)
+        self.assertEqual(colors, [(0, 0, 255), (255, 0, 0)])
