@@ -8,6 +8,7 @@ from numpy import pi
 from numpy import testing
 
 from skrobot.coordinates import CascadedCoords
+from skrobot.coordinates import Coordinates
 from skrobot.coordinates import make_cascoords
 from skrobot.coordinates import make_coords
 from skrobot.coordinates import Transform
@@ -327,6 +328,35 @@ class TestCoordinates(unittest.TestCase):
             result.translation, (1, 2, 3))
         testing.assert_almost_equal(
             result.quaternion_wxyz, (0, 0, 1, 0))
+
+    def test_move_coords_with_cascaded_local_coords(self):
+        # local_coords is a descendant of a moved parent, as with a robot link
+        root = CascadedCoords(pos=[0.3, -0.2, 0.1])
+        link = CascadedCoords(pos=[0.1, 0.05, -0.07])
+        root.assoc(link, relative_coords='local')
+        target = make_coords(pos=[1.2, -0.4, 1.5]).rotate(1.2, 'z')
+        for _ in range(3):
+            root.move_coords(target, link)
+            testing.assert_almost_equal(
+                link.worldpos(), target.worldpos())
+            testing.assert_almost_equal(
+                link.worldrot(), target.worldrot())
+
+    def test_transform_wrt_cascaded_coords(self):
+        parent = CascadedCoords(pos=[1.0, 0.0, 0.0])
+        child = CascadedCoords(pos=[0.0, 0.5, 0.0])
+        parent.assoc(child, relative_coords='local')
+        for cls in (Coordinates, CascadedCoords):
+            # identity transform with respect to any coords is no-op
+            coords = cls(pos=[0.2, 0.3, 0.4])
+            coords.transform(make_coords(), wrt=child)
+            testing.assert_almost_equal(coords.worldpos(), [0.2, 0.3, 0.4])
+            # translation along x of child (rotated 90 deg around z)
+            parent.rotate(np.pi / 2.0, 'z')
+            coords = cls(pos=[0.2, 0.3, 0.4])
+            coords.transform(make_coords(pos=[0.1, 0, 0]), wrt=child)
+            testing.assert_almost_equal(coords.worldpos(), [0.2, 0.4, 0.4])
+            parent.rotate(-np.pi / 2.0, 'z')
 
     def test_translate(self):
         c = make_coords()

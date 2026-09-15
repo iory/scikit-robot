@@ -802,7 +802,10 @@ class Coordinates(object):
             If wrt is 'local' or self, multiply c from the right.
             If wrt is 'world' or 'parent' or self.parent,
             transform c with respect to worldcoord.
-            If wrt is Coordinates, transform c with respect to c.
+            If wrt is Coordinates, transform c with respect to the world
+            pose of wrt, that is, ``W * c * W^-1 * self`` where ``W`` is
+            ``wrt.worldcoords()``. wrt may be a CascadedCoords that has
+            a parent, such as a link or ``end_coords`` of a robot.
         out : None or skrobot.coordinates.Coordinates
             If the `out` is specified, set new coordinates to `out`.
             Note that if the `out` is given, these coordinates don't change.
@@ -814,6 +817,20 @@ class Coordinates(object):
 
         Examples
         --------
+        >>> import numpy as np
+        >>> from skrobot.coordinates import CascadedCoords
+        >>> from skrobot.coordinates import Coordinates
+        >>> parent = CascadedCoords(pos=[1.0, 0.0, 0.0])
+        >>> child = CascadedCoords(pos=[0.0, 0.5, 0.0])
+        >>> _ = parent.assoc(child, relative_coords='local')
+        >>> _ = parent.rotate(np.pi / 2.0, 'z')
+
+        Translate along the x axis of ``child``, which points to the world
+        y axis:
+
+        >>> c = Coordinates(pos=[0.2, 0.3, 0.4])
+        >>> c.transform(Coordinates(pos=[0.1, 0, 0]), wrt=child).worldpos()
+        array([0.2, 0.4, 0.4])
         """
         if out is None:
             out = self
@@ -825,7 +842,8 @@ class Coordinates(object):
             # multiply c from the left
             transform_coords(c, self, out)
         elif isinstance(wrt, Coordinates):
-            transform_coords(wrt.inverse_transformation(), self, out)
+            transform_coords(wrt.worldcoords().inverse_transformation(),
+                             self, out)
             transform_coords(c, out, out)
             transform_coords(wrt.worldcoords(), out, out)
         else:
@@ -833,19 +851,42 @@ class Coordinates(object):
         return out
 
     def move_coords(self, target_coords, local_coords):
-        """Transform this coordinate so that local_coords to target_coords.
+        """Move this coordinates so that local_coords comes to target_coords.
+
+        ``local_coords`` is a frame that moves together with this
+        coordinates, typically a descendant such as ``robot.rarm.end_coords``
+        or a link of a robot. After the call, the world pose of
+        ``local_coords`` is ``target_coords``, regardless of how deep
+        ``local_coords`` is in the tree or how many times this is called.
+
+        If ``local_coords`` is not attached to this coordinates, it is not
+        moved; this coordinates is moved so that its current pose relative
+        to ``local_coords`` is kept, as if ``local_coords`` were attached.
 
         Parameters
         ----------
         target_coords : skrobot.coordinates.Coordinates
-            target coords.
+            target coords in the world frame.
         local_coords : skrobot.coordinates.Coordinates
-            local coords to be aligned.
+            coords to be aligned to ``target_coords``.
 
         Returns
         -------
         self.worldcoords() : skrobot.coordinates.Coordinates
             world coordinates.
+
+        Examples
+        --------
+        >>> from skrobot.coordinates import CascadedCoords
+        >>> from skrobot.coordinates import Coordinates
+        >>> body = CascadedCoords(pos=[0.3, 0.0, 0.0])
+        >>> hand = CascadedCoords(pos=[0.0, 0.0, 0.5])
+        >>> _ = body.assoc(hand, relative_coords='local')
+        >>> _ = body.move_coords(Coordinates(pos=[1.0, 2.0, 3.0]), hand)
+        >>> hand.worldpos()
+        array([1., 2., 3.])
+        >>> body.worldpos()
+        array([1. , 2. , 2.5])
         """
         self.transform(
             local_coords.transformation(target_coords), local_coords)
@@ -2071,7 +2112,12 @@ class CascadedCoords(Coordinates):
             If wrt is 'local' or self, multiply c from the right.
             If wrt is 'parent' or self.parent, transform c
             with respect to parentcoords. (multiply c from the left.)
-            If wrt is Coordinates, transform c with respect to c.
+            If wrt is 'world', transform c with respect to worldcoord.
+            If wrt is Coordinates, transform c with respect to the world
+            pose of wrt, that is, the world pose of this coordinates
+            becomes ``W * c * W^-1 * self.worldcoords()`` where ``W`` is
+            ``wrt.worldcoords()``. wrt may be a CascadedCoords that has
+            a parent, such as a link or ``end_coords`` of a robot.
         out : None or skrobot.coordinates.Coordinates
             If the `out` is specified, set new coordinates to `out`.
             Note that if the `out` is given, these coordinates don't change.
@@ -2085,7 +2131,8 @@ class CascadedCoords(Coordinates):
             out = self
         if isinstance(wrt, Coordinates):
             transform_coords(self.parentcoords(), self, out)
-            transform_coords(wrt.inverse_transformation(), out, out)
+            transform_coords(wrt.worldcoords().inverse_transformation(),
+                             out, out)
             transform_coords(c, out, out)
             transform_coords(wrt.worldcoords(), out, out)
             transform_coords(self.parentcoords().inverse_transformation(),
