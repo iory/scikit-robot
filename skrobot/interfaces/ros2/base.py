@@ -1,4 +1,5 @@
 import copy
+from functools import partial
 from functools import reduce
 from logging import getLogger
 from numbers import Number
@@ -488,16 +489,18 @@ class ROS2RobotInterfaceBase(Node):
                 else:
                     controller_state_topic_name = controller_state
                     trajectory_status_topic_name = trajectory_status
+                # Bind the key of this controller now. A bare closure reads
+                # the loop variable when a message arrives, so every
+                # subscription would store under the last controller's key.
                 self.create_subscription(
                     control_msgs.msg.JointTrajectoryControllerState,
                     controller_state_topic_name,
-                    lambda msg: self.set_robot_state(controller_state, msg),
+                    partial(self.set_robot_state, controller_state),
                     10)
                 self.create_subscription(
                     action_msgs.msg.GoalStatusArray,
                     trajectory_status_topic_name,
-                    lambda msg: self.set_moving_status(
-                        param['controller_type'], msg),
+                    partial(self.set_moving_status, param['controller_type']),
                     10)
         else:
             self.controller_type = controller_type

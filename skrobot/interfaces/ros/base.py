@@ -1,5 +1,6 @@
 import copy
 import datetime
+from functools import partial
 from functools import reduce
 from logging import getLogger
 from numbers import Number
@@ -468,15 +469,17 @@ class ROSRobotInterfaceBase(object):
                         trajectory_status)
                 else:
                     trajectory_status_topic_name = trajectory_status
+                # Bind the key of this controller now. A bare closure reads
+                # the loop variable when a message arrives, so every
+                # subscriber would store under the last controller's key.
                 rospy.Subscriber(
                     controller_state_topic_name,
                     control_msgs.msg.JointTrajectoryControllerState,
-                    lambda msg: self.set_robot_state(controller_state, msg))
+                    partial(self.set_robot_state, controller_state))
                 rospy.Subscriber(
                     trajectory_status_topic_name,
                     actionlib_msgs.msg.GoalStatusArray,
-                    lambda msg: self.set_moving_status(
-                        param['controller_type'], msg))
+                    partial(self.set_moving_status, param['controller_type']))
         else:  # not creating actions, just search
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
@@ -938,7 +941,7 @@ class ControllerActionClient(actionlib.SimpleActionClient):
         actionlib.SimpleActionClient.__init__(self, ns, ActionSpec)
 
     def action_feedback_cb(self, msg):
-        rospy.debug('action_feedback_cb {}'.format(msg))
+        rospy.logdebug('action_feedback_cb {}'.format(msg))
         self.last_feedback_msg_stamp = msg.header.stamp
 
     def is_interpolating(self):
