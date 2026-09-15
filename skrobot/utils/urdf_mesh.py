@@ -1083,6 +1083,70 @@ def _apply_mesh_processing(meshes, blender_remesh_applied):
     return meshes
 
 
+_COLLADA_NS = '{http://www.collada.org/2005/11/COLLADASchema}'
+
+
+def _portable_collada(data):
+    """Rewrite trimesh's Collada output so that Gazebo classic can use it.
+
+    trimesh writes two things that other loaders tolerate and Gazebo does
+    not:
+
+    * every ``<geometry>`` carries the same local ids (``verts-array``,
+      ``normals-array``, ...). Gazebo resolves ``#verts-array`` against the
+      whole document, so every geometry reads the first geometry's
+      vertices; an index past their end gives an inverted bounding box and
+      gzclient aborts on Ogre's ``AxisAlignedBox::setExtents`` assertion.
+    * every material has a black ``<ambient>``, so each face turned away
+      from the light renders black and the model looks as if it had lost
+      its colors.
+
+    Parameters
+    ----------
+    data : bytes
+        A Collada document as written by
+        :func:`trimesh.exchange.dae.export_collada`.
+
+    Returns
+    -------
+    bytes
+        The same document with the ids inside each ``<geometry>`` prefixed
+        by that geometry's id, and each black or missing ambient color
+        replaced by the diffuse color.
+    """
+    root = ET.fromstring(data)
+    for geometry in root.iter(_COLLADA_NS + 'geometry'):
+        prefix = geometry.get('id') + '-'
+        local_ids = set()
+        for element in geometry.iter():
+            if element is not geometry and element.get('id') is not None:
+                local_ids.add(element.get('id'))
+                element.set('id', prefix + element.get('id'))
+        for element in geometry.iter():
+            for key, value in element.attrib.items():
+                if value.startswith('#') and value[1:] in local_ids:
+                    element.set(key, '#' + prefix + value[1:])
+
+    for technique in root.iter(_COLLADA_NS + 'technique'):
+        for shading in technique:
+            diffuse = shading.find(_COLLADA_NS + 'diffuse/'
+                                   + _COLLADA_NS + 'color')
+            if diffuse is None:
+                continue
+            ambient = shading.find(_COLLADA_NS + 'ambient')
+            if ambient is None:
+                ambient = ET.Element(_COLLADA_NS + 'ambient')
+                ET.SubElement(ambient, _COLLADA_NS + 'color')
+                shading.find(_COLLADA_NS + 'diffuse').addprevious(ambient)
+            ambient_color = ambient.find(_COLLADA_NS + 'color')
+            if ambient_color is None:
+                continue
+            rgb = [float(v) for v in (ambient_color.text or '0 0 0').split()]
+            if not any(rgb[:3]):
+                ambient_color.text = diffuse.text
+    return ET.tostring(root, xml_declaration=True, encoding='utf-8')
+
+
 def _write_collada(meshes, output_file):
     """Write ``meshes`` as a Collada file, one geometry per face color."""
     from skrobot.utils.mesh import split_mesh_by_face_color
@@ -1098,7 +1162,8 @@ def _write_collada(meshes, output_file):
             mesh.visual.face_colors = mesh.visual.face_colors
         export_meshes.extend(split_mesh_by_face_color(mesh))
     with open(output_file, 'wb') as f:
-        f.write(trimesh.exchange.dae.export_collada(export_meshes))
+        f.write(_portable_collada(
+            trimesh.exchange.dae.export_collada(export_meshes)))
 
 
 def _write_gltf(meshes, output_file):
