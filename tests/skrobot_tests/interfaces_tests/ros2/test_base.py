@@ -13,7 +13,12 @@ import pytest
 
 
 try:
+    from action_msgs.msg import GoalStatus
+    from action_msgs.msg import GoalStatusArray
+    from control_msgs.action import FollowJointTrajectory
+    from control_msgs.msg import JointTrajectoryControllerState
     import rclpy
+    from rclpy.action import ActionServer
     from rclpy.executors import SingleThreadedExecutor
     from sensor_msgs.msg import JointState
 
@@ -27,6 +32,21 @@ try:
 
         def default_controller(self):
             return []
+
+    class _TwoControllerInterface(ROS2RobotInterfaceBase):
+        """Two controllers, to check that callbacks keep them apart."""
+
+        controller_names = ('_test_first_controller',
+                            '_test_second_controller')
+
+        def default_controller(self):
+            return [dict(
+                controller_type=name,
+                controller_action=name + '/follow_joint_trajectory',
+                controller_state=name + '/state',
+                action_type=FollowJointTrajectory,
+                joint_names=['panda_joint1'])
+                for name in self.controller_names]
 except ImportError:
     ROS2_AVAILABLE = False
 
@@ -222,3 +242,73 @@ class TestRos2BaseConstructorWaitsForJointStates(unittest.TestCase):
             publish_thread.join(timeout=1.0)
             executor.shutdown()
             publisher_node.destroy_node()
+
+
+class TestRos2BaseControllerCallbacks(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        if not rclpy.ok():
+            rclpy.init()
+
+    def setUp(self):
+        # add_controller subscribes to the state and status topics only after
+        # every action server has answered, so serve both actions.
+        self.server_node = rclpy.create_node('aux_trajectory_servers')
+        self.servers = [
+            ActionServer(self.server_node, FollowJointTrajectory,
+                         name + '/follow_joint_trajectory',
+                         lambda goal_handle: FollowJointTrajectory.Result())
+            for name in _TwoControllerInterface.controller_names]
+        self.executor = SingleThreadedExecutor()
+        self.executor.add_node(self.server_node)
+        self.spin_thread = threading.Thread(
+            target=self.executor.spin, daemon=True)
+        self.spin_thread.start()
+        self.ri = _TwoControllerInterface(
+            robot=Panda(), node_name='test_two_controllers',
+            joint_states_topic='_test_joint_states_two_controllers',
+            controller_timeout=5.0)
+        assert self.ri.joint_action_enable
+
+    def tearDown(self):
+        self.ri.destroy_node()
+        self.executor.shutdown()
+        for server in self.servers:
+            server.destroy()
+        self.server_node.destroy_node()
+
+    def _publish_until(self, msg_type, topic, msg, condition, timeout=5.0):
+        publisher = self.server_node.create_publisher(msg_type, topic, 10)
+        try:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                publisher.publish(msg)
+                rclpy.spin_once(self.ri, timeout_sec=0.1)
+                if condition():
+                    return True
+            return False
+        finally:
+            self.server_node.destroy_publisher(publisher)
+
+    def test_state_is_stored_under_its_own_controller(self):
+        first, second = _TwoControllerInterface.controller_names
+        received = self._publish_until(
+            JointTrajectoryControllerState, first + '/state',
+            JointTrajectoryControllerState(),
+            lambda: first + '/state' in self.ri.robot_state
+            or second + '/state' in self.ri.robot_state)
+        assert received
+        assert first + '/state' in self.ri.robot_state
+        assert second + '/state' not in self.ri.robot_state
+
+    def test_moving_status_is_stored_under_its_own_controller(self):
+        first, second = _TwoControllerInterface.controller_names
+        msg = GoalStatusArray(
+            status_list=[GoalStatus(status=GoalStatus.STATUS_EXECUTING)])
+        received = self._publish_until(
+            GoalStatusArray, first + '/follow_joint_trajectory/status', msg,
+            lambda: len(self.ri.moving_status) > 0)
+        assert received
+        assert self.ri.moving_status == {first: True}
+        assert self.ri.is_moving(controller_type=first)
