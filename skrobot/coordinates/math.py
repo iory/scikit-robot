@@ -2744,6 +2744,7 @@ def counter_clockwise_angle_between_vectors(v1, v2, normal_vector=None):
         input vector.
     normal_vector : numpy.ndarray, list[float] or tuple(float) or None
         Base plane's normal vector.
+        If None, use the normalized cross product of v1 and v2.
 
     Returns
     -------
@@ -2752,7 +2753,7 @@ def counter_clockwise_angle_between_vectors(v1, v2, normal_vector=None):
         Return values in [0 radian, 2 * np.pi radian].
     """
     if normal_vector is None:
-        normal_vector = normal_vector(np.cross(v1, v2))
+        normal_vector = normalize_vector(np.cross(v1, v2))
     # https://stackoverflow.com/questions/14066933/direct-way-of-computing-clockwise-angle-between-2-vectors  # NOQA
     det = triple_product(normal_vector, v1, v2)
     dot = np.dot(v1, v2)
@@ -2773,6 +2774,7 @@ def clockwise_angle_between_vectors(v1, v2, normal_vector=None):
         input vector.
     normal_vector : numpy.ndarray, list[float] or tuple(float) or None
         Base plane's normal vector.
+        If None, use the normalized cross product of v1 and v2.
 
     Returns
     -------
@@ -2781,7 +2783,7 @@ def clockwise_angle_between_vectors(v1, v2, normal_vector=None):
         Return values in [0 radian, 2 * np.pi radian].
     """
     if normal_vector is None:
-        normal_vector = normal_vector(np.cross(v1, v2))
+        normal_vector = normalize_vector(np.cross(v1, v2))
     normal_vector = - np.array(normal_vector)
     det = triple_product(normal_vector, v1, v2)
     dot = np.dot(v1, v2)

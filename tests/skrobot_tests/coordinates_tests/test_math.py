@@ -70,6 +70,27 @@ from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.coordinates.math import ypr2matrix
 
 
+@pytest.mark.parametrize('angle_function, expected_index', [
+    (counter_clockwise_angle_between_vectors, 0),
+    (clockwise_angle_between_vectors, 1),
+])
+@pytest.mark.parametrize('v1, v2, expected_angles', [
+    ([2, 0, 0], [3, 3, 0], (np.pi / 4, 7 * np.pi / 4)),
+    ([2, 0, 0], [-3, 3, 0], (3 * np.pi / 4, 5 * np.pi / 4)),
+    ((1, 1, 0), (0, 2, 2), (np.pi / 3, 5 * np.pi / 3)),
+    (np.array([2, 0, 0]), np.array([3, 0, 0]), (0, 0)),
+    (np.array([2, 0, 0]), np.array([-3, 0, 0]), (np.pi, np.pi)),
+])
+def test_oriented_angle_with_default_normal(
+        angle_function, expected_index, v1, v2, expected_angles):
+    expected_angle = expected_angles[expected_index]
+    testing.assert_allclose(angle_function(v1, v2), expected_angle,
+                            atol=1e-14)
+    testing.assert_allclose(
+        angle_function(v1, v2, normal_vector=None), expected_angle,
+        atol=1e-14)
+
+
 class TestMath(unittest.TestCase):
 
     def test__check_valid_rotation(self):
