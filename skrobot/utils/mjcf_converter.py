@@ -105,8 +105,14 @@ class _MeshAssets:
     @classmethod
     def _meshable(cls, mesh):
         """True if MuJoCo's mesh compiler can accept this sub-mesh at all."""
-        return (len(mesh.faces) > 0
-                and len(mesh.vertices) >= cls.MIN_VERTICES)
+        # MuJoCo merges coincident vertices before counting, so count UNIQUE
+        # positions: an unmerged sub-mesh (e.g. one triangle stored twice,
+        # front and back -- 6 vertices, 3 distinct) otherwise slips through
+        # and fails with "at least 4 vertices required".
+        if len(mesh.faces) == 0:
+            return False
+        vertices = np.asarray(mesh.vertices, dtype=float)
+        return len(np.unique(vertices, axis=0)) >= cls.MIN_VERTICES
 
     @classmethod
     def _is_shell(cls, mesh):
