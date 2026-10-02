@@ -50,6 +50,20 @@ def _single_triangle():
                            process=False)
 
 
+def _doubled_triangle():
+    """One triangle stored twice, front and back: 6 vertices, 3 distinct.
+
+    A COLLADA export keeps the duplicates, so a raw vertex count says 6;
+    MuJoCo merges coincident vertices first, sees 3, and refuses the mesh.
+    """
+    vertices = np.array([[0.0, 0.0, 0.0],
+                         [0.05, 0.0, 0.0],
+                         [0.0, 0.05, 0.0]] * 2)
+    return trimesh.Trimesh(vertices=vertices,
+                           faces=np.array([[0, 1, 2], [3, 5, 4]]),
+                           process=False)
+
+
 _URDF_TEMPLATE = """<?xml version="1.0"?>
 <robot name="degenerate">
   <link name="base_link">
@@ -85,12 +99,14 @@ class TestDegenerateMeshes(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _convert(self, mesh):
-        mesh_path = os.path.join(self.tmpdir, 'part.stl')
+    def _convert(self, mesh, ext='stl'):
+        # STL and OBJ loading merge coincident vertices; COLLADA keeps them
+        name = 'part.' + ext
+        mesh_path = os.path.join(self.tmpdir, name)
         mesh.export(mesh_path)
         urdf_path = os.path.join(self.tmpdir, 'robot.urdf')
         with open(urdf_path, 'w') as f:
-            f.write(_URDF_TEMPLATE.format(mesh='part.stl'))
+            f.write(_URDF_TEMPLATE.format(mesh=name))
         out_path = os.path.join(self.tmpdir, 'robot.xml')
         urdf_to_mjcf(urdf_path, out_path, add_ground=False)
         return out_path, ET.parse(out_path).getroot()
@@ -121,6 +137,11 @@ class TestDegenerateMeshes(unittest.TestCase):
         mesh_geoms = [g for g in root.iter('geom') if g.get('type') == 'mesh']
         self.assertEqual(mesh_geoms, [])
 
+    def test_duplicated_vertices_do_not_count(self):
+        # 6 stored vertices but only 3 distinct: dropped like a single triangle
+        _, root = self._convert(_doubled_triangle(), ext='dae')
+        self.assertEqual(len(self._mesh_assets(root)), 0)
+
     def test_coplanar_mesh_survives_as_visual_only(self):
         # It keeps its <visual> geom (group 2, no contact) but loses the
         # <collision> one (group 3), which MuJoCo could not have compiled.
@@ -148,6 +169,12 @@ class TestDegenerateMeshes(unittest.TestCase):
     def test_mujoco_loads_the_thin_shell_model(self):
         mujoco = self._require_mujoco()
         out_path, _ = self._convert(_thin_shell())
+        model = mujoco.MjModel.from_xml_path(out_path)
+        self.assertEqual(model.nbody, 2)
+
+    def test_mujoco_loads_the_doubled_triangle_model(self):
+        mujoco = self._require_mujoco()
+        out_path, _ = self._convert(_doubled_triangle(), ext='dae')
         model = mujoco.MjModel.from_xml_path(out_path)
         self.assertEqual(model.nbody, 2)
 
