@@ -94,6 +94,37 @@ class TestDracoCompressedMeshDetection(unittest.TestCase):
             os.remove(path)
 
 
+class TestStepMeshesLoadUnmerged(unittest.TestCase):
+    """STEP meshes must be loaded with one material per primitive.
+
+    trimesh merges a STEP part's primitives by default, which turns a
+    multi-coloured part (e.g. a KiCad 0402 resistor: body + terminals) into
+    a MultiMaterial that the URDF loader cannot handle.
+    """
+
+    def _load_kwargs(self, suffix):
+        import trimesh
+        box = trimesh.creation.box(extents=[1, 1, 1])
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            path = tmp.name
+        try:
+            with mock.patch('trimesh.load', return_value=box) as load:
+                meshes = urdf_mesh._load_meshes(path)
+        finally:
+            os.remove(path)
+        self.assertEqual(len(meshes), 1)
+        return load.call_args.kwargs
+
+    def test_step_is_loaded_without_merging_primitives(self):
+        for suffix in ('.step', '.STEP', '.stp'):
+            self.assertEqual(self._load_kwargs(suffix),
+                             {'merge_primitives': False}, suffix)
+
+    def test_other_formats_keep_default_load_arguments(self):
+        for suffix in ('.stl', '.dae', '.glb'):
+            self.assertEqual(self._load_kwargs(suffix), {}, suffix)
+
+
 class TestGetPathWithCacheResolverOrder(unittest.TestCase):
     """get_path_with_cache should respect ROS_VERSION when both resolvers are present."""
 
