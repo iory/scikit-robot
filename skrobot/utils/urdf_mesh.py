@@ -697,7 +697,15 @@ def _load_meshes(filename):
         # Convert the mesh unit from [mm] to [m].
         # To convert the mesh unit from millimeters to meters,
         # use the function meshes.convert_units('meter').
-        meshes = trimesh.load(filename)
+        # trimesh's STEP loader merges all primitives of a part into one
+        # mesh by default.  A part with more than one colour (e.g. a KiCad
+        # SMD model: body + terminals) then carries a MultiMaterial, whose
+        # main_color is None and which has no to_color(), so loading fails
+        # further down.  Keep one material per primitive instead.
+        load_kwargs = {}
+        if ext.lower() in ('.step', '.stp'):
+            load_kwargs['merge_primitives'] = False
+        meshes = trimesh.load(filename, **load_kwargs)
         # Keep whatever normals the file stored: they encode which edges the
         # author meant to be smooth, and nothing downstream can recover that
         # once they have been dropped.
