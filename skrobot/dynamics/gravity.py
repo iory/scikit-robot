@@ -39,7 +39,8 @@ def compute_gravity_torque(
     Returns
     -------
     torques : np.ndarray, shape (n_joints,)
-        Gravity-induced torque at each joint in N*m.
+        Torque [N*m] each joint must exert to hold the pose against
+        gravity, dU/dq.
 
     Examples
     --------
@@ -109,7 +110,8 @@ def compute_gravity_torque(
             torque_vec = np.cross(r, F_gravity)
             total_torque += np.dot(torque_vec, joint_axis)
 
-        torques[i] = total_torque
+        # Gravity's moment about the axis; holding takes the opposite.
+        torques[i] = -total_torque
 
     # Restore original angles
     for i, link in enumerate(link_list):
@@ -195,7 +197,8 @@ def build_gravity_torque_function(params, backend=None):
         Returns
         -------
         torques : array, shape (n_joints,)
-            Gravity-induced torque at each joint.
+            Torque each joint must exert to hold the pose against
+            gravity, dU/dq.
         """
         if gravity is None:
             gravity = backend.array([0.0, 0.0, -9.81])
@@ -224,7 +227,8 @@ def build_gravity_torque_function(params, backend=None):
 
                 # Torque contribution
                 torque_vec = backend.cross(r, F_gravity)
-                total_torque = total_torque + backend.dot(torque_vec, joint_axis_world)
+                # Gravity's moment about the axis; holding takes the opposite.
+                total_torque = total_torque - backend.dot(torque_vec, joint_axis_world)
 
             # Update torques array
             if hasattr(torques, 'at'):
