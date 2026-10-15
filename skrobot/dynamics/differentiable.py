@@ -990,9 +990,11 @@ def extract_inverse_dynamics_parameters(robot_model, link_list=None,
         joint_types.append(joint.joint_type)
 
         # Mass properties
+        # A link whose mass is zero (or unset) carries nothing; it used to be
+        # given a phantom 100 g here, which added torque for an empty link.
         mass = getattr(link, 'mass', None)
         if mass is None or mass <= 0:
-            mass = 0.1  # Default 100g
+            mass = 0.0
         link_masses.append(float(mass))
 
         # Center of mass (centroid in link frame)
@@ -1594,8 +1596,10 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
         # Build tau array from list (in sorted order)
         tau_sorted = backend.stack(tau_list)
 
-        # Reorder output from sorted to original order
-        tau = tau_sorted[sorted_to_original]
+        # The sum above is the generalized force of gravity, the external
+        # forces and the d'Alembert inertial forces on each joint; the joint
+        # has to supply the opposite: tau = M qdd + C + g(q) - J^T f_ext.
+        tau = -tau_sorted[sorted_to_original]
 
         return tau
 
@@ -2166,8 +2170,8 @@ def build_optimized_gravity_torque_fn(robot_model, link_list=None,
         # Compute all torques using vmap
         tau_sorted = jax.vmap(compute_torque)(jnp.arange(n_joints))
 
-        # Reorder output
-        tau = tau_sorted[sorted_to_original]
+        # Gravity's moment about each axis; holding takes the opposite.
+        tau = -tau_sorted[sorted_to_original]
 
         return tau
 
@@ -2348,7 +2352,8 @@ def build_gravity_torque_fn_vectorized(robot_model, link_list=None,
             return jnp.sum(projections * mask)
 
         tau_sorted = jax.vmap(compute_torque)(jnp.arange(n_joints))
-        tau = tau_sorted[sorted_to_original]
+        # Gravity's moment about each axis; holding takes the opposite.
+        tau = -tau_sorted[sorted_to_original]
 
         return tau
 
@@ -2691,8 +2696,8 @@ def build_rnea_gravity_fn(robot_model, link_list=None, use_float32=False):
             jnp.arange(n_joints)
         )
 
-        # Reorder output
-        tau = taus_sorted[sorted_to_original]
+        # Gravity's moment about each axis; holding takes the opposite.
+        tau = -taus_sorted[sorted_to_original]
 
         return tau
 
@@ -2909,6 +2914,7 @@ def build_rnea_serial_gravity_fn(robot_model, link_list=None, use_float32=False)
         # Project onto axes
         taus_sorted = jnp.sum(total_moment * axes_world, axis=1)
 
-        return taus_sorted[sorted_to_original]
+        # Gravity's moment about each axis; holding takes the opposite.
+        return -taus_sorted[sorted_to_original]
 
     return jax.jit(gravity_torque_fn)
