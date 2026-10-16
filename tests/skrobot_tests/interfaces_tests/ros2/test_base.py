@@ -312,3 +312,121 @@ class TestRos2BaseControllerCallbacks(unittest.TestCase):
         assert received
         assert self.ri.moving_status == {first: True}
         assert self.ri.is_moving(controller_type=first)
+
+
+if ROS2_AVAILABLE:
+    class _ModelControllerInterface(ROS2RobotInterfaceBase):
+        """One controller over every joint of the CURRENT model, as a
+        subclass that follows its model computes it."""
+
+        controller_name = '_test_model_controller'
+
+        def default_controller(self):
+            return [dict(
+                controller_type=self.controller_name,
+                controller_action=(self.controller_name
+                                   + '/follow_joint_trajectory'),
+                controller_state=self.controller_name + '/state',
+                action_type=FollowJointTrajectory,
+                joint_names=[j.name for j in self.robot.joint_list])]
+
+
+class TestRos2BaseSetRobot(unittest.TestCase):
+    """Replacing the model at runtime (a tool change, a module attached)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not rclpy.ok():
+            rclpy.init()
+
+    def setUp(self):
+        from skrobot.models import Kuka
+        self.Kuka = Kuka
+        self.server_node = rclpy.create_node('aux_set_robot_server')
+        self.server = ActionServer(
+            self.server_node, FollowJointTrajectory,
+            _ModelControllerInterface.controller_name
+            + '/follow_joint_trajectory',
+            lambda goal_handle: FollowJointTrajectory.Result())
+        self.executor = SingleThreadedExecutor()
+        self.executor.add_node(self.server_node)
+        self.spin_thread = threading.Thread(
+            target=self.executor.spin, daemon=True)
+        self.spin_thread.start()
+        self.ri = _ModelControllerInterface(
+            robot=Panda(), node_name='test_set_robot',
+            joint_states_topic='_test_joint_states_set_robot',
+            default_controller=_ModelControllerInterface.controller_name,
+            controller_timeout=5.0)
+        assert self.ri.joint_action_enable
+
+    def tearDown(self):
+        self.ri.destroy_node()
+        self.executor.shutdown()
+        self.server.destroy()
+        self.server_node.destroy_node()
+
+    def _controller_joints(self):
+        name = _ModelControllerInterface.controller_name
+        return self.ri.controller_param_table[name][0]['joint_names']
+
+    def test_the_controllers_follow_the_new_model(self):
+        panda_joints = [j.name for j in self.ri.robot.joint_list]
+        assert self._controller_joints() == panda_joints
+        seen = []
+        self.ri.add_robot_changed_callback(
+            lambda old, new: seen.append((old.name, new.name)))
+
+        old = self.ri.set_robot(self.Kuka())
+
+        kuka_joints = [j.name for j in self.ri.robot.joint_list]
+        assert old.name != self.ri.robot.name
+        assert self._controller_joints() == kuka_joints
+        assert seen == [(old.name, self.ri.robot.name)]
+        assert self.ri.joint_action_enable
+
+    def test_the_old_controllers_subscriptions_are_taken_down(self):
+        before = len(list(self.ri.subscriptions))
+        self.ri.set_robot(self.Kuka())
+        self.ri.set_robot(Panda())
+        assert len(list(self.ri.subscriptions)) == before
+
+    def test_joint_states_are_refiled_against_the_new_joint_list(self):
+        kuka = self.Kuka()
+        shared = kuka.joint_list[0].name
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, [shared] + [j.name for j in self.ri.robot.joint_list],
+            [0.3] + [0.0] * len(self.ri.robot.joint_list)))
+        self.ri.set_robot(kuka)
+        names = self.ri.robot_state['name']
+        assert names == [j.name for j in self.ri.robot.joint_list]
+        assert self.ri.robot_state['position'][names.index(shared)] == 0.3
+
+    def test_the_new_model_holds_the_measured_pose_not_defaults(self):
+        kuka = self.Kuka()
+        names = [j.name for j in kuka.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names, [0.1 * (i + 1) for i in range(len(names))]))
+        self.ri.set_robot(kuka)
+        assert np.allclose(self.ri.robot.angle_vector(),
+                           [0.1 * (i + 1) for i in range(len(names))])
+
+    def test_a_never_measured_joint_is_not_sent_its_default(self):
+        names = [j.name for j in self.ri.robot.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names[:-1], [0.0] * (len(names) - 1)))
+        with pytest.raises(ValueError, match='never measured'):
+            self.ri.angle_vector_from_names({names[0]: 0.1})
+        self.ri.angle_vector_from_names({names[0]: 0.1, names[-1]: 0.0})
+
+    def test_angles_by_name_do_not_depend_on_joint_order(self):
+        names = [j.name for j in self.ri.robot.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names, [0.0] * len(names)))
+        name = self.ri.robot.joint_list[2].name
+        av = self.ri.angle_vector_from_names({name: 0.5})
+        assert av[2] == 0.5
+        assert np.allclose(np.delete(av, 2),
+                           np.delete(self.ri.robot.angle_vector(), 2))
+        with pytest.raises(KeyError, match='not joints of'):
+            self.ri.angle_vector_from_names({'no_such_joint': 0.0})
