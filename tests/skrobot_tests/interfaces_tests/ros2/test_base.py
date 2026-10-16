@@ -402,7 +402,27 @@ class TestRos2BaseSetRobot(unittest.TestCase):
         assert names == [j.name for j in self.ri.robot.joint_list]
         assert self.ri.robot_state['position'][names.index(shared)] == 0.3
 
+    def test_the_new_model_holds_the_measured_pose_not_defaults(self):
+        kuka = self.Kuka()
+        names = [j.name for j in kuka.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names, [0.1 * (i + 1) for i in range(len(names))]))
+        self.ri.set_robot(kuka)
+        assert np.allclose(self.ri.robot.angle_vector(),
+                           [0.1 * (i + 1) for i in range(len(names))])
+
+    def test_a_never_measured_joint_is_not_sent_its_default(self):
+        names = [j.name for j in self.ri.robot.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names[:-1], [0.0] * (len(names) - 1)))
+        with pytest.raises(ValueError, match='never measured'):
+            self.ri.angle_vector_from_names({names[0]: 0.1})
+        self.ri.angle_vector_from_names({names[0]: 0.1, names[-1]: 0.0})
+
     def test_angles_by_name_do_not_depend_on_joint_order(self):
+        names = [j.name for j in self.ri.robot.joint_list]
+        self.ri.joint_state_callback(_make_joint_state(
+            self.ri, names, [0.0] * len(names)))
         name = self.ri.robot.joint_list[2].name
         av = self.ri.angle_vector_from_names({name: 0.5})
         assert av[2] == 0.5

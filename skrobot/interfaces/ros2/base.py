@@ -173,9 +173,12 @@ class ROS2RobotInterfaceBase(Node):
         self.prev_moving_status = dict()
         self._not_updated_joints = []
         if self._joint_state_msg is not None:
-            # Re-file the latest joint_states against the new joint list, so
-            # joints both models share keep their measured values.
+            # Re-file the latest joint_states against the new joint list, and
+            # put them in the model: a fresh model holds every joint at its
+            # default angle, and anything built from robot.angle_vector() --
+            # angle_vector_from_names, for one -- would command those.
             self.joint_state_callback(self._joint_state_msg)
+            self.update_robot_state()
         self.joint_action_enable = True
         self.controller_table = {}
         self.controller_param_table = {}
@@ -707,12 +710,22 @@ class ROS2RobotInterfaceBase(Node):
         KeyError
             If a name is not a joint of the current model: dropping it would
             send a motion without the joint the caller asked to move.
+        ValueError
+            If a joint left out has never been reported on joint_states: its
+            angle in the model is a default, not a pose, and the vector would
+            send it there.
         """
         names = [joint.name for joint in self.robot.joint_list]
         unknown = sorted(set(angles) - set(names))
         if unknown:
             raise KeyError('not joints of {}: {}'.format(
                 self.robot.name, ', '.join(unknown)))
+        unmeasured = sorted(set(names) - set(angles) - self._received_joint_names)
+        if unmeasured:
+            raise ValueError(
+                'never measured, so their angles are defaults, not poses: {}. '
+                'Give them explicitly or wait for joint_states.'.format(
+                    ', '.join(unmeasured)))
         av = np.array(self.robot.angle_vector(), dtype=np.float64)
         for name, angle in angles.items():
             av[names.index(name)] = angle
