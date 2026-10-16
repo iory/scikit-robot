@@ -124,11 +124,75 @@ class ROS2RobotInterfaceBase(Node):
         if wait_for_joint_states:
             self._wait_for_first_joint_state(joint_states_timeout)
 
+        # Action clients and subscriptions add_controller created, so that
+        # set_robot can take them down before building the new ones.
+        self._controller_entities = []
+        self._robot_changed_callbacks = []
         self.controller_table = {}
         self.controller_param_table = {}
         self.controller_type = default_controller
         self.controller_actions = self.add_controller(
             self.controller_type, create_actions=True, joint_enable_check=True)
+
+    def set_robot(self, robot, cancel_motion=True):
+        """Replace the robot model while the interface is running.
+
+        For a robot whose joints or kinematics change at runtime -- a tool
+        change, a module attached or removed -- the model, the joint-state
+        bookkeeping and the controllers have to change together: every
+        angle-vector of this interface is indexed by ``robot.joint_list``, and
+        the controllers come from :meth:`default_controller`, which subclasses
+        compute from that model. Replacing only ``self.robot`` would send the
+        new model's angles to the old controllers in the old order.
+
+        Parameters
+        ----------
+        robot : skrobot.model.RobotModel
+            The new model; copied, as in ``__init__``.
+        cancel_motion : bool
+            Cancel every goal in flight first (default). A trajectory planned
+            for the old model has no meaning for the new one.
+
+        Returns
+        -------
+        skrobot.model.RobotModel
+            The model that was replaced.
+        """
+        if cancel_motion:
+            self.cancel_angle_vector()
+        old = self.robot
+        for entity in self._controller_entities:
+            if isinstance(entity, ActionClient):
+                entity.destroy()
+            else:
+                self.destroy_subscription(entity)
+        self._controller_entities = []
+        self.robot = copy.deepcopy(robot)
+        self.robot_state = dict()
+        self.moving_status = dict()
+        self.prev_moving_status = dict()
+        self._not_updated_joints = []
+        if self._joint_state_msg is not None:
+            # Re-file the latest joint_states against the new joint list, so
+            # joints both models share keep their measured values.
+            self.joint_state_callback(self._joint_state_msg)
+        self.joint_action_enable = True
+        self.controller_table = {}
+        self.controller_param_table = {}
+        self.controller_actions = self.add_controller(
+            self.controller_type, create_actions=True, joint_enable_check=True)
+        for callback in list(self._robot_changed_callbacks):
+            callback(old, self.robot)
+        return old
+
+    def add_robot_changed_callback(self, callback):
+        """Call ``callback(old_robot, new_robot)`` after each :meth:`set_robot`.
+
+        For code that holds the model (or links and joints of it): after a
+        change those are the old model's and must be fetched again from
+        ``self.robot``.
+        """
+        self._robot_changed_callbacks.append(callback)
 
     def _check_time(self, time, fastest_time, time_scale):
         """Check and Return send angle vector time
@@ -446,6 +510,7 @@ class ROS2RobotInterfaceBase(Node):
                 action = ControllerActionClient(self,
                                                 controller_action,
                                                 controller['action_type'])
+                self._controller_entities.append(action._action_client)
                 tmp_actions.append(action)
                 tmp_actions_name.append(controller_action)
                 if 'controller_type' in controller:
@@ -492,16 +557,16 @@ class ROS2RobotInterfaceBase(Node):
                 # Bind the key of this controller now. A bare closure reads
                 # the loop variable when a message arrives, so every
                 # subscription would store under the last controller's key.
-                self.create_subscription(
+                self._controller_entities.append(self.create_subscription(
                     control_msgs.msg.JointTrajectoryControllerState,
                     controller_state_topic_name,
                     partial(self.set_robot_state, controller_state),
-                    10)
-                self.create_subscription(
+                    10))
+                self._controller_entities.append(self.create_subscription(
                     action_msgs.msg.GoalStatusArray,
                     trajectory_status_topic_name,
                     partial(self.set_moving_status, param['controller_type']),
-                    10)
+                    10))
         else:
             self.controller_type = controller_type
         self.controller_table[controller_type] = tmp_actions
@@ -563,8 +628,11 @@ class ROS2RobotInterfaceBase(Node):
 
         Parameters
         ----------
-        av : list or numpy.ndarray
-            joint angle vector
+        av : list, numpy.ndarray or dict
+            joint angle vector, or ``{joint name: angle}`` for the joints to
+            move -- the others keep the model's current angles. A dict does
+            not depend on the order of ``robot.joint_list``, which changes
+            when the model does (see :meth:`set_robot`).
         time : None or float
             time to goal in [sec]
             if designated time is faster than fastest speed, use fastest speed
@@ -587,6 +655,8 @@ class ROS2RobotInterfaceBase(Node):
         if av is None:
             self.update_robot_state(wait_until_update=True)
             return self.robot.angle_vector()
+        if isinstance(av, dict):
+            av = self.angle_vector_from_names(av)
         if controller_type is None:
             controller_type = self.controller_type
         if controller_type not in self.controller_table:
@@ -617,6 +687,35 @@ class ROS2RobotInterfaceBase(Node):
                 controller_param['joint_names'],
                 start_time,
                 traj_points)
+        return av
+
+    def angle_vector_from_names(self, angles):
+        """An angle vector of the current model with ``angles`` set by name.
+
+        Parameters
+        ----------
+        angles : dict
+            ``{joint name: angle}``.
+
+        Returns
+        -------
+        numpy.ndarray
+            ``robot.angle_vector()`` with those joints replaced.
+
+        Raises
+        ------
+        KeyError
+            If a name is not a joint of the current model: dropping it would
+            send a motion without the joint the caller asked to move.
+        """
+        names = [joint.name for joint in self.robot.joint_list]
+        unknown = sorted(set(angles) - set(names))
+        if unknown:
+            raise KeyError('not joints of {}: {}'.format(
+                self.robot.name, ', '.join(unknown)))
+        av = np.array(self.robot.angle_vector(), dtype=np.float64)
+        for name, angle in angles.items():
+            av[names.index(name)] = angle
         return av
 
     def potentio_vector(self):
