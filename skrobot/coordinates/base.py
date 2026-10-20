@@ -1794,6 +1794,7 @@ class CascadedCoords(Coordinates):
                     "`relative_coords`'s type should be"
                     "skrobot.coordinates.Coordinates, but is {}"
                     .format(type(relative_coords)))
+            # The parent setter removes child from its previous parent.
             child.parent = self
             child.newcoords(relative_coords, check_validity=False, relative_coords='local')
             self._descendants.append(child)
@@ -1997,7 +1998,8 @@ class CascadedCoords(Coordinates):
         """Rotate this coordinate.
 
         Rotate this coordinate relative to axis by theta radians
-        with respect to wrt.
+        with respect to wrt. The origin of this coordinate is kept for
+        every ``wrt``; only its orientation changes.
 
         Parameters
         ----------
@@ -2006,6 +2008,13 @@ class CascadedCoords(Coordinates):
         axis : str or numpy.ndarray
             'x', 'y', 'z' or vector
         wrt : str or Coordinates
+            Frame in which ``axis`` is expressed.
+
+            - ``'local'`` or ``self``: this coordinate's own axes.
+            - ``'parent'`` or the parent object: the parent's axes. Without
+              a parent, this is the world frame.
+            - ``'world'``: the world axes.
+            - other ``Coordinates``: that coordinate's axes.
         skip_normalization : bool
             if `True`, skip normalization for axis.
 
@@ -2043,22 +2052,9 @@ class CascadedCoords(Coordinates):
         if isinstance(axis, np.ndarray) and axis.shape == (3, 3):
             return self.rotate_with_matrix(theta, wrt)
 
-        if wrt == 'local' or wrt == self:
-            rotation = rotate_matrix_by_axis_angle(
-                self._rotation, theta, axis,
-                skip_normalization=skip_normalization)
-            return self.newcoords(rotation, self._translation,
-                                  check_validity=False, relative_coords='local')
-        elif wrt == 'parent' or wrt == self.parent:
-            rotation = rotate_matrix_by_axis_angle(
-                self._rotation, theta, axis,
-                skip_normalization=skip_normalization)
-            return self.newcoords(rotation, self._translation,
-                                  check_validity=False, relative_coords='local')
-        else:
-            return self.rotate_with_matrix(
-                rotation_matrix(theta, axis,
-                                skip_normalization=skip_normalization), wrt)
+        return self.rotate_with_matrix(
+            rotation_matrix(theta, axis,
+                            skip_normalization=skip_normalization), wrt)
 
     def orient_with_matrix(self, rotation_matrix, wrt='world'):
         """Force update this coordinate system's rotation.
@@ -2192,7 +2188,27 @@ class CascadedCoords(Coordinates):
         if not (c is None or coordinates_p(c)):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
+        previous = getattr(self, '_parent', None)
+        if previous is c:
+            self._parent = c
+            return
+        # A parent chain through self would make worldcoords() recurse
+        # forever.
+        ancestor = c
+        while ancestor is not None:
+            if ancestor is self:
+                raise ValueError(
+                    'Cannot make {!r} a parent of {!r}: it is already one '
+                    'of its descendants.'.format(c.name, self.name))
+            ancestor = getattr(ancestor, 'parent', None)
+        # Leave the previous parent's descendants, so that re-parenting by
+        # either assoc or a direct assignment leaves no stale entry there.
+        if (isinstance(previous, CascadedCoords)
+                and self in previous._descendants):
+            previous._descendants.remove(self)
         self._parent = c
+        # The cached world pose was taken under the previous parent.
+        self.changed()
 
     def __getstate__(self):
         assert self._worldcoords._hook == self.update
