@@ -3,8 +3,12 @@
 Walks the raw parsed URDF and emits a USD stage with a UsdPhysics
 articulation -- one rigid body per link (mass + regularized inertia), visual meshes embedded with
 per-vertex ``displayColor`` (USD renders vertex colours natively, unlike STL/
-MJCF), convex collision meshes, and revolute/prismatic/fixed joints (limits +
-position drives). A fixed joint welds the base to the world.
+MJCF) and, when the mesh file carries a PBR material (glTF ``metallicFactor`` /
+``roughnessFactor``, as sw2robot writes them from the SolidWorks appearance), a
+``UsdPreviewSurface`` material bound to the mesh so Isaac Sim's RTX renderer
+shows aluminium as aluminium; convex collision meshes, and
+revolute/prismatic/fixed joints (limits + position drives). A fixed joint welds
+the base to the world.
 
 USD authoring only needs ``usd-core`` (pip), so this runs anywhere -- author the
 USD on a laptop, load it in Isaac Sim on a GPU box. Entry point: :func:`urdf_to_usd`.
@@ -318,9 +322,33 @@ def _inertia_from_mesh(link, mass, return_reason=False):
     return None, last_error
 
 
+def _submesh_pbr(m):
+    """``(metallic, roughness, name)`` of a sub-mesh's PBR material, or None
+    when its visual carries no metallic/roughness (vertex colours, COLLADA
+    diffuse, no material at all).  glTF is the one URDF mesh format that can
+    say how shiny a part is; trimesh exposes it as ``visual.material`` with
+    ``metallicFactor`` / ``roughnessFactor``."""
+    mat = getattr(getattr(m, "visual", None), "material", None)
+    if mat is None:
+        return None
+    metallic = getattr(mat, "metallicFactor", None)
+    roughness = getattr(mat, "roughnessFactor", None)
+    if metallic is None and roughness is None:
+        return None
+    try:
+        metallic = 0.0 if metallic is None else float(metallic)
+        roughness = 0.5 if roughness is None else float(roughness)
+    except (TypeError, ValueError):
+        return None
+    name = getattr(mat, "name", None)
+    return (min(max(metallic, 0.0), 1.0), min(max(roughness, 0.0), 1.0),
+            str(name) if name else None)
+
+
 def _submesh_geometry(mesh_geometry):
-    """Yield (points, face_counts, face_indices, per_vertex_rgb_or_None, scale)
-    for each sub-mesh of a URDF Mesh geometry."""
+    """Yield (points, face_counts, face_indices, per_vertex_rgb_or_None, pbr)
+    for each sub-mesh of a URDF Mesh geometry; ``pbr`` is
+    :func:`_submesh_pbr` of that sub-mesh."""
     import trimesh
     subs = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
             if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
@@ -360,7 +388,7 @@ def _submesh_geometry(mesh_geometry):
                     c = c / 255.0
                 rgb = [c[:3].tolist()]
                 break
-        yield pts.tolist(), counts, indices, rgb
+        yield pts.tolist(), counts, indices, rgb, _submesh_pbr(m)
 
 
 def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
@@ -797,7 +825,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         # would make a huge degenerate convex hull that NaNs the articulation.
         if len(submeshes) > 1:
             cents = [np.mean(np.asarray(pts, dtype=float), axis=0)
-                     if pts else np.zeros(3) for pts, _, _, _ in submeshes]
+                     if pts else np.zeros(3) for pts, _, _, _, _ in submeshes]
             med = np.median(np.array(cents), axis=0)
             dist = [float(np.linalg.norm(c - med)) for c in cents]
             threshold = max(0.15, 3.0 * float(np.median(dist)))
@@ -806,7 +834,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         all_counts = []
         all_idx = []
         offset = 0
-        for pts, counts, idx, _rgb in submeshes:
+        for pts, counts, idx, _rgb, _pbr in submeshes:
             all_pts.extend(pts)
             all_counts.extend(counts)
             all_idx.extend(int(j) + offset for j in idx)
@@ -867,16 +895,18 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
     urdf_rgb = _visual_rgb(vc)
 
     # visual: URDF material colour if given, else keep per-submesh colors
-    for sub_i, (pts, counts, idx, rgb) in enumerate(submeshes):
+    for sub_i, (pts, counts, idx, rgb, pbr) in enumerate(submeshes):
         p = link_path.AppendChild("visual_{}_{}".format(index, sub_i))
         mesh = UsdGeom.Mesh.Define(stage, p)
         mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in pts]))
         mesh.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
         mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(idx))
         mesh.AddTransformOp().Set(_mat_to_gf(None, origin))
+        lin = None
         if urdf_rgb is not None:
             dc = mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
             dc.Set(Vt.Vec3fArray([Gf.Vec3f(*urdf_rgb)]))
+            lin = np.asarray([urdf_rgb], dtype=float)
         elif rgb is not None:
             # Mesh colours are sRGB too (COLLADA diffuse, glTF baseColorFactor),
             # so they need the same linearisation as the URDF ones.
@@ -887,6 +917,52 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
                 UsdGeom.Tokens.vertex if len(rgb) == len(pts)
                 else UsdGeom.Tokens.constant)
             dc.Set(Vt.Vec3fArray([Gf.Vec3f(*c) for c in lin.tolist()]))
+        if pbr is not None:
+            # displayColor alone renders as a dielectric in RTX; the glTF
+            # metallic / roughness only reach the renderer through a bound
+            # UsdPreviewSurface, with the (one) colour as its diffuseColor.
+            diffuse = (np.mean(lin, axis=0).tolist() if lin is not None
+                       else [0.75, 0.75, 0.75])
+            material = _preview_surface(stage, diffuse, pbr)
+            from pxr import UsdShade
+            UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+
+
+_LOOKS_PATH = "/robot/Looks"
+
+
+def _preview_surface(stage, diffuse_rgb, pbr):
+    """A ``UsdPreviewSurface`` material under ``/robot/Looks`` for a linear
+    diffuse colour and ``(metallic, roughness, name)``; one prim per distinct
+    combination, reused across meshes (a frame of forty aluminium extrusions
+    gets one material, not forty)."""
+    from pxr import Gf
+    from pxr import Sdf
+    from pxr import UsdGeom
+    from pxr import UsdShade
+
+    metallic, roughness, name = pbr
+    key = "{}_{:02x}{:02x}{:02x}_m{:02d}_r{:02d}".format(
+        sanitize_name(name) if name else "material",
+        *[int(round(min(max(c, 0.0), 1.0) * 255)) for c in diffuse_rgb[:3]],
+        int(round(metallic * 99)), int(round(roughness * 99)))
+    path = Sdf.Path(_LOOKS_PATH).AppendChild(key)
+    prim = stage.GetPrimAtPath(path)
+    if prim.IsValid():
+        return UsdShade.Material(prim)
+    if not stage.GetPrimAtPath(_LOOKS_PATH).IsValid():
+        UsdGeom.Scope.Define(stage, Sdf.Path(_LOOKS_PATH))
+    material = UsdShade.Material.Define(stage, path)
+    shader = UsdShade.Shader.Define(stage, path.AppendChild("Shader"))
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+        Gf.Vec3f(*[float(c) for c in diffuse_rgb[:3]]))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(metallic))
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
+    shader.CreateInput("useSpecularWorkflow", Sdf.ValueTypeNames.Int).Set(0)
+    material.CreateSurfaceOutput().ConnectToSource(
+        shader.ConnectableAPI(), "surface")
+    return material
 
 
 def _emit_joint(stage, UsdPhysics, Gf, Sdf, joint, link_path, stiffness, damping,
