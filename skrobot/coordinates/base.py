@@ -1794,6 +1794,7 @@ class CascadedCoords(Coordinates):
                     "`relative_coords`'s type should be"
                     "skrobot.coordinates.Coordinates, but is {}"
                     .format(type(relative_coords)))
+            # The parent setter removes child from its previous parent.
             child.parent = self
             child.newcoords(relative_coords, check_validity=False, relative_coords='local')
             self._descendants.append(child)
@@ -2187,6 +2188,13 @@ class CascadedCoords(Coordinates):
         if not (c is None or coordinates_p(c)):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
+        # Leave the previous parent's descendants, so that re-parenting by
+        # either assoc or a direct assignment leaves no stale entry there.
+        previous = getattr(self, '_parent', None)
+        if (previous is not c
+                and isinstance(previous, CascadedCoords)
+                and self in previous._descendants):
+            previous._descendants.remove(self)
         self._parent = c
 
     def __getstate__(self):
