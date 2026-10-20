@@ -7,6 +7,7 @@ from skrobot.kinematics import find_base_placement
 from skrobot.kinematics import set_base_pose
 from skrobot.kinematics.base_placement import _chain_fk_params
 from skrobot.kinematics.base_placement import _resolve_link_list
+from skrobot.kinematics.base_placement import _resolve_masks
 from skrobot.kinematics.base_placement import _SharedBaseProblem
 from skrobot.models import Fetch
 
@@ -123,6 +124,83 @@ class TestFindBasePlacement(unittest.TestCase):
         x, y = result.base_pose.worldpos()[:2]
         self.assertTrue(-0.5 <= x <= 0.5 and -0.5 <= y <= 0.5)
         self.assertFalse(result.all_reached)
+
+    def test_base_height(self):
+        robot = self.robot
+        true_base = Coordinates(pos=[1.0, 0.5, -0.2]).rotate(-0.4, 'z')
+        targets = _targets_from_base(robot, true_base, 3, seed=2)
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list, base_height=-0.2,
+            initial_base_poses=Coordinates(pos=[0.8, 0.3, 0.0]))
+        self.assertTrue(result.all_reached, result)
+        self.assertAlmostEqual(result.base_pose.worldpos()[2], -0.2)
+        set_base_pose(robot, result.base_pose)
+        for av, target in zip(result.angle_vectors, targets):
+            robot.angle_vector(av)
+            np.testing.assert_allclose(
+                robot.rarm.end_coords.worldpos(), target.worldpos(),
+                atol=2e-3)
+
+    def test_per_target_masks(self):
+        np.testing.assert_array_equal(
+            _resolve_masks([1, 1, 0], 2), [[1, 1, 0], [1, 1, 0]])
+        np.testing.assert_array_equal(
+            _resolve_masks([True, 'z', False], 3),
+            [[1, 1, 1], [0, 0, 1], [0, 0, 0]])
+        with self.assertRaises(ValueError):
+            _resolve_masks([True, False], 3)
+
+        robot = self.robot
+        true_base = Coordinates(pos=[1.0, 0.0, 0.0])
+        targets = _targets_from_base(robot, true_base, 2, seed=3)
+        # Turned about the hand's own y axis, which 'xz' leaves free, as
+        # it does in inverse_kinematics.
+        targets[0].rotate(0.8, 'y')
+        # An orientation the arm cannot take at that position, but only
+        # its position is asked for.
+        targets[1].rotate(np.pi, 'x')
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list,
+            initial_base_poses=Coordinates(pos=[0.8, 0.2, 0.0]),
+            rotation_mask=['xz', False])
+        self.assertTrue(result.all_reached, result)
+        set_base_pose(robot, result.base_pose)
+        robot.angle_vector(result.angle_vectors[0])
+        hand = robot.rarm.end_coords
+        np.testing.assert_allclose(
+            hand.difference_rotation(targets[0], rotation_mask='xz'),
+            0.0, atol=np.deg2rad(1.0))
+        np.testing.assert_allclose(
+            hand.difference_position(targets[0]), 0.0, atol=2e-3)
+        self.assertGreater(
+            np.linalg.norm(hand.difference_rotation(targets[0])), 0.1)
+
+    def test_ranks_by_joint_margin_then_custom_score(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[1.5, 0.0, 0.8]),
+                   Coordinates(pos=[1.6, 0.2, 0.9])]
+        starts = [Coordinates(pos=[x, y, 0.0]).rotate(yaw, 'z')
+                  for x in (0.6, 1.0) for y in (-0.4, 0.4)
+                  for yaw in (-0.5, 0.5)]
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False, initial_base_poses=starts)
+        reached = [c for c in result.candidates if c.all_reached]
+        self.assertGreater(len(reached), 1)
+        self.assertTrue(result.all_reached)
+        self.assertEqual(result.score, result.min_joint_margin)
+        self.assertEqual(result.score, max(c.score for c in reached))
+        self.assertTrue(0.0 <= result.min_joint_margin <= 0.5)
+
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False, initial_base_poses=starts,
+            score=lambda r: -r.base_pose.worldpos()[0])
+        reached = [c for c in result.candidates if c.all_reached]
+        self.assertEqual(result.base_pose.worldpos()[0],
+                         min(c.base_pose.worldpos()[0] for c in reached))
 
     def test_set_base_pose_does_not_drift(self):
         robot = self.robot
