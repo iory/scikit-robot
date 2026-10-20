@@ -1627,6 +1627,47 @@ class TestCascadedCoordinates(unittest.TestCase):
         testing.assert_almost_equal(
             _homogeneous(child.worldcoords()), world_before)
 
+    def test_parent_assignment_refreshes_world_pose(self):
+        # A world pose cached under the previous parent must not survive
+        # the assignment, for the child and for its descendants.
+        parent = make_cascoords(pos=[1, 0, 0])
+        other = make_cascoords(pos=[0, 1, 0], rot=rotation_matrix(0.5, 'z'))
+        child = make_cascoords(pos=[0, 0, 1])
+        tip = make_cascoords(pos=[0.3, -0.2, 0.4])
+        parent.assoc(child, relative_coords='local')
+        child.assoc(tip, relative_coords='local')
+        tip.worldcoords()  # Populate the descendant cache.
+
+        child.parent = other
+        want = _homogeneous(other).dot(_homogeneous(child))
+        testing.assert_almost_equal(_homogeneous(child.worldcoords()), want)
+        testing.assert_almost_equal(
+            _homogeneous(tip.worldcoords()), want.dot(_homogeneous(tip)))
+
+        child.parent = None
+        testing.assert_almost_equal(
+            _homogeneous(child.worldcoords()), _homogeneous(child))
+
+    def test_parent_rejects_cycles(self):
+        root = make_cascoords(pos=[1, 0, 0])
+        middle = make_cascoords(pos=[0, 1, 0])
+        leaf = make_cascoords(pos=[0, 0, 1])
+        root.assoc(middle)
+        middle.assoc(leaf)
+
+        # Neither assoc (force or not) nor a direct assignment may put a
+        # coordinate under its own descendant.
+        with self.assertRaises(ValueError):
+            middle.assoc(root)
+        with self.assertRaises(ValueError):
+            leaf.assoc(root, force=True)
+        with self.assertRaises(ValueError):
+            root.parent = leaf
+        self.assertIsNone(root.parent)
+        self.assertIs(middle.parent, root)
+        self.assertIn(middle, root.descendants)
+        testing.assert_almost_equal(root.worldpos(), [1, 0, 0])
+
     def test_assoc_deprecated_c_argument(self):
         parent = make_cascoords(pos=[2, 0, 0])
         child = make_cascoords(pos=[0, 2, 0])
