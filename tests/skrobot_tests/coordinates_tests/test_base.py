@@ -1458,56 +1458,62 @@ class TestCascadedCoordinates(unittest.TestCase):
                         _homogeneous(other.worldcoords()))
 
     def test_rotate_wrt_parent_and_world(self):
+        # Named and vector axes share one path, and the parent object means
+        # the same frame as 'parent'.
+        theta = 0.9
+        vector_axis = np.array([1.0, -2.0, 0.5])
+        vector_axis = vector_axis / np.linalg.norm(vector_axis)
         for a, b in _coords_pairs():
             hp, hc = _homogeneous(a), _homogeneous(b)
-            theta, axis = 0.9, np.array([1.0, -2.0, 0.5])
-            axis = axis / np.linalg.norm(axis)
-            hr = np.eye(4)
-            hr[:3, :3] = rotation_matrix(theta, axis)
-
-            # 'local' turns the child about its own axes.
-            parent = make_cascoords(pos=a.translation, rot=a.rotation)
-            child = make_cascoords(pos=b.translation, rot=b.rotation)
-            parent.assoc(child, relative_coords='local')
-            child.rotate(theta, axis, 'local')
-            testing.assert_almost_equal(
-                _homogeneous(child.worldcoords()), hp.dot(hc).dot(hr))
-
-            # 'parent' turns it about the parent's axes, origin kept.
-            parent = make_cascoords(pos=a.translation, rot=a.rotation)
-            child = make_cascoords(pos=b.translation, rot=b.rotation)
-            parent.assoc(child, relative_coords='local')
-            child.rotate(theta, axis, 'parent')
-            want = hr.dot(hc)
-            want[:3, 3] = hc[:3, 3]
-            testing.assert_almost_equal(
-                _homogeneous(child.worldcoords()), hp.dot(want))
-
-    def test_named_rotation_wrt_parent(self):
-        for a, b in _coords_pairs():
-            for axis in 'xyz':
-                for parent_object in (False, True):
-                    with self.subTest(axis=axis, parent_object=parent_object):
-                        parent = make_cascoords(pos=a.translation, rot=a.rotation)
-                        child = make_cascoords(pos=b.translation, rot=b.rotation)
+            for axis in ('x', 'y', 'z', vector_axis):
+                hr = np.eye(4)
+                hr[:3, :3] = rotation_matrix(theta, axis)
+                for frame in ('local', 'parent', 'parent_object'):
+                    with self.subTest(axis=axis, frame=frame):
+                        parent = make_cascoords(
+                            pos=a.translation, rot=a.rotation)
+                        child = make_cascoords(
+                            pos=b.translation, rot=b.rotation)
                         tip = make_cascoords(pos=[0.3, -0.2, 0.4])
                         parent.assoc(child, relative_coords='local')
                         child.assoc(tip, relative_coords='local')
                         tip.worldcoords()  # Populate the descendant cache.
 
-                        expected = _homogeneous(b)
-                        expected[:3, :3] = rotation_matrix(0.7, axis).dot(b.rotation)
-                        expected = _homogeneous(a).dot(expected)
-                        frame = parent if parent_object else 'parent'
-                        child.rotate(0.7, axis, wrt=frame)
+                        if frame == 'local':
+                            # 'local' turns the child about its own axes.
+                            want = hc.dot(hr)
+                            child.rotate(theta, axis, 'local')
+                        else:
+                            # 'parent' turns it about the parent's axes,
+                            # origin kept.
+                            want = hr.dot(hc)
+                            want[:3, 3] = hc[:3, 3]
+                            wrt_frame = (parent if frame == 'parent_object'
+                                         else 'parent')
+                            child.rotate(theta, axis, wrt_frame)
+                        want = hp.dot(want)
 
                         testing.assert_allclose(
-                            _homogeneous(child.worldcoords()), expected,
+                            _homogeneous(child.worldcoords()), want,
                             atol=1e-14, rtol=0)
                         testing.assert_allclose(
                             _homogeneous(tip.worldcoords()),
-                            expected.dot(_homogeneous(tip)), atol=1e-14, rtol=0)
-                        testing.assert_array_equal(child.translation, b.translation)
+                            want.dot(_homogeneous(tip)), atol=1e-14, rtol=0)
+                        testing.assert_array_equal(
+                            child.translation, b.translation)
+
+    def test_rotate_wrt_parent_without_parent(self):
+        # Without a parent, the parent frame is the world frame.
+        for a, _ in _coords_pairs():
+            for axis in ('x', 'y', 'z', [1.0, -2.0, 0.5]):
+                with self.subTest(axis=axis):
+                    root = make_cascoords(pos=a.translation, rot=a.rotation)
+                    ref = make_cascoords(pos=a.translation, rot=a.rotation)
+                    root.rotate(0.7, axis, 'parent')
+                    ref.rotate(0.7, axis, 'world')
+                    testing.assert_allclose(
+                        _homogeneous(root.worldcoords()),
+                        _homogeneous(ref.worldcoords()), atol=1e-14, rtol=0)
 
     def test_transformation_wrt_with_parent(self):
         # With a parent attached, 'world', 'parent' and the parent object all
