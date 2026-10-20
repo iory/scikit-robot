@@ -1483,6 +1483,32 @@ class TestCascadedCoordinates(unittest.TestCase):
             testing.assert_almost_equal(
                 _homogeneous(child.worldcoords()), hp.dot(want))
 
+    def test_named_rotation_wrt_parent(self):
+        for a, b in _coords_pairs():
+            for axis in 'xyz':
+                for parent_object in (False, True):
+                    with self.subTest(axis=axis, parent_object=parent_object):
+                        parent = make_cascoords(pos=a.translation, rot=a.rotation)
+                        child = make_cascoords(pos=b.translation, rot=b.rotation)
+                        tip = make_cascoords(pos=[0.3, -0.2, 0.4])
+                        parent.assoc(child, relative_coords='local')
+                        child.assoc(tip, relative_coords='local')
+                        tip.worldcoords()  # Populate the descendant cache.
+
+                        expected = _homogeneous(b)
+                        expected[:3, :3] = rotation_matrix(0.7, axis).dot(b.rotation)
+                        expected = _homogeneous(a).dot(expected)
+                        frame = parent if parent_object else 'parent'
+                        child.rotate(0.7, axis, wrt=frame)
+
+                        testing.assert_allclose(
+                            _homogeneous(child.worldcoords()), expected,
+                            atol=1e-14, rtol=0)
+                        testing.assert_allclose(
+                            _homogeneous(tip.worldcoords()),
+                            expected.dot(_homogeneous(tip)), atol=1e-14, rtol=0)
+                        testing.assert_array_equal(child.translation, b.translation)
+
     def test_transformation_wrt_with_parent(self):
         # With a parent attached, 'world', 'parent' and the parent object all
         # mean the same frame, while 'local' and self mean this coordinate.

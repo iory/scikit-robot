@@ -2051,7 +2051,7 @@ class CascadedCoords(Coordinates):
                                   check_validity=False, relative_coords='local')
         elif wrt == 'parent' or wrt == self.parent:
             rotation = rotate_matrix_by_axis_angle(
-                self._rotation, theta, axis,
+                self._rotation, theta, axis, world=True,
                 skip_normalization=skip_normalization)
             return self.newcoords(rotation, self._translation,
                                   check_validity=False, relative_coords='local')
