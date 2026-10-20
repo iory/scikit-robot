@@ -43,6 +43,10 @@ from skrobot.collision.distance import sphere_box_distance
 from skrobot.collision.distance import sphere_capsule_distance
 from skrobot.collision.distance import sphere_halfspace_distance
 from skrobot.collision.distance import sphere_sphere_distance
+from skrobot.collision.environment_collision import CollisionReport
+from skrobot.collision.environment_collision import EnvironmentCollision
+from skrobot.collision.environment_collision import link_transforms
+from skrobot.collision.environment_collision import sample_surface
 from skrobot.collision.geometry import Box
 from skrobot.collision.geometry import Capsule
 from skrobot.collision.geometry import CollisionGeometry
@@ -83,6 +87,11 @@ __all__ = [
     # Robot collision
     'RobotCollisionChecker',
     'LinkCollisionGeometry',
+    # Robot against a static environment
+    'EnvironmentCollision',
+    'CollisionReport',
+    'link_transforms',
+    'sample_surface',
     # Mesh self-collision + joint-limit sweep
     'SelfCollision',
     'sweep_limits',
