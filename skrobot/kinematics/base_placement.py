@@ -32,11 +32,15 @@ class BasePlacementResult(object):
     base_pose : skrobot.coordinates.Coordinates
         Pose of the robot's root link. Planar: at ``z = base_height``
         (0 by default, the convention of ``use_base='planar'``) and turned
-        about ``z`` only.
+        about ``z`` only, by the yaw from the world +x axis to the root
+        link's +x axis -- the robot's forward axis when its URDF follows
+        the ROS convention. ``base_pose.x_axis`` is where it points.
     angle_vectors : numpy.ndarray
-        ``(n_targets, n_robot_joints)`` full angle vectors, one per target.
-        Joints outside the solved chain keep the angles the model had when
-        the solve started.
+        ``(n_targets, len(robot_model.joint_list))``: one full
+        ``robot_model.angle_vector()`` per target, in the order of
+        ``robot_model.joint_list`` -- not only the solved joints. Joints
+        outside the solved chain (a gripper's fingers, for instance) keep
+        the angles the model had when the solve started.
     success : numpy.ndarray
         ``(n_targets,)`` bool, whether each target was reached within the
         thresholds. A placement that misses targets is still returned;
@@ -60,6 +64,9 @@ class BasePlacementResult(object):
         Which initial base pose the returned placement started from.
     base_valid : bool
         ``is_valid_base(base_pose)``, or True when none was given.
+    at_bound : bool
+        Whether the base ended on an edge of ``base_bounds``. The solve
+        would have gone further; a wider region may hold a better base.
     candidates : list of BasePlacementResult
         Every candidate's result, best first. Empty on the entries of this
         list themselves.
@@ -67,9 +74,10 @@ class BasePlacementResult(object):
 
     def __init__(self, base_pose, angle_vectors, success, position_errors,
                  rotation_errors, joint_margins, candidate_index,
-                 base_valid=True):
+                 base_valid=True, at_bound=False):
         self.base_pose = base_pose
         self.base_valid = base_valid
+        self.at_bound = at_bound
         self.angle_vectors = angle_vectors
         self.success = success
         self.position_errors = position_errors
@@ -215,7 +223,7 @@ class _SharedBaseProblem(object):
 
     def __init__(self, fk_params, target_pos, target_rot, position_mask,
                  rotation_mask, base_height=0.0, margin_target=None,
-                 margin_weight=0.1, rotation_tolerance=None):
+                 margin_weight=0.1, rotation_tolerance=None, base_frame=None):
         self.fk_params = fk_params
         n_joints = fk_params['n_joints']
         mimic_parent = fk_params['mimic_parent_indices']
@@ -235,6 +243,10 @@ class _SharedBaseProblem(object):
             np.broadcast_to(rotation_mask, (self.n_targets, 3)),
         ], axis=1)
         self.base_height = base_height
+        # (N,) True for targets given in the root-link frame: they move
+        # with the base, so only the arm can close their error.
+        self.base_frame = (np.zeros(self.n_targets, dtype=bool)
+                           if base_frame is None else base_frame)
         self.rotation_tolerance = rotation_tolerance  # (N, 3) or None
         self.margin_target = margin_target
         self.margin_weight = margin_weight
@@ -248,25 +260,30 @@ class _SharedBaseProblem(object):
         angles[:, self.non_mimic] = flat
         return angles
 
-    def margin_terms(self, q):
+    def margin_terms(self, q, margin_target):
         """Hinge residual keeping joints ``margin_target`` off the limits.
 
-        Returns ``(err, jac)``, both ``(K, N, n_opt)``: joint ``j`` of
-        target ``n`` contributes the row ``jac[..., j] * dq_j = err[..., j]``
-        while its normalized margin is under ``margin_target``, and zero
-        once it is clear. Each row touches one joint of one target, so it
-        only adds to the diagonal of that target's arm block.
+        ``margin_target`` is None, a scalar, or ``(K,)`` -- one per
+        candidate. Returns ``(err, jac)``, both ``(K, N, n_opt)``: joint
+        ``j`` of target ``n`` contributes the row ``jac[..., j] * dq_j =
+        err[..., j]`` while its normalized margin is under the target,
+        and zero once it is clear. Each row touches one joint of one
+        target, so it only adds to the diagonal of that target's arm
+        block.
         """
-        if self.margin_target is None:
+        if margin_target is None:
             zeros = np.zeros_like(q)
             return zeros, zeros
+        target = np.asarray(margin_target, dtype=np.float64)
+        if target.ndim == 1:
+            target = target[:, None, None]
         to_lower = (q - self.lower) / self.span
         to_upper = (self.upper - q) / self.span
         margin = np.minimum(to_lower, to_upper)
         slope = np.where(to_lower < to_upper, 1.0, -1.0) / self.span
-        active = self.bounded & (margin < self.margin_target)
+        active = self.bounded & (margin < target)
         w = self.margin_weight
-        err = np.where(active, w * (self.margin_target - margin), 0.0)
+        err = np.where(active, w * (target - margin), 0.0)
         jac = np.where(active, w * slope, 0.0)
         return err, jac
 
@@ -294,10 +311,16 @@ class _SharedBaseProblem(object):
         world_pos = np.einsum('kij,knj->kni', base_rot, pos) \
             + base_pos[:, None, :]
         world_rot = np.einsum('kij,knjl->knil', base_rot, rot)
+        if np.any(self.base_frame):
+            # Root-link frame for the targets that ride on the base.
+            local_pos = pos + np.array([0.0, 0.0, self.base_height])
+            sel = self.base_frame[None, :, None]
+            world_pos = np.where(sel, local_pos, world_pos)
+            world_rot = np.where(sel[..., None], rot, world_rot)
         return world_pos, world_rot, jac, base_rot, base_pos
 
     def residual(self, base, q):
-        """``(K, N, 6)`` masked world-frame error, target minus actual."""
+        """``(K, N, 6)`` masked end-effector-frame error."""
         world_pos, world_rot, _, _, _ = self._ee_world(base, q, False)
         return self._residual(world_pos, world_rot)
 
@@ -338,6 +361,13 @@ class _SharedBaseProblem(object):
         base_jac[:, :, 0, 2] = -rel[..., 1]
         base_jac[:, :, 1, 2] = rel[..., 0]
         base_jac[:, :, 5, 2] = 1.0
+        base_jac[:, self.base_frame] = 0.0
+        if np.any(self.base_frame):
+            # Back to world quantities for the arm's rotation into the hand
+            # frame (R_world^T R_base J == R_root^T J).
+            world_rot = np.where(
+                self.base_frame[None, :, None, None],
+                np.einsum('kij,knjl->knil', base_rot, world_rot), world_rot)
 
         # World-frame twists into the end-effector frame of the residual.
         # Under a partial position mask this drops how turning the hand
@@ -421,7 +451,8 @@ def _errors(err):
 
 
 def _levenberg_marquardt(problem, bases, q, active, stop, thre, rthre,
-                         base_weight, bounds, max_pos_step, max_rot_step):
+                         base_weight, bounds, max_pos_step, max_rot_step,
+                         margin_target=None):
     """Iterate on the active targets of every candidate, in place.
 
     A candidate stops once its active targets are reached and its joints
@@ -429,14 +460,20 @@ def _levenberg_marquardt(problem, bases, q, active, stop, thre, rthre,
     the damping saturates, or five accepted steps in a row each lower the
     cost by less than 0.1%. Stopped candidates drop out of the batch, so
     a few slow ones do not cost the price of all of them.
+    ``margin_target`` is None or ``(K,)``, one per candidate.
     """
     n_cand = bases.shape[0]
+
+    def margin(qs, rows):
+        return problem.margin_terms(
+            qs, None if margin_target is None else margin_target[rows])
+
     weight = active[..., None].astype(np.float64)
     damping = np.full(n_cand, 1e-2)
     stalls = np.zeros(n_cand, dtype=np.int64)
     done = np.zeros(n_cand, dtype=bool)
     err, base_jac, arm_jac = problem.linearize(bases, q)
-    m_err, m_jac = problem.margin_terms(q)
+    m_err, m_jac = margin(q, slice(None))
     cost = _cost(err * weight, m_err)
     for _ in range(stop):
         pos_norm, rot_norm = _errors(err)
@@ -456,7 +493,7 @@ def _levenberg_marquardt(problem, bases, q, active, stop, thre, rthre,
         if bounds is not None:
             new_bases[:, :2] = np.clip(new_bases[:, :2], bounds[0], bounds[1])
         new_q = problem.clip(q[run] + d_arm)
-        new_m_err, _ = problem.margin_terms(new_q)
+        new_m_err, _ = margin(new_q, run)
         new_cost = _cost(problem.residual(new_bases, new_q) * w, new_m_err)
         accept = new_cost < cost[run]
         damping[run] = np.where(accept, np.maximum(damping[run] * 0.5, 1e-6),
@@ -469,10 +506,41 @@ def _levenberg_marquardt(problem, bases, q, active, stop, thre, rthre,
             bases[moved] = new_bases[accept]
             q[moved] = new_q[accept]
             e, bj, aj = problem.linearize(bases[moved], q[moved])
-            me, mj = problem.margin_terms(q[moved])
+            me, mj = margin(q[moved], moved)
             err[moved], base_jac[moved], arm_jac[moved] = e, bj, aj
             m_err[moved], m_jac[moved] = me, mj
             cost[moved] = _cost(e * weight[moved], me)
+    return err
+
+
+def _climb_margin(problem, bases, q, err, stop, thre, rthre, base_weight,
+                  bounds, max_pos_step, max_rot_step, floor, step):
+    """Raise each candidate's smallest joint margin while it stays valid.
+
+    Works in place on ``bases`` and ``q``; returns the matching error.
+    """
+    pos_err, rot_err = _errors(err)
+    reached = (pos_err < thre) & (rot_err < rthre)
+    current = np.min(_joint_margins(problem.fk_params, q), axis=1)
+    running = np.any(reached, axis=1)
+    while np.any(running):
+        rows = np.where(running)[0]
+        trial_bases = bases[rows].copy()
+        trial_q = q[rows].copy()
+        target = np.maximum(current[rows] + step, floor)
+        trial_err = _levenberg_marquardt(
+            problem, trial_bases, trial_q, reached[rows], stop, thre, rthre,
+            base_weight, bounds, max_pos_step, max_rot_step, target)
+        pe, re = _errors(trial_err)
+        kept = np.all(((pe < thre) & (re < rthre)) | ~reached[rows], axis=1)
+        margin = np.min(_joint_margins(problem.fk_params, trial_q), axis=1)
+        better = kept & (margin > current[rows] + 1e-4)
+        won = rows[better]
+        bases[won] = trial_bases[better]
+        q[won] = trial_q[better]
+        err[won] = trial_err[better]
+        current[won] = margin[better]
+        running[rows[~better]] = False
     return err
 
 
@@ -481,7 +549,8 @@ def solve_shared_base_ik(
         position_mask=None, rotation_mask=None, stop=200, thre=1e-3,
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
-        margin_weight=0.1, rotation_tolerance=None, max_pos_step=0.1,
+        margin_weight=0.1, rotation_tolerance=None, base_frame=None,
+        maximize_margin=False, margin_step=0.01, max_pos_step=0.1,
         max_rot_step=0.5):
     """Solve shared-base IK from several initial bases at once.
 
@@ -496,6 +565,14 @@ def solve_shared_base_ik(
     it still weighs are all reached. A
     last pass then holds the base and moves each dropped target's arm as
     close as it gets, so the reported errors are those of the final base.
+
+    With ``maximize_margin``, each candidate then raises its margin target
+    a step above the smallest margin it has, solves again -- base
+    included -- and keeps the result if every target it reached is still
+    reached and the smallest margin grew; it stops at the first step that
+    fails. This climbs towards the largest smallest margin the targets
+    allow near that candidate, which the hinge alone does not: once every
+    joint clears ``margin_target`` it stops pushing.
 
     Parameters
     ----------
@@ -538,6 +615,13 @@ def solve_shared_base_ik(
     rotation_tolerance : sequence of 3, or list of them, optional
         Per-axis rotation error, in the end-effector frame, that counts
         as reached -- one triple for all targets or one per target.
+    base_frame : numpy.ndarray, optional
+        ``(N,)`` bool, True where ``target_pos`` / ``target_rot`` are in
+        the root-link frame rather than the world frame.
+    maximize_margin : bool
+        Climb the smallest joint-limit margin, as described above.
+    margin_step : float
+        How far each climbing step raises the margin target.
     max_pos_step, max_rot_step : float
         Per-target cap on the error fed to one step, in meters and
         radians.
@@ -561,7 +645,9 @@ def solve_shared_base_ik(
         margin_target=margin_target, margin_weight=margin_weight,
         rotation_tolerance=(
             None if rotation_tolerance is None
-            else _resolve_tolerances(rotation_tolerance, n_targets)))
+            else _resolve_tolerances(rotation_tolerance, n_targets)),
+        base_frame=(None if base_frame is None
+                    else np.asarray(base_frame, dtype=bool)))
     bases = np.array(initial_bases, dtype=np.float64).reshape(-1, 3)
     n_cand = bases.shape[0]
     q = np.broadcast_to(
@@ -576,12 +662,13 @@ def solve_shared_base_ik(
                   np.array([base_bounds[0][1], base_bounds[1][1]]))
         bases[:, :2] = np.clip(bases[:, :2], bounds[0], bounds[1])
 
+    floor = None if margin_target is None else np.full(n_cand, margin_target)
     active = np.ones((n_cand, problem.n_targets), dtype=bool)
     rounds = problem.n_targets if drop_unreachable else 1
     for _ in range(rounds):
         err = _levenberg_marquardt(
             problem, bases, q, active, stop, thre, rthre, base_weight,
-            bounds, max_pos_step, max_rot_step)
+            bounds, max_pos_step, max_rot_step, floor)
         if not drop_unreachable:
             break
         pos_err, rot_err = _errors(err)
@@ -602,7 +689,13 @@ def solve_shared_base_ik(
         # Base held: only the dropped targets' arms still have work to do.
         err = _levenberg_marquardt(
             problem, bases, q, np.ones_like(active), stop, thre, rthre,
-            np.zeros(3), bounds, max_pos_step, max_rot_step)
+            np.zeros(3), bounds, max_pos_step, max_rot_step, floor)
+
+    if maximize_margin:
+        err = _climb_margin(
+            problem, bases, q, err, stop, thre, rthre, base_weight, bounds,
+            max_pos_step, max_rot_step,
+            0.0 if margin_target is None else margin_target, margin_step)
     bases[:, 2] = np.arctan2(np.sin(bases[:, 2]), np.cos(bases[:, 2]))
     pos_err, rot_err = _errors(err)
     return bases, q, pos_err, rot_err
@@ -677,13 +770,28 @@ def _base_to_array(coords):
     return np.array([pos[0], pos[1], _yaw_of(coords.worldrot())])
 
 
+def _rank(results):
+    """Best of ``results``, with all of them, ranked, as its candidates."""
+    order = np.lexsort((
+        [np.sum(r.position_errors) + np.sum(r.rotation_errors)
+         for r in results],
+        [-r.score for r in results],
+        [-r.n_reached for r in results],
+        [not r.base_valid for r in results]))
+    candidates = [results[k] for k in order]
+    best = candidates[0]
+    best.candidates = candidates
+    return best
+
+
 def find_base_placement(
         robot_model, target_coords, move_target=None, link_list=None,
         joint_list=None, initial_base_poses=None, initial_angles='current',
         position_mask=True, rotation_mask=True, stop=200, thre=1e-3,
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
-        margin_weight=0.1, rotation_tolerance=None, score=None, irm=None,
+        margin_weight=0.1, rotation_tolerance=None, maximize_margin=False,
+        margin_step=0.01, target_frame='world', score=None, irm=None,
         n_candidates=10, is_valid_base=None, apply=False):
     """Find one planar base pose from which every target is reachable.
 
@@ -706,7 +814,8 @@ def find_base_placement(
     robot_model : skrobot.model.RobotModel
         Robot. Its root link is the mobile base.
     target_coords : Coordinates or list of Coordinates
-        End-effector targets in the world frame.
+        End-effector targets, in the world frame unless ``target_frame``
+        says otherwise.
     move_target : CascadedCoords, optional
         End effector. Defaults to ``robot_model.end_coords``.
     link_list : list of Link, optional
@@ -747,11 +856,14 @@ def find_base_placement(
         worst quarter of them and solve again, so the base settles for the
         targets it can serve instead of a compromise that serves none.
         Dropped targets are still reported in ``result.success``.
-    base_height : float
+    base_height : float or sequence of float
         Height of the root link, held fixed while ``(x, y, yaw)`` are
         solved. 0 puts it on the floor as ``use_base='planar'`` does; a
         root link above the floor, or a base raised or lowered against
-        the targets, takes its actual height.
+        the targets, takes its actual height. A sequence -- the heights a
+        pedestal can be set to, say -- solves each and returns the best
+        over all of them, with ``result.candidates`` drawn from every
+        height.
     margin_target : float, optional
         Keep every joint at least this normalized margin (0 to 0.5, see
         :attr:`BasePlacementResult.joint_margins`) from its limits: a
@@ -762,6 +874,22 @@ def find_base_placement(
         None (default) solves for the targets only.
     margin_weight : float
         Weight of that term against errors in meters and radians.
+    maximize_margin : bool
+        After the targets are reached, keep raising the margin target a
+        ``margin_step`` above the smallest margin each candidate has, base
+        free to move, for as long as every reached target stays reached
+        and the smallest margin grows. The hinge alone stops pushing once
+        every joint clears ``margin_target``; this climbs to the largest
+        smallest margin the targets allow near each candidate, at the
+        cost of more solves.
+    margin_step : float
+        How far each climbing step raises the margin target.
+    target_frame : 'world', 'base', or list of them
+        Frame of each target: ``'world'``, or ``'base'`` for a pose
+        relative to the root link -- a fixture carried on the base, which
+        moves with it and is reached by the arm alone. One value for all
+        targets or one per target. ``irm`` ignores base-frame targets
+        when proposing bases, since every base serves them alike.
     rotation_tolerance : sequence of 3, or list of them, optional
         Per-axis rotation error in the end-effector frame that counts as
         reached, as in :meth:`~skrobot.model.RobotModel.batch_inverse_kinematics`
@@ -793,7 +921,9 @@ def find_base_placement(
     Returns
     -------
     BasePlacementResult
-        Best placement; ``result.candidates`` holds every start's result.
+        Best placement; ``result.candidates`` holds every start's result,
+        ranked: valid base, most targets reached, highest ``score``,
+        smallest error.
 
     Examples
     --------
@@ -808,6 +938,31 @@ def find_base_placement(
     >>> result.all_reached
     True
     """
+    if np.ndim(base_height) > 0:
+        kwargs = dict(
+            move_target=move_target, link_list=link_list,
+            joint_list=joint_list, initial_base_poses=initial_base_poses,
+            initial_angles=initial_angles, position_mask=position_mask,
+            rotation_mask=rotation_mask, stop=stop, thre=thre, rthre=rthre,
+            base_weight=base_weight, base_bounds=base_bounds,
+            drop_unreachable=drop_unreachable, margin_target=margin_target,
+            margin_weight=margin_weight, rotation_tolerance=rotation_tolerance,
+            maximize_margin=maximize_margin, margin_step=margin_step,
+            target_frame=target_frame, score=score, irm=irm,
+            n_candidates=n_candidates, is_valid_base=is_valid_base)
+        candidates = []
+        for height in base_height:
+            candidates.extend(find_base_placement(
+                robot_model, target_coords, base_height=float(height),
+                **kwargs).candidates)
+        for result in candidates:
+            result.candidates = []
+        best = _rank(candidates)
+        if apply:
+            set_base_pose(robot_model, best.base_pose)
+            robot_model.angle_vector(best.angle_vectors[0])
+        return best
+
     if move_target is None:
         move_target = robot_model.end_coords
     if isinstance(move_target, (list, tuple)):
@@ -818,6 +973,14 @@ def find_base_placement(
         robot_model, move_target, link_list, joint_list)
     fk_params = _chain_fk_params(robot_model, link_list, move_target)
     target_pos, target_rot = _targets_to_pos_rot(target_coords)
+    frames = ([target_frame] * len(target_pos)
+              if isinstance(target_frame, str) else list(target_frame))
+    if len(frames) != len(target_pos) or \
+            any(f not in ('world', 'base') for f in frames):
+        raise ValueError(
+            "target_frame must be 'world', 'base', or one of them per "
+            'target, got {!r}'.format(target_frame))
+    base_frame = np.array([f == 'base' for f in frames])
 
     mimic_parent = fk_params['mimic_parent_indices']
     non_mimic = [i for i in range(len(link_list)) if mimic_parent[i] < 0]
@@ -841,10 +1004,22 @@ def find_base_placement(
             raise ValueError(
                 'irm was built for joints {}, not {}'.format(
                     irm.joint_names, names))
+        world = np.where(~base_frame)[0]
+        if len(world) == 0:
+            raise ValueError(
+                'irm needs at least one world-frame target to place the '
+                'base against')
+        masks = _resolve_masks(rotation_mask, len(target_pos))[world]
+        coords = target_coords if isinstance(target_coords, Coordinates) \
+            else [target_coords[i] for i in world]
         proposed = irm.candidate_bases(
-            target_coords, n_candidates=n_candidates,
-            rotation_mask=rotation_mask, base_bounds=base_bounds,
-            base_height=base_height, is_valid_base=is_valid_base)
+            coords, n_candidates=n_candidates, rotation_mask=list(masks),
+            base_bounds=base_bounds, base_height=base_height,
+            is_valid_base=is_valid_base)
+        # Base-frame targets cast no votes and get no sample seed.
+        seeds = np.full((len(proposed), len(target_pos), len(initial_q)),
+                        np.nan)
+        seeds[:, world] = proposed.seeds
         if len(proposed) == 0:
             warnings.warn(
                 'The inverse reachability map proposed no base for these '
@@ -857,8 +1032,7 @@ def find_base_placement(
         start_bases.extend(proposed.bases)
         start_q.extend(np.broadcast_to(
             initial_q, (len(proposed), len(target_pos), len(initial_q))))
-        start_q.extend(np.where(
-            np.isnan(proposed.seeds), initial_q, proposed.seeds))
+        start_q.extend(np.where(np.isnan(seeds), initial_q, seeds))
     if initial_base_poses is None and not start_bases:
         initial_base_poses = [_root_link(robot_model).worldcoords()]
     for c in initial_base_poses or []:
@@ -874,7 +1048,9 @@ def find_base_placement(
         stop=stop, thre=thre, rthre=rthre, base_weight=base_weight,
         base_bounds=base_bounds, drop_unreachable=drop_unreachable,
         base_height=base_height, margin_target=margin_target,
-        margin_weight=margin_weight, rotation_tolerance=rotation_tolerance)
+        margin_weight=margin_weight, rotation_tolerance=rotation_tolerance,
+        base_frame=base_frame, maximize_margin=maximize_margin,
+        margin_step=margin_step)
 
     success = (pos_err < thre) & (rot_err < rthre)
     margins = _joint_margins(fk_params, q)
@@ -890,21 +1066,15 @@ def find_base_placement(
         avs[:, robot_index] = q[k]
         pose = _planar_coords(*bases[k], z=base_height)
         valid = True if is_valid_base is None else bool(is_valid_base(pose))
+        at_bound = base_bounds is not None and bool(np.any(
+            np.abs(bases[k, :2, None] - np.asarray(base_bounds)) < 1e-6))
         result = BasePlacementResult(
             pose, avs, success[k], pos_err[k], rot_err[k], margins[k], k,
-            base_valid=valid)
+            base_valid=valid, at_bound=at_bound)
         result.score = float(result.min_joint_margin if score is None
                              else score(result))
         results.append(result)
-    total_err = np.sum(pos_err, axis=1) + np.sum(rot_err, axis=1)
-    order = np.lexsort((
-        total_err,
-        -np.array([r.score for r in results]),
-        -np.count_nonzero(success, axis=1),
-        ~np.array([r.base_valid for r in results])))
-    candidates = [results[k] for k in order]
-    best = candidates[0]
-    best.candidates = candidates
+    best = _rank(results)
 
     if apply:
         set_base_pose(robot_model, best.base_pose)

@@ -124,6 +124,70 @@ class TestFindBasePlacement(unittest.TestCase):
         x, y = result.base_pose.worldpos()[:2]
         self.assertTrue(-0.5 <= x <= 0.5 and -0.5 <= y <= 0.5)
         self.assertFalse(result.all_reached)
+        self.assertTrue(result.at_bound)
+
+        free = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False, base_bounds=((-5, 5), (-5, 5)))
+        self.assertTrue(free.all_reached)
+        self.assertFalse(free.at_bound)
+
+    def test_base_frame_targets(self):
+        robot = self.robot
+        world = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.5, 0.0]).rotate(0.3, 'z'), 2,
+            seed=5)
+        # A pose of the hand relative to the root link, reachable from any
+        # base.
+        local = _targets_from_base(robot, Coordinates(), 1, seed=6)[0]
+        result = find_base_placement(
+            robot, world + [local], move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list,
+            initial_base_poses=Coordinates(pos=[0.8, 0.3, 0.0]),
+            target_frame=['world', 'world', 'base'])
+        self.assertTrue(result.all_reached, result)
+        set_base_pose(robot, result.base_pose)
+        robot.angle_vector(result.angle_vectors[2])
+        hand = robot.root_link.worldcoords().inverse_transformation()\
+            .transform(robot.rarm.end_coords.worldcoords())
+        np.testing.assert_allclose(hand.worldpos(), local.worldpos(),
+                                   atol=2e-3)
+        np.testing.assert_allclose(hand.worldrot(), local.worldrot(),
+                                   atol=2e-2)
+        with self.assertRaises(ValueError):
+            find_base_placement(
+                robot, world, move_target=robot.rarm.end_coords,
+                target_frame=['world'])
+
+    def test_base_height_candidates(self):
+        robot = self.robot
+        targets = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.5, -0.2]), 2, seed=7)
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list, base_height=[0.0, -0.2],
+            initial_base_poses=Coordinates(pos=[0.8, 0.3, 0.0]))
+        heights = {round(c.base_pose.worldpos()[2], 6)
+                   for c in result.candidates}
+        self.assertEqual(heights, {0.0, -0.2})
+        self.assertTrue(result.all_reached)
+        self.assertIs(result.candidates[0], result)
+
+    def test_maximize_margin(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[1.5, 0.0, 0.8]),
+                   Coordinates(pos=[1.6, 0.2, 0.9])]
+        kwargs = dict(move_target=robot.rarm.end_coords,
+                      joint_list=robot.rarm.joint_list, rotation_mask=False,
+                      initial_base_poses=Coordinates(pos=[0.8, 0.0, 0.0]))
+        hinge = find_base_placement(
+            robot, targets, margin_target=0.1, **kwargs)
+        climbed = find_base_placement(
+            robot, targets, margin_target=0.1, maximize_margin=True,
+            **kwargs)
+        self.assertTrue(climbed.all_reached, climbed)
+        self.assertGreater(climbed.min_joint_margin,
+                           hinge.min_joint_margin + 0.02)
 
     def test_base_height(self):
         robot = self.robot

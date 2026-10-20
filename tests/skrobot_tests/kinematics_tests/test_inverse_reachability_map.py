@@ -79,6 +79,21 @@ class TestInverseReachabilityMap(unittest.TestCase):
         self.assertTrue(result.base_valid)
         self.assertLess(result.base_pose.worldpos()[0], 1.2)
 
+    def test_hybrid_solve_with_base_frame_target(self):
+        base = Coordinates(pos=[1.0, -2.0, 0.0]).rotate(2.0, 'z')
+        targets = self._targets_from(base)
+        # A stored sample, which is a hand pose in the root-link frame.
+        local = self._targets_from(Coordinates())[0]
+        result = find_base_placement(
+            self.robot, targets + [local],
+            move_target=self.robot.rarm.end_coords, irm=self.irm,
+            target_frame=['world'] * len(targets) + ['base'])
+        self.assertTrue(result.all_reached, result)
+        with self.assertRaises(ValueError):
+            find_base_placement(
+                self.robot, [local], move_target=self.robot.rarm.end_coords,
+                irm=self.irm, target_frame='base')
+
     def test_save_load(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'irm.npz')
