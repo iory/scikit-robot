@@ -550,7 +550,7 @@ def _schur_step(err, base_jac, arm_jac, damping, base_weight,
     base_t = xp.swapaxes(base_jac, -1, -2)
     h_aa = arm_t @ arm_jac \
         + lam * xp.eye(n_opt)
-    h_ba = base_t @ arm_jac  # (K, N, 3, n)
+    h_base_arm = base_t @ arm_jac  # (K, N, 3, n)
     g_a = (arm_t @ err[..., None])[..., 0]
     if margin_jac is not None:
         h_aa = h_aa + (margin_jac ** 2)[..., None] * xp.eye(n_opt)
@@ -561,13 +561,13 @@ def _schur_step(err, base_jac, arm_jac, damping, base_weight,
 
     # H_aa^-1 [H_ab, g_a] in one solve per target.
     rhs = xp.concatenate(
-        [xp.swapaxes(h_ba, -1, -2), g_a[..., None]], axis=-1)
+        [xp.swapaxes(h_base_arm, -1, -2), g_a[..., None]], axis=-1)
     sol = xp.linalg.solve(h_aa, rhs)
     inv_h_ab = sol[..., :3]
     inv_g_a = sol[..., 3]
 
-    schur = h_bb - (h_ba @ inv_h_ab).sum(axis=1)
-    reduced = g_b - (h_ba @ inv_g_a[..., None])[..., 0].sum(axis=1)
+    schur = h_bb - (h_base_arm @ inv_h_ab).sum(axis=1)
+    reduced = g_b - (h_base_arm @ inv_g_a[..., None])[..., 0].sum(axis=1)
     d_base = xp.linalg.solve(schur, reduced[..., None])[..., 0]
     d_arm = inv_g_a - (inv_h_ab @ d_base[:, None, :, None])[..., 0]
     return d_base * base_weight, d_arm

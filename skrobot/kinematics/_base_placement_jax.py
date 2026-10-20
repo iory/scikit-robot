@@ -37,6 +37,18 @@ def _rodrigues(jnp, twist):
     return jnp.eye(3) + s * k + (1.0 - c) * (k @ k)
 
 
+def _enable_x64(jax):
+    """Context manager turning on float64 for the code inside it.
+
+    It is ``jax.enable_x64`` in current JAX and only
+    ``jax.experimental.enable_x64`` up to 0.7.
+    """
+    if hasattr(jax, 'enable_x64'):
+        return jax.enable_x64(True)
+    from jax.experimental import enable_x64
+    return enable_x64(True)
+
+
 class JaxLevenbergMarquardt(object):
     """Jitted LM iterations for one :class:`_SharedBaseProblem`."""
 
@@ -95,15 +107,15 @@ class JaxLevenbergMarquardt(object):
                     pos.reshape(n_cand, n_targets, 3),
                     rot.reshape(n_cand, n_targets, 3, 3))
 
-        def residual(meas_pos, meas_rot, tpos, trot):
-            return _pose_residual(meas_pos, meas_rot, tpos, trot, row_mask,
+        def residual(meas_pos, meas_rot, target_pos, target_rot):
+            return _pose_residual(meas_pos, meas_rot, target_pos, target_rot, row_mask,
                                   tolerance, jnp)
 
-        def linearize(bases, q, tpos, trot, dt):
+        def linearize(bases, q, target_pos, target_rot, dt):
             jac, pos, rot = chain(q)
             (meas_pos, meas_rot, world_pos, world_rot, base_rot,
              base_pos) = _place_on_base(pos, rot, bases, base_frame, jnp)
-            err = residual(meas_pos, meas_rot, tpos, trot)
+            err = residual(meas_pos, meas_rot, target_pos, target_rot)
             base_jac, arm_jac = _residual_jacobians(
                 err, jac, world_pos, world_rot, base_rot, base_pos,
                 base_frame, row_mask, tolerance, dt, jnp)
@@ -116,20 +128,20 @@ class JaxLevenbergMarquardt(object):
         def iterate(state, base_weight, mpos, mrot, mdt):
             bases, q, damping, stalls, done, weight, floor = state
             n_cand = bases.shape[0]
-            tpos = jnp.broadcast_to(static_pos, (n_cand,) + static_pos.shape)
-            trot = jnp.broadcast_to(static_rot, (n_cand,) + static_rot.shape)
+            target_pos = jnp.broadcast_to(static_pos, (n_cand,) + static_pos.shape)
+            target_rot = jnp.broadcast_to(static_rot, (n_cand,) + static_rot.shape)
             dt = None
             if has_moving:
-                tpos = tpos.at[:, moving_idx].set(mpos)
-                trot = trot.at[:, moving_idx].set(mrot)
+                target_pos = target_pos.at[:, moving_idx].set(mpos)
+                target_rot = target_rot.at[:, moving_idx].set(mrot)
                 dt = jnp.zeros((n_cand, n_targets, 6, 3)).at[
                     :, moving_idx].set(mdt)
-            err, bj, aj = linearize(bases, q, tpos, trot, dt)
+            err, bj, aj = linearize(bases, q, target_pos, target_rot, dt)
             m_err, m_jac = margin_terms(q, floor)
             cost = _cost(err * weight[..., None], m_err, jnp)
-            pn = jnp.linalg.norm(err[..., :3], axis=-1)
-            rn = jnp.linalg.norm(err[..., 3:], axis=-1)
-            reached = (pn < thre) & (rn < rthre)
+            pos_norm = jnp.linalg.norm(err[..., :3], axis=-1)
+            rot_norm = jnp.linalg.norm(err[..., 3:], axis=-1)
+            reached = (pos_norm < thre) & (rot_norm < rthre)
             done = done | (jnp.all(reached | (weight == 0), axis=1)
                            & ~jnp.any(m_err > 0, axis=(1, 2)))
             done = done | (damping >= 1e4) | (stalls >= 5)
@@ -146,16 +158,16 @@ class JaxLevenbergMarquardt(object):
             step = new_bases[:, :3] - bases[:, :3]
             if has_moving:
                 # First-order move of the base-following targets.
-                ntpos = tpos + jnp.einsum('knia,ka->kni', dt[..., :3, :],
-                                          step)
-                ntrot = _rodrigues(jnp, jnp.einsum(
-                    'knia,ka->kni', dt[..., 3:, :], step)) @ trot
+                new_target_pos = target_pos + jnp.einsum(
+                    'knia,ka->kni', dt[..., :3, :], step)
+                new_target_rot = _rodrigues(jnp, jnp.einsum(
+                    'knia,ka->kni', dt[..., 3:, :], step)) @ target_rot
             else:
-                ntpos, ntrot = tpos, trot
+                new_target_pos, new_target_rot = target_pos, target_rot
             _, pos, rot = chain(new_q)
             mp, mr, _, _, _, _ = _place_on_base(pos, rot, new_bases,
                                                 base_frame, jnp)
-            new_err = residual(mp, mr, ntpos, ntrot)
+            new_err = residual(mp, mr, new_target_pos, new_target_rot)
             new_m_err, _ = margin_terms(new_q, floor)
             new_cost = _cost(new_err * weight[..., None], new_m_err, jnp)
             accept = (new_cost < cost) & ~done
@@ -184,7 +196,7 @@ class JaxLevenbergMarquardt(object):
 
     def run(self, bases, q, active, stop, base_weight, margin_target):
         """Iterate in place on ``bases`` / ``q``; return the final error."""
-        with self.jax.enable_x64(True):
+        with _enable_x64(self.jax):
             self._run(bases, q, active, stop, base_weight, margin_target)
         return self.problem.residual(bases, q)
 
