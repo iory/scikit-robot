@@ -177,6 +177,38 @@ class TestFindBasePlacement(unittest.TestCase):
         self.assertGreater(
             np.linalg.norm(hand.difference_rotation(targets[0])), 0.1)
 
+    def test_rotation_tolerance(self):
+        robot = self.robot
+        targets = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.0, 0.0]), 2, seed=4)
+        targets[0].rotate(0.5, 'y')
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list,
+            initial_base_poses=Coordinates(pos=[0.8, 0.2, 0.0]),
+            rotation_tolerance=[(0, 0.6, 0), (0, 0, 0)])
+        self.assertTrue(result.all_reached, result)
+        set_base_pose(robot, result.base_pose)
+        robot.angle_vector(result.angle_vectors[0])
+        err = robot.rarm.end_coords.difference_rotation(targets[0])
+        self.assertLessEqual(abs(err[1]), 0.6 + 1e-6)
+        np.testing.assert_allclose(err[[0, 2]], 0.0, atol=np.deg2rad(1.0))
+
+    def test_margin_target_keeps_joints_off_limits(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[1.5, 0.0, 0.8]),
+                   Coordinates(pos=[1.6, 0.2, 0.9])]
+        kwargs = dict(move_target=robot.rarm.end_coords,
+                      joint_list=robot.rarm.joint_list, rotation_mask=False,
+                      initial_base_poses=Coordinates(pos=[0.8, 0.0, 0.0]))
+        plain = find_base_placement(robot, targets, **kwargs)
+        kept = find_base_placement(
+            robot, targets, margin_target=0.15, **kwargs)
+        self.assertTrue(kept.all_reached, kept)
+        self.assertGreaterEqual(kept.min_joint_margin, 0.14)
+        self.assertGreaterEqual(kept.min_joint_margin,
+                                plain.min_joint_margin)
+
     def test_ranks_by_joint_margin_then_custom_score(self):
         robot = self.robot
         targets = [Coordinates(pos=[1.5, 0.0, 0.8]),
