@@ -2188,14 +2188,27 @@ class CascadedCoords(Coordinates):
         if not (c is None or coordinates_p(c)):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
+        previous = getattr(self, '_parent', None)
+        if previous is c:
+            self._parent = c
+            return
+        # A parent chain through self would make worldcoords() recurse
+        # forever.
+        ancestor = c
+        while ancestor is not None:
+            if ancestor is self:
+                raise ValueError(
+                    'Cannot make {!r} a parent of {!r}: it is already one '
+                    'of its descendants.'.format(c.name, self.name))
+            ancestor = getattr(ancestor, 'parent', None)
         # Leave the previous parent's descendants, so that re-parenting by
         # either assoc or a direct assignment leaves no stale entry there.
-        previous = getattr(self, '_parent', None)
-        if (previous is not c
-                and isinstance(previous, CascadedCoords)
+        if (isinstance(previous, CascadedCoords)
                 and self in previous._descendants):
             previous._descendants.remove(self)
         self._parent = c
+        # The cached world pose was taken under the previous parent.
+        self.changed()
 
     def __getstate__(self):
         assert self._worldcoords._hook == self.update
