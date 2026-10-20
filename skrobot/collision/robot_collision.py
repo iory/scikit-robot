@@ -318,6 +318,7 @@ class RobotCollisionChecker:
             Obstacle geometry in world frame. Accepts:
             - skrobot.model.primitives.Sphere, Box, Cylinder
             - skrobot.collision.Sphere, Capsule, Box, HalfSpace
+            - skrobot.sdf.SignedDistanceFunction (GridSDF, BoxSDF, ...)
             - Any object with .sdf callable attribute
             - callable SDF function: points (N, 3) -> distances (N,)
         use_sdf : bool
@@ -325,6 +326,13 @@ class RobotCollisionChecker:
             collision checking. If False, prefer analytical primitives
             (faster, JAX-compatible).
         """
+        from skrobot.sdf import SignedDistanceFunction
+
+        # An SDF object has a worldpos, so test for it before primitives.
+        if isinstance(obstacle, SignedDistanceFunction):
+            self._world_sdfs.append(obstacle)
+            return
+
         # Check if it's a callable (SDF function)
         if callable(obstacle) and not hasattr(obstacle, 'worldpos'):
             self._world_sdfs.append(obstacle)
