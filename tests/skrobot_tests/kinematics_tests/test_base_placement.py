@@ -125,12 +125,16 @@ class TestFindBasePlacement(unittest.TestCase):
         self.assertTrue(-0.5 <= x <= 0.5 and -0.5 <= y <= 0.5)
         self.assertFalse(result.all_reached)
         self.assertTrue(result.at_bound)
+        self.assertLess(result.bound_distance, 1e-6)
 
         free = find_base_placement(
             robot, targets, move_target=robot.rarm.end_coords,
             rotation_mask=False, base_bounds=((-5, 5), (-5, 5)))
         self.assertTrue(free.all_reached)
         self.assertFalse(free.at_bound)
+        x, y = free.base_pose.worldpos()[:2]
+        self.assertAlmostEqual(
+            free.bound_distance, min(5 - abs(x), 5 - abs(y)))
 
     def test_base_frame_targets(self):
         for height in (0.0, -0.2):
@@ -259,6 +263,13 @@ class TestFindBasePlacement(unittest.TestCase):
         self.assertTrue(climbed.all_reached, climbed)
         self.assertGreater(climbed.min_joint_margin,
                            hinge.min_joint_margin + 0.02)
+        capped = find_base_placement(
+            robot, targets, margin_target=0.1, maximize_margin=True,
+            max_margin_steps=1, **kwargs)
+        self.assertLessEqual(capped.min_joint_margin,
+                             climbed.min_joint_margin)
+        self.assertGreaterEqual(capped.min_joint_margin,
+                                hinge.min_joint_margin)
 
     def test_base_height(self):
         robot = self.robot

@@ -70,6 +70,11 @@ class BasePlacementResult(object):
     at_bound : bool
         Whether the base ended on an edge of ``base_bounds``. The solve
         would have gone further; a wider region may hold a better base.
+    bound_distance : float
+        Distance in meters from the base to the nearest edge of
+        ``base_bounds`` (inf without bounds). A base a few millimeters
+        inside is as suspect as one on the edge: the edge may have held
+        it during the solve and let go at the end.
     candidates : list of BasePlacementResult
         Every candidate's result, best first. Empty on the entries of this
         list themselves.
@@ -77,8 +82,10 @@ class BasePlacementResult(object):
 
     def __init__(self, base_pose, angle_vectors, success, position_errors,
                  rotation_errors, joint_margins, candidate_index,
-                 base_valid=True, at_bound=False, target_coords=None):
+                 base_valid=True, at_bound=False, bound_distance=np.inf,
+                 target_coords=None):
         self.base_pose = base_pose
+        self.bound_distance = bound_distance
         self.target_coords = target_coords
         self.base_valid = base_valid
         self.at_bound = at_bound
@@ -567,16 +574,22 @@ def _levenberg_marquardt(problem, bases, q, active, stop, thre, rthre,
 
 
 def _climb_margin(problem, bases, q, err, stop, thre, rthre, base_weight,
-                  bounds, max_pos_step, max_rot_step, floor, step):
+                  bounds, max_pos_step, max_rot_step, floor, step,
+                  max_steps=None, verbose=False):
     """Raise each candidate's smallest joint margin while it stays valid.
 
-    Works in place on ``bases`` and ``q``; returns the matching error.
+    At most ``max_steps`` rounds when given. Works in place on ``bases``
+    and ``q``; returns the matching error.
     """
     pos_err, rot_err = _errors(err)
     reached = (pos_err < thre) & (rot_err < rthre)
     current = np.min(_joint_margins(problem.fk_params, q), axis=1)
     running = np.any(reached, axis=1)
+    n_round = 0
     while np.any(running):
+        if max_steps is not None and n_round >= max_steps:
+            break
+        n_round += 1
         rows = np.where(running)[0]
         trial_bases = bases[rows].copy()
         trial_q = q[rows].copy()
@@ -594,6 +607,11 @@ def _climb_margin(problem, bases, q, err, stop, thre, rthre, base_weight,
         err[won] = trial_err[better]
         current[won] = margin[better]
         running[rows[~better]] = False
+        if verbose:
+            print('  margin climb round {}: {} of {} candidates still '
+                  'climbing, best smallest margin {:.3f}'.format(
+                      n_round, int(np.count_nonzero(running)), len(running),
+                      float(np.max(current))))
     return err
 
 
@@ -604,7 +622,7 @@ def solve_shared_base_ik(
         drop_unreachable=True, base_height=0.0, margin_target=None,
         margin_weight=0.1, rotation_tolerance=None, base_frame=None,
         target_fns=None, maximize_margin=False, margin_step=0.01,
-        max_pos_step=0.1,
+        max_margin_steps=None, verbose=False, max_pos_step=0.1,
         max_rot_step=0.5):
     """Solve shared-base IK from several initial bases at once.
 
@@ -680,6 +698,10 @@ def solve_shared_base_ik(
         Climb the smallest joint-limit margin, as described above.
     margin_step : float
         How far each climbing step raises the margin target.
+    max_margin_steps : int, optional
+        Cap on the climbing rounds; None climbs until no candidate gains.
+    verbose : bool
+        Print the progress of the climb.
     max_pos_step, max_rot_step : float
         Per-target cap on the error fed to one step, in meters and
         radians.
@@ -754,7 +776,8 @@ def solve_shared_base_ik(
         err = _climb_margin(
             problem, bases, q, err, stop, thre, rthre, base_weight, bounds,
             max_pos_step, max_rot_step,
-            0.0 if margin_target is None else margin_target, margin_step)
+            0.0 if margin_target is None else margin_target, margin_step,
+            max_margin_steps, verbose)
     bases[:, 2] = np.arctan2(np.sin(bases[:, 2]), np.cos(bases[:, 2]))
     pos_err, rot_err = _errors(err)
     return bases, q, pos_err, rot_err
@@ -850,8 +873,9 @@ def find_base_placement(
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
         margin_weight=0.1, rotation_tolerance=None, maximize_margin=False,
-        margin_step=0.01, target_frame='world', score=None, irm=None,
-        n_candidates=10, is_valid_base=None, apply=False):
+        margin_step=0.01, max_margin_steps=None, target_frame='world',
+        score=None, irm=None, n_candidates=10, is_valid_base=None,
+        apply=False, verbose=False):
     """Find one planar base pose from which every target is reachable.
 
     Solves for a single base pose ``(x, y, yaw)`` of the robot's root link
@@ -899,7 +923,9 @@ def find_base_placement(
         solve is local in the arm as much as in the base, and on one
         74-target problem the smallest margin found ran from 0.18 to
         0.22 over four seeds. Several distinct seeds cost a solve each
-        and make the outcome less of a draw. ``'current'`` reads the
+        and make the outcome less of a draw; three to five spread over
+        the arm's working poses -- the reset pose, the arm reaching
+        forward low and high -- are a good default. ``'current'`` reads the
         model at call time, so the same call can answer differently
         after the model has been moved.
     position_mask, rotation_mask : bool, str, sequence or list
@@ -955,6 +981,9 @@ def find_base_placement(
         cost of more solves.
     margin_step : float
         How far each climbing step raises the margin target.
+    max_margin_steps : int, optional
+        Cap on the climbing rounds, which take most of the time when
+        ``maximize_margin`` is on; None climbs until no candidate gains.
     target_frame : 'world', 'base', or list of them
         Frame of each target: ``'world'``, or ``'base'`` for a pose
         relative to the root link -- a fixture carried on the base, which
@@ -989,6 +1018,8 @@ def find_base_placement(
     apply : bool
         If True, move the robot to the found base pose and the first
         target's angle vector.
+    verbose : bool
+        Print progress: each height, the number of starts, the climb.
 
     Returns
     -------
@@ -1020,8 +1051,9 @@ def find_base_placement(
             drop_unreachable=drop_unreachable, margin_target=margin_target,
             margin_weight=margin_weight, rotation_tolerance=rotation_tolerance,
             maximize_margin=maximize_margin, margin_step=margin_step,
-            target_frame=target_frame, score=score, irm=irm,
-            n_candidates=n_candidates, is_valid_base=is_valid_base)
+            max_margin_steps=max_margin_steps, target_frame=target_frame,
+            score=score, irm=irm, n_candidates=n_candidates,
+            is_valid_base=is_valid_base, verbose=verbose)
         candidates = []
         for height in base_height:
             candidates.extend(find_base_placement(
@@ -1140,6 +1172,9 @@ def find_base_placement(
     start_q.extend(qs)
     initial_bases = np.array(start_bases)
     initial_q = np.array(start_q)
+    if verbose:
+        print('find_base_placement: base_height {:.3f}, {} starts'.format(
+            float(base_height), len(initial_bases)))
 
     bases, q, pos_err, rot_err = solve_shared_base_ik(
         fk_params, target_pos, target_rot, initial_bases, initial_q,
@@ -1149,7 +1184,8 @@ def find_base_placement(
         base_height=base_height, margin_target=margin_target,
         margin_weight=margin_weight, rotation_tolerance=rotation_tolerance,
         base_frame=base_frame, target_fns=target_fns,
-        maximize_margin=maximize_margin, margin_step=margin_step)
+        maximize_margin=maximize_margin, margin_step=margin_step,
+        max_margin_steps=max_margin_steps, verbose=verbose)
 
     success = (pos_err < thre) & (rot_err < rthre)
     margins = _joint_margins(fk_params, q)
@@ -1165,14 +1201,18 @@ def find_base_placement(
         avs[:, robot_index] = q[k]
         pose = _planar_coords(*bases[k], z=base_height)
         valid = True if is_valid_base is None else bool(is_valid_base(pose))
-        at_bound = base_bounds is not None and bool(np.any(
-            np.abs(bases[k, :2, None] - np.asarray(base_bounds)) < 1e-6))
+        if base_bounds is None:
+            bound_distance = np.inf
+        else:
+            bound_distance = float(np.min(
+                np.abs(bases[k, :2, None] - np.asarray(base_bounds))))
+        at_bound = bound_distance < 1e-6
         solved_targets = [t(pose) if callable(t) else t
                           for t in target_coords]
         result = BasePlacementResult(
             pose, avs, success[k], pos_err[k], rot_err[k], margins[k], k,
             base_valid=valid, at_bound=at_bound,
-            target_coords=solved_targets)
+            bound_distance=bound_distance, target_coords=solved_targets)
         result.score = float(result.min_joint_margin if score is None
                              else score(result))
         results.append(result)
