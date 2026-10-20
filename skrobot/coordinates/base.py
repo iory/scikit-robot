@@ -1783,7 +1783,7 @@ class CascadedCoords(Coordinates):
                 .format(child.parent.name)
             raise RuntimeError(msg)
 
-        if child.parent is not self or child not in self._descendants:
+        if child not in self._descendants:
             if relative_coords is None or relative_coords == 'world':
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
@@ -1794,14 +1794,10 @@ class CascadedCoords(Coordinates):
                     "`relative_coords`'s type should be"
                     "skrobot.coordinates.Coordinates, but is {}"
                     .format(type(relative_coords)))
-            previous_parent = child.parent
-            if (isinstance(previous_parent, CascadedCoords)
-                    and child in previous_parent._descendants):
-                previous_parent._descendants.remove(child)
+            # The parent setter removes child from its previous parent.
             child.parent = self
             child.newcoords(relative_coords, check_validity=False, relative_coords='local')
-            if child not in self._descendants:
-                self._descendants.append(child)
+            self._descendants.append(child)
         return child
 
     def dissoc(self, child):
@@ -2192,6 +2188,13 @@ class CascadedCoords(Coordinates):
         if not (c is None or coordinates_p(c)):
             raise ValueError('parent should be None or Coordinates. '
                              'get type=={}'.format(type(c)))
+        # Leave the previous parent's descendants, so that re-parenting by
+        # either assoc or a direct assignment leaves no stale entry there.
+        previous = getattr(self, '_parent', None)
+        if (previous is not c
+                and isinstance(previous, CascadedCoords)
+                and self in previous._descendants):
+            previous._descendants.remove(self)
         self._parent = c
 
     def __getstate__(self):

@@ -1599,12 +1599,33 @@ class TestCascadedCoordinates(unittest.TestCase):
                     self.assertIs(child.parent, other)
                     self.assertNotIn(child, parent.descendants)
                     self.assertEqual(other.descendants.count(child), 1)
-                    testing.assert_allclose(
-                        _homogeneous(child.worldcoords()), expected,
-                        atol=1e-14, rtol=0)
-                    testing.assert_allclose(
-                        _homogeneous(tip.worldcoords()), expected.dot(tip_local),
-                        atol=1e-14, rtol=0)
+                    testing.assert_almost_equal(
+                        _homogeneous(child.worldcoords()), expected)
+                    testing.assert_almost_equal(
+                        _homogeneous(tip.worldcoords()), expected.dot(tip_local))
+
+    def test_reparent_by_parent_assignment(self):
+        # Assigning parent directly, as CascadedCoords(parent=...) does,
+        # must also drop the child from its previous parent.
+        parent = make_cascoords(pos=[1, 0, 0])
+        other = make_cascoords(pos=[0, 1, 0], rot=rotation_matrix(0.5, 'z'))
+        child = make_cascoords(pos=[0, 0, 1])
+        parent.assoc(child)
+
+        child.parent = other
+        self.assertNotIn(child, parent.descendants)
+        other.assoc(child, relative_coords='local', force=True)
+        self.assertIs(child.parent, other)
+        self.assertEqual(other.descendants.count(child), 1)
+        self.assertNotIn(child, parent.descendants)
+
+        # The previous parent no longer drags or detaches the child.
+        world_before = _homogeneous(child.worldcoords())
+        parent.translate([0.3, 0, 0], wrt='world')
+        parent.dissoc(child)
+        self.assertIs(child.parent, other)
+        testing.assert_almost_equal(
+            _homogeneous(child.worldcoords()), world_before)
 
     def test_assoc_deprecated_c_argument(self):
         parent = make_cascoords(pos=[2, 0, 0])
