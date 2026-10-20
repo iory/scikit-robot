@@ -84,6 +84,31 @@ class TestUrdfToUsd(unittest.TestCase):
         self.assertTrue(root.IsValid())
         self.assertTrue(root.HasAPI(UsdPhysics.ArticulationRootAPI))
 
+    def test_robot_is_the_default_prim(self):
+        # so another stage can reference the file without naming a prim path
+        self.assertEqual(Usd.Stage.Open(self.out).GetDefaultPrim().GetPath(),
+                         '/robot')
+        host = Usd.Stage.CreateInMemory()
+        prim = host.DefinePrim('/World/robot')
+        prim.GetReferences().AddReference(self.out)
+        self.assertTrue(prim.HasAPI(UsdPhysics.ArticulationRootAPI))
+        self.assertGreater(len(list(Usd.PrimRange(prim))), 1)
+
+    def test_cli_writes_a_stage(self):
+        import subprocess
+        import sys
+        out = os.path.join(self.tmpdir, 'kuka_cli.usda')
+        result = subprocess.run(
+            [sys.executable, '-m', 'skrobot.apps.convert_urdf_to_usd',
+             KUKA_URDF, '-o', out, '--floating-base',
+             '--home', 'lbr_iiwa_with_wsg50__J1=0.5'],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stage = Usd.Stage.Open(out)
+        self.assertEqual(stage.GetDefaultPrim().GetPath(), '/robot')
+        self.assertFalse(
+            stage.GetPrimAtPath('/robot/joints/base_fixed').IsValid())
+
     def test_base_is_welded_to_the_world(self):
         # A fixed base means a FixedJoint whose body1 is the base link and whose
         # body0 (the world) is left empty.

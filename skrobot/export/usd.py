@@ -471,6 +471,10 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         scene.CreateGravityMagnitudeAttr(float(n))
 
     root = UsdGeom.Xform.Define(stage, Sdf.Path("/robot"))
+    # The robot is the stage's defaultPrim, so the file can be referenced (or
+    # payloaded) from another stage without naming a prim path; without one such
+    # a reference resolves to nothing.
+    stage.SetDefaultPrim(root.GetPrim())
     UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
     # PhysxArticulationAPI lives in the Omniverse physx schema, absent from pip
     # usd-core. AddAppliedSchema registers the API by name (no type needed) so

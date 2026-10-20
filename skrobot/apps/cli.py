@@ -24,6 +24,7 @@ def get_available_apps():
         'extract_sub_urdf': ('Extract sub-URDF from a root link', None),
         'generate_robot_class': ('Generate robot class from URDF geometry', None),
         'urdf_tree': ('Print URDF link tree and validate its structure', None),
+        'convert_urdf_to_usd': ('Convert URDF to a USD physics articulation', None),
     }
 
     for filename in os.listdir(apps_dir):
