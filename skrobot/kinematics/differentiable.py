@@ -1251,8 +1251,8 @@ def batch_solve_ik(
     return solutions, success_flags, errors
 
 
-def rotation_error_so3_log_batch_numpy(actual_rot, target_rot):
-    """Rotation error as the SO(3) logarithm of ``actual^T @ target``, in NumPy.
+def rotation_error_so3_log_batch_numpy(actual_rot, target_rot, xp=np):
+    """Rotation error as the SO(3) logarithm of ``actual^T @ target``.
 
     The anti-symmetric part of a rotation matrix is ``sin(theta) * axis``,
     which shrinks back towards zero once the error passes a quarter turn
@@ -1261,51 +1261,64 @@ def rotation_error_so3_log_batch_numpy(actual_rot, target_rot):
 
     Parameters
     ----------
-    actual_rot : numpy.ndarray
-        Current rotation matrices, ``(batch, 3, 3)``.
-    target_rot : numpy.ndarray
-        Target rotation matrices, ``(batch, 3, 3)``.
+    actual_rot : array
+        Current rotation matrices, ``(..., 3, 3)``.
+    target_rot : array
+        Target rotation matrices, ``(..., 3, 3)``.
+    xp : module
+        Array module to compute with (``numpy`` or ``jax.numpy``).
 
     Returns
     -------
-    numpy.ndarray
-        ``(batch, 3)`` axis-angle error in the actual (body) frame.
+    array
+        ``(..., 3)`` axis-angle error in the actual (body) frame.
     """
-    r = np.matmul(np.transpose(actual_rot, (0, 2, 1)), target_rot)
-    vee = 0.5 * np.stack([
-        r[:, 2, 1] - r[:, 1, 2],
-        r[:, 0, 2] - r[:, 2, 0],
-        r[:, 1, 0] - r[:, 0, 1]
-    ], axis=1)  # sin(theta) * axis
-    cos_theta = np.clip(
-        (np.trace(r, axis1=1, axis2=2) - 1.0) / 2.0, -1.0, 1.0)
-    sin_theta = np.linalg.norm(vee, axis=1)
-    theta = np.arctan2(sin_theta, cos_theta)
+    r = xp.matmul(xp.swapaxes(actual_rot, -1, -2), target_rot)
+    vee = 0.5 * xp.stack([
+        r[..., 2, 1] - r[..., 1, 2],
+        r[..., 0, 2] - r[..., 2, 0],
+        r[..., 1, 0] - r[..., 0, 1]
+    ], axis=-1)  # sin(theta) * axis
+    cos_theta = xp.clip(
+        (xp.trace(r, axis1=-2, axis2=-1) - 1.0) / 2.0, -1.0, 1.0)
+    sin_theta = xp.linalg.norm(vee, axis=-1)
+    theta = xp.arctan2(sin_theta, cos_theta)
 
     # theta / sin(theta) rescales the anti-symmetric part into the log.
     # Below the guard sin(theta) is either a genuine zero rotation, where
     # the ratio tends to 1 and vee is already the answer, or a half turn,
     # handled separately below.
     safe = sin_theta > 1e-6
-    scale = np.where(safe, theta / np.where(safe, sin_theta, 1.0), 1.0)
-    log = vee * scale[:, None]
+    scale = xp.where(safe, theta / xp.where(safe, sin_theta, 1.0), 1.0)
+    log = vee * scale[..., None]
 
-    # At a half turn the anti-symmetric part carries no axis, but every
-    # column of the symmetric part is parallel to it.
-    near_pi = np.logical_and(np.logical_not(safe), cos_theta < 0)
-    if np.any(near_pi):
-        idx = np.where(near_pi)[0]
-        sym = (r[idx] + np.eye(3)) / 2.0
-        col = np.argmax(np.diagonal(sym, axis1=1, axis2=2), axis=1)
-        axis = sym[np.arange(idx.shape[0]), :, col]
-        axis = axis / np.maximum(
-            np.linalg.norm(axis, axis=1, keepdims=True), 1e-12)
-        # Either sign is a valid logarithm; keep the one the residual
-        # anti-symmetric part points at so the step stays continuous.
-        sign = np.sign(np.sum(axis * vee[idx], axis=1))
-        sign = np.where(sign == 0, 1.0, sign)
-        log[idx] = theta[idx][:, None] * axis * sign[:, None]
-    return log
+    near_pi = xp.logical_and(xp.logical_not(safe), cos_theta < 0)
+    if xp is np:
+        # NumPy fixes up the few half turns in place.
+        if np.any(near_pi):
+            log[near_pi] = _half_turn_log(
+                r[near_pi], vee[near_pi], theta[near_pi], np)
+        return log
+    # Traced arrays cannot be indexed by a mask: compute every row.
+    return xp.where(near_pi[..., None], _half_turn_log(r, vee, theta, xp),
+                    log)
+
+
+def _half_turn_log(r, vee, theta, xp):
+    """SO(3) log of ``r`` near a half turn, where ``vee`` carries no axis.
+
+    Every column of the symmetric part is parallel to the axis then. Either
+    sign is a valid logarithm; keep the one the residual anti-symmetric
+    part points at so the step stays continuous.
+    """
+    sym = (r + xp.eye(3)) / 2.0
+    col = xp.argmax(xp.diagonal(sym, axis1=-2, axis2=-1), axis=-1)
+    axis = xp.take_along_axis(sym, col[..., None, None], axis=-1)[..., 0]
+    axis = axis / xp.maximum(
+        xp.linalg.norm(axis, axis=-1, keepdims=True), 1e-12)
+    sign = xp.sign(xp.sum(axis * vee, axis=-1))
+    sign = xp.where(sign == 0, 1.0, sign)
+    return theta[..., None] * axis * sign[..., None]
 
 
 def _seed_centred_limits(lower, upper, unbounded, seed, n_rows):
@@ -4988,29 +5001,25 @@ def compute_geometric_jacobian_batched_numpy(
 
     for i in range(n_joints):
         # Apply link static transform
-        current_pos = current_pos + np.einsum(
-            'bij,j->bi', current_rot, translations[i])
-        current_rot = np.einsum(
-            'bij,jk->bik', current_rot, local_rotations[i])
+        current_pos = current_pos + current_rot @ translations[i]
+        current_rot = current_rot @ local_rotations[i]
 
         # Store joint position and axis in world frame
         joint_positions[i] = current_pos.copy()
-        joint_axes_world[i] = np.einsum(
-            'bij,j->bi', current_rot, axes[i])
+        joint_axes_world[i] = current_rot @ axes[i]
 
         # Apply joint motion
         delta_angles = joint_angles_batch[:, i] - ref_angles[i]
 
         if joint_types[i] == 'prismatic':
-            current_pos = current_pos + np.einsum(
-                'bij,j,b->bi', current_rot, axes[i], delta_angles)
+            current_pos = current_pos + (current_rot @ axes[i]) * delta_angles[:, None]
         else:
             joint_rots = _axis_angle_to_matrix_batched(axes[i], delta_angles)
-            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+            current_rot = current_rot @ joint_rots
 
     # Apply end-effector offset
-    ee_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
-    ee_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+    ee_pos = current_pos + current_rot @ ee_offset_pos
+    ee_rot = current_rot @ ee_offset_rot
 
     # Compute full Jacobian columns: (batch, 6, n_joints)
     J_full = np.zeros((batch_size, 6, n_joints))
@@ -5106,32 +5115,26 @@ def forward_kinematics_ee_batched_numpy(joint_angles_batch, fk_params):
     for i in range(n_joints):
         # Apply link static transform
         # pos = pos + rot @ translation
-        current_pos = current_pos + np.einsum(
-            'bij,j->bi', current_rot, translations[i]
-        )
+        current_pos = current_pos + current_rot @ translations[i]
         # rot = rot @ local_rotation
-        current_rot = np.einsum(
-            'bij,jk->bik', current_rot, local_rotations[i]
-        )
+        current_rot = current_rot @ local_rotations[i]
 
         # Apply joint motion
         delta_angles = joint_angles_batch[:, i] - ref_angles[i]  # (batch,)
 
         if joint_types[i] == 'prismatic':
             # Translate along axis
-            current_pos = current_pos + np.einsum(
-                'bij,j,b->bi', current_rot, axes[i], delta_angles
-            )
+            current_pos = current_pos + (current_rot @ axes[i]) * delta_angles[:, None]
         else:
             # Revolute: rotate around axis
             joint_rots = _axis_angle_to_matrix_batched(
                 axes[i], delta_angles
             )  # (batch, 3, 3)
-            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+            current_rot = current_rot @ joint_rots
 
     # Apply end-effector offset
-    current_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
-    current_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+    current_pos = current_pos + current_rot @ ee_offset_pos
+    current_rot = current_rot @ ee_offset_rot
 
     return current_pos, current_rot
 

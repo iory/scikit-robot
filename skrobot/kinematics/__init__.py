@@ -11,12 +11,22 @@ The algorithms support multiple backends (NumPy, JAX) for
 different performance and autodiff requirements.
 """
 
+# Mobile-base placement for several end-effector targets
+from skrobot.kinematics.base_placement import BasePlacementResult
+from skrobot.kinematics.base_placement import find_base_placement
+from skrobot.kinematics.base_placement import set_base_pose
+from skrobot.kinematics.base_placement import vectorized_target
+
 # Differentiable kinematics (backend-agnostic)
 from skrobot.kinematics.differentiable import create_batch_ik_solver
 from skrobot.kinematics.differentiable import create_dynamic_limit_mask
 from skrobot.kinematics.differentiable import extract_fk_parameters
 from skrobot.kinematics.differentiable import forward_kinematics
 from skrobot.kinematics.differentiable import forward_kinematics_ee
+
+# Inverse reachability map: base poses that reach a hand pose
+from skrobot.kinematics.inverse_reachability_map import BaseCandidates
+from skrobot.kinematics.inverse_reachability_map import InverseReachabilityMap
 
 # Loop-closure solving for cut kinematic loops
 from skrobot.kinematics.loop_closure import LoopClosureSolver
@@ -33,4 +43,10 @@ __all__ = [
     'create_dynamic_limit_mask',
     'LoopClosureSolver',
     'ReachabilityMap',
+    'BasePlacementResult',
+    'find_base_placement',
+    'set_base_pose',
+    'vectorized_target',
+    'BaseCandidates',
+    'InverseReachabilityMap',
 ]
