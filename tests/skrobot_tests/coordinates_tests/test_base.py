@@ -1525,9 +1525,54 @@ class TestCascadedCoordinates(unittest.TestCase):
         other.assoc(child, force=True)
         self.assertIs(child.parent, other)
         self.assertIn(child, other.descendants)
+        self.assertNotIn(child, parent.descendants)
         # force still defaults to relative_coords='world', so it stays put.
         testing.assert_almost_equal(
             _homogeneous(child.worldcoords()), world_before)
+
+        parent.assoc(child, force=True)
+        self.assertIs(child.parent, parent)
+        self.assertIn(child, parent.descendants)
+        self.assertNotIn(child, other.descendants)
+        parent.translate([0.3, 0, 0], wrt='world')
+        other.translate([-0.2, 0, 0], wrt='world')
+        world_before[0, 3] += 0.3
+        testing.assert_almost_equal(
+            _homogeneous(child.worldcoords()), world_before)
+
+    def test_force_assoc_reference_modes(self):
+        attachment = make_coords(pos=[0.1, -0.2, 0.3],
+                                 rot=rotation_matrix(0.4, 'y'))
+        for a, b in _coords_pairs():
+            for reference in (None, 'world', 'local', attachment):
+                with self.subTest(reference=reference):
+                    parent = make_cascoords(pos=a.translation, rot=a.rotation)
+                    other = make_cascoords(pos=b.translation, rot=b.rotation)
+                    child = make_cascoords(pos=[0.2, 0.3, -0.1],
+                                           rot=rotation_matrix(-0.3, 'z'))
+                    tip = make_cascoords(pos=[0.1, -0.2, 0.3])
+                    parent.assoc(child, relative_coords='local')
+                    child.assoc(tip, relative_coords='local')
+                    before = _homogeneous(child.worldcoords())
+                    tip_local = _homogeneous(tip).copy()
+                    tip.worldcoords()
+                    if reference is None or reference == 'world':
+                        expected = before
+                    elif reference == 'local':
+                        expected = _homogeneous(other).dot(before)
+                    else:
+                        expected = _homogeneous(other).dot(_homogeneous(attachment))
+
+                    other.assoc(child, relative_coords=reference, force=True)
+                    self.assertIs(child.parent, other)
+                    self.assertNotIn(child, parent.descendants)
+                    self.assertEqual(other.descendants.count(child), 1)
+                    testing.assert_allclose(
+                        _homogeneous(child.worldcoords()), expected,
+                        atol=1e-14, rtol=0)
+                    testing.assert_allclose(
+                        _homogeneous(tip.worldcoords()), expected.dot(tip_local),
+                        atol=1e-14, rtol=0)
 
     def test_assoc_deprecated_c_argument(self):
         parent = make_cascoords(pos=[2, 0, 0])

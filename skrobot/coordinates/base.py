@@ -1783,7 +1783,7 @@ class CascadedCoords(Coordinates):
                 .format(child.parent.name)
             raise RuntimeError(msg)
 
-        if child not in self._descendants:
+        if child.parent is not self or child not in self._descendants:
             if relative_coords is None or relative_coords == 'world':
                 relative_coords = self.worldcoords().transformation(
                     child.worldcoords())
@@ -1794,9 +1794,14 @@ class CascadedCoords(Coordinates):
                     "`relative_coords`'s type should be"
                     "skrobot.coordinates.Coordinates, but is {}"
                     .format(type(relative_coords)))
+            previous_parent = child.parent
+            if (isinstance(previous_parent, CascadedCoords)
+                    and child in previous_parent._descendants):
+                previous_parent._descendants.remove(child)
             child.parent = self
             child.newcoords(relative_coords, check_validity=False, relative_coords='local')
-            self._descendants.append(child)
+            if child not in self._descendants:
+                self._descendants.append(child)
         return child
 
     def dissoc(self, child):
