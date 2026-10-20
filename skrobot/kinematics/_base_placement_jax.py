@@ -20,21 +20,7 @@ iteration the trial step moves them along that derivative.
 
 import numpy as np
 
-
-def _rodrigues(jnp, twist):
-    """``(..., 3, 3)`` rotation for ``(..., 3)`` axis-angle vectors."""
-    theta = jnp.linalg.norm(twist, axis=-1, keepdims=True)
-    axis = twist / jnp.maximum(theta, 1e-12)
-    x, y, z = axis[..., 0], axis[..., 1], axis[..., 2]
-    zero = jnp.zeros_like(x)
-    k = jnp.stack([
-        jnp.stack([zero, -z, y], axis=-1),
-        jnp.stack([z, zero, -x], axis=-1),
-        jnp.stack([-y, x, zero], axis=-1),
-    ], axis=-2)
-    s = jnp.sin(theta)[..., None]
-    c = jnp.cos(theta)[..., None]
-    return jnp.eye(3) + s * k + (1.0 - c) * (k @ k)
+from skrobot.backend.math_utils import rodrigues_rotation
 
 
 def _enable_x64(jax):
@@ -160,8 +146,9 @@ class JaxLevenbergMarquardt(object):
                 # First-order move of the base-following targets.
                 new_target_pos = target_pos + jnp.einsum(
                     'knia,ka->kni', dt[..., :3, :], step)
-                new_target_rot = _rodrigues(jnp, jnp.einsum(
-                    'knia,ka->kni', dt[..., 3:, :], step)) @ target_rot
+                twist = jnp.einsum('knia,ka->kni', dt[..., 3:, :], step)
+                new_target_rot = rodrigues_rotation(
+                    jnp, twist, jnp.linalg.norm(twist, axis=-1)) @ target_rot
             else:
                 new_target_pos, new_target_rot = target_pos, target_rot
             _, pos, rot = chain(new_q)
