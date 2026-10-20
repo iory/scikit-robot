@@ -16,16 +16,13 @@ are within reach, up to the map's resolution, and make good starts for
 
 import numpy as np
 
+from skrobot.coordinates.math import normalize_angle
 from skrobot.kinematics.base_placement import _chain_fk_params
 from skrobot.kinematics.base_placement import _planar_coords
 from skrobot.kinematics.base_placement import _resolve_link_list
 from skrobot.kinematics.base_placement import _resolve_masks
 from skrobot.kinematics.base_placement import _targets_to_pos_rot
 from skrobot.kinematics.differentiable import forward_kinematics_ee_batched_numpy
-
-
-def _wrap(angle):
-    return np.arctan2(np.sin(angle), np.cos(angle))
 
 
 class BaseCandidates(object):
@@ -228,7 +225,7 @@ class InverseReachabilityMap(object):
         c, s = np.cos(yaw), np.sin(yaw)
         x = target_pos[0] - (c * pos[:, 0] - s * pos[:, 1])
         y = target_pos[1] - (s * pos[:, 0] + c * pos[:, 1])
-        return np.stack([x, y, _wrap(yaw)], axis=1), sample
+        return np.stack([x, y, normalize_angle(yaw)], axis=1), sample
 
     def candidate_bases(
             self, target_coords, n_candidates=10, xy_resolution=0.1,
@@ -376,7 +373,7 @@ class InverseReachabilityMap(object):
         for c in order:
             b = cell_bases[c]
             if any(np.hypot(*(b[:2] - cell_bases[o][:2]))
-                   + abs(_wrap(b[2] - cell_bases[o][2])) * yaw_scale
+                   + abs(normalize_angle(b[2] - cell_bases[o][2])) * yaw_scale
                    < min_separation for o in chosen):
                 continue
             if is_valid_base is not None:

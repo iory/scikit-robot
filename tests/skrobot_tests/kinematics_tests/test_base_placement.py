@@ -82,7 +82,7 @@ class TestFindBasePlacement(unittest.TestCase):
         problem = _SharedBaseProblem(
             fk_params, np.zeros((1, 3)), np.eye(3)[None],
             np.ones(3), np.ones(3))
-        pos, rot, _, _, _ = problem._ee_world(base, q, False)
+        _, pos, rot, _, _, _, _ = problem._ee_world(base, q, False)
         problem.target_pos = pos[0]
         problem.target_rot = rot[0]
         err, base_jac, arm_jac = problem.linearize(base, q)
@@ -198,7 +198,7 @@ class TestFindBasePlacement(unittest.TestCase):
         probe = _SharedBaseProblem(
             fk_params, np.zeros((1, 3)), np.eye(3)[None], np.ones(3),
             np.ones(3))
-        pos, rot, _, _, _ = probe._ee_world(base, q, False)
+        _, pos, rot, _, _, _, _ = probe._ee_world(base, q, False)
         hand_pos, hand_rot = pos[0, 0], rot[0, 0]
 
         def on_hand(base_pose):

@@ -37,34 +37,6 @@ def _rodrigues(jnp, twist):
     return jnp.eye(3) + s * k + (1.0 - c) * (k @ k)
 
 
-def _rotation_log(jnp, actual, target):
-    """Body-frame log of ``actual^T @ target``; see the NumPy version."""
-    r = jnp.swapaxes(actual, -1, -2) @ target
-    vee = 0.5 * jnp.stack([
-        r[..., 2, 1] - r[..., 1, 2],
-        r[..., 0, 2] - r[..., 2, 0],
-        r[..., 1, 0] - r[..., 0, 1],
-    ], axis=-1)
-    cos_theta = jnp.clip((jnp.trace(r, axis1=-2, axis2=-1) - 1.0) / 2.0,
-                         -1.0, 1.0)
-    sin_theta = jnp.linalg.norm(vee, axis=-1)
-    theta = jnp.arctan2(sin_theta, cos_theta)
-    safe = sin_theta > 1e-6
-    scale = jnp.where(safe, theta / jnp.where(safe, sin_theta, 1.0), 1.0)
-    log = vee * scale[..., None]
-    # Half turn: the axis is the dominant column of the symmetric part.
-    sym = (r + jnp.eye(3)) / 2.0
-    col = jnp.argmax(jnp.diagonal(sym, axis1=-2, axis2=-1), axis=-1)
-    axis = jnp.take_along_axis(sym, col[..., None, None], axis=-1)[..., 0]
-    axis = axis / jnp.maximum(
-        jnp.linalg.norm(axis, axis=-1, keepdims=True), 1e-12)
-    sign = jnp.sign(jnp.sum(axis * vee, axis=-1))
-    sign = jnp.where(sign == 0, 1.0, sign)
-    near_pi = jnp.logical_and(jnp.logical_not(safe), cos_theta < 0)
-    return jnp.where(near_pi[..., None],
-                     theta[..., None] * axis * sign[..., None], log)
-
-
 class JaxLevenbergMarquardt(object):
     """Jitted LM iterations for one :class:`_SharedBaseProblem`."""
 
@@ -73,6 +45,14 @@ class JaxLevenbergMarquardt(object):
         import jax
         import jax.numpy as jnp
 
+        from skrobot.kinematics.base_placement import _clip_joints
+        from skrobot.kinematics.base_placement import _clip_rows
+        from skrobot.kinematics.base_placement import _cost
+        from skrobot.kinematics.base_placement import _margin_terms
+        from skrobot.kinematics.base_placement import _place_on_base
+        from skrobot.kinematics.base_placement import _pose_residual
+        from skrobot.kinematics.base_placement import _residual_jacobians
+        from skrobot.kinematics.base_placement import _schur_step
         from skrobot.kinematics.differentiable import compute_geometric_jacobian_jax
 
         self.jax = jax
@@ -88,7 +68,8 @@ class JaxLevenbergMarquardt(object):
         row_mask = jnp.asarray(problem.row_mask)
         tolerance = (None if problem.rotation_tolerance is None
                      else jnp.asarray(problem.rotation_tolerance))
-        base_frame = jnp.asarray(problem.base_frame)
+        # Kept in NumPy: only its pattern is read, at trace time.
+        base_frame = problem.base_frame
         lower = jnp.asarray(problem.lower)
         upper = jnp.asarray(problem.upper)
         unbounded = jnp.asarray(problem.unbounded)
@@ -105,13 +86,6 @@ class JaxLevenbergMarquardt(object):
         lo = None if bounds is None else jnp.asarray(bounds[0])
         hi = None if bounds is None else jnp.asarray(bounds[1])
 
-        def base_rotations(yaw):
-            c, s = jnp.cos(yaw), jnp.sin(yaw)
-            z, o = jnp.zeros_like(yaw), jnp.ones_like(yaw)
-            return jnp.stack([jnp.stack([c, -s, z], -1),
-                              jnp.stack([s, c, z], -1),
-                              jnp.stack([z, z, o], -1)], -2)
-
         def chain(q):
             n_cand = q.shape[0]
             angles = jnp.zeros((n_cand * n_targets, n_joints), q.dtype)
@@ -121,107 +95,23 @@ class JaxLevenbergMarquardt(object):
                     pos.reshape(n_cand, n_targets, 3),
                     rot.reshape(n_cand, n_targets, 3, 3))
 
-        def ee_world(bases, q):
-            jac, pos, rot = chain(q)
-            base_rot = base_rotations(bases[:, 2])
-            base_pos = bases[:, jnp.array([0, 1, 3])]
-            world_pos = jnp.einsum('kij,knj->kni', base_rot, pos) \
-                + base_pos[:, None, :]
-            world_rot = base_rot[:, None] @ rot
-            sel = base_frame[None, :, None]
-            meas_pos = jnp.where(sel, pos, world_pos)
-            meas_rot = jnp.where(sel[..., None], rot, world_rot)
-            return (jac, meas_pos, meas_rot, world_pos, world_rot, base_rot,
-                    base_pos)
-
-        def residual_from(meas_pos, meas_rot, tpos, trot):
-            pos_err = jnp.einsum('knji,knj->kni', meas_rot, tpos - meas_pos)
-            rot_err = _rotation_log(jnp, meas_rot, trot)
-            if tolerance is not None:
-                rot_err = jnp.where(jnp.abs(rot_err) <= tolerance, 0.0,
-                                    rot_err)
-            return jnp.concatenate([pos_err, rot_err], -1) * row_mask
+        def residual(meas_pos, meas_rot, tpos, trot):
+            return _pose_residual(meas_pos, meas_rot, tpos, trot, row_mask,
+                                  tolerance, jnp)
 
         def linearize(bases, q, tpos, trot, dt):
-            (jac, meas_pos, meas_rot, world_pos, world_rot, base_rot,
-             base_pos) = ee_world(bases, q)
-            err = residual_from(meas_pos, meas_rot, tpos, trot)
-            arm_jac = jnp.concatenate([
-                base_rot[:, None] @ jac[:, :, :3],
-                base_rot[:, None] @ jac[:, :, 3:]], axis=2)
-            rel = world_pos - base_pos[:, None, :]
-            one = jnp.ones(rel.shape[:2])
-            zero = jnp.zeros(rel.shape[:2])
-            base_jac = jnp.stack([
-                jnp.stack([one, zero, -rel[..., 1]], -1),
-                jnp.stack([zero, one, rel[..., 0]], -1),
-                jnp.stack([zero, zero, zero], -1),
-                jnp.stack([zero, zero, zero], -1),
-                jnp.stack([zero, zero, zero], -1),
-                jnp.stack([zero, zero, one], -1),
-            ], -2)
-            base_jac = jnp.where(base_frame[None, :, None, None], 0.0,
-                                 base_jac)
-            if has_moving:
-                base_jac = base_jac - dt
-            rot_t = jnp.swapaxes(world_rot, -1, -2)
-
-            def to_hand(j6):
-                return jnp.concatenate(
-                    [rot_t @ j6[:, :, :3], rot_t @ j6[:, :, 3:]], axis=2)
-
-            mask = row_mask[..., None]
-            if tolerance is not None:
-                live = jnp.concatenate(
-                    [jnp.ones(err.shape[:-1] + (3,), bool),
-                     err[..., 3:] != 0.0], -1)
-                mask = mask * live[..., None]
-            return err, to_hand(base_jac) * mask, to_hand(arm_jac) * mask
+            jac, pos, rot = chain(q)
+            (meas_pos, meas_rot, world_pos, world_rot, base_rot,
+             base_pos) = _place_on_base(pos, rot, bases, base_frame, jnp)
+            err = residual(meas_pos, meas_rot, tpos, trot)
+            base_jac, arm_jac = _residual_jacobians(
+                err, jac, world_pos, world_rot, base_rot, base_pos,
+                base_frame, row_mask, tolerance, dt, jnp)
+            return err, base_jac, arm_jac
 
         def margin_terms(q, floor):
-            to_lower = (q - lower) / span
-            to_upper = (upper - q) / span
-            margin = jnp.minimum(to_lower, to_upper)
-            slope = jnp.where(to_lower < to_upper, 1.0, -1.0) / span
-            target = floor[:, None, None]
-            active = bounded & (margin < target)
-            m_err = jnp.where(active, margin_weight * (target - margin), 0.0)
-            m_jac = jnp.where(active, margin_weight * slope, 0.0)
-            return m_err, m_jac
-
-        def clip_q(q):
-            return jnp.where(unbounded, q, jnp.clip(q, lower, upper))
-
-        def clip_rows(err):
-            pn = jnp.linalg.norm(err[..., :3], axis=-1, keepdims=True)
-            rn = jnp.linalg.norm(err[..., 3:], axis=-1, keepdims=True)
-            ps = jnp.minimum(1.0, max_pos_step / jnp.maximum(pn, 1e-12))
-            rs = jnp.minimum(1.0, max_rot_step / jnp.maximum(rn, 1e-12))
-            return jnp.concatenate([err[..., :3] * ps, err[..., 3:] * rs], -1)
-
-        def schur(err, bj, aj, damping, base_weight, m_err, m_jac):
-            bj = bj * base_weight
-            h_aa = jnp.einsum('knri,knrj->knij', aj, aj) \
-                + damping[:, None, None, None] * jnp.eye(n_opt)
-            h_aa = h_aa + jax.vmap(jax.vmap(jnp.diag))(m_jac ** 2)
-            h_ba = jnp.einsum('knri,knrj->knij', bj, aj)
-            g_a = jnp.einsum('knri,knr->kni', aj, err) + m_jac * m_err
-            g_b = jnp.einsum('knri,knr->ki', bj, err)
-            h_bb = jnp.einsum('knri,knrj->kij', bj, bj) \
-                + damping[:, None, None] * jnp.eye(3)
-            rhs = jnp.concatenate(
-                [jnp.swapaxes(h_ba, -1, -2), g_a[..., None]], -1)
-            sol = jnp.linalg.solve(h_aa, rhs)
-            inv_h_ab, inv_g_a = sol[..., :3], sol[..., 3]
-            s_mat = h_bb - jnp.einsum('knij,knjl->kil', h_ba, inv_h_ab)
-            red = g_b - jnp.einsum('knij,knj->ki', h_ba, inv_g_a)
-            d_base = jnp.linalg.solve(s_mat, red[..., None])[..., 0]
-            d_arm = inv_g_a - jnp.einsum('knij,kj->kni', inv_h_ab, d_base)
-            return d_base * base_weight, d_arm
-
-        def cost_of(err, weight, m_err):
-            return (jnp.sum((err * weight[..., None]) ** 2, axis=(1, 2))
-                    + jnp.sum(m_err ** 2, axis=(1, 2)))
+            return _margin_terms(q, floor, lower, upper, span, bounded,
+                                 margin_weight, jnp)
 
         def iterate(state, base_weight, mpos, mrot, mdt):
             bases, q, damping, stalls, done, weight, floor = state
@@ -236,7 +126,7 @@ class JaxLevenbergMarquardt(object):
                     :, moving_idx].set(mdt)
             err, bj, aj = linearize(bases, q, tpos, trot, dt)
             m_err, m_jac = margin_terms(q, floor)
-            cost = cost_of(err, weight, m_err)
+            cost = _cost(err * weight[..., None], m_err, jnp)
             pn = jnp.linalg.norm(err[..., :3], axis=-1)
             rn = jnp.linalg.norm(err[..., 3:], axis=-1)
             reached = (pn < thre) & (rn < rthre)
@@ -244,14 +134,15 @@ class JaxLevenbergMarquardt(object):
                            & ~jnp.any(m_err > 0, axis=(1, 2)))
             done = done | (damping >= 1e4) | (stalls >= 5)
             w = weight[..., None]
-            d_base, d_arm = schur(clip_rows(err) * w, bj * w[..., None],
-                                  aj * w[..., None], damping, base_weight,
-                                  m_err, m_jac)
+            d_base, d_arm = _schur_step(
+                _clip_rows(err, max_pos_step, max_rot_step, jnp) * w,
+                bj * w[..., None], aj * w[..., None], damping, base_weight,
+                m_err, m_jac, jnp)
             new_bases = bases.at[:, :3].add(d_base)
             if lo is not None:
                 new_bases = new_bases.at[:, :2].set(
                     jnp.clip(new_bases[:, :2], lo, hi))
-            new_q = clip_q(q + d_arm)
+            new_q = _clip_joints(q + d_arm, lower, upper, unbounded, jnp)
             step = new_bases[:, :3] - bases[:, :3]
             if has_moving:
                 # First-order move of the base-following targets.
@@ -261,10 +152,12 @@ class JaxLevenbergMarquardt(object):
                     'knia,ka->kni', dt[..., 3:, :], step)) @ trot
             else:
                 ntpos, ntrot = tpos, trot
-            _, mp, mr, _, _, _, _ = ee_world(new_bases, new_q)
-            new_err = residual_from(mp, mr, ntpos, ntrot)
+            _, pos, rot = chain(new_q)
+            mp, mr, _, _, _, _ = _place_on_base(pos, rot, new_bases,
+                                                base_frame, jnp)
+            new_err = residual(mp, mr, ntpos, ntrot)
             new_m_err, _ = margin_terms(new_q, floor)
-            new_cost = cost_of(new_err, weight, new_m_err)
+            new_cost = _cost(new_err * weight[..., None], new_m_err, jnp)
             accept = (new_cost < cost) & ~done
             damping = jnp.where(accept, jnp.maximum(damping * 0.5, 1e-6),
                                 jnp.minimum(damping * 4.0, 1e4))
@@ -281,28 +174,13 @@ class JaxLevenbergMarquardt(object):
     def _moving(self, bases):
         """Host-side poses ``(K, D, 3)``, ``(K, D, 3, 3)`` of the targets
         that follow the base, and their base derivative ``(K, D, 6, 3)``."""
-        from skrobot.kinematics.differentiable import rotation_error_so3_log_batch_numpy
         problem = self.problem
         n_cand = bases.shape[0]
-        n_moving = len(problem.target_fns)
-        if not n_moving:
+        if not problem.target_fns:
             return (np.zeros((n_cand, 0, 3)), np.zeros((n_cand, 0, 3, 3)),
                     np.zeros((n_cand, 0, 6, 3)))
         pos, rot = problem._moving_targets(bases)
-        deriv = np.zeros((n_cand, n_moving, 6, 3))
-        eps = 1e-5
-        for axis in range(3):
-            step = np.zeros(4)
-            step[axis] = eps
-            pos_p, rot_p = problem._moving_targets(bases + step)
-            pos_m, rot_m = problem._moving_targets(bases - step)
-            twist = rotation_error_so3_log_batch_numpy(
-                rot_m.reshape(-1, 3, 3), rot_p.reshape(-1, 3, 3))
-            twist = np.einsum('bij,bj->bi', rot_m.reshape(-1, 3, 3),
-                              twist).reshape(pos_p.shape)
-            deriv[..., :3, axis] = (pos_p - pos_m) / (2 * eps)
-            deriv[..., 3:, axis] = twist / (2 * eps)
-        return pos, rot, deriv
+        return pos, rot, problem.moving_target_jacobian(bases)
 
     def run(self, bases, q, active, stop, base_weight, margin_target):
         """Iterate in place on ``bases`` / ``q``; return the final error."""

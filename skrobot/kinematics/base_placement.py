@@ -18,6 +18,12 @@ import warnings
 import numpy as np
 
 from skrobot.coordinates import Coordinates
+from skrobot.coordinates.math import matrix2ypr
+from skrobot.coordinates.math import normalize_angle
+from skrobot.coordinates.math import normalize_mask
+from skrobot.coordinates.math import rotation_matrix
+from skrobot.kinematics.differentiable import _apply_rotation_tolerance
+from skrobot.kinematics.differentiable import _normalize_axis_tolerance
 from skrobot.kinematics.differentiable import compute_geometric_jacobian_batched_numpy
 from skrobot.kinematics.differentiable import extract_fk_parameters
 from skrobot.kinematics.differentiable import forward_kinematics_ee_batched_numpy
@@ -123,13 +129,11 @@ class BasePlacementResult(object):
 
 
 def _yaw_of(rot):
-    return float(np.arctan2(rot[1, 0], rot[0, 0]))
+    return float(matrix2ypr(rot)[0])
 
 
 def _planar_coords(x, y, yaw, z=0.0):
-    c, s = np.cos(yaw), np.sin(yaw)
-    rot = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
-    return Coordinates(pos=np.array([x, y, z]), rot=rot)
+    return Coordinates(pos=np.array([x, y, z]), rot=rotation_matrix(yaw, 'z'))
 
 
 def _base_matrices(base):
@@ -162,29 +166,20 @@ def vectorized_target(fn):
     return fn
 
 
-def _base_rotations(yaw):
-    """``(..., 3, 3)`` rotations about z for an array of yaw angles."""
-    c, s = np.cos(yaw), np.sin(yaw)
-    zeros = np.zeros_like(yaw)
-    ones = np.ones_like(yaw)
-    return np.stack([
-        np.stack([c, -s, zeros], axis=-1),
-        np.stack([s, c, zeros], axis=-1),
-        np.stack([zeros, zeros, ones], axis=-1),
+def _base_rotations(yaw, xp=np):
+    """``(..., 3, 3)`` rotations about z for an array of yaw angles.
+
+    ``rotation_matrix`` builds one; this builds a batch, with ``xp`` the
+    array module (``numpy`` or ``jax.numpy``).
+    """
+    c, s = xp.cos(yaw), xp.sin(yaw)
+    zeros = xp.zeros_like(yaw)
+    ones = xp.ones_like(yaw)
+    return xp.stack([
+        xp.stack([c, -s, zeros], axis=-1),
+        xp.stack([s, c, zeros], axis=-1),
+        xp.stack([zeros, zeros, ones], axis=-1),
     ], axis=-2)
-
-
-def _resolve_mask(mask):
-    if mask is True or mask is None:
-        return np.ones(3)
-    if mask is False:
-        return np.zeros(3)
-    if isinstance(mask, str):
-        return np.array([float(a in mask.lower()) for a in 'xyz'])
-    mask = np.asarray(mask, dtype=np.float64)
-    if mask.shape != (3,):
-        raise ValueError('mask must have 3 entries, got {}'.format(mask))
-    return mask
 
 
 def _is_single_mask(mask):
@@ -200,27 +195,26 @@ def _is_single_mask(mask):
 def _resolve_masks(mask, n_targets):
     """``(n_targets, 3)`` mask from one mask or one per target."""
     if _is_single_mask(mask):
-        return np.tile(_resolve_mask(mask), (n_targets, 1))
+        return np.tile(normalize_mask(mask).astype(np.float64),
+                       (n_targets, 1))
     if isinstance(mask, np.ndarray) and mask.ndim == 2:
         mask = list(mask)
     if len(mask) != n_targets:
         raise ValueError(
             'Got {} masks for {} targets'.format(len(mask), n_targets))
-    return np.array([_resolve_mask(m) for m in mask])
+    return np.array([normalize_mask(m) for m in mask], dtype=np.float64)
 
 
 def _resolve_tolerances(tolerance, n_targets):
     """``(n_targets, 3)`` per-axis tolerance, 0 where there is none."""
-    tol = np.array(
-        [[0.0 if t is None else t for t in row]
-         for row in np.atleast_2d(np.asarray(tolerance, dtype=object))],
-        dtype=np.float64)
-    if tol.shape == (1, 3):
-        tol = np.tile(tol, (n_targets, 1))
-    if tol.shape != (n_targets, 3):
+    rows = np.atleast_2d(np.asarray(tolerance, dtype=object))
+    if rows.shape == (1, 3):
+        rows = np.repeat(rows, n_targets, axis=0)
+    if rows.shape != (n_targets, 3):
         raise ValueError('rotation_tolerance must be 3 values or one '
-                         'triple per target, got shape {}'.format(tol.shape))
-    return np.maximum(tol, 0.0)
+                         'triple per target, got shape {}'.format(rows.shape))
+    tol = [_normalize_axis_tolerance(row) for row in rows]
+    return np.array([np.zeros(3) if t is None else t for t in tol])
 
 
 def _targets_to_pos_rot(target_coords):
@@ -233,20 +227,11 @@ def _targets_to_pos_rot(target_coords):
     return pos, rot
 
 
-def _root_link(robot_model):
-    root_link = getattr(robot_model, 'root_link', None)
-    if root_link is not None:
-        return root_link
-    for link in robot_model.link_list:
-        if link.parent_link is None:
-            return link
-    raise RuntimeError('Cannot determine the root link of the robot model')
-
-
 def _chain_fk_params(robot_model, link_list, move_target):
     """FK parameters of the arm chain, expressed in the root-link frame."""
     fk_params = extract_fk_parameters(robot_model, link_list, move_target)
-    root_inv = _root_link(robot_model).worldcoords().inverse_transformation()
+    root_link = robot_model._find_fullbody_root_link()
+    root_inv = root_link.worldcoords().inverse_transformation()
     chain_base = root_inv.transform(Coordinates(
         pos=fk_params['base_position'], rot=fk_params['base_rotation']))
     fk_params['base_position'] = chain_base.worldpos().copy()
@@ -310,32 +295,16 @@ class _SharedBaseProblem(object):
         """Hinge residual keeping joints ``margin_target`` off the limits.
 
         ``margin_target`` is None, a scalar, or ``(K,)`` -- one per
-        candidate. Returns ``(err, jac)``, both ``(K, N, n_opt)``: joint
-        ``j`` of target ``n`` contributes the row ``jac[..., j] * dq_j =
-        err[..., j]`` while its normalized margin is under the target,
-        and zero once it is clear. Each row touches one joint of one
-        target, so it only adds to the diagonal of that target's arm
-        block.
+        candidate; see :func:`_margin_terms`.
         """
         if margin_target is None:
             zeros = np.zeros_like(q)
             return zeros, zeros
-        target = np.asarray(margin_target, dtype=np.float64)
-        if target.ndim == 1:
-            target = target[:, None, None]
-        to_lower = (q - self.lower) / self.span
-        to_upper = (self.upper - q) / self.span
-        margin = np.minimum(to_lower, to_upper)
-        slope = np.where(to_lower < to_upper, 1.0, -1.0) / self.span
-        active = self.bounded & (margin < target)
-        w = self.margin_weight
-        err = np.where(active, w * (target - margin), 0.0)
-        jac = np.where(active, w * slope, 0.0)
-        return err, jac
+        return _margin_terms(q, margin_target, self.lower, self.upper,
+                             self.span, self.bounded, self.margin_weight)
 
     def clip(self, q):
-        clipped = np.clip(q, self.lower, self.upper)
-        return np.where(self.unbounded, q, clipped)
+        return _clip_joints(q, self.lower, self.upper, self.unbounded)
 
     def _ee_world(self, base, q, with_jacobian):
         n_cand = base.shape[0]
@@ -350,19 +319,7 @@ class _SharedBaseProblem(object):
             jac = None
         pos = pos.reshape(n_cand, self.n_targets, 3)
         rot = rot.reshape(n_cand, self.n_targets, 3, 3)
-        base_rot = _base_rotations(base[:, 2])  # (K, 3, 3)
-        base_pos = base[:, [0, 1, 3]]  # (K, 3)
-        world_pos = (base_rot[:, None] @ pos[..., None])[..., 0] \
-            + base_pos[:, None, :]
-        world_rot = base_rot[:, None] @ rot
-        if np.any(self.base_frame):
-            # Root-link frame for the targets that ride on the base: the
-            # chain's own FK, which is already relative to the root link
-            # wherever base_height puts it.
-            sel = self.base_frame[None, :, None]
-            world_pos = np.where(sel, pos, world_pos)
-            world_rot = np.where(sel[..., None], rot, world_rot)
-        return world_pos, world_rot, jac, base_rot, base_pos
+        return (jac,) + _place_on_base(pos, rot, base, self.base_frame)
 
     def _moving_targets(self, base):
         """``(K, D, 3)`` and ``(K, D, 3, 3)`` poses of the base-following
@@ -385,6 +342,22 @@ class _SharedBaseProblem(object):
                     rot[k, d] = c.worldrot()
         return pos, rot
 
+    def moving_target_jacobian(self, base):
+        """``(K, D, 6, 3)`` world twist of each base-following target per
+        unit base ``(x, y, yaw)``, by central differences of its function."""
+        eps = 1e-5
+        jac = np.empty((base.shape[0], len(self.target_fns), 6, 3))
+        for axis in range(3):
+            step = np.zeros(4)
+            step[axis] = eps
+            pos_p, rot_p = self._moving_targets(base + step)
+            pos_m, rot_m = self._moving_targets(base - step)
+            twist = rot_m @ rotation_error_so3_log_batch_numpy(
+                rot_m, rot_p)[..., None]
+            jac[..., :3, axis] = (pos_p - pos_m) / (2 * eps)
+            jac[..., 3:, axis] = twist[..., 0] / (2 * eps)
+        return jac
+
     def targets(self, base):
         """``(K, N, 3)`` and ``(K, N, 3, 3)`` target poses for each base."""
         n_cand = base.shape[0]
@@ -399,113 +372,171 @@ class _SharedBaseProblem(object):
 
     def residual(self, base, q):
         """``(K, N, 6)`` masked end-effector-frame error."""
-        world_pos, world_rot, _, _, _ = self._ee_world(base, q, False)
-        return self._residual(world_pos, world_rot, *self.targets(base))
-
-    def _residual(self, world_pos, world_rot, target_pos, target_rot):
-        # In the end-effector frame, where the masks apply -- the same
-        # frame as difference_position / difference_rotation, so a mask
-        # means what it means to inverse_kinematics.
-        n_cand = world_pos.shape[0]
-        pos_err = (np.swapaxes(world_rot, -1, -2)
-                   @ (target_pos - world_pos)[..., None])[..., 0]
-        tgt_rot = target_rot
-        rot_err = rotation_error_so3_log_batch_numpy(
-            world_rot.reshape(-1, 3, 3), tgt_rot.reshape(-1, 3, 3))
-        rot_err = rot_err.reshape(n_cand, self.n_targets, 3)
-        if self.rotation_tolerance is not None:
-            # As in batch_inverse_kinematics: a component within its
-            # tolerance counts as reached and stops pulling.
-            rot_err = np.where(
-                np.abs(rot_err) <= self.rotation_tolerance, 0.0, rot_err)
-        return np.concatenate([pos_err, rot_err], axis=-1) * self.row_mask
+        _, meas_pos, meas_rot, _, _, _, _ = self._ee_world(base, q, False)
+        return _pose_residual(meas_pos, meas_rot, *self.targets(base),
+                              row_mask=self.row_mask,
+                              tolerance=self.rotation_tolerance)
 
     def linearize(self, base, q):
         """Residual, base Jacobian ``(K, N, 6, 3)``, arm Jacobian."""
-        world_pos, world_rot, jac, base_rot, base_pos = self._ee_world(
-            base, q, True)
-        err = self._residual(world_pos, world_rot, *self.targets(base))
+        (jac, meas_pos, meas_rot, world_pos, world_rot, base_rot,
+         base_pos) = self._ee_world(base, q, True)
+        err = _pose_residual(meas_pos, meas_rot, *self.targets(base),
+                             row_mask=self.row_mask,
+                             tolerance=self.rotation_tolerance)
+        moving_jac = None
+        if self.target_fns:
+            moving_jac = np.zeros(err.shape[:2] + (6, 3))
+            moving_jac[:, [i for i, _ in self.target_fns]] = \
+                self.moving_target_jacobian(base)
+        base_jac, arm_jac = _residual_jacobians(
+            err, jac, world_pos, world_rot, base_rot, base_pos,
+            self.base_frame, self.row_mask, self.rotation_tolerance,
+            moving_jac)
+        return err, base_jac, arm_jac
 
-        # The chain Jacobian is in the root frame; rotate both halves.
-        arm_jac = np.concatenate([
-            base_rot[:, None] @ jac[:, :, :3],
-            base_rot[:, None] @ jac[:, :, 3:],
+
+def _margin_terms(q, margin_target, lower, upper, span, bounded, weight,
+                  xp=np):
+    """Hinge residual keeping joints ``margin_target`` off their limits.
+
+    ``margin_target`` is a scalar or ``(K,)``, one per candidate. Returns
+    ``(err, jac)``, both ``(K, N, n_opt)``: joint ``j`` of target ``n``
+    contributes the row ``jac[..., j] * dq_j = err[..., j]`` while its
+    normalized margin is under the target, and zero once it is clear.
+    Each row touches one joint of one target, so it only adds to the
+    diagonal of that target's arm block.
+    """
+    target = xp.asarray(margin_target, dtype=xp.float64)
+    if target.ndim == 1:
+        target = target[:, None, None]
+    to_lower = (q - lower) / span
+    to_upper = (upper - q) / span
+    margin = xp.minimum(to_lower, to_upper)
+    slope = xp.where(to_lower < to_upper, 1.0, -1.0) / span
+    active = bounded & (margin < target)
+    err = xp.where(active, weight * (target - margin), 0.0)
+    jac = xp.where(active, weight * slope, 0.0)
+    return err, jac
+
+
+def _clip_joints(q, lower, upper, unbounded, xp=np):
+    return xp.where(unbounded, q, xp.clip(q, lower, upper))
+
+
+def _place_on_base(pos, rot, base, base_frame, xp=np):
+    """End-effector poses from the chain's root-frame FK and the bases.
+
+    Returns ``(meas_pos, meas_rot, world_pos, world_rot, base_rot,
+    base_pos)``: the measured poses are the world ones except for targets
+    given in the root-link frame, which are measured by the chain's own
+    FK -- already relative to the root link wherever base_height puts it.
+    """
+    base_rot = _base_rotations(base[:, 2], xp)  # (K, 3, 3)
+    base_pos = base[:, xp.asarray([0, 1, 3])]  # (K, 3)
+    world_pos = (base_rot[:, None] @ pos[..., None])[..., 0] \
+        + base_pos[:, None, :]
+    world_rot = base_rot[:, None] @ rot
+    meas_pos, meas_rot = world_pos, world_rot
+    if np.any(base_frame):
+        sel = base_frame[None, :, None]
+        meas_pos = xp.where(sel, pos, world_pos)
+        meas_rot = xp.where(sel[..., None], rot, world_rot)
+    return meas_pos, meas_rot, world_pos, world_rot, base_rot, base_pos
+
+
+def _pose_residual(meas_pos, meas_rot, target_pos, target_rot, row_mask,
+                   tolerance=None, xp=np):
+    """``(K, N, 6)`` masked error in the end-effector frame.
+
+    The frame where the masks apply -- the same frame as
+    difference_position / difference_rotation, so a mask means what it
+    means to inverse_kinematics.
+    """
+    pos_err = (xp.swapaxes(meas_rot, -1, -2)
+               @ (target_pos - meas_pos)[..., None])[..., 0]
+    rot_err = rotation_error_so3_log_batch_numpy(meas_rot, target_rot, xp)
+    if tolerance is not None:
+        # As in batch_inverse_kinematics: a component within its
+        # tolerance counts as reached and stops pulling.
+        rot_err = _apply_rotation_tolerance(rot_err, tolerance, xp)
+    return xp.concatenate([pos_err, rot_err], axis=-1) * row_mask
+
+
+def _residual_jacobians(err, jac, world_pos, world_rot, base_rot, base_pos,
+                        base_frame, row_mask, tolerance=None,
+                        moving_jac=None, xp=np):
+    """Base ``(K, N, 6, 3)`` and arm ``(K, N, 6, n_opt)`` Jacobians of
+    :func:`_pose_residual`, from the chain's root-frame Jacobian ``jac``.
+
+    ``moving_jac`` is ``(K, N, 6, 3)``, the world twist per unit base of
+    targets that follow the base (zero for the others), or None.
+    """
+    # The chain Jacobian is in the root frame; rotate both halves.
+    arm_jac = xp.concatenate([
+        base_rot[:, None] @ jac[:, :, :3],
+        base_rot[:, None] @ jac[:, :, 3:],
+    ], axis=2)
+
+    rel = world_pos - base_pos[:, None, :]
+    one = xp.ones(rel.shape[:2])
+    zero = xp.zeros(rel.shape[:2])
+    base_jac = xp.stack([
+        xp.stack([one, zero, -rel[..., 1]], axis=-1),
+        xp.stack([zero, one, rel[..., 0]], axis=-1),
+        xp.stack([zero, zero, zero], axis=-1),
+        xp.stack([zero, zero, zero], axis=-1),
+        xp.stack([zero, zero, zero], axis=-1),
+        xp.stack([zero, zero, one], axis=-1),
+    ], axis=-2)
+    if np.any(base_frame):
+        base_jac = xp.where(base_frame[None, :, None, None], 0.0, base_jac)
+    if moving_jac is not None:
+        # A target that follows the base moves the error both ways.
+        base_jac = base_jac - moving_jac
+
+    # World-frame twists into the end-effector frame of the residual; for
+    # root-frame targets too, since R_world^T R_base J == R_root^T J.
+    # Under a partial position mask this drops how turning the hand
+    # turns the frame the error is measured in, as inverse_kinematics
+    # does; the term vanishes as the masked error does.
+    rot_t = xp.swapaxes(world_rot, -1, -2)
+
+    def to_hand(jac6):
+        return xp.concatenate([
+            rot_t @ jac6[:, :, :3],
+            rot_t @ jac6[:, :, 3:],
         ], axis=2)
 
-        rel = world_pos - base_pos[:, None, :]
-        base_jac = np.zeros(err.shape[:2] + (6, 3))
-        base_jac[:, :, 0, 0] = 1.0
-        base_jac[:, :, 1, 1] = 1.0
-        base_jac[:, :, 0, 2] = -rel[..., 1]
-        base_jac[:, :, 1, 2] = rel[..., 0]
-        base_jac[:, :, 5, 2] = 1.0
-        base_jac[:, self.base_frame] = 0.0
-        if self.target_fns:
-            # A target that follows the base moves the error both ways;
-            # its share is taken by central differences of f.
-            idx = [i for i, _ in self.target_fns]
-            eps = 1e-5
-            moving = base_jac[:, idx]  # (K, D, 6, 3), a copy
-            for axis in range(3):
-                step = np.zeros(4)
-                step[axis] = eps
-                pos_p, rot_p = self._moving_targets(base + step)
-                pos_m, rot_m = self._moving_targets(base - step)
-                twist = rotation_error_so3_log_batch_numpy(
-                    rot_m.reshape(-1, 3, 3), rot_p.reshape(-1, 3, 3))
-                twist = np.einsum('bij,bj->bi', rot_m.reshape(-1, 3, 3),
-                                  twist).reshape(pos_p.shape)
-                moving[..., :3, axis] -= (pos_p - pos_m) / (2 * eps)
-                moving[..., 3:, axis] -= twist / (2 * eps)
-            base_jac[:, idx] = moving
-        if np.any(self.base_frame):
-            # Back to world quantities for the arm's rotation into the hand
-            # frame (R_world^T R_base J == R_root^T J).
-            world_rot = np.where(
-                self.base_frame[None, :, None, None],
-                base_rot[:, None] @ world_rot, world_rot)
-
-        # World-frame twists into the end-effector frame of the residual.
-        # Under a partial position mask this drops how turning the hand
-        # turns the frame the error is measured in, as inverse_kinematics
-        # does; the term vanishes as the masked error does.
-        rot_t = np.swapaxes(world_rot, -1, -2)
-
-        def to_hand(jac6):
-            return np.concatenate([
-                rot_t @ jac6[:, :, :3],
-                rot_t @ jac6[:, :, 3:],
-            ], axis=2)
-
-        mask = self.row_mask[..., None]
-        if self.rotation_tolerance is not None:
-            # Rows inside the dead zone have no gradient.
-            live = np.concatenate(
-                [np.ones(err.shape[:-1] + (3,), dtype=bool),
-                 err[..., 3:] != 0.0], axis=-1)
-            mask = mask * live[..., None]
-        return err, to_hand(base_jac) * mask, to_hand(arm_jac) * mask
+    mask = row_mask[..., None]
+    if tolerance is not None:
+        # Rows inside the dead zone have no gradient.
+        live = xp.concatenate(
+            [xp.ones(err.shape[:-1] + (3,), dtype=bool),
+             err[..., 3:] != 0.0], axis=-1)
+        mask = mask * live[..., None]
+    return to_hand(base_jac) * mask, to_hand(arm_jac) * mask
 
 
-def _cost(err, margin_err=None):
-    cost = np.sum(err ** 2, axis=(1, 2))
+def _cost(err, margin_err=None, xp=np):
+    cost = xp.sum(err ** 2, axis=(1, 2))
     if margin_err is not None:
-        cost = cost + np.sum(margin_err ** 2, axis=(1, 2))
+        cost = cost + xp.sum(margin_err ** 2, axis=(1, 2))
     return cost
 
 
-def _clip_rows(err, max_pos_step, max_rot_step):
+def _clip_rows(err, max_pos_step, max_rot_step, xp=np):
     """Cap each target's error so one far target cannot drag the base."""
-    pos_norm = np.linalg.norm(err[..., :3], axis=-1, keepdims=True)
-    rot_norm = np.linalg.norm(err[..., 3:], axis=-1, keepdims=True)
-    pos_scale = np.minimum(1.0, max_pos_step / np.maximum(pos_norm, 1e-12))
-    rot_scale = np.minimum(1.0, max_rot_step / np.maximum(rot_norm, 1e-12))
-    return np.concatenate(
+    pos_norm = xp.linalg.norm(err[..., :3], axis=-1, keepdims=True)
+    rot_norm = xp.linalg.norm(err[..., 3:], axis=-1, keepdims=True)
+    pos_scale = xp.minimum(1.0, max_pos_step / xp.maximum(pos_norm, 1e-12))
+    rot_scale = xp.minimum(1.0, max_rot_step / xp.maximum(rot_norm, 1e-12))
+    return xp.concatenate(
         [err[..., :3] * pos_scale, err[..., 3:] * rot_scale], axis=-1)
 
 
 def _schur_step(err, base_jac, arm_jac, damping, base_weight,
-                margin_err=None, margin_jac=None):
+                margin_err=None, margin_jac=None, xp=np):
     """Solve the arrow-shaped damped normal equations.
 
     The unknowns are one base step shared by every target and one arm step
@@ -515,30 +546,29 @@ def _schur_step(err, base_jac, arm_jac, damping, base_weight,
     base_jac = base_jac * base_weight
     lam = damping[:, None, None, None]
 
-    arm_t = np.swapaxes(arm_jac, -1, -2)
-    base_t = np.swapaxes(base_jac, -1, -2)
+    arm_t = xp.swapaxes(arm_jac, -1, -2)
+    base_t = xp.swapaxes(base_jac, -1, -2)
     h_aa = arm_t @ arm_jac \
-        + lam * np.eye(n_opt)
+        + lam * xp.eye(n_opt)
     h_ba = base_t @ arm_jac  # (K, N, 3, n)
     g_a = (arm_t @ err[..., None])[..., 0]
     if margin_jac is not None:
-        idx = np.arange(n_opt)
-        h_aa[..., idx, idx] += margin_jac ** 2
+        h_aa = h_aa + (margin_jac ** 2)[..., None] * xp.eye(n_opt)
         g_a = g_a + margin_jac * margin_err
     g_b = (base_t @ err[..., None])[..., 0].sum(axis=1)
     h_bb = (base_t @ base_jac).sum(axis=1) \
-        + damping[:, None, None] * np.eye(3)
+        + damping[:, None, None] * xp.eye(3)
 
     # H_aa^-1 [H_ab, g_a] in one solve per target.
-    rhs = np.concatenate(
-        [np.swapaxes(h_ba, -1, -2), g_a[..., None]], axis=-1)
-    sol = np.linalg.solve(h_aa, rhs)
+    rhs = xp.concatenate(
+        [xp.swapaxes(h_ba, -1, -2), g_a[..., None]], axis=-1)
+    sol = xp.linalg.solve(h_aa, rhs)
     inv_h_ab = sol[..., :3]
     inv_g_a = sol[..., 3]
 
     schur = h_bb - (h_ba @ inv_h_ab).sum(axis=1)
     reduced = g_b - (h_ba @ inv_g_a[..., None])[..., 0].sum(axis=1)
-    d_base = np.linalg.solve(schur, reduced[..., None])[..., 0]
+    d_base = xp.linalg.solve(schur, reduced[..., None])[..., 0]
     d_arm = inv_g_a - (inv_h_ab @ d_base[:, None, :, None])[..., 0]
     return d_base * base_weight, d_arm
 
@@ -662,7 +692,7 @@ def _climb_margin(problem, bases, q, err, stop, thre, rthre, base_weight,
 
 def solve_shared_base_ik(
         fk_params, target_pos, target_rot, initial_bases, initial_q,
-        position_mask=None, rotation_mask=None, stop=200, thre=1e-3,
+        position_mask=True, rotation_mask=True, stop=200, thre=1e-3,
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
         margin_weight=0.1, rotation_tolerance=None, base_frame=None,
@@ -864,7 +894,7 @@ def solve_shared_base_ik(
             max_pos_step, max_rot_step,
             0.0 if margin_target is None else margin_target, margin_step,
             max_margin_steps, verbose)
-    bases[:, 2] = np.arctan2(np.sin(bases[:, 2]), np.cos(bases[:, 2]))
+    bases[:, 2] = normalize_angle(bases[:, 2])
     pos_err, rot_err = _errors(err)
     return bases[:, :3], q, pos_err, rot_err
 
@@ -892,7 +922,7 @@ def set_base_pose(robot_model, base_pose):
     The root link is often a child of the model's own coordinates, so the
     model is moved rather than the link.
     """
-    root_link = _root_link(robot_model)
+    root_link = robot_model._find_fullbody_root_link()
     if root_link is robot_model:
         robot_model.newcoords(base_pose)
         return
@@ -1249,7 +1279,7 @@ def find_base_placement(
             start_q.extend(np.where(np.isnan(seeds), initial_q, seeds))
         poses = initial_base_poses
         if poses is None and len(start_bases) == n_before:
-            poses = [_root_link(robot_model).worldcoords()]
+            poses = [robot_model._find_fullbody_root_link().worldcoords()]
         b, qs = from_seeds([_base_to_array(c) for c in poses or []])
         start_bases.extend(b)
         start_q.extend(qs)
