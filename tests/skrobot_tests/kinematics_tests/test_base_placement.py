@@ -133,19 +133,24 @@ class TestFindBasePlacement(unittest.TestCase):
         self.assertFalse(free.at_bound)
 
     def test_base_frame_targets(self):
+        for height in (0.0, -0.2):
+            self._check_base_frame_targets(height)
+
+    def _check_base_frame_targets(self, height):
         robot = self.robot
         world = _targets_from_base(
-            robot, Coordinates(pos=[1.0, 0.5, 0.0]).rotate(0.3, 'z'), 2,
+            robot, Coordinates(pos=[1.0, 0.5, height]).rotate(0.3, 'z'), 2,
             seed=5)
         # A pose of the hand relative to the root link, reachable from any
         # base.
         local = _targets_from_base(robot, Coordinates(), 1, seed=6)[0]
         result = find_base_placement(
             robot, world + [local], move_target=robot.rarm.end_coords,
-            joint_list=robot.rarm.joint_list,
+            joint_list=robot.rarm.joint_list, base_height=height,
             initial_base_poses=Coordinates(pos=[0.8, 0.3, 0.0]),
             target_frame=['world', 'world', 'base'])
         self.assertTrue(result.all_reached, result)
+        self.assertAlmostEqual(result.base_pose.worldpos()[2], height)
         set_base_pose(robot, result.base_pose)
         robot.angle_vector(result.angle_vectors[2])
         hand = robot.root_link.worldcoords().inverse_transformation()\
@@ -158,6 +163,72 @@ class TestFindBasePlacement(unittest.TestCase):
             find_base_placement(
                 robot, world, move_target=robot.rarm.end_coords,
                 target_frame=['world'])
+
+    def test_targets_that_follow_the_base(self):
+        robot = self.robot
+        world = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.5, -0.2]).rotate(0.3, 'z'), 2,
+            seed=8)
+        fixture = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.5, -0.2]).rotate(0.3, 'z'), 1,
+            seed=9)[0]
+        offset = fixture.worldpos()[0] - 1.0
+
+        def follow_x(base_pose):
+            # Rides along x with the base; fixed in y and z, like a stand
+            # on the front edge of a table.
+            pos = fixture.worldpos().copy()
+            pos[0] = base_pose.worldpos()[0] + offset
+            return Coordinates(pos=pos, rot=fixture.worldrot())
+
+        move_target = robot.rarm.end_coords
+        link_list = _resolve_link_list(
+            robot, move_target, None, robot.rarm.joint_list)
+        fk_params = _chain_fk_params(robot, link_list, move_target)
+        base = np.array([[0.9, 0.4, 0.2]])
+        q = np.array([[[j.joint_angle() + 0.1 for j in
+                        robot.rarm.joint_list]]])
+        # A following target that sits on the hand at this base and q, so
+        # the residual is zero and its derivative is the Jacobian.
+        probe = _SharedBaseProblem(
+            fk_params, np.zeros((1, 3)), np.eye(3)[None], np.ones(3),
+            np.ones(3), base_height=-0.2)
+        pos, rot, _, _, _ = probe._ee_world(base, q, False)
+        hand_pos, hand_rot = pos[0, 0], rot[0, 0]
+
+        def on_hand(base_pose):
+            p = hand_pos.copy()
+            p[0] += base_pose.worldpos()[0] - 0.9
+            return Coordinates(pos=p, rot=hand_rot)
+
+        problem = _SharedBaseProblem(
+            fk_params, np.zeros((1, 3)), np.eye(3)[None], np.ones(3),
+            np.ones(3), base_height=-0.2, target_fns={0: on_hand})
+        err, base_jac, _ = problem.linearize(base, q)
+        np.testing.assert_allclose(err, 0.0, atol=1e-9)
+        for i in range(3):
+            d = np.zeros((1, 3))
+            d[0, i] = 1e-6
+            num = -(problem.residual(base + d, q)
+                    - problem.residual(base - d, q)) / 2e-6
+            np.testing.assert_allclose(
+                num[0, 0], base_jac[0, 0, :, i], atol=1e-4)
+
+        # Two following targets and several starts, so the batch has more
+        # than one of each.
+        result = find_base_placement(
+            robot, world + [follow_x, follow_x], move_target=move_target,
+            joint_list=robot.rarm.joint_list, base_height=-0.2,
+            initial_base_poses=[Coordinates(pos=[0.8, 0.3, 0.0]),
+                                Coordinates(pos=[1.1, 0.6, 0.0])])
+        self.assertTrue(result.all_reached, result)
+        solved = result.target_coords[2]
+        self.assertAlmostEqual(
+            solved.worldpos()[0], result.base_pose.worldpos()[0] + offset)
+        set_base_pose(robot, result.base_pose)
+        robot.angle_vector(result.angle_vectors[2])
+        np.testing.assert_allclose(
+            move_target.worldpos(), solved.worldpos(), atol=2e-3)
 
     def test_base_height_candidates(self):
         robot = self.robot

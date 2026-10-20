@@ -64,6 +64,9 @@ class BasePlacementResult(object):
         Which initial base pose the returned placement started from.
     base_valid : bool
         ``is_valid_base(base_pose)``, or True when none was given.
+    target_coords : list of Coordinates
+        The targets as solved for this base: a target given as a function
+        is evaluated at ``base_pose``.
     at_bound : bool
         Whether the base ended on an edge of ``base_bounds``. The solve
         would have gone further; a wider region may hold a better base.
@@ -74,8 +77,9 @@ class BasePlacementResult(object):
 
     def __init__(self, base_pose, angle_vectors, success, position_errors,
                  rotation_errors, joint_margins, candidate_index,
-                 base_valid=True, at_bound=False):
+                 base_valid=True, at_bound=False, target_coords=None):
         self.base_pose = base_pose
+        self.target_coords = target_coords
         self.base_valid = base_valid
         self.at_bound = at_bound
         self.angle_vectors = angle_vectors
@@ -223,7 +227,8 @@ class _SharedBaseProblem(object):
 
     def __init__(self, fk_params, target_pos, target_rot, position_mask,
                  rotation_mask, base_height=0.0, margin_target=None,
-                 margin_weight=0.1, rotation_tolerance=None, base_frame=None):
+                 margin_weight=0.1, rotation_tolerance=None, base_frame=None,
+                 target_fns=None):
         self.fk_params = fk_params
         n_joints = fk_params['n_joints']
         mimic_parent = fk_params['mimic_parent_indices']
@@ -236,6 +241,9 @@ class _SharedBaseProblem(object):
         self.unbounded = fk_params['joint_limits_unbounded'][self.non_mimic]
         self.target_pos = target_pos
         self.target_rot = target_rot
+        # [(index, f)]: targets that follow the base, f(base_pose) giving
+        # their world pose.
+        self.target_fns = sorted((target_fns or {}).items())
         self.n_targets = len(target_pos)
         # (N, 6): which world axes each target constrains.
         self.row_mask = np.concatenate([
@@ -312,26 +320,53 @@ class _SharedBaseProblem(object):
             + base_pos[:, None, :]
         world_rot = np.einsum('kij,knjl->knil', base_rot, rot)
         if np.any(self.base_frame):
-            # Root-link frame for the targets that ride on the base.
-            local_pos = pos + np.array([0.0, 0.0, self.base_height])
+            # Root-link frame for the targets that ride on the base: the
+            # chain's own FK, which is already relative to the root link
+            # wherever base_height puts it.
             sel = self.base_frame[None, :, None]
-            world_pos = np.where(sel, local_pos, world_pos)
+            world_pos = np.where(sel, pos, world_pos)
             world_rot = np.where(sel[..., None], rot, world_rot)
         return world_pos, world_rot, jac, base_rot, base_pos
+
+    def _moving_targets(self, base):
+        """``(K, D, 3)`` and ``(K, D, 3, 3)`` poses of the base-following
+        targets for each candidate base."""
+        n_cand = base.shape[0]
+        pos = np.empty((n_cand, len(self.target_fns), 3))
+        rot = np.empty((n_cand, len(self.target_fns), 3, 3))
+        for k in range(n_cand):
+            pose = _planar_coords(*base[k], z=self.base_height)
+            for d, (_, fn) in enumerate(self.target_fns):
+                c = fn(pose)
+                pos[k, d] = c.worldpos()
+                rot[k, d] = c.worldrot()
+        return pos, rot
+
+    def targets(self, base):
+        """``(K, N, 3)`` and ``(K, N, 3, 3)`` target poses for each base."""
+        n_cand = base.shape[0]
+        pos = np.broadcast_to(self.target_pos, (n_cand, self.n_targets, 3))
+        rot = np.broadcast_to(self.target_rot,
+                              (n_cand, self.n_targets, 3, 3))
+        if self.target_fns:
+            idx = [i for i, _ in self.target_fns]
+            pos, rot = pos.copy(), rot.copy()
+            pos[:, idx], rot[:, idx] = self._moving_targets(base)
+        return pos, rot
 
     def residual(self, base, q):
         """``(K, N, 6)`` masked end-effector-frame error."""
         world_pos, world_rot, _, _, _ = self._ee_world(base, q, False)
-        return self._residual(world_pos, world_rot)
+        return self._residual(world_pos, world_rot, *self.targets(base))
 
-    def _residual(self, world_pos, world_rot):
+    def _residual(self, world_pos, world_rot, target_pos, target_rot):
         # In the end-effector frame, where the masks apply -- the same
         # frame as difference_position / difference_rotation, so a mask
         # means what it means to inverse_kinematics.
         n_cand = world_pos.shape[0]
         pos_err = np.einsum('knji,knj->kni', world_rot,
-                            self.target_pos[None] - world_pos)
-        tgt_rot = np.broadcast_to(self.target_rot[None], world_rot.shape)
+                            target_pos - world_pos)
+        tgt_rot = target_rot
         rot_err = rotation_error_so3_log_batch_numpy(
             world_rot.reshape(-1, 3, 3), tgt_rot.reshape(-1, 3, 3))
         rot_err = rot_err.reshape(n_cand, self.n_targets, 3)
@@ -346,7 +381,7 @@ class _SharedBaseProblem(object):
         """Residual, base Jacobian ``(K, N, 6, 3)``, arm Jacobian."""
         world_pos, world_rot, jac, base_rot, base_pos = self._ee_world(
             base, q, True)
-        err = self._residual(world_pos, world_rot)
+        err = self._residual(world_pos, world_rot, *self.targets(base))
 
         # The chain Jacobian is in the root frame; rotate both halves.
         arm_jac = np.concatenate([
@@ -362,6 +397,24 @@ class _SharedBaseProblem(object):
         base_jac[:, :, 1, 2] = rel[..., 0]
         base_jac[:, :, 5, 2] = 1.0
         base_jac[:, self.base_frame] = 0.0
+        if self.target_fns:
+            # A target that follows the base moves the error both ways;
+            # its share is taken by central differences of f.
+            idx = [i for i, _ in self.target_fns]
+            eps = 1e-5
+            moving = base_jac[:, idx]  # (K, D, 6, 3), a copy
+            for axis in range(3):
+                step = np.zeros(3)
+                step[axis] = eps
+                pos_p, rot_p = self._moving_targets(base + step)
+                pos_m, rot_m = self._moving_targets(base - step)
+                twist = rotation_error_so3_log_batch_numpy(
+                    rot_m.reshape(-1, 3, 3), rot_p.reshape(-1, 3, 3))
+                twist = np.einsum('bij,bj->bi', rot_m.reshape(-1, 3, 3),
+                                  twist).reshape(pos_p.shape)
+                moving[..., :3, axis] -= (pos_p - pos_m) / (2 * eps)
+                moving[..., 3:, axis] -= twist / (2 * eps)
+            base_jac[:, idx] = moving
         if np.any(self.base_frame):
             # Back to world quantities for the arm's rotation into the hand
             # frame (R_world^T R_base J == R_root^T J).
@@ -550,7 +603,8 @@ def solve_shared_base_ik(
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
         margin_weight=0.1, rotation_tolerance=None, base_frame=None,
-        maximize_margin=False, margin_step=0.01, max_pos_step=0.1,
+        target_fns=None, maximize_margin=False, margin_step=0.01,
+        max_pos_step=0.1,
         max_rot_step=0.5):
     """Solve shared-base IK from several initial bases at once.
 
@@ -618,6 +672,10 @@ def solve_shared_base_ik(
     base_frame : numpy.ndarray, optional
         ``(N,)`` bool, True where ``target_pos`` / ``target_rot`` are in
         the root-link frame rather than the world frame.
+    target_fns : dict, optional
+        ``{index: f}`` for targets that follow the base: ``f(base_pose)``
+        returns the target's world pose for a root-link pose, and replaces
+        ``target_pos[index]`` / ``target_rot[index]``.
     maximize_margin : bool
         Climb the smallest joint-limit margin, as described above.
     margin_step : float
@@ -647,7 +705,8 @@ def solve_shared_base_ik(
             None if rotation_tolerance is None
             else _resolve_tolerances(rotation_tolerance, n_targets)),
         base_frame=(None if base_frame is None
-                    else np.asarray(base_frame, dtype=bool)))
+                    else np.asarray(base_frame, dtype=bool)),
+        target_fns=target_fns)
     bases = np.array(initial_bases, dtype=np.float64).reshape(-1, 3)
     n_cand = bases.shape[0]
     q = np.broadcast_to(
@@ -813,9 +872,14 @@ def find_base_placement(
     ----------
     robot_model : skrobot.model.RobotModel
         Robot. Its root link is the mobile base.
-    target_coords : Coordinates or list of Coordinates
+    target_coords : Coordinates or list of Coordinates or callables
         End-effector targets, in the world frame unless ``target_frame``
-        says otherwise.
+        says otherwise. An entry can also be a function that takes a
+        root-link pose and returns the target's world pose, for a target
+        that depends on where the base stands -- a fixture that moves
+        with the base along one axis only, say. Its share of the base
+        Jacobian is taken by finite differences, so it should be smooth.
+        ``irm`` leaves such targets out of the vote.
     move_target : CascadedCoords, optional
         End effector. Defaults to ``robot_model.end_coords``.
     link_list : list of Link, optional
@@ -830,7 +894,14 @@ def find_base_placement(
     initial_angles : 'current' or numpy.ndarray
         Arm angles to start every target from: ``'current'`` uses the
         model's angles, an array is ``(n_opt,)`` over the chain's
-        non-mimic joints.
+        non-mimic joints, and ``(n_seeds, n_opt)`` solves every base
+        start once from each seed. The result depends on these: the
+        solve is local in the arm as much as in the base, and on one
+        74-target problem the smallest margin found ran from 0.18 to
+        0.22 over four seeds. Several distinct seeds cost a solve each
+        and make the outcome less of a draw. ``'current'`` reads the
+        model at call time, so the same call can answer differently
+        after the model has been moved.
     position_mask, rotation_mask : bool, str, sequence or list
         End-effector axes to constrain, with the meaning they have in
         :meth:`~skrobot.model.RobotModel.inverse_kinematics`: the error
@@ -905,10 +976,11 @@ def find_base_placement(
         Map built for the same chain and end effector; its candidate
         bases and seeds start the solve.
     n_candidates : int
-        How many bases to take from ``irm``. Each is solved twice: with
-        every arm starting from ``initial_angles``, and with each arm
-        starting from the map sample that voted for that base. Which
-        start does better depends on the robot and the targets.
+        How many bases to take from ``irm``. Each is solved once per seed
+        in ``initial_angles``, with every arm starting there, and once
+        with each arm starting from the map sample that voted for that
+        base. Which start does better depends on the robot and the
+        targets.
     is_valid_base : callable, optional
         ``f(Coordinates) -> bool`` for where the base may stand. ``irm``
         proposes only valid cells, and among the solved placements the
@@ -972,7 +1044,12 @@ def find_base_placement(
     link_list = _resolve_link_list(
         robot_model, move_target, link_list, joint_list)
     fk_params = _chain_fk_params(robot_model, link_list, move_target)
-    target_pos, target_rot = _targets_to_pos_rot(target_coords)
+    if isinstance(target_coords, Coordinates) or callable(target_coords):
+        target_coords = [target_coords]
+    target_coords = list(target_coords)
+    target_fns = {i: t for i, t in enumerate(target_coords) if callable(t)}
+    target_pos, target_rot = _targets_to_pos_rot(
+        [Coordinates() if callable(t) else t for t in target_coords])
     frames = ([target_frame] * len(target_pos)
               if isinstance(target_frame, str) else list(target_frame))
     if len(frames) != len(target_pos) or \
@@ -981,6 +1058,10 @@ def find_base_placement(
             "target_frame must be 'world', 'base', or one of them per "
             'target, got {!r}'.format(target_frame))
     base_frame = np.array([f == 'base' for f in frames])
+    if any(base_frame[i] for i in target_fns):
+        raise ValueError(
+            "A target given as a function returns a world pose; it cannot "
+            "also have target_frame='base'")
 
     mimic_parent = fk_params['mimic_parent_indices']
     non_mimic = [i for i in range(len(link_list)) if mimic_parent[i] < 0]
@@ -989,10 +1070,27 @@ def find_base_placement(
             raise ValueError(
                 "initial_angles must be 'current' or an array, got {!r}"
                 .format(initial_angles))
-        initial_q = np.array(
-            [link_list[i].joint.joint_angle() for i in non_mimic])
+        arm_seeds = np.array(
+            [[link_list[i].joint.joint_angle() for i in non_mimic]])
     else:
-        initial_q = np.asarray(initial_angles, dtype=np.float64)
+        arm_seeds = np.atleast_2d(
+            np.asarray(initial_angles, dtype=np.float64))
+        if arm_seeds.ndim != 2 or arm_seeds.shape[1] != len(non_mimic):
+            raise ValueError(
+                'initial_angles must be (n_opt,) or (n_seeds, n_opt) with '
+                'n_opt={}, got shape {}'.format(
+                    len(non_mimic), np.shape(initial_angles)))
+    initial_q = arm_seeds[0]
+    n_targets = len(target_pos)
+
+    def from_seeds(bases):
+        """Every base once per arm seed, with every arm at that seed."""
+        out_bases, out_q = [], []
+        for seed in arm_seeds:
+            out_bases.extend(bases)
+            out_q.extend(np.broadcast_to(
+                seed, (len(bases), n_targets, len(seed))))
+        return out_bases, out_q
 
     if isinstance(initial_base_poses, Coordinates):
         initial_base_poses = [initial_base_poses]
@@ -1004,19 +1102,21 @@ def find_base_placement(
             raise ValueError(
                 'irm was built for joints {}, not {}'.format(
                     irm.joint_names, names))
-        world = np.where(~base_frame)[0]
+        world = np.array([i for i in range(len(target_pos))
+                          if not base_frame[i] and i not in target_fns],
+                         dtype=np.int64)
         if len(world) == 0:
             raise ValueError(
-                'irm needs at least one world-frame target to place the '
-                'base against')
+                'irm needs at least one fixed world-frame target to place '
+                'the base against')
         masks = _resolve_masks(rotation_mask, len(target_pos))[world]
-        coords = target_coords if isinstance(target_coords, Coordinates) \
-            else [target_coords[i] for i in world]
+        coords = [target_coords[i] for i in world]
         proposed = irm.candidate_bases(
             coords, n_candidates=n_candidates, rotation_mask=list(masks),
             base_bounds=base_bounds, base_height=base_height,
             is_valid_base=is_valid_base)
-        # Base-frame targets cast no votes and get no sample seed.
+        # Targets on or following the base cast no votes and get no
+        # sample seed.
         seeds = np.full((len(proposed), len(target_pos), len(initial_q)),
                         np.nan)
         seeds[:, world] = proposed.seeds
@@ -1026,19 +1126,18 @@ def find_base_placement(
                 'targets; solving from the initial base poses only.',
                 RuntimeWarning)
         # Neither seeding wins everywhere, so each proposed base is
-        # solved from both: the arms all from initial_angles, and each
+        # solved from both: the arms from each of initial_angles, and each
         # arm from the sample that voted for the base.
+        b, qs = from_seeds(list(proposed.bases))
+        start_bases.extend(b)
+        start_q.extend(qs)
         start_bases.extend(proposed.bases)
-        start_bases.extend(proposed.bases)
-        start_q.extend(np.broadcast_to(
-            initial_q, (len(proposed), len(target_pos), len(initial_q))))
         start_q.extend(np.where(np.isnan(seeds), initial_q, seeds))
     if initial_base_poses is None and not start_bases:
         initial_base_poses = [_root_link(robot_model).worldcoords()]
-    for c in initial_base_poses or []:
-        start_bases.append(_base_to_array(c))
-        start_q.append(np.broadcast_to(
-            initial_q, (len(target_pos), len(initial_q))))
+    b, qs = from_seeds([_base_to_array(c) for c in initial_base_poses or []])
+    start_bases.extend(b)
+    start_q.extend(qs)
     initial_bases = np.array(start_bases)
     initial_q = np.array(start_q)
 
@@ -1049,8 +1148,8 @@ def find_base_placement(
         base_bounds=base_bounds, drop_unreachable=drop_unreachable,
         base_height=base_height, margin_target=margin_target,
         margin_weight=margin_weight, rotation_tolerance=rotation_tolerance,
-        base_frame=base_frame, maximize_margin=maximize_margin,
-        margin_step=margin_step)
+        base_frame=base_frame, target_fns=target_fns,
+        maximize_margin=maximize_margin, margin_step=margin_step)
 
     success = (pos_err < thre) & (rot_err < rthre)
     margins = _joint_margins(fk_params, q)
@@ -1068,9 +1167,12 @@ def find_base_placement(
         valid = True if is_valid_base is None else bool(is_valid_base(pose))
         at_bound = base_bounds is not None and bool(np.any(
             np.abs(bases[k, :2, None] - np.asarray(base_bounds)) < 1e-6))
+        solved_targets = [t(pose) if callable(t) else t
+                          for t in target_coords]
         result = BasePlacementResult(
             pose, avs, success[k], pos_err[k], rot_err[k], margins[k], k,
-            base_valid=valid, at_bound=at_bound)
+            base_valid=valid, at_bound=at_bound,
+            target_coords=solved_targets)
         result.score = float(result.min_joint_margin if score is None
                              else score(result))
         results.append(result)
