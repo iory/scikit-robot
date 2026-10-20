@@ -13,6 +13,8 @@ step is recovered through a Schur complement, at a cost linear in the
 number of targets.
 """
 
+import warnings
+
 import numpy as np
 
 from skrobot.coordinates import Coordinates
@@ -56,14 +58,18 @@ class BasePlacementResult(object):
         :attr:`min_joint_margin`.
     candidate_index : int
         Which initial base pose the returned placement started from.
+    base_valid : bool
+        ``is_valid_base(base_pose)``, or True when none was given.
     candidates : list of BasePlacementResult
         Every candidate's result, best first. Empty on the entries of this
         list themselves.
     """
 
     def __init__(self, base_pose, angle_vectors, success, position_errors,
-                 rotation_errors, joint_margins, candidate_index):
+                 rotation_errors, joint_margins, candidate_index,
+                 base_valid=True):
         self.base_pose = base_pose
+        self.base_valid = base_valid
         self.angle_vectors = angle_vectors
         self.success = success
         self.position_errors = position_errors
@@ -677,8 +683,8 @@ def find_base_placement(
         position_mask=True, rotation_mask=True, stop=200, thre=1e-3,
         rthre=np.deg2rad(1.0), base_weight=1.0, base_bounds=None,
         drop_unreachable=True, base_height=0.0, margin_target=None,
-        margin_weight=0.1, rotation_tolerance=None, score=None,
-        apply=False):
+        margin_weight=0.1, rotation_tolerance=None, score=None, irm=None,
+        n_candidates=10, is_valid_base=None, apply=False):
     """Find one planar base pose from which every target is reachable.
 
     Solves for a single base pose ``(x, y, yaw)`` of the robot's root link
@@ -691,8 +697,9 @@ def find_base_placement(
 
     The optimization is local: from a poor start it can settle where only
     some targets are reached. ``result.success`` says which; nothing is
-    hidden. Several spread-out initial poses make a full solution more
-    likely.
+    hidden. Passing an :class:`InverseReachabilityMap` as ``irm`` gives it
+    global starts: the map proposes the base cells most targets can be
+    reached from.
 
     Parameters
     ----------
@@ -708,8 +715,9 @@ def find_base_placement(
     joint_list : list of Joint, optional
         Joints to actuate; alternative to ``link_list``.
     initial_base_poses : Coordinates or list of Coordinates, optional
-        Starting base poses; only their ``(x, y, yaw)`` is used. Defaults
-        to the root link's current pose.
+        Starting base poses, solved in addition to those ``irm``
+        proposes; only their ``(x, y, yaw)`` is used. Without either,
+        the root link's current pose.
     initial_angles : 'current' or numpy.ndarray
         Arm angles to start every target from: ``'current'`` uses the
         model's angles, an array is ``(n_opt,)`` over the chain's
@@ -765,6 +773,19 @@ def find_base_placement(
         ``f(BasePlacementResult) -> float``, higher is better, ranking
         placements that reach the same number of targets. Defaults to
         :attr:`BasePlacementResult.min_joint_margin`.
+    irm : InverseReachabilityMap, optional
+        Map built for the same chain and end effector; its candidate
+        bases and seeds start the solve.
+    n_candidates : int
+        How many bases to take from ``irm``. Each is solved twice: with
+        every arm starting from ``initial_angles``, and with each arm
+        starting from the map sample that voted for that base. Which
+        start does better depends on the robot and the targets.
+    is_valid_base : callable, optional
+        ``f(Coordinates) -> bool`` for where the base may stand. ``irm``
+        proposes only valid cells, and among the solved placements the
+        valid ones rank first; ``result.base_valid`` tells whether the
+        returned one is.
     apply : bool
         If True, move the robot to the found base pose and the first
         target's angle vector.
@@ -810,11 +831,42 @@ def find_base_placement(
     else:
         initial_q = np.asarray(initial_angles, dtype=np.float64)
 
-    if initial_base_poses is None:
-        initial_base_poses = [_root_link(robot_model).worldcoords()]
-    elif isinstance(initial_base_poses, Coordinates):
+    if isinstance(initial_base_poses, Coordinates):
         initial_base_poses = [initial_base_poses]
-    initial_bases = np.array([_base_to_array(c) for c in initial_base_poses])
+    start_bases = []
+    start_q = []
+    if irm is not None:
+        names = [fk_params['joint_names'][i] for i in non_mimic]
+        if names != irm.joint_names:
+            raise ValueError(
+                'irm was built for joints {}, not {}'.format(
+                    irm.joint_names, names))
+        proposed = irm.candidate_bases(
+            target_coords, n_candidates=n_candidates,
+            rotation_mask=rotation_mask, base_bounds=base_bounds,
+            base_height=base_height, is_valid_base=is_valid_base)
+        if len(proposed) == 0:
+            warnings.warn(
+                'The inverse reachability map proposed no base for these '
+                'targets; solving from the initial base poses only.',
+                RuntimeWarning)
+        # Neither seeding wins everywhere, so each proposed base is
+        # solved from both: the arms all from initial_angles, and each
+        # arm from the sample that voted for the base.
+        start_bases.extend(proposed.bases)
+        start_bases.extend(proposed.bases)
+        start_q.extend(np.broadcast_to(
+            initial_q, (len(proposed), len(target_pos), len(initial_q))))
+        start_q.extend(np.where(
+            np.isnan(proposed.seeds), initial_q, proposed.seeds))
+    if initial_base_poses is None and not start_bases:
+        initial_base_poses = [_root_link(robot_model).worldcoords()]
+    for c in initial_base_poses or []:
+        start_bases.append(_base_to_array(c))
+        start_q.append(np.broadcast_to(
+            initial_q, (len(target_pos), len(initial_q))))
+    initial_bases = np.array(start_bases)
+    initial_q = np.array(start_q)
 
     bases, q, pos_err, rot_err = solve_shared_base_ik(
         fk_params, target_pos, target_rot, initial_bases, initial_q,
@@ -836,9 +888,11 @@ def find_base_placement(
     for k in range(len(bases)):
         avs = np.tile(current_av, (len(target_pos), 1))
         avs[:, robot_index] = q[k]
+        pose = _planar_coords(*bases[k], z=base_height)
+        valid = True if is_valid_base is None else bool(is_valid_base(pose))
         result = BasePlacementResult(
-            _planar_coords(*bases[k], z=base_height), avs, success[k],
-            pos_err[k], rot_err[k], margins[k], k)
+            pose, avs, success[k], pos_err[k], rot_err[k], margins[k], k,
+            base_valid=valid)
         result.score = float(result.min_joint_margin if score is None
                              else score(result))
         results.append(result)
@@ -846,7 +900,8 @@ def find_base_placement(
     order = np.lexsort((
         total_err,
         -np.array([r.score for r in results]),
-        -np.count_nonzero(success, axis=1)))
+        -np.count_nonzero(success, axis=1),
+        ~np.array([r.base_valid for r in results])))
     candidates = [results[k] for k in order]
     best = candidates[0]
     best.candidates = candidates

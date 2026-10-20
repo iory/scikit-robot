@@ -23,6 +23,10 @@ from skrobot.kinematics.differentiable import extract_fk_parameters
 from skrobot.kinematics.differentiable import forward_kinematics
 from skrobot.kinematics.differentiable import forward_kinematics_ee
 
+# Inverse reachability map: base poses that reach a hand pose
+from skrobot.kinematics.inverse_reachability_map import BaseCandidates
+from skrobot.kinematics.inverse_reachability_map import InverseReachabilityMap
+
 # Loop-closure solving for cut kinematic loops
 from skrobot.kinematics.loop_closure import LoopClosureSolver
 
@@ -41,4 +45,6 @@ __all__ = [
     'BasePlacementResult',
     'find_base_placement',
     'set_base_pose',
+    'BaseCandidates',
+    'InverseReachabilityMap',
 ]
