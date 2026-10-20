@@ -1,0 +1,157 @@
+import unittest
+
+import numpy as np
+
+from skrobot.coordinates import Coordinates
+from skrobot.kinematics import find_base_placement
+from skrobot.kinematics import set_base_pose
+from skrobot.kinematics.base_placement import _chain_fk_params
+from skrobot.kinematics.base_placement import _resolve_link_list
+from skrobot.kinematics.base_placement import _SharedBaseProblem
+from skrobot.models import Fetch
+
+
+def _targets_from_base(robot, base_pose, n_targets, seed):
+    """Targets the arm provably reaches from ``base_pose``."""
+    rng = np.random.RandomState(seed)
+    move_target = robot.rarm.end_coords
+    joints = robot.rarm.joint_list
+    set_base_pose(robot, base_pose)
+    targets = []
+    for _ in range(n_targets):
+        robot.reset_pose()
+        for j in joints:
+            lo = max(j.min_angle, -2.0)
+            hi = min(j.max_angle, 2.0)
+            j.joint_angle(j.joint_angle() + rng.uniform(-0.3, 0.3)
+                          * (hi - lo) / 2.0)
+        targets.append(move_target.copy_worldcoords())
+    robot.reset_pose()
+    set_base_pose(robot, Coordinates())
+    return targets
+
+
+class TestFindBasePlacement(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.robot = Fetch()
+
+    def setUp(self):
+        self.robot.reset_pose()
+        set_base_pose(self.robot, Coordinates())
+
+    def test_reaches_targets_from_a_known_base(self):
+        robot = self.robot
+        true_base = Coordinates(pos=[2.0, 1.0, 0.0]).rotate(0.7, 'z')
+        targets = _targets_from_base(robot, true_base, 4, seed=0)
+        starts = [Coordinates(pos=[x, y, 0.0]).rotate(yaw, 'z')
+                  for x in (1.0, 2.5) for y in (0.0, 1.5)
+                  for yaw in (0.0, 1.5)]
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list, initial_base_poses=starts)
+        self.assertTrue(result.all_reached, result)
+        self.assertEqual(len(result.candidates), len(starts))
+
+        # Check against the model's own FK, not the solver's.
+        set_base_pose(robot, result.base_pose)
+        for av, target in zip(result.angle_vectors, targets):
+            robot.angle_vector(av)
+            ee = robot.rarm.end_coords.worldcoords()
+            np.testing.assert_allclose(
+                ee.worldpos(), target.worldpos(), atol=2e-3)
+            np.testing.assert_allclose(
+                ee.worldrot(), target.worldrot(), atol=2e-2)
+        np.testing.assert_allclose(
+            result.base_pose.worldpos()[2], 0.0, atol=1e-12)
+
+    def test_base_jacobian_matches_finite_difference(self):
+        robot = self.robot
+        move_target = robot.rarm.end_coords
+        link_list = _resolve_link_list(
+            robot, move_target, None, robot.rarm.joint_list)
+        fk_params = _chain_fk_params(robot, link_list, move_target)
+        base = np.array([[0.3, -0.2, 0.4]])
+        q = np.array([[[j.joint_angle() + 0.1 for j in
+                        robot.rarm.joint_list]]])
+        # The log-map error has the geometric Jacobian as its derivative
+        # only at zero error, so the target is the pose itself.
+        problem = _SharedBaseProblem(
+            fk_params, np.zeros((1, 3)), np.eye(3)[None],
+            np.ones(3), np.ones(3))
+        pos, rot, _, _, _ = problem._ee_world(base, q, False)
+        problem.target_pos = pos[0]
+        problem.target_rot = rot[0]
+        err, base_jac, arm_jac = problem.linearize(base, q)
+        np.testing.assert_allclose(err, 0.0, atol=1e-12)
+        eps = 1e-6
+        for i in range(3):
+            d = np.zeros((1, 3))
+            d[0, i] = eps
+            num = -(problem.residual(base + d, q)
+                    - problem.residual(base - d, q)) / (2 * eps)
+            np.testing.assert_allclose(
+                num[0, 0], base_jac[0, 0, :, i], atol=1e-5)
+        for i in range(q.shape[-1]):
+            d = np.zeros_like(q)
+            d[..., i] = eps
+            num = -(problem.residual(base, q + d)
+                    - problem.residual(base, q - d)) / (2 * eps)
+            np.testing.assert_allclose(
+                num[0, 0], arm_jac[0, 0, :, i], atol=1e-5)
+
+    def test_reports_unreachable_target(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[1.0, 0.0, 0.8]),
+                   Coordinates(pos=[1.1, 0.1, 0.9]),
+                   Coordinates(pos=[1.0, 0.0, 5.0])]
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False)
+        np.testing.assert_array_equal(result.success, [True, True, False])
+        self.assertFalse(result.all_reached)
+        self.assertEqual(result.n_reached, 2)
+
+    def test_base_bounds(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[2.0, 0.0, 0.8])]
+        bounds = ((-0.5, 0.5), (-0.5, 0.5))
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False, base_bounds=bounds)
+        x, y = result.base_pose.worldpos()[:2]
+        self.assertTrue(-0.5 <= x <= 0.5 and -0.5 <= y <= 0.5)
+        self.assertFalse(result.all_reached)
+
+    def test_set_base_pose_does_not_drift(self):
+        robot = self.robot
+        robot.root_link.translate([0.1, 0.0, 0.05])
+        try:
+            for i in range(500):
+                set_base_pose(robot, Coordinates(pos=[1.0, 2.0, 0.0])
+                              .rotate(0.3 * i, 'z'))
+            np.testing.assert_allclose(
+                robot.root_link.worldpos(), [1.0, 2.0, 0.0], atol=1e-9)
+            np.testing.assert_allclose(
+                np.linalg.det(robot.worldrot()), 1.0, atol=1e-12)
+        finally:
+            robot.root_link.translate([-0.1, 0.0, -0.05])
+
+    def test_apply_moves_robot(self):
+        robot = self.robot
+        targets = [Coordinates(pos=[1.5, 1.0, 0.8])]
+        result = find_base_placement(
+            robot, targets, move_target=robot.rarm.end_coords,
+            rotation_mask=False, apply=True)
+        self.assertTrue(result.all_reached)
+        np.testing.assert_allclose(
+            robot.root_link.worldpos(), result.base_pose.worldpos(),
+            atol=1e-9)
+        np.testing.assert_allclose(
+            robot.rarm.end_coords.worldpos(), targets[0].worldpos(),
+            atol=2e-3)
+
+
+if __name__ == '__main__':
+    unittest.main()

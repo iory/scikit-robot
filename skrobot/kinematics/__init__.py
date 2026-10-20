@@ -11,6 +11,11 @@ The algorithms support multiple backends (NumPy, JAX) for
 different performance and autodiff requirements.
 """
 
+# Mobile-base placement for several end-effector targets
+from skrobot.kinematics.base_placement import BasePlacementResult
+from skrobot.kinematics.base_placement import find_base_placement
+from skrobot.kinematics.base_placement import set_base_pose
+
 # Differentiable kinematics (backend-agnostic)
 from skrobot.kinematics.differentiable import create_batch_ik_solver
 from skrobot.kinematics.differentiable import create_dynamic_limit_mask
@@ -33,4 +38,7 @@ __all__ = [
     'create_dynamic_limit_mask',
     'LoopClosureSolver',
     'ReachabilityMap',
+    'BasePlacementResult',
+    'find_base_placement',
+    'set_base_pose',
 ]
