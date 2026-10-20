@@ -5,6 +5,7 @@ import numpy as np
 from skrobot.coordinates import Coordinates
 from skrobot.kinematics import find_base_placement
 from skrobot.kinematics import set_base_pose
+from skrobot.kinematics import vectorized_target
 from skrobot.kinematics.base_placement import _chain_fk_params
 from skrobot.kinematics.base_placement import _resolve_link_list
 from skrobot.kinematics.base_placement import _resolve_masks
@@ -73,7 +74,7 @@ class TestFindBasePlacement(unittest.TestCase):
         link_list = _resolve_link_list(
             robot, move_target, None, robot.rarm.joint_list)
         fk_params = _chain_fk_params(robot, link_list, move_target)
-        base = np.array([[0.3, -0.2, 0.4]])
+        base = np.array([[0.3, -0.2, 0.4, 0.0]])  # x, y, yaw, height
         q = np.array([[[j.joint_angle() + 0.1 for j in
                         robot.rarm.joint_list]]])
         # The log-map error has the geometric Jacobian as its derivative
@@ -88,7 +89,7 @@ class TestFindBasePlacement(unittest.TestCase):
         np.testing.assert_allclose(err, 0.0, atol=1e-12)
         eps = 1e-6
         for i in range(3):
-            d = np.zeros((1, 3))
+            d = np.zeros((1, 4))
             d[0, i] = eps
             num = -(problem.residual(base + d, q)
                     - problem.residual(base - d, q)) / (2 * eps)
@@ -189,14 +190,14 @@ class TestFindBasePlacement(unittest.TestCase):
         link_list = _resolve_link_list(
             robot, move_target, None, robot.rarm.joint_list)
         fk_params = _chain_fk_params(robot, link_list, move_target)
-        base = np.array([[0.9, 0.4, 0.2]])
+        base = np.array([[0.9, 0.4, 0.2, -0.2]])  # x, y, yaw, height
         q = np.array([[[j.joint_angle() + 0.1 for j in
                         robot.rarm.joint_list]]])
         # A following target that sits on the hand at this base and q, so
         # the residual is zero and its derivative is the Jacobian.
         probe = _SharedBaseProblem(
             fk_params, np.zeros((1, 3)), np.eye(3)[None], np.ones(3),
-            np.ones(3), base_height=-0.2)
+            np.ones(3))
         pos, rot, _, _, _ = probe._ee_world(base, q, False)
         hand_pos, hand_rot = pos[0, 0], rot[0, 0]
 
@@ -207,11 +208,11 @@ class TestFindBasePlacement(unittest.TestCase):
 
         problem = _SharedBaseProblem(
             fk_params, np.zeros((1, 3)), np.eye(3)[None], np.ones(3),
-            np.ones(3), base_height=-0.2, target_fns={0: on_hand})
+            np.ones(3), target_fns={0: on_hand})
         err, base_jac, _ = problem.linearize(base, q)
         np.testing.assert_allclose(err, 0.0, atol=1e-9)
         for i in range(3):
-            d = np.zeros((1, 3))
+            d = np.zeros((1, 4))
             d[0, i] = 1e-6
             num = -(problem.residual(base + d, q)
                     - problem.residual(base - d, q)) / 2e-6
@@ -226,6 +227,27 @@ class TestFindBasePlacement(unittest.TestCase):
             initial_base_poses=[Coordinates(pos=[0.8, 0.3, 0.0]),
                                 Coordinates(pos=[1.1, 0.6, 0.0])])
         self.assertTrue(result.all_reached, result)
+
+        @vectorized_target
+        def follow_x_all(base_matrices):
+            out = np.tile(np.eye(4), (len(base_matrices), 1, 1))
+            out[:, :3, :3] = fixture.worldrot()
+            out[:, :3, 3] = fixture.worldpos()
+            out[:, 0, 3] = base_matrices[:, 0, 3] + offset
+            return out
+
+        same = find_base_placement(
+            robot, world + [follow_x_all, follow_x_all],
+            move_target=move_target, joint_list=robot.rarm.joint_list,
+            base_height=-0.2,
+            initial_base_poses=[Coordinates(pos=[0.8, 0.3, 0.0]),
+                                Coordinates(pos=[1.1, 0.6, 0.0])])
+        np.testing.assert_allclose(
+            same.base_pose.worldpos(), result.base_pose.worldpos(),
+            atol=1e-9)
+        np.testing.assert_allclose(
+            same.target_coords[2].worldpos(),
+            result.target_coords[2].worldpos(), atol=1e-9)
         solved = result.target_coords[2]
         self.assertAlmostEqual(
             solved.worldpos()[0], result.base_pose.worldpos()[0] + offset)
@@ -407,6 +429,51 @@ class TestFindBasePlacement(unittest.TestCase):
         np.testing.assert_allclose(
             robot.rarm.end_coords.worldpos(), targets[0].worldpos(),
             atol=2e-3)
+
+
+class TestJaxBackend(unittest.TestCase):
+
+    def test_matches_numpy(self):
+        try:
+            import jax  # NOQA
+        except ImportError:
+            self.skipTest('jax is not installed')
+        robot = Fetch()
+        robot.reset_pose()
+        targets = _targets_from_base(
+            robot, Coordinates(pos=[1.0, 0.5, -0.2]).rotate(0.3, 'z'), 3,
+            seed=10)
+        offset = targets[2].worldpos()[0] - 1.0
+        rot = targets[2].worldrot()
+        pos = targets[2].worldpos()
+
+        @vectorized_target
+        def follow_x(base_matrices):
+            out = np.tile(np.eye(4), (len(base_matrices), 1, 1))
+            out[:, :3, :3] = rot
+            out[:, :3, 3] = pos
+            out[:, 0, 3] = base_matrices[:, 0, 3] + offset
+            return out
+
+        kwargs = dict(
+            move_target=robot.rarm.end_coords,
+            joint_list=robot.rarm.joint_list, base_height=-0.2,
+            margin_target=0.1, maximize_margin=True,
+            initial_base_poses=[Coordinates(pos=[0.8, 0.3, 0.0]),
+                                Coordinates(pos=[1.2, 0.7, 0.0])])
+        results = {}
+        for backend in ('numpy', 'jax'):
+            robot.reset_pose()
+            results[backend] = find_base_placement(
+                robot, targets[:2] + [follow_x], backend=backend, **kwargs)
+        a, b = results['numpy'], results['jax']
+        self.assertTrue(a.all_reached)
+        np.testing.assert_array_equal(a.success, b.success)
+        # Same steps, but summed in another order over many iterations.
+        np.testing.assert_allclose(a.base_pose.worldpos(),
+                                   b.base_pose.worldpos(), atol=1e-4)
+        np.testing.assert_allclose(a.angle_vectors, b.angle_vectors,
+                                   atol=1e-3)
 
 
 if __name__ == '__main__':

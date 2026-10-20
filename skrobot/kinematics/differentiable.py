@@ -4988,29 +4988,25 @@ def compute_geometric_jacobian_batched_numpy(
 
     for i in range(n_joints):
         # Apply link static transform
-        current_pos = current_pos + np.einsum(
-            'bij,j->bi', current_rot, translations[i])
-        current_rot = np.einsum(
-            'bij,jk->bik', current_rot, local_rotations[i])
+        current_pos = current_pos + current_rot @ translations[i]
+        current_rot = current_rot @ local_rotations[i]
 
         # Store joint position and axis in world frame
         joint_positions[i] = current_pos.copy()
-        joint_axes_world[i] = np.einsum(
-            'bij,j->bi', current_rot, axes[i])
+        joint_axes_world[i] = current_rot @ axes[i]
 
         # Apply joint motion
         delta_angles = joint_angles_batch[:, i] - ref_angles[i]
 
         if joint_types[i] == 'prismatic':
-            current_pos = current_pos + np.einsum(
-                'bij,j,b->bi', current_rot, axes[i], delta_angles)
+            current_pos = current_pos + (current_rot @ axes[i]) * delta_angles[:, None]
         else:
             joint_rots = _axis_angle_to_matrix_batched(axes[i], delta_angles)
-            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+            current_rot = current_rot @ joint_rots
 
     # Apply end-effector offset
-    ee_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
-    ee_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+    ee_pos = current_pos + current_rot @ ee_offset_pos
+    ee_rot = current_rot @ ee_offset_rot
 
     # Compute full Jacobian columns: (batch, 6, n_joints)
     J_full = np.zeros((batch_size, 6, n_joints))
@@ -5106,32 +5102,26 @@ def forward_kinematics_ee_batched_numpy(joint_angles_batch, fk_params):
     for i in range(n_joints):
         # Apply link static transform
         # pos = pos + rot @ translation
-        current_pos = current_pos + np.einsum(
-            'bij,j->bi', current_rot, translations[i]
-        )
+        current_pos = current_pos + current_rot @ translations[i]
         # rot = rot @ local_rotation
-        current_rot = np.einsum(
-            'bij,jk->bik', current_rot, local_rotations[i]
-        )
+        current_rot = current_rot @ local_rotations[i]
 
         # Apply joint motion
         delta_angles = joint_angles_batch[:, i] - ref_angles[i]  # (batch,)
 
         if joint_types[i] == 'prismatic':
             # Translate along axis
-            current_pos = current_pos + np.einsum(
-                'bij,j,b->bi', current_rot, axes[i], delta_angles
-            )
+            current_pos = current_pos + (current_rot @ axes[i]) * delta_angles[:, None]
         else:
             # Revolute: rotate around axis
             joint_rots = _axis_angle_to_matrix_batched(
                 axes[i], delta_angles
             )  # (batch, 3, 3)
-            current_rot = np.einsum('bij,bjk->bik', current_rot, joint_rots)
+            current_rot = current_rot @ joint_rots
 
     # Apply end-effector offset
-    current_pos = current_pos + np.einsum('bij,j->bi', current_rot, ee_offset_pos)
-    current_rot = np.einsum('bij,jk->bik', current_rot, ee_offset_rot)
+    current_pos = current_pos + current_rot @ ee_offset_pos
+    current_rot = current_rot @ ee_offset_rot
 
     return current_pos, current_rot
 

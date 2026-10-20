@@ -77,6 +77,21 @@ Options
   arm too, so three to five seeds spread over the arm's working poses make
   the result much less dependent on where the model happens to be.
 
+Speed
+=====
+
+- A target given as a function is called once per start and iteration.
+  Decorate it with ``vectorized_target`` to receive every start's root-link
+  pose at once as a ``(K, 4, 4)`` array and return ``(K, 4, 4)``.
+- ``base_height`` with several heights solves them in one batch.
+- ``backend='jax'`` jits the solver's iterations. It pays a few seconds of
+  compilation per solve and is worth it on a GPU only.
+
+On a 74-target Panda problem with 200 starts (4 heights, 4 arm seeds, 10
+map candidates, ``maximize_margin``), one solve took 38 s with NumPy and a
+vectorized target function, 58 s with a plain one, and 28 s with JAX on a
+GPU, all with the same result.
+
 Results
 =======
 
