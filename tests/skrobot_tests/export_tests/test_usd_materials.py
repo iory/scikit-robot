@@ -115,3 +115,67 @@ class TestPbrMaterials(unittest.TestCase):
                  if p.GetPath().pathString.startswith('/robot/Looks/')
                  and p.IsA(UsdShade.Material)]
         self.assertEqual(len(looks), 1)
+
+
+def _textured_box_glb(path):
+    import numpy as np
+    from PIL import Image
+    import trimesh
+    from trimesh.visual import TextureVisuals
+    from trimesh.visual.material import PBRMaterial
+    box = trimesh.creation.box(extents=(0.02, 0.03, 0.04))
+    uv = (box.vertices[:, :2] - box.vertices[:, :2].min(0)) / np.ptp(box.vertices[:, :2], axis=0)
+    image = Image.new('RGB', (8, 4), (200, 30, 30))
+    box.visual = TextureVisuals(uv=uv, material=PBRMaterial(
+        baseColorTexture=image, metallicFactor=0.0, roughnessFactor=0.6,
+        name='painted'))
+    scene = trimesh.Scene()
+    scene.add_geometry(box, node_name='painted', geom_name='painted')
+    with open(path, 'wb') as f:
+        f.write(scene.export(file_type='glb'))
+
+
+@unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
+class TestTextures(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        _textured_box_glb(os.path.join(cls.tmp, 'painted.glb'))
+        import trimesh
+        trimesh.creation.box(extents=(0.02, 0.02, 0.02)).export(
+            os.path.join(cls.tmp, 'plain.stl'))
+        urdf = os.path.join(cls.tmp, 'tex.urdf')
+        with open(urdf, 'w') as f:
+            f.write(URDF.format(glb='painted.glb', stl='plain.stl'))
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            cls.stage = urdf_to_usd(urdf, os.path.join(cls.tmp, 'tex.usda'))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_uvs_become_st(self):
+        from pxr import UsdGeom
+        prim = self.stage.GetPrimAtPath('/robot/base_link/visual_0_0')
+        st = UsdGeom.PrimvarsAPI(prim).GetPrimvar('st')
+        self.assertTrue(st)
+        points = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+        self.assertEqual(len(st.Get()), len(points))
+
+    def test_diffuse_reads_the_image(self):
+        material, shader = _bound_shader(self.stage, '/robot/base_link/visual_0_0')
+        sources = shader.GetInput('diffuseColor').GetConnectedSources()[0]
+        texture = UsdShade.Shader(sources[0].source.GetPrim())
+        self.assertEqual(texture.GetIdAttr().Get(), 'UsdUVTexture')
+        rel = texture.GetInput('file').Get().path
+        path = os.path.join(self.tmp, rel)
+        self.assertTrue(os.path.exists(path), path)
+        from PIL import Image
+        self.assertEqual(Image.open(path).convert('RGB').getpixel((0, 0)), (200, 30, 30))
+
+    def test_untextured_link_has_no_st(self):
+        from pxr import UsdGeom
+        prim = self.stage.GetPrimAtPath('/robot/plain_link/visual_0_0')
+        self.assertFalse(UsdGeom.PrimvarsAPI(prim).GetPrimvar('st'))

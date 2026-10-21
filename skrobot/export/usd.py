@@ -6,7 +6,10 @@ per-vertex ``displayColor`` (USD renders vertex colours natively, unlike STL/
 MJCF) and, when the mesh file carries a PBR material (glTF ``metallicFactor`` /
 ``roughnessFactor``, as sw2robot writes them from the SolidWorks appearance), a
 ``UsdPreviewSurface`` material bound to the mesh so Isaac Sim's RTX renderer
-shows aluminium as aluminium; convex collision meshes, and
+shows aluminium as aluminium. A glTF base-colour texture comes along too: the
+mesh gets its UVs as ``primvars:st`` and the material a ``UsdUVTexture`` reading
+the image, written next to the USD under ``textures/``. Then convex collision
+meshes, and
 revolute/prismatic/fixed joints (limits + position drives). A fixed joint welds
 the base to the world.
 
@@ -345,10 +348,32 @@ def _submesh_pbr(m):
             str(name) if name else None)
 
 
+def _submesh_texture(m):
+    """``(uv, image)`` of a sub-mesh's base-colour texture, or None.
+
+    ``uv`` is (N, 2), one pair per vertex, in USD's convention (origin at the
+    image's bottom-left): trimesh already flips glTF's top-left ``v`` on load.
+    ``image`` is the PIL image of ``baseColorTexture``.
+    """
+    visual = getattr(m, "visual", None)
+    uv = getattr(visual, "uv", None)
+    mat = getattr(visual, "material", None)
+    image = getattr(mat, "baseColorTexture", None) if mat is not None else None
+    if image is None and mat is not None:
+        image = getattr(mat, "image", None)
+    if uv is None or image is None:
+        return None
+    uv = np.asarray(uv, dtype=float)
+    if uv.ndim != 2 or uv.shape[1] != 2 or len(uv) != len(m.vertices):
+        return None
+    return uv, image
+
+
 def _submesh_geometry(mesh_geometry):
-    """Yield (points, face_counts, face_indices, per_vertex_rgb_or_None, pbr)
-    for each sub-mesh of a URDF Mesh geometry; ``pbr`` is
-    :func:`_submesh_pbr` of that sub-mesh."""
+    """Yield (points, face_counts, face_indices, per_vertex_rgb_or_None, pbr,
+    texture) for each sub-mesh of a URDF Mesh geometry; ``pbr`` is
+    :func:`_submesh_pbr` and ``texture`` :func:`_submesh_texture` of that
+    sub-mesh."""
     import trimesh
     subs = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
             if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
@@ -388,7 +413,8 @@ def _submesh_geometry(mesh_geometry):
                     c = c / 255.0
                 rgb = [c[:3].tolist()]
                 break
-        yield pts.tolist(), counts, indices, rgb, _submesh_pbr(m)
+        yield (pts.tolist(), counts, indices, rgb, _submesh_pbr(m),
+               _submesh_texture(m))
 
 
 def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
@@ -829,7 +855,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         # would make a huge degenerate convex hull that NaNs the articulation.
         if len(submeshes) > 1:
             cents = [np.mean(np.asarray(pts, dtype=float), axis=0)
-                     if pts else np.zeros(3) for pts, _, _, _, _ in submeshes]
+                     if pts else np.zeros(3) for pts, _, _, _, _, _ in submeshes]
             med = np.median(np.array(cents), axis=0)
             dist = [float(np.linalg.norm(c - med)) for c in cents]
             threshold = max(0.15, 3.0 * float(np.median(dist)))
@@ -838,7 +864,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         all_counts = []
         all_idx = []
         offset = 0
-        for pts, counts, idx, _rgb, _pbr in submeshes:
+        for pts, counts, idx, _rgb, _pbr, _tex in submeshes:
             all_pts.extend(pts)
             all_counts.extend(counts)
             all_idx.extend(int(j) + offset for j in idx)
@@ -899,7 +925,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
     urdf_rgb = _visual_rgb(vc)
 
     # visual: URDF material colour if given, else keep per-submesh colors
-    for sub_i, (pts, counts, idx, rgb, pbr) in enumerate(submeshes):
+    for sub_i, (pts, counts, idx, rgb, pbr, tex) in enumerate(submeshes):
         p = link_path.AppendChild("visual_{}_{}".format(index, sub_i))
         mesh = UsdGeom.Mesh.Define(stage, p)
         mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in pts]))
@@ -921,13 +947,25 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
                 UsdGeom.Tokens.vertex if len(rgb) == len(pts)
                 else UsdGeom.Tokens.constant)
             dc.Set(Vt.Vec3fArray([Gf.Vec3f(*c) for c in lin.tolist()]))
+        texture = None
+        if tex is not None and urdf_rgb is None:
+            # a URDF <material> overrides the mesh's look, texture included
+            from pxr import Sdf
+            uv, image = tex
+            st = UsdGeom.PrimvarsAPI(mesh.GetPrim()).CreatePrimvar(
+                "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+            st.Set(Vt.Vec2fArray([Gf.Vec2f(*q) for q in uv.tolist()]))
+            texture = _write_texture(stage, image)
+            if pbr is None:
+                pbr = (0.0, 0.5, None)
         if pbr is not None:
             # displayColor alone renders as a dielectric in RTX; the glTF
             # metallic / roughness only reach the renderer through a bound
-            # UsdPreviewSurface, with the (one) colour as its diffuseColor.
+            # UsdPreviewSurface, with the (one) colour as its diffuseColor
+            # (or the texture, when there is one).
             diffuse = (np.mean(lin, axis=0).tolist() if lin is not None
                        else [0.75, 0.75, 0.75])
-            material = _preview_surface(stage, diffuse, pbr)
+            material = _preview_surface(stage, diffuse, pbr, texture)
             from pxr import UsdShade
             UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
 
@@ -935,11 +973,36 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
 _LOOKS_PATH = "/robot/Looks"
 
 
-def _preview_surface(stage, diffuse_rgb, pbr):
+def _write_texture(stage, image):
+    """Save a texture image under ``textures/`` beside the stage's file; return
+    its path relative to the stage. Named by content, so a texture shared by
+    several meshes is written once."""
+    import hashlib
+    import io
+    import os
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    data = buf.getvalue()
+    name = "tex_{}.png".format(hashlib.md5(data).hexdigest()[:12])
+    folder = os.path.join(
+        os.path.dirname(os.path.abspath(stage.GetRootLayer().realPath)),
+        "textures")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name)
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(data)
+    return "./textures/" + name
+
+
+def _preview_surface(stage, diffuse_rgb, pbr, texture=None):
     """A ``UsdPreviewSurface`` material under ``/robot/Looks`` for a linear
     diffuse colour and ``(metallic, roughness, name)``; one prim per distinct
     combination, reused across meshes (a frame of forty aluminium extrusions
-    gets one material, not forty)."""
+    gets one material, not forty). With ``texture`` (a path relative to the
+    stage), the diffuse colour comes from that image through the mesh's
+    ``st`` UVs instead."""
     from pxr import Gf
     from pxr import Sdf
     from pxr import UsdGeom
@@ -950,6 +1013,8 @@ def _preview_surface(stage, diffuse_rgb, pbr):
         sanitize_name(name) if name else "material",
         *[int(round(min(max(c, 0.0), 1.0) * 255)) for c in diffuse_rgb[:3]],
         int(round(metallic * 99)), int(round(roughness * 99)))
+    if texture is not None:
+        key += "_" + texture.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     path = Sdf.Path(_LOOKS_PATH).AppendChild(key)
     prim = stage.GetPrimAtPath(path)
     if prim.IsValid():
@@ -964,6 +1029,23 @@ def _preview_surface(stage, diffuse_rgb, pbr):
     shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(metallic))
     shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
     shader.CreateInput("useSpecularWorkflow", Sdf.ValueTypeNames.Int).Set(0)
+    if texture is not None:
+        reader = UsdShade.Shader.Define(stage, path.AppendChild("st_reader"))
+        reader.CreateIdAttr("UsdPrimvarReader_float2")
+        reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+        reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+        image = UsdShade.Shader.Define(stage, path.AppendChild("diffuse_texture"))
+        image.CreateIdAttr("UsdUVTexture")
+        image.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(texture)
+        image.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("sRGB")
+        # glTF's sampler repeats unless it says otherwise, and UVs past 0..1 mean tiling
+        image.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("repeat")
+        image.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("repeat")
+        image.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(
+            reader.ConnectableAPI(), "result")
+        image.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+        shader.GetInput("diffuseColor").ConnectToSource(
+            image.ConnectableAPI(), "rgb")
     material.CreateSurfaceOutput().ConnectToSource(
         shader.ConnectableAPI(), "surface")
     return material
