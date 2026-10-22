@@ -439,3 +439,30 @@ def test_batch_use_base_result_attributes():
         attempts.base_poses[0][best].worldpos(),
         base_poses[0].worldpos(), atol=1e-8)
     assert bool(attempts.success[0, best]) == success_flags[0]
+
+
+@pytest.mark.parametrize('use_base', ['planar', '6dof'])
+@pytest.mark.parametrize('yaw', [0.0, 2.5])
+def test_batch_use_base_poses_from_turned_start(use_base, yaw):
+    """base_poses are the robot's world pose even when it starts away from
+    the origin and turned: robot.newcoords(base_pose) with the solution
+    puts the end effector on the target."""
+    robot = _build_fetch()
+    robot.newcoords(Coordinates(pos=[1.0, -0.5, 0.0], rot=[yaw, 0, 0]))
+    target = Coordinates(
+        pos=robot.rarm_end_coords.worldpos()
+        + robot.worldrot().dot([0.8, 0.3, 0.1]))
+    solutions, base_poses, success, _ = robot.batch_inverse_kinematics(
+        target_coords=[target],
+        move_target=robot.rarm_end_coords,
+        link_list=robot.rarm.link_list,
+        rotation_mask=False,
+        stop=200, thre=0.01,
+        backend='numpy', initial_angles='current',
+        use_base=use_base,
+    )
+    assert success[0]
+    robot.angle_vector(solutions[0])
+    robot.newcoords(base_poses[0])
+    err = np.linalg.norm(robot.rarm_end_coords.worldpos() - target.worldpos())
+    assert err < 0.01, 'EE err {}'.format(err)

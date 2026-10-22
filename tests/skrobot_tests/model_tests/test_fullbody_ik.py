@@ -232,3 +232,45 @@ def test_multi_ee_reorder_helper_ignores_shared_root_link():
         'rarm_end_coords must pair with the chain containing r_shoulder_pan '
         'even though both chains share root_link')
     assert reordered[1] is larm_with_root
+
+
+def test_inverse_kinematics_use_base_planar_from_turned_start():
+    """The base DoFs act in the robot's frame, wherever it stands. A
+    robot away from the origin and turned around must reach a target in
+    front of it as one at the origin does."""
+    for yaw in [0.0, np.pi / 2, 2.5, np.pi]:
+        robot = skrobot.models.Fetch()
+        robot.newcoords(Coordinates(pos=[1.0, -0.5, 0.0], rot=[yaw, 0, 0]))
+        target = Coordinates(
+            pos=robot.rarm_end_coords.worldpos()
+            + robot.worldrot().dot([0.8, 0.3, 0.0]))
+
+        result = robot.inverse_kinematics(
+            target, move_target=robot.rarm_end_coords,
+            link_list=robot.rarm.link_list,
+            rotation_mask=False, stop=100, use_base='planar')
+
+        assert result is not False, 'failed from yaw={}'.format(yaw)
+        err = np.linalg.norm(
+            robot.rarm_end_coords.worldpos() - target.worldpos())
+        assert err < 1e-3, 'yaw={}: err={}'.format(yaw, err)
+
+
+def test_inverse_kinematics_use_base_keeps_base_for_reachable_target():
+    """A target the arm reaches by itself, with a heavy base, must not
+    move the base away from where the robot stands (here off the origin)."""
+    robot = skrobot.models.Fetch()
+    robot.newcoords(Coordinates(pos=[1.0, -0.5, 0.0], rot=[0.3, 0, 0]))
+    root0 = robot.root_link.worldpos().copy()
+    target = Coordinates(
+        pos=robot.rarm_end_coords.worldpos() + np.array([0.02, 0.0, 0.0]))
+
+    result = robot.inverse_kinematics(
+        target, move_target=robot.rarm_end_coords,
+        link_list=robot.rarm.link_list,
+        rotation_mask=False, stop=100, use_base='planar',
+        base_weight=[0.01, 0.01, 0.01])
+
+    assert result is not False
+    moved = np.linalg.norm(robot.root_link.worldpos() - root0)
+    assert moved < 0.05, 'base moved {} m for a 2 cm reach'.format(moved)
