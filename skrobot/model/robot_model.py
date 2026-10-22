@@ -1447,6 +1447,9 @@ class CascadedLink(CascadedCoords):
             'orig_parent_link': root_link._parent_link,
             'orig_joint': root_link.joint,
             'rel_entries': [],
+            # root_link's own coords, relative to its coordinate parent
+            'orig_local': Coordinates(pos=root_link.translation.copy(),
+                                      rot=root_link.rotation.copy()),
         }
         virtual_joint = joint_cls(
             parent_link=virtual_link,
@@ -1511,6 +1514,18 @@ class CascadedLink(CascadedCoords):
         if self._relevance_predicate_table is not None:
             for key in state['rel_entries']:
                 self._relevance_predicate_table.pop(key, None)
+        # The solve left the base pose in root_link's local coords, i.e.
+        # root_link is now offset from the robot. Move that pose onto the
+        # robot and put root_link back where it was in it, so the robot's
+        # coords are its base pose (as batch IK's base_poses are) and a
+        # later robot.newcoords() does not carry the offset along.
+        if root_link.parent is self:
+            root_world = root_link.copy_worldcoords()
+            root_link.newcoords(state['orig_local'].copy_worldcoords())
+            self.newcoords(
+                root_world.transform(
+                    state['orig_local'].inverse_transformation()),
+                relative_coords='world')
 
     def _attach_batch_virtual_base_chain(self, use_base, link_list):
         """Inject a chain of single-DoF virtual joints above ``root_link``.
