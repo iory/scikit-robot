@@ -274,3 +274,28 @@ def test_inverse_kinematics_use_base_keeps_base_for_reachable_target():
     assert result is not False
     moved = np.linalg.norm(robot.root_link.worldpos() - root0)
     assert moved < 0.05, 'base moved {} m for a 2 cm reach'.format(moved)
+
+
+def test_inverse_kinematics_use_base_moves_the_robot_not_root_link():
+    """The solved base pose ends up on the robot's coords: root_link keeps
+    its place in the robot, so moving the robot afterwards does not carry
+    a leftover offset."""
+    robot = skrobot.models.Fetch()
+    local0 = robot.root_link.translation.copy()
+    target = _far_target_from_current(robot)
+
+    result = robot.inverse_kinematics(
+        target, move_target=robot.rarm_end_coords,
+        link_list=robot.rarm.link_list,
+        rotation_mask=False, stop=100, use_base='planar')
+
+    assert result is not False
+    testing.assert_allclose(robot.root_link.translation, local0, atol=1e-9)
+    assert np.linalg.norm(robot.worldpos()) > 0.1, 'robot did not move'
+    err = np.linalg.norm(
+        robot.rarm_end_coords.worldpos() - target.worldpos())
+    assert err < 1e-3
+
+    robot.newcoords(Coordinates(pos=[2.0, 0.0, 0.0]))
+    testing.assert_allclose(
+        robot.root_link.worldpos(), [2.0, 0.0, 0.0] + local0, atol=1e-9)
