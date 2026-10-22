@@ -179,3 +179,65 @@ class TestTextures(unittest.TestCase):
         from pxr import UsdGeom
         prim = self.stage.GetPrimAtPath('/robot/plain_link/visual_0_0')
         self.assertFalse(UsdGeom.PrimvarsAPI(prim).GetPrimvar('st'))
+
+
+URDF_COLOURED = '''<?xml version="1.0"?>
+<robot name="coloured">
+  <link name="base_link">
+    <visual><geometry><mesh filename="{glb}"/></geometry>
+      <material name="white"><color rgba="1 1 1 1"/></material></visual>
+  </link>
+  <link name="plain_link">
+    <visual><geometry><mesh filename="{stl}"/></geometry>
+      <material name="red"><color rgba="1 0 0 1"/></material></visual>
+  </link>
+  <joint name="j" type="fixed">
+    <parent link="base_link"/><child link="plain_link"/>
+    <origin xyz="0.1 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>
+'''
+
+
+@unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
+class TestMeshColoursOverUrdfMaterial(unittest.TestCase):
+    """A URDF <material> colours only meshes without colours of their own."""
+
+    @classmethod
+    def setUpClass(cls):
+        import numpy as np
+        import trimesh
+        cls.tmp = tempfile.mkdtemp()
+        box = trimesh.creation.box(extents=(0.02, 0.03, 0.04))
+        colours = np.tile([0, 0, 0, 255], (len(box.vertices), 1))
+        colours[box.vertices[:, 2] > 0] = [0, 0, 255, 255]   # black, blue top
+        box.visual = trimesh.visual.ColorVisuals(box, vertex_colors=colours)
+        box.export(os.path.join(cls.tmp, 'two_tone.glb'))
+        trimesh.creation.box(extents=(0.02, 0.02, 0.02)).export(
+            os.path.join(cls.tmp, 'plain.stl'))
+        urdf = os.path.join(cls.tmp, 'coloured.urdf')
+        with open(urdf, 'w') as f:
+            f.write(URDF_COLOURED.format(glb='two_tone.glb', stl='plain.stl'))
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            cls.stage = urdf_to_usd(urdf, os.path.join(cls.tmp, 'coloured.usda'))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _display_colour(self, path):
+        from pxr import UsdGeom
+        prim = self.stage.GetPrimAtPath(path)
+        pv = UsdGeom.PrimvarsAPI(prim).GetPrimvar('displayColor')
+        return pv.GetInterpolation(), {tuple(round(c, 3) for c in v) for v in pv.Get()}
+
+    def test_vertex_colours_survive_a_urdf_material(self):
+        interp, colours = self._display_colour('/robot/base_link/visual_0_0')
+        self.assertEqual(interp, 'vertex')
+        self.assertEqual(colours, {(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)})
+
+    def test_uncoloured_mesh_takes_the_urdf_material(self):
+        interp, colours = self._display_colour('/robot/plain_link/visual_0_0')
+        self.assertEqual(interp, 'constant')
+        self.assertEqual(colours, {(1.0, 0.0, 0.0)})
