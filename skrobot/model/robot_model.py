@@ -1453,6 +1453,13 @@ class CascadedLink(CascadedCoords):
             child_link=root_link,
             name='_fullbody_ik_base_joint',
         )
+        # joint_angle writes default_coords (+ the joint's motion) into
+        # root_link's local coords, but Joint.__init__ took them from
+        # copy_coords(), which is the world pose: away from the origin,
+        # the first step would move root_link by the robot's own pose.
+        virtual_joint.default_coords = Coordinates(
+            pos=root_link.translation.copy(),
+            rot=root_link.rotation.copy())
         # Detach root_link from its original parent's _child_links before
         # reparenting so the kinematic graph stays consistent (a link must
         # appear in at most one parent's child list at a time).
