@@ -369,11 +369,29 @@ def _submesh_texture(m):
     return uv, image
 
 
+def _has_own_color(m):
+    """Whether a sub-mesh carries a colour of its own: vertex or face colours,
+    a material colour, or a texture.  A URDF ``<material>`` paints only meshes
+    that do not, the test :meth:`RobotModel._meshes_from_urdf_visual` applies
+    and the one RViz applies per sub-mesh (its ``BaseWhite`` check)."""
+    import trimesh
+    visual = m.visual
+    if not isinstance(visual, trimesh.visual.ColorVisuals):
+        if _submesh_texture(m) is not None:
+            return True
+        visual = visual.to_color()
+    if visual.kind is None:
+        return False
+    # vertex_colors: a to_color() result has no mesh to give face colours
+    return not (np.asarray(visual.vertex_colors)
+                == trimesh.visual.DEFAULT_COLOR).all()
+
+
 def _submesh_geometry(mesh_geometry):
     """Yield (points, face_counts, face_indices, per_vertex_rgb_or_None, pbr,
-    texture) for each sub-mesh of a URDF Mesh geometry; ``pbr`` is
-    :func:`_submesh_pbr` and ``texture`` :func:`_submesh_texture` of that
-    sub-mesh."""
+    texture, own_color) for each sub-mesh of a URDF Mesh geometry; ``pbr`` is
+    :func:`_submesh_pbr`, ``texture`` :func:`_submesh_texture` and
+    ``own_color`` :func:`_has_own_color` of that sub-mesh."""
     import trimesh
     subs = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
             if isinstance(m, trimesh.Trimesh) and len(m.faces) > 0]
@@ -414,7 +432,7 @@ def _submesh_geometry(mesh_geometry):
                 rgb = [c[:3].tolist()]
                 break
         yield (pts.tolist(), counts, indices, rgb, _submesh_pbr(m),
-               _submesh_texture(m))
+               _submesh_texture(m), _has_own_color(m))
 
 
 def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
@@ -855,7 +873,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         # would make a huge degenerate convex hull that NaNs the articulation.
         if len(submeshes) > 1:
             cents = [np.mean(np.asarray(pts, dtype=float), axis=0)
-                     if pts else np.zeros(3) for pts, _, _, _, _, _ in submeshes]
+                     if pts else np.zeros(3) for pts, _, _, _, _, _, _ in submeshes]
             med = np.median(np.array(cents), axis=0)
             dist = [float(np.linalg.norm(c - med)) for c in cents]
             threshold = max(0.15, 3.0 * float(np.median(dist)))
@@ -864,7 +882,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         all_counts = []
         all_idx = []
         offset = 0
-        for pts, counts, idx, _rgb, _pbr, _tex in submeshes:
+        for pts, counts, idx, _rgb, _pbr, _tex, _own in submeshes:
             all_pts.extend(pts)
             all_counts.extend(counts)
             all_idx.extend(int(j) + offset for j in idx)
@@ -916,22 +934,22 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         _emit_convex("collision_{}".format(index), all_pts, all_counts, all_idx)
         return
 
-    # The URDF's <material> on a visual OVERRIDES the colour baked into the mesh
-    # file, which is how RViz and other URDF consumers read it. Links with no
-    # <material> keep the mesh's own colours.
+    # The URDF's <material> on a visual colours only the sub-meshes that have
+    # no colour of their own (a bare STL, an uncoloured OBJ); a mesh's own
+    # vertex colours, material or texture win, as in RViz and RobotModel.
     # displayColor is consumed as a LINEAR albedo while URDF rgba is written as
     # an sRGB display colour, so it must be converted or the hue shifts: 0.5 sRGB
     # is only 0.214 linear.
-    urdf_rgb = _visual_rgb(vc)
+    visual_rgb = _visual_rgb(vc)
 
-    # visual: URDF material colour if given, else keep per-submesh colors
-    for sub_i, (pts, counts, idx, rgb, pbr, tex) in enumerate(submeshes):
+    for sub_i, (pts, counts, idx, rgb, pbr, tex, own) in enumerate(submeshes):
         p = link_path.AppendChild("visual_{}_{}".format(index, sub_i))
         mesh = UsdGeom.Mesh.Define(stage, p)
         mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*v) for v in pts]))
         mesh.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
         mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(idx))
         mesh.AddTransformOp().Set(_mat_to_gf(None, origin))
+        urdf_rgb = None if own else visual_rgb
         lin = None
         if urdf_rgb is not None:
             dc = mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
@@ -949,7 +967,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
             dc.Set(Vt.Vec3fArray([Gf.Vec3f(*c) for c in lin.tolist()]))
         texture = None
         if tex is not None and urdf_rgb is None:
-            # a URDF <material> overrides the mesh's look, texture included
+            # a textured mesh has its own colour, so no URDF colour reached it
             from pxr import Sdf
             uv, image = tex
             st = UsdGeom.PrimvarsAPI(mesh.GetPrim()).CreatePrimvar(
