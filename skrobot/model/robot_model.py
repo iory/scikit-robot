@@ -1433,6 +1433,14 @@ class CascadedLink(CascadedCoords):
                 % (use_base,))
         root_link = self._find_fullbody_root_link()
         virtual_link = Link(name='_fullbody_ik_virtual_world')
+        # The virtual joint moves root_link relative to root_link's
+        # coordinate parent (usually the robot model), so the joint's
+        # frame is that parent's world frame. Left at the world origin,
+        # the Jacobian's base columns ignore the robot's own pose: once
+        # the robot is turned, x/y/yaw point the wrong way and the solve
+        # diverges.
+        if root_link.parent is not None:
+            virtual_link.newcoords(root_link.parent.copy_worldcoords())
         state = {
             'root_link': root_link,
             'virtual_link': virtual_link,
@@ -1541,7 +1549,14 @@ class CascadedLink(CascadedCoords):
                 % (use_base,))
 
         root_link = self._find_fullbody_root_link()
+        # The chain starts where root_link stands, so its DoFs move the
+        # base in the base's own frame (as PlanarJoint / FloatingJoint do
+        # with their default_coords). At the world origin they would turn
+        # the robot about the origin, and the angles would mean nothing
+        # without the start pose.
+        root0 = root_link.copy_worldcoords()
         virtual_world = Link(name='_batch_ik_virtual_world')
+        virtual_world.newcoords(root0.copy_worldcoords())
 
         chain_links = []
         chain_joints = []
@@ -1553,6 +1568,7 @@ class CascadedLink(CascadedCoords):
             else:
                 child = Link(name='_batch_ik_virtual_{}_{}'.format(
                     i, axis))
+                child.newcoords(root0.copy_worldcoords())
                 chain_links.append(child)
             if kind == 'lin':
                 j = LinearJoint(
@@ -1592,6 +1608,12 @@ class CascadedLink(CascadedCoords):
             'orig_parent_link': root_link._parent_link,
             'orig_joint': root_link.joint,
             'orig_parent_had_child': False,
+            # The chain's angles move root_link from root0, in its own
+            # frame; keep root0 (and root_link in the robot's frame) so
+            # base_poses can be returned as the robot's world pose.
+            'base_frame': (root0,
+                           self.copy_worldcoords().inverse_transformation()
+                           .transform(root0)),
         }
         # Detach root_link from its original parent's child list before
         # reparenting so the graph stays consistent (a link must appear in
@@ -2800,7 +2822,8 @@ class BatchIKAttempts(object):
 
     def __init__(self, solutions, success, errors, angle_vector,
                  robot_joint_indices, solution_indices,
-                 use_base=None, base_solution_indices=None):
+                 use_base=None, base_solution_indices=None,
+                 base_frame=None):
         self._solutions = solutions
         self.success = success
         self.errors = errors
@@ -2809,6 +2832,7 @@ class BatchIKAttempts(object):
         self._solution_indices = solution_indices
         self._use_base = use_base
         self._base_solution_indices = base_solution_indices
+        self._base_frame = base_frame
         self._angle_vectors = None
         self._base_poses = None
 
@@ -2859,7 +2883,8 @@ class BatchIKAttempts(object):
             indices = self._base_solution_indices
             self._base_poses = [
                 [RobotModel._virtual_chain_angles_to_base_pose(
-                    self._solutions[pose][attempt][indices], self._use_base)
+                    self._solutions[pose][attempt][indices], self._use_base,
+                    self._base_frame)
                  for attempt in range(self.n_attempts)]
                 for pose in range(self._solutions.shape[0])
             ]
@@ -4452,7 +4477,8 @@ class RobotModel(CascadedLink):
             base_solution_indices = np.arange(n_dof, dtype=np.int64)
             base_poses = [
                 self._virtual_chain_angles_to_base_pose(
-                    solutions_np[i, :n_dof], use_base)
+                    solutions_np[i, :n_dof], use_base,
+                    _base_state['base_frame'])
                 for i in range(n_poses)
             ]
 
@@ -4464,20 +4490,38 @@ class RobotModel(CascadedLink):
             joint_indices,
             fk_indices_for_actual_joints,
             use_base=use_base,
-            base_solution_indices=base_solution_indices)
+            base_solution_indices=base_solution_indices,
+            base_frame=(None if _base_state is None
+                        else _base_state['base_frame']))
 
         return BatchIKResult(full_solutions, success_flags, attempt_counts,
                              base_poses=base_poses, attempts=attempts)
 
     @staticmethod
-    def _virtual_chain_angles_to_base_pose(joint_angles, use_base):
+    def _virtual_chain_angles_to_base_pose(joint_angles, use_base,
+                                           base_frame=None):
         """Convert virtual-chain joint angles to a world-frame base pose.
 
         The decomposition in :meth:`_attach_batch_virtual_base_chain` means
         the per-DoF angles compose exactly like the corresponding
         :class:`PlanarJoint` / :class:`FloatingJoint` applied to
         ``default_coords = identity``.
+
+        The angles move root_link from where it stood when the solve
+        started, in its own frame. With ``base_frame`` (root_link's world
+        pose at the start, and root_link in the robot's frame) the result
+        is the robot's world pose, ready for ``robot.newcoords``; without
+        it, the bare move.
         """
+        move = RobotModel._virtual_chain_move(joint_angles, use_base)
+        if base_frame is None:
+            return move
+        root0, root_in_robot = base_frame
+        return root0.copy_worldcoords().transform(move).transform(
+            root_in_robot.inverse_transformation())
+
+    @staticmethod
+    def _virtual_chain_move(joint_angles, use_base):
         if use_base == 'planar':
             x, y, yaw = float(joint_angles[0]), float(joint_angles[1]), float(
                 joint_angles[2])
@@ -4776,7 +4820,7 @@ class RobotModel(CascadedLink):
             virtual_angles = solutions_np[:, virtual_idx_arr]
             base_poses = [
                 self._virtual_chain_angles_to_base_pose(
-                    virtual_angles[i], use_base)
+                    virtual_angles[i], use_base, _base_state['base_frame'])
                 for i in range(n_poses)
             ]
 
@@ -4788,7 +4832,9 @@ class RobotModel(CascadedLink):
             robot_idx_arr.tolist(),
             union_idx_arr.tolist(),
             use_base=use_base,
-            base_solution_indices=virtual_idx_arr)
+            base_solution_indices=virtual_idx_arr,
+            base_frame=(None if _base_state is None
+                        else _base_state['base_frame']))
 
         return BatchIKResult(full_solutions, success_flags, attempt_counts,
                              base_poses=base_poses, attempts=attempts)
