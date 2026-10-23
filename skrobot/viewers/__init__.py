@@ -72,6 +72,19 @@ except (ImportError, RuntimeError) as error_log:
         _import_error = error_log
 
 try:
+    from ._offscreen import OffscreenRenderer
+    from ._offscreen import look_at_pose
+    from ._offscreen import merge_by_material
+    from ._offscreen import render_parallel
+except ImportError as error_log:
+    _offscreen_import_error = error_log
+
+    class OffscreenRenderer(object):
+        def __init__(self, *args, **kwargs):
+            raise ImportError('OffscreenRenderer needs pyrender: {}'.format(
+                _offscreen_import_error))
+
+try:
     from ._notebook import JupyterNotebookViewer
 except ImportError:
     class JupyterNotebookViewer(DummyViewer):
@@ -114,13 +127,15 @@ _VIEWER_CLASSES = {
     'viser': ViserViewer,
     'notebook': JupyterNotebookViewer,
     'mitsuba': MitsubaViewer,
+    # headless: same calls, nothing on screen (save_image renders the camera's view)
+    'offscreen': OffscreenRenderer,
 }
 
 # Viewer names suitable for a command-line ``--viewer`` choice (every backend
 # except the notebook-only one). Examples import this so a newly added viewer
 # automatically becomes selectable everywhere.
 VIEWER_TYPES = tuple(
-    name for name in _VIEWER_CLASSES if name != 'notebook')
+    name for name in _VIEWER_CLASSES if name not in ('notebook', 'offscreen'))
 
 # Shared ``help=`` text for a ``--viewer`` argparse argument, kept next to
 # VIEWER_TYPES so the wording (and the listed backends) stay in sync.
