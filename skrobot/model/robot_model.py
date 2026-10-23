@@ -4217,6 +4217,95 @@ class RobotModel(CascadedLink):
                 self._detach_batch_virtual_base_chain(_base_state)
         return result
 
+    @staticmethod
+    def _batch_ik_chain(link_list, move_target):
+        """The chain batch IK models for ``link_list``, and the joints it holds.
+
+        The solver folds whatever lies between two links of its chain into
+        one transform, taken when it is built. A fixed link in the chain
+        therefore only adds a joint the solver would try to turn, and a
+        mimic link left out freezes the linkage its joint drives. So the
+        links from ``link_list[0]`` to ``move_target`` are walked: fixed
+        links are dropped, and the mimic links of moved joints are put in.
+
+        Parameters
+        ----------
+        link_list : list[skrobot.model.Link]
+        move_target : skrobot.coordinates.CascadedCoords
+
+        Returns
+        -------
+        chain : list[skrobot.model.Link]
+            ``link_list`` itself when it is not one path towards
+            ``move_target``.
+        held : list[skrobot.model.Joint]
+            The joints between the chain's links that it does not move.
+            The solver holds them at their angles when it is built.
+        """
+        path = []
+        link = move_target.parent
+        while link is not None and link is not link_list[0]:
+            path.append(link)
+            link = getattr(link, 'parent_link', None)
+        listed = set(id(lk) for lk in link_list)
+        if link is None or not listed <= set(id(lk) for lk in path + [link]):
+            return list(link_list), []
+        path.append(link)
+        chain, held, moved = [], [], set()
+        for link in reversed(path):
+            joint = link.joint
+            if joint is None or joint.joint_type == 'fixed':
+                continue
+            mimic = getattr(joint, 'mimic', None)
+            parent = mimic.get('joint') if isinstance(mimic, dict) else None
+            if (parent is None and id(link) in listed) \
+                    or (parent is not None and id(parent) in moved):
+                chain.append(link)
+                moved.add(id(joint))
+            else:
+                held.append(joint)
+        if not chain:
+            return list(link_list), []
+        return chain, held
+
+    @staticmethod
+    def _batch_ik_held_angles(held):
+        return np.concatenate(
+            [np.atleast_1d(j.joint_angle()) for j in held] + [np.zeros(0)])
+
+    @staticmethod
+    def _batch_ik_rebase(fk_params, base, positions, rotations,
+                         position_mask):
+        """World targets in the frame a solver was built in.
+
+        The solver keeps the pose its chain's base had when it was built.
+        With the base at ``base`` now, targets move by the same rigid
+        transform, and so does the position mask, which is given along
+        world axes.
+
+        Returns
+        -------
+        tuple or None
+            ``(positions, rotations, position_mask)``, or None when the
+            moved mask is not along axes of the solver's frame (the solver
+            must then be built for ``base``).
+        """
+        built = np.eye(4)
+        built[:3, :3] = fk_params['base_rotation']
+        built[:3, 3] = fk_params['base_position']
+        move = built @ np.linalg.inv(base)
+        if np.allclose(move, np.eye(4), rtol=0.0, atol=1e-12):
+            return positions, rotations, position_mask
+        rot = move[:3, :3]
+        mask = np.asarray(position_mask)
+        moved = rot @ np.diag(mask.astype(np.float64)) @ rot.T
+        new_mask = np.round(np.diag(moved))
+        if not np.allclose(moved, np.diag(new_mask), rtol=0.0, atol=1e-9):
+            return None
+        return (np.asarray(positions) @ rot.T + move[:3, 3],
+                np.einsum('ij,njk->nik', rot, rotations),
+                new_mask.astype(mask.dtype))
+
     def _batch_inverse_kinematics_impl(
             self, target_coords, move_target, link_list,
             rotation_mask, position_mask, rotation_mirror, stop, thre, rthre,
@@ -4296,7 +4385,8 @@ class RobotModel(CascadedLink):
                     ', '.join(repr(k) for k in sorted(kwargs)),
                     'they are' if len(kwargs) > 1 else 'it is'))
 
-        single_link_list = link_list
+        single_link_list, held_joints = self._batch_ik_chain(
+            link_list, move_target)
 
         # Single move_target (multi-EE already handled above).
         single_move_target = move_target
@@ -4347,6 +4437,21 @@ class RobotModel(CascadedLink):
         # (i.e., n_joints from FK params, which is len(single_link_list))
         n_fk_joints = len(single_link_list)
 
+        # Angles given per link of link_list as passed: carry them over to
+        # the chain, which may have lost fixed links and gained mimic ones.
+        if (isinstance(initial_angles, np.ndarray)
+                and initial_angles.shape == (n_poses, len(link_list))
+                and len(link_list) not in (ndof, n_fk_joints)):
+            column = {id(link): i for i, link in enumerate(link_list)}
+            chain_angles = np.array(
+                [link.joint.joint_angle() for link in single_link_list])
+            initial_angles_given = initial_angles
+            initial_angles = np.tile(chain_angles, (n_poses, 1))
+            for i, link in enumerate(single_link_list):
+                if id(link) in column:
+                    initial_angles[:, i] = \
+                        initial_angles_given[:, column[id(link)]]
+
         # Prepare initial angles for backend solver
         # Solver expects shape (n_targets, n_fk_joints) for all joints in link_list
         if initial_angles is None or (isinstance(initial_angles, str) and initial_angles == "random"):
@@ -4382,6 +4487,11 @@ class RobotModel(CascadedLink):
         # a virtual chain, the fresh Link/Joint objects give unique id()s
         # every call, so caching would accumulate stale entries without
         # ever hitting. Bypass the cache in that case.
+        #
+        # A cached solver holds the joints the chain does not move at their
+        # angles when it was built, so it is built again once they have
+        # moved. Its base pose is fixed in it too; when only the base has
+        # moved since, the targets are moved into the frame it was built in.
         if _base_state is None:
             cache_key = (
                 tuple(id(link) for link in single_link_list),
@@ -4390,12 +4500,25 @@ class RobotModel(CascadedLink):
             )
             if not hasattr(self, '_batch_ik_solver_cache'):
                 self._batch_ik_solver_cache = {}
-            if cache_key not in self._batch_ik_solver_cache:
-                self._batch_ik_solver_cache[cache_key] = \
-                    create_batch_ik_solver(
-                        self, single_link_list, single_move_target,
-                        backend_name=backend)
-            solver = self._batch_ik_solver_cache[cache_key]
+            held_angles = self._batch_ik_held_angles(held_joints)
+            cached = self._batch_ik_solver_cache.get(cache_key)
+            if cached is None or not np.array_equal(cached[1], held_angles):
+                cached = (create_batch_ik_solver(
+                    self, single_link_list, single_move_target,
+                    backend_name=backend), held_angles)
+                self._batch_ik_solver_cache[cache_key] = cached
+            solver = cached[0]
+            base = single_link_list[0].parent
+            rebased = self._batch_ik_rebase(
+                solver.fk_params,
+                np.eye(4) if base is None else base.worldcoords().T(),
+                target_positions, target_rotations, position_mask)
+            if rebased is None:
+                solver = create_batch_ik_solver(
+                    self, single_link_list, single_move_target,
+                    backend_name=backend)
+            else:
+                target_positions, target_rotations, position_mask = rebased
         else:
             solver = create_batch_ik_solver(
                 self, single_link_list, single_move_target,
@@ -4681,6 +4804,12 @@ class RobotModel(CascadedLink):
         # Bypass the cache when a virtual base chain is attached: its
         # fresh Link/Joint objects would poison the cache with one-shot
         # entries (id()s never match again).
+        # The cached solver holds what its chains do not move (their bases
+        # and the joints between their links) where it was when built, so
+        # it is built again once any of that has moved.
+        chains = [self._batch_ik_chain(ll, mt)
+                  for ll, mt in zip(link_list, move_target)]
+        link_list = [chain for chain, _ in chains]
         if _base_state is None:
             cache_key = (
                 tuple(tuple(id(link) for link in ll) for ll in link_list),
@@ -4689,11 +4818,18 @@ class RobotModel(CascadedLink):
             )
             if not hasattr(self, '_batch_ik_multi_ee_solver_cache'):
                 self._batch_ik_multi_ee_solver_cache = {}
-            if cache_key not in self._batch_ik_multi_ee_solver_cache:
-                self._batch_ik_multi_ee_solver_cache[cache_key] = \
-                    create_batch_ik_solver(
-                        self, link_list, move_target, backend_name=backend)
-            solver = self._batch_ik_multi_ee_solver_cache[cache_key]
+            held_state = np.concatenate(
+                [self._batch_ik_held_angles(held) for _, held in chains]
+                + [np.zeros(0) if chain[0].parent is None
+                   else chain[0].parent.worldcoords().T().ravel()
+                   for chain, _ in chains])
+            cached = self._batch_ik_multi_ee_solver_cache.get(cache_key)
+            if cached is None or not np.array_equal(cached[1], held_state):
+                cached = (create_batch_ik_solver(
+                    self, link_list, move_target, backend_name=backend),
+                    held_state)
+                self._batch_ik_multi_ee_solver_cache[cache_key] = cached
+            solver = cached[0]
         else:
             solver = create_batch_ik_solver(
                 self, link_list, move_target, backend_name=backend)
