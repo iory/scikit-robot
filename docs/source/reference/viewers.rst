@@ -355,6 +355,65 @@ MitsubaViewer
     viewer = skrobot.viewers.PyrenderViewer(resolution=(640, 480), update_interval=1.0)           # 1 Hz, lower idle CPU
 
 
+OffscreenRenderer
+-----------------
+
+**Description:**
+  ``OffscreenRenderer`` draws the same scene as ``PyrenderViewer`` into arrays,
+  with no window (EGL or OSMesa through pyrender, so set
+  ``PYOPENGL_PLATFORM=egl`` on a machine without a display). Use it for videos
+  and images of a trajectory. A robot is drawn one mesh per link and follows its
+  links at every ``render``; it is lit as ``PyrenderViewer`` lights its scene, so
+  a frame looks like the viewer's.
+
+**Check a view in a viewer, then render it headless:**
+
+  .. code-block:: python
+
+    from skrobot.viewers import OffscreenRenderer, PyrenderViewer
+
+    viewer = PyrenderViewer()
+    viewer.add(robot)
+    viewer.show()                                   # look, move the camera
+    renderer = OffscreenRenderer.from_viewer(viewer)  # its links, camera and size
+    for av in trajectory:
+        robot.angle_vector(av)
+        image = renderer.render()                    # (height, width, 3) uint8
+
+  ``from_viewer`` also takes a ``TrimeshSceneViewer`` (its camera and links;
+  the shading is pyrender's).
+
+**Or run a viewer script headless:** ``create_viewer('offscreen')`` returns an
+  ``OffscreenRenderer``, which takes the viewers' calls (``add``, ``delete``,
+  ``set_camera``, ``redraw``, ``show``, ``pause``, ``save_image``); ``save_image``
+  writes what the camera sees.
+
+**Rendering many frames:**
+
+  .. code-block:: python
+
+    from skrobot.viewers import OffscreenRenderer, render_parallel
+
+    def setup(urdf):                 # once per process; module level (spawned)
+        robot = RobotModel.from_urdf(urdf)
+        renderer = OffscreenRenderer((640, 480))
+        renderer.add(robot)
+
+        def render_one(job):
+            i, av = job
+            robot.angle_vector(av)
+            Image.fromarray(renderer.render(eye=[2, -2, 1.5], target=[0, 0, 0.8])).save('%05d.png' % i)
+        return render_one
+
+    render_parallel(setup, enumerate(trajectory), workers=4, setup_args=(urdf,))
+
+  Each process builds its own scene and GL context ('spawn': a context does not
+  survive a fork). ``add`` also takes a ``trimesh.Trimesh`` (moved with
+  ``set_pose``) and a ``trimesh.Scene`` (static; its pieces joined by material
+  with ``merge_by_material``, as a scanned room of hundreds of pieces otherwise
+  costs more per frame than the GPU does).
+
+
 Selecting a viewer
 ==================
 
@@ -366,7 +425,7 @@ applications that expose a ``--viewer`` option:
 
     import skrobot
 
-    # name is one of 'trimesh', 'pyrender', 'viser', 'mitsuba' or 'notebook'
+    # name is one of 'trimesh', 'pyrender', 'viser', 'mitsuba', 'notebook' or 'offscreen'
     viewer = skrobot.viewers.create_viewer('pyrender', resolution=(640, 480))
     viewer.add(skrobot.models.PR2())
     viewer.show()

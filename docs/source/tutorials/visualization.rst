@@ -13,6 +13,8 @@ Scikit-robot supports multiple visualization backends:
 - **PyrenderViewer**: OpenGL-based, smoother rendering
 - **JupyterNotebookViewer**: Browser-based, works in Jupyter and Google Colab
 - **ViserViewer**: Web-based viewer with interactive joint sliders
+- **OffscreenRenderer**: No window; renders images and videos headless, or what an
+  open PyrenderViewer / TrimeshSceneViewer shows (``OffscreenRenderer.from_viewer``)
 
 Basic usage:
 
