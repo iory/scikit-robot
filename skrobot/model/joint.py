@@ -3,9 +3,11 @@ import math
 
 import numpy as np
 
+from skrobot.coordinates import CascadedCoords
 from skrobot.coordinates import convert_to_axis_vector
 from skrobot.coordinates import normalize_vector
 from skrobot.coordinates.math import cross_product
+from skrobot.coordinates.math import rotation_matrix
 from skrobot.coordinates.math import select_by_mask
 
 
@@ -133,6 +135,106 @@ class Joint(object):
         self.joint_min_max_target = joint_min_max_target
         self.default_coords = self.child_link.copy_coords()
         self._hooks = hooks
+        # The child link's (rotation, translation) arrays as this joint last
+        # set them, and the link they were set on (see _set_child_link).
+        self._child_written = None
+
+    def __getstate__(self):
+        # A copy (deepcopy, pickle) has its own, writeable, arrays: its joint
+        # takes its child link's pose as it is when it first moves.
+        state = self.__dict__.copy()
+        state['_child_written'] = None
+        return state
+
+    def _child_moved(self):
+        """Has the child link been moved by something other than this joint
+        since the joint last set it (or has the joint never set it)?
+
+        Every Coordinates method or property setter that moves a link
+        (translate, rotate, newcoords, ``link.translation = v``, ...) assigns
+        it new arrays, so comparing the link's arrays with those the joint
+        wrote finds such a move.
+        """
+        # (getattr: a joint pickled before it kept them has none)
+        w = getattr(self, '_child_written', None)
+        child = self.child_link
+        return (w is None or w[2] is not child
+                or child._rotation is not w[0]
+                or child._translation is not w[1])
+
+    def _set_child_link(self, rot, pos, moved, prev_rot, prev_pos):
+        """Set the child link's local pose to default_coords moved by the
+        joint's motion now (rot, and pos in default_coords' axes, or None
+        for none), not turn it by the change of angle since the last pose:
+        turning by each change accumulates rounding (with float32 angles a
+        7-joint arm's links drift ~1e-5 m in 10k calls).
+
+        If the link was moved by something else since this joint last set it
+        (moved: see _child_moved), its pose now is taken as the joint's pose
+        at the previous angle (motion prev_rot, prev_pos): default_coords is
+        set back from it, so the move is kept, as it was when each change was
+        applied to the link.
+
+        The arrays written are read-only: a link's pose is changed through
+        Coordinates methods and property setters, not by writing into its
+        arrays (``link.translation[0] += 0.1`` raises ValueError once a joint
+        has set the link; such a write did not reach the link's descendants
+        either).
+        """
+        child = self.child_link
+        d = self.default_coords
+        if moved:
+            d_rot = child._rotation if prev_rot is None \
+                else np.dot(child._rotation, prev_rot.T)
+            d_pos = child._translation if prev_pos is None \
+                else child._translation - np.dot(d_rot, prev_pos)
+            d.newcoords(d_rot, d_pos, check_validity=False)
+            t = type(child)
+            # (as CascadedCoords.rotate's fast path: set the arrays, then mark
+            # the descendants changed; else through newcoords)
+            fast = (getattr(child, '_hook', None) is None
+                    and hasattr(child, '_descendants')
+                    and t.newcoords is CascadedCoords.newcoords
+                    and t.changed is CascadedCoords.changed)
+            keep_rot = keep_pos = None
+        else:
+            # what the joint does not move stays the array it wrote
+            fast = self._child_written[3]
+            keep_rot, keep_pos = child._rotation, child._translation
+        if rot is not None:
+            rot = np.dot(d._rotation, rot)
+            rot.setflags(write=False)
+        elif keep_rot is not None:
+            rot = keep_rot
+        else:
+            rot = d._rotation.copy()
+            rot.setflags(write=False)
+        if pos is not None:
+            pos = d._translation + np.dot(d._rotation, pos)
+            pos.setflags(write=False)
+        elif keep_pos is not None:
+            pos = keep_pos
+        else:
+            pos = d._translation.copy()
+            pos.setflags(write=False)
+        if fast:
+            child._rotation = rot
+            child._translation = pos
+            if not child._changed:
+                child._changed = True
+                stack = list(child._descendants)
+                while stack:
+                    c = stack.pop()
+                    if not c._changed:
+                        c._changed = True
+                        stack.extend(c._descendants)
+        else:
+            child.newcoords(rot, pos, check_validity=False)
+            # (newcoords keeps copies)
+            child._rotation.setflags(write=False)
+            child._translation.setflags(write=False)
+        self._child_written = (child._rotation, child._translation, child,
+                               fast)
 
     @property
     def type(self):
@@ -553,11 +655,18 @@ class RotationalJoint(Joint):
             if not relative and min_angle - v > _limit_rounding:
                 logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
             v = min_angle
-        diff_angle = v - self._joint_angle
+        prev_angle = self._joint_angle
         self._joint_angle = v
-        if diff_angle:
-            self.child_link.rotate(diff_angle, self.axis,
-                                   skip_normalization=True)
+        if v - prev_angle:
+            # (the previous angle's motion: only wanted when the link was
+            # moved by something else)
+            moved = self._child_moved()
+            self._set_child_link(
+                rotation_matrix(float(v), self.axis, skip_normalization=True),
+                None, moved,
+                rotation_matrix(float(prev_angle), self.axis,
+                                skip_normalization=True) if moved else None,
+                None)
         # Skip the for-loop setup when no hooks are registered.
         if enable_hook and self._hooks:
             for hook in self._hooks:
@@ -737,10 +846,13 @@ class LinearJoint(Joint):
                 if not relative and min_angle - v > _limit_rounding:
                     logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
                 v = min_angle
-            diff_translation = v - self._joint_angle
+            prev = self._joint_angle
             self._joint_angle = v
-            if diff_translation:
-                self.child_link.translate(diff_translation * self.axis)
+            if v - prev:
+                axis = np.asarray(self.axis, dtype=np.float64)
+                self._set_child_link(None, axis * float(v),
+                                     self._child_moved(), None,
+                                     axis * float(prev))
 
             if enable_hook and self._hooks:
                 for hook in self._hooks:
