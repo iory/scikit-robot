@@ -134,3 +134,144 @@ def compute_swept_sphere(collision_mesh,
     # map all centers to the original space
     centers_original_space = inverse_map(centers_pts_mapped_space)
     return centers_original_space, radius
+
+
+def _sample_surface(mesh, spacing):
+    """Points on a mesh's surface, every point of it within ``spacing`` of one.
+
+    Each triangle is split into n x n smaller ones, n from its longest edge,
+    and their corners are returned (the mesh's vertices too).
+    """
+    tri = mesh.triangles
+    edge = np.max(np.linalg.norm(tri - np.roll(tri, 1, axis=1), axis=2), axis=1)
+    splits = np.maximum(1, np.ceil(edge / spacing).astype(int))
+    out = [np.asarray(mesh.vertices)]
+    for n in np.unique(splits):
+        t = tri[splits == n]
+        i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1), indexing='ij')
+        keep = i + j <= n
+        a, b = i[keep] / n, j[keep] / n
+        pts = (t[:, None, 0] * (1 - a - b)[None, :, None]
+               + t[:, None, 1] * a[None, :, None]
+               + t[:, None, 2] * b[None, :, None])
+        out.append(pts.reshape(-1, 3))
+    return np.concatenate(out)
+
+
+def compute_fitted_spheres(collision_mesh, tol=0.01, res=None,
+                           solid='hull', max_candidates=64):
+    """Compute spheres of varying radius covering a mesh
+
+    Unlike :func:`compute_swept_sphere`, which puts spheres of one radius
+    along the mesh's main axis, each sphere here has its own radius, and
+    none reaches more than about ``tol`` (in metres) out of the solid. A box,
+    a bracket or a wide palm then takes a few big spheres inside and small
+    ones at its corners, rather than many of one size.
+
+    Candidate centres are the cells of a ``res`` grid inside the solid, each
+    with the radius that reaches ``tol`` past the solid's surface nearest to
+    it, plus ``res``. The mesh's surface is sampled at ``res`` and covered
+    greedily: take a sample not covered yet and, of the candidates covering
+    it, keep the one covering the most samples not covered yet. A sample
+    counts as covered within ``res`` of the sphere's surface, so the whole
+    surface is covered, not only the samples.
+
+    Parameters
+    ----------
+    collision_mesh : trimesh.Trimesh
+        Mesh to cover, in its own frame.
+    tol : float
+        How far a sphere may reach out of the solid [m]. The grid adds up to
+        ``2 * res`` to that (a cell's worth for the covering between samples,
+        and up to a cell for where the grid puts the solid's surface).
+    res : float or None
+        Grid cell size [m]; ``tol / 2`` if None. It is never finer than
+        1/64 of the mesh's largest extent, which keeps a big mesh fast.
+    solid : str
+        What the spheres stay in: ``'hull'`` (the convex hull, the default:
+        visual meshes are often open shells that enclose nothing) or
+        ``'mesh'`` (what the mesh itself encloses, its holes filled).
+    max_candidates : int
+        Candidates compared for a sample when more cover it: the biggest
+        half of them and a random half of the rest.
+
+    Returns
+    -------
+    centers : numpy.ndarray[float](n_sphere, 3)
+        Centres of the spheres, in the mesh's frame.
+    radii : numpy.ndarray[float](n_sphere,)
+        Their radii.
+    """
+    from scipy import ndimage
+    from scipy.spatial import cKDTree
+
+    if solid not in ('hull', 'mesh'):
+        raise ValueError(
+            "solid must be 'hull' or 'mesh', got {!r}".format(solid))
+    res = tol / 2.0 if res is None else res
+    res = max(res, float(np.max(collision_mesh.extents)) / 64.0)
+    pts = _sample_surface(collision_mesh, res)
+    lo = pts.min(axis=0) - 2 * res
+    shape = np.ceil((pts.max(axis=0) + 2 * res - lo) / res).astype(int) + 1
+    surface_cells = tuple(np.floor((pts - lo) / res).astype(int).T)
+    if solid == 'hull':
+        hull = collision_mesh.convex_hull
+        normals = hull.face_normals
+        offsets = -np.einsum('ij,ij->i', normals, hull.triangles[:, 0])
+        idx = np.stack(np.meshgrid(*[np.arange(n) for n in shape],
+                                   indexing='ij'), axis=-1).reshape(-1, 3)
+        x = lo + (idx + 0.5) * res
+        inside = np.ones(len(x), dtype=bool)
+        for k in range(0, len(normals), 256):
+            inside &= np.all(
+                x @ normals[k:k + 256].T + offsets[k:k + 256] <= 0, axis=1)
+        inside = inside.reshape(shape)
+        inside[surface_cells] = True
+    else:
+        occupied = np.zeros(shape, dtype=bool)
+        occupied[surface_cells] = True
+        inside = ndimage.binary_fill_holes(occupied)
+
+    # how far each cell's centre is from the nearest cell outside, less a cell
+    room = np.maximum(ndimage.distance_transform_edt(inside) * res - res, 0.0)
+    cells = np.argwhere(inside)
+    candidates = lo + (cells + 0.5) * res
+    reach = room[tuple(cells.T)] + tol + res
+    # a sample covered this far in leaves every surface point within res of
+    # it inside the sphere
+    covers = reach - res
+    candidate_tree = cKDTree(candidates)
+    sample_tree = cKDTree(pts)
+    uncovered = np.ones(len(pts), dtype=bool)
+    rng = np.random.default_rng(0)
+    centers, radii = [], []
+    while uncovered.any():
+        p = pts[np.flatnonzero(uncovered)[0]]
+        near = np.array(candidate_tree.query_ball_point(p, covers.max()),
+                        dtype=int)
+        near = near[np.linalg.norm(candidates[near] - p, axis=1) <= covers[near]]
+        if len(near) == 0:
+            # beyond every candidate's reach: a small sphere of its own
+            centers.append(p)
+            radii.append(tol + res)
+            uncovered[sample_tree.query_ball_point(p, tol)] = False
+            continue
+        if len(near) > max_candidates:
+            order = np.argsort(-reach[near])
+            half = max_candidates // 2
+            near = np.concatenate([
+                near[order[:half]],
+                rng.choice(near[order[half:]], max_candidates - half,
+                           replace=False)])
+        best, best_count, best_covered = None, -1, None
+        for c in near:
+            covered = np.array(
+                sample_tree.query_ball_point(candidates[c], covers[c]),
+                dtype=int)
+            count = int(uncovered[covered].sum()) if len(covered) else 0
+            if count > best_count:
+                best, best_count, best_covered = c, count, covered
+        centers.append(candidates[best])
+        radii.append(reach[best])
+        uncovered[best_covered] = False
+    return np.array(centers), np.array(radii)

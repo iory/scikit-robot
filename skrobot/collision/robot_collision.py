@@ -103,7 +103,8 @@ class RobotCollisionChecker:
         self.color_collision_sphere = [255, 0, 0, 200]
 
     def add_link(self, link, geometry_type='auto', n_spheres=None,
-                 radius_scale=1.0, tol=0.1, aspect_threshold=1.5):
+                 radius_scale=1.0, tol=0.1, aspect_threshold=1.5,
+                 fit_tol=0.01):
         """Add collision geometry for a link.
 
         Automatically generates collision geometry from the link's
@@ -119,6 +120,9 @@ class RobotCollisionChecker:
             - 'auto': Automatically select based on aspect ratio (default)
             - 'spheres': Use swept spheres (compatible with SweptSphereSdfCollisionChecker)
             - 'capsule': Use single capsule (more efficient for elongated shapes)
+            - 'fitted_spheres': Spheres of varying radius covering the mesh's
+              convex hull, none reaching more than about ``fit_tol`` out of it
+              (see :func:`skrobot.planner.swept_sphere.compute_fitted_spheres`)
         n_spheres : int or None
             Number of spheres to use (only for 'spheres' type). If None,
             automatically determined based on tolerance.
@@ -129,6 +133,9 @@ class RobotCollisionChecker:
         aspect_threshold : float
             Aspect ratio threshold for auto geometry selection.
             If length/diameter > threshold, use capsule. Default is 1.5.
+        fit_tol : float
+            How far a sphere may reach out of the mesh's convex hull, in
+            metres (only for 'fitted_spheres' type).
         """
         try:
             import trimesh
@@ -139,6 +146,14 @@ class RobotCollisionChecker:
         if mesh is None or not isinstance(mesh, trimesh.Trimesh) or mesh.is_empty:
             # Fallback: single sphere at origin
             self.add_link_sphere(link, radius=0.05)
+            return
+
+        if geometry_type == 'fitted_spheres':
+            from skrobot.planner.swept_sphere import compute_fitted_spheres
+            centers, radii = compute_fitted_spheres(mesh, tol=fit_tol)
+            for center, radius in zip(centers, radii):
+                self.add_link_sphere(link, center_local=center,
+                                     radius=radius * radius_scale)
             return
 
         try:
@@ -238,7 +253,7 @@ class RobotCollisionChecker:
         return p1, p2, radius
 
     def add_links(self, links, geometry_type='auto', n_spheres=None,
-                  radius_scale=1.0, aspect_threshold=1.5):
+                  radius_scale=1.0, aspect_threshold=1.5, fit_tol=0.01):
         """Add collision geometry for multiple links.
 
         Parameters
@@ -246,13 +261,17 @@ class RobotCollisionChecker:
         links : list of Link
             Robot links to add.
         geometry_type : str
-            Type of geometry: 'auto', 'spheres', or 'capsule'.
+            Type of geometry: 'auto', 'spheres', 'capsule' or
+            'fitted_spheres'.
         n_spheres : int or None
             Number of spheres per link (only for 'spheres' type).
         radius_scale : float
             Scale factor for computed radius.
         aspect_threshold : float
             Aspect ratio threshold for auto selection.
+        fit_tol : float
+            How far a sphere may reach out of a link's convex hull, in
+            metres (only for 'fitted_spheres' type).
         """
         for link in links:
             self.add_link(
@@ -261,6 +280,7 @@ class RobotCollisionChecker:
                 n_spheres=n_spheres,
                 radius_scale=radius_scale,
                 aspect_threshold=aspect_threshold,
+                fit_tol=fit_tol,
             )
 
     def add_link_sphere(self, link, center_local=None, radius=0.05):
