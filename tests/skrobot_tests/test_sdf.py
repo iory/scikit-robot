@@ -340,3 +340,62 @@ class TestSDF(unittest.TestCase):
         mesh = trimesh.creation.cylinder(radius=1.0, height=1.0)
         sdf = skrobot.sdf.trimesh2sdf(mesh)
         assert isinstance(sdf, CylinderSDF)
+
+
+def _box_distance(points, center, extents):
+    """Exact signed distance to an axis-aligned box."""
+    q = np.abs(points - center) - np.asarray(extents) / 2.0
+    outside = np.linalg.norm(np.maximum(q, 0.0), axis=1)
+    return np.where(q.max(axis=1) > 0, outside, q.max(axis=1))
+
+
+class TestGridSDFFromMeshes(unittest.TestCase):
+
+    resolution = 0.02
+    boxes = [(np.array([0.0, 0.0, 0.0]), np.array([0.3, 0.2, 0.1])),
+             (np.array([0.5, 0.1, 0.05]), np.array([0.1, 0.1, 0.2]))]
+
+    def setUp(self):
+        meshes = []
+        for center, extents in self.boxes:
+            box = trimesh.creation.box(extents=extents)
+            box.apply_translation(center)
+            meshes.append(box)
+        self.lower = np.array([-0.4, -0.3, -0.3])
+        self.upper = np.array([0.8, 0.4, 0.4])
+        self.sdf = GridSDF.from_meshes(
+            meshes, self.lower, self.upper, self.resolution)
+
+    def exact(self, points):
+        return np.min([_box_distance(points, c, e) for c, e in self.boxes],
+                      axis=0)
+
+    def test_sign(self):
+        inside = np.array([[0.0, 0.0, 0.0], [0.5, 0.1, 0.05]])
+        outside = np.array([[0.0, 0.0, 0.2], [0.3, -0.2, 0.0]])
+        self.assertTrue(np.all(self.sdf(inside) < 0))
+        self.assertTrue(np.all(self.sdf(outside) > 0))
+
+    def test_close_to_exact(self):
+        # below the true distance, by no more than the 2.5 cells measured
+        rng = np.random.RandomState(1)
+        points = rng.uniform(self.lower, self.upper, (20000, 3))
+        error = (self.sdf(points) - self.exact(points)) / self.resolution
+        self.assertGreaterEqual(error.min(), -2.6)
+
+    def test_overstates_by_at_most_half_a_cell_diagonal(self):
+        # the documented bound: sqrt(3) / 2 * resolution over the true
+        # distance, anywhere in the grid
+        rng = np.random.RandomState(0)
+        points = rng.uniform(self.lower, self.upper, (20000, 3))
+        excess = self.sdf(points) - self.exact(points)
+        self.assertLessEqual(
+            excess.max(), 0.5 * np.sqrt(3) * self.resolution + 1e-9)
+
+    def test_open_mesh_keeps_the_rest_outside(self):
+        box = trimesh.creation.box(extents=[0.2, 0.2, 0.2])
+        box.update_faces(np.arange(len(box.faces)) >= 2)    # a face off
+        sdf = GridSDF.from_meshes(
+            [box], [-0.3, -0.3, -0.3], [0.3, 0.3, 0.3], self.resolution)
+        far = np.array([[0.25, 0.25, 0.25], [-0.25, 0.0, 0.0]])
+        self.assertTrue(np.all(sdf(far) > 0))

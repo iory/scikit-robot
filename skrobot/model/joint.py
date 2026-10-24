@@ -13,6 +13,10 @@ logger = getLogger(__name__)
 
 _default_max_joint_velocity = 1.0
 _default_max_joint_torque = 1.0
+# How far past a limit a joint angle [rad or m] is taken as rounding (a float32
+# solution comes back as 1.5700000524 for a limit of 1.57): clamped without a
+# warning. Anything further is still clamped, and warned about.
+_limit_rounding = 1e-6
 
 
 def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
@@ -542,11 +546,11 @@ class RotationalJoint(Joint):
         if max_angle < min_angle:
             v = 0.5 * (float(min_angle) + float(max_angle))
         elif v > max_angle:
-            if not relative:
+            if not relative and v - max_angle > _limit_rounding:
                 logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
             v = max_angle
         elif v < min_angle:
-            if not relative:
+            if not relative and min_angle - v > _limit_rounding:
                 logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
             v = min_angle
         diff_angle = v - self._joint_angle
@@ -726,11 +730,11 @@ class LinearJoint(Joint):
             max_angle = self.max_angle
             min_angle = self.min_angle
             if v > max_angle:
-                if not relative:
+                if not relative and v - max_angle > _limit_rounding:
                     logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
                 v = max_angle
             elif v < min_angle:
-                if not relative:
+                if not relative and min_angle - v > _limit_rounding:
                     logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
                 v = min_angle
             diff_translation = v - self._joint_angle
