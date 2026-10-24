@@ -273,6 +273,59 @@ class SelfCollision:
         return float(d), tuple(sorted((la, lb)))
 
 
+def touching_link_pairs(robot, angle_vectors=None, meshes=None, hull=False):
+    """Link pairs whose meshes touch in the given poses, and every
+    parent/child pair.
+
+    What MoveIt's setup assistant disables as ``Default`` and ``Adjacent``:
+    pairs in contact in the robot's own rest pose (parts touching by design,
+    a folded arm lying on its base) can never be told apart from a collision
+    by a self-collision check there, so they go in ``ignore_pairs`` of
+    :meth:`RobotCollisionChecker.setup_self_collision_pairs` or the SRDF's
+    disabled collisions.  Needs the optional ``python-fcl`` package.
+
+    Parameters
+    ----------
+    robot : skrobot.model.RobotModel
+    angle_vectors : list of array-like, optional
+        Poses to look in; the robot's current pose when omitted.  The
+        robot's angle vector is restored afterwards.
+    meshes : dict, optional
+        ``{link name: local-frame trimesh}``; :func:`link_meshes` by default.
+    hull : bool
+        Use each link's convex hull (faster, and more pairs touch).
+
+    Returns
+    -------
+    pairs : set of tuple of str
+        ``(link_a, link_b)`` with ``link_a < link_b``.
+    """
+    if meshes is None:
+        meshes = link_meshes(robot)
+    saved = robot.angle_vector().copy()
+    pairs = set()
+    sc = None
+    try:
+        for av in ([None] if angle_vectors is None else angle_vectors):
+            if av is not None:
+                robot.angle_vector(np.asarray(av, dtype=float))
+            if sc is None:
+                # its baseline: contacts here, and parent/child pairs
+                sc = SelfCollision(robot, meshes, hull=hull)
+                pairs |= sc.baseline
+            else:
+                sc._sync()
+                pairs |= sc._pairs(0.0)
+    finally:
+        robot.angle_vector(saved)
+    # parent/child from the link tree: joint_list leaves fixed joints out
+    for link in robot.link_list:
+        parent = getattr(link, 'parent_link', None)
+        if parent is not None:
+            pairs.add(frozenset((link.name, parent.name)))
+    return {tuple(sorted(p)) for p in pairs}
+
+
 def _prismatic_joints(robot):
     from skrobot.model.joint import LinearJoint
     return [j for j in robot.joint_list if isinstance(j, LinearJoint)]

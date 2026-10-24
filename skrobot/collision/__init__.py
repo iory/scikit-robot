@@ -64,6 +64,7 @@ from skrobot.collision.self_collision import link_visual_mesh
 from skrobot.collision.self_collision import moving_links
 from skrobot.collision.self_collision import SelfCollision
 from skrobot.collision.self_collision import sweep_limits
+from skrobot.collision.self_collision import touching_link_pairs
 
 
 __all__ = [
@@ -99,4 +100,5 @@ __all__ = [
     'moving_links',
     'link_visual_mesh',
     'is_fcl_available',
+    'touching_link_pairs',
 ]
