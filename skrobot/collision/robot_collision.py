@@ -402,7 +402,9 @@ class RobotCollisionChecker:
 
     def setup_self_collision_pairs(self, min_link_distance=2,
                                      ignore_pairs=None,
-                                     use_urdf_adjacency=True):
+                                     use_urdf_adjacency=True,
+                                     ignore_touching_at=None,
+                                     touching_margin=0.0):
         """Setup pairs of link geometries for self-collision checking.
 
         Parameters
@@ -416,6 +418,18 @@ class RobotCollisionChecker:
         use_urdf_adjacency : bool
             If True, compute actual kinematic chain distance using
             parent-child relationships. If False, use insertion order.
+        ignore_touching_at : list of array-like, optional
+            Angle vectors (the robot's rest or tucked pose, say). A link
+            pair whose geometries are closer than ``touching_margin`` in
+            any of them is not checked. The spheres and capsules are
+            fatter than the links, so pairs such as a folded arm resting
+            over its base can overlap in the robot's own rest pose; kept,
+            they make every self-collision constraint unsatisfiable from
+            that pose. The robot's angle vector is restored afterwards.
+        touching_margin : float
+            Distance below which a pair counts as touching in
+            ``ignore_touching_at`` (the clearance an optimizer is asked
+            for, typically).
         """
         self._self_collision_pairs = []
         n = len(self._link_geometries)
@@ -434,6 +448,10 @@ class RobotCollisionChecker:
             for name_a, name_b in ignore_pairs:
                 ignore_set.add((name_a, name_b))
                 ignore_set.add((name_b, name_a))
+
+        if ignore_touching_at is not None:
+            ignore_set |= self._touching_link_pairs(ignore_touching_at,
+                                                    touching_margin)
 
         # Compute kinematic chain distance between links
         def get_ancestors(link):
@@ -500,6 +518,27 @@ class RobotCollisionChecker:
                     continue
 
                 self._self_collision_pairs.append((i, j))
+
+    def _touching_link_pairs(self, angle_vectors, margin):
+        """Link-name pairs (both orders) whose geometries come closer than
+        margin in any of angle_vectors."""
+        saved = self.robot_model.angle_vector().copy()
+        out = set()
+        try:
+            for av in angle_vectors:
+                self.robot_model.angle_vector(np.asarray(av, dtype=float))
+                world = [lg.get_world_geometry() for lg in self._link_geometries]
+                names = [lg.link.name for lg in self._link_geometries]
+                for i in range(len(world)):
+                    for j in range(i + 1, len(world)):
+                        if names[i] == names[j] or (names[i], names[j]) in out:
+                            continue
+                        if collision_distance(world[i], world[j]) < margin:
+                            out.add((names[i], names[j]))
+                            out.add((names[j], names[i]))
+        finally:
+            self.robot_model.angle_vector(saved)
+        return out
 
     def set_self_collision_pairs(self, pairs):
         """Manually set self-collision pairs.

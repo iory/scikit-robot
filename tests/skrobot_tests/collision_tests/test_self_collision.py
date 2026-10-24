@@ -10,6 +10,7 @@ from skrobot.collision import link_meshes
 from skrobot.collision import moving_links
 from skrobot.collision import SelfCollision
 from skrobot.collision import sweep_limits
+from skrobot.collision import touching_link_pairs
 
 
 # A bar hinged 0.1 m up on a pedestal, with a separate pillar standing on the
@@ -82,6 +83,28 @@ class TestSelfCollision(unittest.TestCase):
         self.assertIn(frozenset(('base_link', 'bar')), sc.baseline)
         robot.pitch.joint_angle(math.radians(15.0))
         self.assertIn(frozenset(('bar', 'pillar')), sc.new_pairs())
+
+
+@unittest.skipUnless(is_fcl_available(), 'python-fcl is not installed')
+class TestTouchingLinkPairs(unittest.TestCase):
+
+    def test_adjacent_pairs_and_not_the_apart_ones(self):
+        robot = _load_robot()
+        pairs = touching_link_pairs(robot)
+        self.assertIn(('bar', 'base_link'), pairs)
+        self.assertIn(('base_link', 'pillar'), pairs)
+        # the bar is level, clear of the pillar below it
+        self.assertNotIn(('bar', 'pillar'), pairs)
+
+    def test_every_pose_counts_and_the_pose_is_restored(self):
+        robot = _load_robot()
+        robot.pitch.joint_angle(math.radians(-30.0))
+        dipped = robot.angle_vector().copy()
+        dipped[list(robot.joint_list).index(robot.pitch)] = math.radians(15.0)
+        pairs = touching_link_pairs(robot, [np.zeros(len(dipped)), dipped])
+        # the bar lies on the pillar in the second pose
+        self.assertIn(('bar', 'pillar'), pairs)
+        self.assertAlmostEqual(float(robot.pitch.joint_angle()), math.radians(-30.0))
 
 
 @unittest.skipUnless(is_fcl_available(), 'python-fcl is not installed')
