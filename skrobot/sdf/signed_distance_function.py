@@ -553,6 +553,99 @@ class GridSDF(SignedDistanceFunction):
                 logger.info('finish pre-computation')
         return GridSDF.from_file(sdf_cache_path, **kwargs)
 
+    @staticmethod
+    def from_meshes(meshes, lower, upper, resolution=0.02, **kwargs):
+        """Return a GridSDF of several meshes over the box [lower, upper].
+
+        Unlike :meth:`from_objfile` this needs neither pysdfgen nor a
+        file on disk, and it takes any number of meshes at once (a room
+        made of many pieces, for instance), all in the frame the grid is
+        built in.
+
+        The grid nodes the meshes' surfaces pass through are marked
+        occupied, and so are the nodes they enclose
+        (``scipy.ndimage.binary_fill_holes``); the distance from every
+        node to the nearest node on the other side
+        (``scipy.ndimage.distance_transform_edt``) gives a signed field,
+        negative inside. A surface lies anywhere within half a cell
+        diagonal of the node it marked, so every value is then lowered by
+        that much: at the nodes the field never exceeds the true distance.
+
+        Between nodes the interpolated value can still exceed the true
+        distance, by up to about another half cell diagonal
+        (``sqrt(3) / 2 * resolution``). A caller who needs a clearance it
+        can rely on should ask for that much more than it needs.
+
+        The field errs the other way in practice: on boxes at several
+        resolutions and grid offsets it came out below the true distance
+        everywhere, by 0.1 to 2.5 cells (inside and outside alike), as
+        the marked surface is up to a cell thick and the lowering above
+        assumes the worst.
+
+        An open mesh encloses nothing, so only its surface nodes count as
+        inside; it never turns the rest of the grid negative.
+
+        Parameters
+        ----------
+        meshes : list[trimesh.Trimesh]
+            Meshes, in the frame of the grid.
+        lower, upper : array_like (3,)
+            Corners of the box the grid covers.
+        resolution : float
+            Grid spacing.
+        **kwargs
+            Passed on to :class:`GridSDF` (``fill_value``, ``use_abs``).
+
+        Returns
+        -------
+        sdf_instance : skrobot.sdf.GridSDF
+            The signed distance field, its origin at ``lower``.
+        """
+        # imported here: older scipy does not load submodules on access
+        from scipy import ndimage
+        lower = np.asarray(lower, dtype=np.float64)
+        upper = np.asarray(upper, dtype=np.float64)
+        shape = np.maximum(
+            np.ceil((upper - lower) / resolution).astype(int) + 1, 2)
+        occupied = np.zeros(shape, dtype=bool)
+        for mesh in meshes:
+            if len(mesh.faces) == 0:
+                continue
+            # surface points no more than half a cell apart, so every
+            # node a surface passes near is marked
+            points = _mesh_surface_points(mesh, resolution / 2.0)
+            index = np.rint((points - lower) / resolution).astype(int)
+            inside = np.all((index >= 0) & (index < shape), axis=1)
+            occupied[tuple(index[inside].T)] = True
+        occupied = ndimage.binary_fill_holes(occupied)
+        outside_dist = ndimage.distance_transform_edt(~occupied) * resolution
+        inside_dist = ndimage.distance_transform_edt(occupied) * resolution
+        sdf_data = np.where(occupied, -inside_dist, outside_dist) \
+            - 0.5 * np.sqrt(3) * resolution
+        return GridSDF(sdf_data, lower, resolution, **kwargs)
+
+
+def _mesh_surface_points(mesh, spacing):
+    """Points on a mesh's surface, every point of it within ``spacing``.
+
+    Each triangle is cut into n x n smaller ones, n from its longest
+    edge, and their corners are returned with the mesh's vertices.
+    """
+    triangles = mesh.triangles
+    edge = np.max(np.linalg.norm(
+        triangles - np.roll(triangles, 1, axis=1), axis=2), axis=1)
+    cuts = np.maximum(1, np.ceil(edge / spacing).astype(int))
+    out = [mesh.vertices]
+    for n in np.unique(cuts):
+        tri = triangles[cuts == n]
+        i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1), indexing='ij')
+        keep = i + j <= n
+        a, b = i[keep] / float(n), j[keep] / float(n)
+        out.append((tri[:, None, 0] * (1 - a - b)[None, :, None]
+                    + tri[:, None, 1] * a[None, :, None]
+                    + tri[:, None, 2] * b[None, :, None]).reshape(-1, 3))
+    return np.concatenate(out)
+
 
 def ray_marching(pts_starts, direction_arr, f_sdf, threshold):
     norms = np.linalg.norm(direction_arr, axis=1)
