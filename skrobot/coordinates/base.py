@@ -2099,6 +2099,13 @@ class CascadedCoords(Coordinates):
     def transform(self, c, wrt='local', out=None):
         """Transform this coordinates
 
+        Note that this function changes this coordinates
+        translation and rotation, as Coordinates.transform does.
+        For a link or any CascadedCoords with descendants, that also
+        moves everything attached to it.
+        If you would like not to change this coordinates,
+        Please use copy_worldcoords() or give `out`.
+
         Parameters
         ----------
         c : skrobot.coordinates.Coordinates
