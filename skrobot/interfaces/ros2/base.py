@@ -330,6 +330,10 @@ class ROS2RobotInterfaceBase(Node):
                     self._timeout_reason = ""
                     return True
 
+            if not self.context.ok():
+                self._timeout_reason = (
+                    "ROS context shut down before joint_states were updated")
+                return False
             if timeout and (time.time() - start) > timeout:
                 self._set_timeout_reason(initial_time)
                 logger.warning(
@@ -939,6 +943,15 @@ class ROS2RobotInterfaceBase(Node):
                 # Wait for goal acceptance
                 while not action._current_future.done():
                     time.sleep(0.01)
+                    # After Ctrl-C the executor stops, so the future never
+                    # completes; stop waiting instead of hanging the thread.
+                    if not self.context.ok():
+                        logger.warning(
+                            "ROS context shut down while waiting for goal "
+                            "acceptance")
+                        results.append(True)
+                        action_completed = True
+                        break
                     if timeout > 0 and (time.time() - start_time) > timeout:
                         self.get_logger().warn(f"Goal acceptance timed out after {timeout}s")
                         results.append(True)
@@ -972,6 +985,13 @@ class ROS2RobotInterfaceBase(Node):
             # Wait for the motion to complete
             while not result_future.done():
                 time.sleep(0.01)  # 10ms polling
+
+                if not self.context.ok():
+                    logger.warning(
+                        "ROS context shut down while waiting for motion")
+                    results.append(True)  # Still interpolating
+                    action_completed = True
+                    break
 
                 # Check timeout
                 if timeout > 0 and (time.time() - start_time) > timeout:
