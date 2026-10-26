@@ -874,8 +874,13 @@ def extract_inverse_dynamics_parameters(robot_model, link_list=None,
     link_list = sorted(link_list, key=get_depth)
 
     # Compute permutations between sorted and original order
-    # sorted_to_original[sorted_idx] = original_idx (for reordering output)
-    # original_to_sorted[original_idx] = sorted_idx (for reordering input)
+    # sorted_to_original[sorted_idx] = original_idx
+    # original_to_sorted[original_idx] = sorted_idx
+    # Gathering with them: x_sorted = x[sorted_to_original] (input),
+    # x = x_sorted[original_to_sorted] (output), and an index into the
+    # original list maps with original_to_sorted[idx]. Swapping the two
+    # gathers only goes unnoticed when the sort is its own inverse (no
+    # reordering, or two branches of equal length).
     sorted_link_names = [link.name for link in link_list]
     sorted_to_original = np.array([
         original_link_names.index(name) for name in sorted_link_names
@@ -1239,7 +1244,9 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
         """Compute forward kinematics for all joints.
 
         Returns positions and rotations of each link frame.
-        Position is the origin of the link frame (joint location).
+        Position is the origin of the link frame after the joint has
+        moved: on the axis for a revolute joint, translated along it for a
+        prismatic one.
         Rotation is the orientation of the link frame (after joint rotation).
 
         Supports branching kinematic trees via parent_indices.
@@ -1263,9 +1270,6 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
             pos = parent_pos + parent_rot @ link_translations[i]
             rot = parent_rot @ link_rotations[i]
 
-            # Save position before joint rotation (joint axis passes through here)
-            joint_pos = pos
-
             # Apply joint motion as delta from reference angle
             delta_angle = q[i] - ref_angles[i]
 
@@ -1278,8 +1282,13 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
                 joint_rot = rodrigues_rotation(joint_axes[i], delta_angle)
                 rot = rot @ joint_rot
 
-            # Store joint position and link rotation
-            positions[i] = joint_pos
+            # Store the link frame: its origin and orientation after the
+            # joint has moved. For a revolute joint the origin lies on the
+            # axis, so it doubles as the moment-arm origin. For a prismatic
+            # joint it must be the translated origin: the child links and
+            # this link's CoM ride on it (the torque of a prismatic joint is
+            # F . axis and does not need a point on the axis).
+            positions[i] = pos
             rotations[i] = rot
 
         return positions, rotations
@@ -1319,9 +1328,6 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
             # Apply static transform
             pos = parent_pos + parent_rot @ link_translations[i]
             rot = parent_rot @ link_rotations[i]
-
-            # Save joint position
-            joint_pos = pos
 
             # Apply joint motion
             delta_angle = q[i] - ref_angles[i]
@@ -1365,7 +1371,8 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
                 ang_acc = parent_ang_acc + axis_world * qdd[i]
                 ang_acc = ang_acc + backend.cross(parent_ang_vel, axis_world * qd[i])
 
-            positions[i] = joint_pos
+            # Link frame origin after the joint moved (see compute_fk).
+            positions[i] = pos
             rotations[i] = rot
             lin_vels[i] = lin_vel
             ang_vels[i] = ang_vel
@@ -1413,15 +1420,15 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
             gravity = backend.array([0.0, 0.0, -9.81])
 
         # Reorder input from original to sorted order
-        q_sorted = q[original_to_sorted]
+        q_sorted = q[sorted_to_original]
 
         # Reorder external forces/moments if provided
         external_forces_sorted = None
         if external_forces is not None:
-            external_forces_sorted = external_forces[original_to_sorted]
+            external_forces_sorted = external_forces[sorted_to_original]
         external_moments_sorted = None
         if external_moments is not None:
-            external_moments_sorted = external_moments[original_to_sorted]
+            external_moments_sorted = external_moments[sorted_to_original]
 
         # Remap point force link indices from original to sorted order
         point_force_link_indices_sorted = None
@@ -1433,8 +1440,8 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
 
         if is_dynamic:
             # Reorder velocities and accelerations
-            qd_sorted = qd[original_to_sorted]
-            qdd_sorted = qdd[original_to_sorted]
+            qd_sorted = qd[sorted_to_original]
+            qdd_sorted = qdd[sorted_to_original]
             # Dynamic case: use Newton-Euler with velocities and accelerations
             positions, rotations, lin_vels, ang_vels, lin_accs, ang_accs = \
                 compute_fk_with_velocity(q_sorted, qd_sorted, qdd_sorted)
@@ -1599,7 +1606,7 @@ def build_inverse_dynamics_fn(robot_model, link_list=None, backend=None,
         # The sum above is the generalized force of gravity, the external
         # forces and the d'Alembert inertial forces on each joint; the joint
         # has to supply the opposite: tau = M qdd + C + g(q) - J^T f_ext.
-        tau = -tau_sorted[sorted_to_original]
+        tau = -tau_sorted[original_to_sorted]
 
         return tau
 
@@ -1687,6 +1694,36 @@ def build_torque_vector_fn(robot_model, link_list=None, backend=None,
     return torque_vector_fn
 
 
+def _find_carrying_link(coords, link_list):
+    """Return the link in ``link_list`` that ``coords`` moves with.
+
+    The search starts at ``coords`` itself: a target that is one of the
+    chain links (``target_coords=[robot.some_link]``) is carried by that
+    link, whose own joint feels the force. Starting from its parent would
+    hand the force to the joint above and drop the link's own joint.
+
+    Parameters
+    ----------
+    coords : Coordinates
+        Target frame, a link or a frame attached below one.
+    link_list : list of Link
+        Links that carry a joint.
+
+    Returns
+    -------
+    link : Link or None
+        The nearest of ``coords`` and its ancestors that is in
+        ``link_list``, or None when there is none.
+    """
+    ids = set(id(link) for link in link_list)
+    current = coords
+    while current is not None:
+        if id(current) in ids:
+            return current
+        current = getattr(current, 'parent', None)
+    return None
+
+
 def preprocess_external_forces(robot, force_list=None, moment_list=None,
                                 target_coords=None, link_list=None):
     """Convert high-level force specification to low-level arrays.
@@ -1744,10 +1781,7 @@ def preprocess_external_forces(robot, force_list=None, moment_list=None,
 
     n_joints = len(link_list)
 
-    # Build link name to index mapping
-    link_name_to_idx = {}
-    for idx, link in enumerate(link_list):
-        link_name_to_idx[link.name] = idx
+    link_index_by_id = {id(link): idx for idx, link in enumerate(link_list)}
 
     # Case 1: No target_coords - forces/moments applied at link CoMs
     external_forces = None
@@ -1779,18 +1813,10 @@ def preprocess_external_forces(robot, force_list=None, moment_list=None,
         valid_local_positions = []
 
         for force, coords in zip(force_list, target_coords):
-            # Traverse up parent chain to find a link in link_list
-            current = coords.parent if hasattr(coords, 'parent') else None
-            found_link = None
-
-            while current is not None:
-                if current.name in link_name_to_idx:
-                    found_link = current
-                    break
-                current = current.parent if hasattr(current, 'parent') else None
+            found_link = _find_carrying_link(coords, link_list)
 
             if found_link is not None:
-                link_idx = link_name_to_idx[found_link.name]
+                link_idx = link_index_by_id[id(found_link)]
 
                 # Compute local position relative to link frame
                 point_world = coords.worldpos()
@@ -1811,13 +1837,9 @@ def preprocess_external_forces(robot, force_list=None, moment_list=None,
     if moment_list is not None and target_coords is not None:
         external_moments = np.zeros((n_joints, 3))
         for moment, coords in zip(moment_list, target_coords):
-            current = coords.parent if hasattr(coords, 'parent') else None
-            while current is not None:
-                if current.name in link_name_to_idx:
-                    link_idx = link_name_to_idx[current.name]
-                    external_moments[link_idx] += moment
-                    break
-                current = current.parent if hasattr(current, 'parent') else None
+            found_link = _find_carrying_link(coords, link_list)
+            if found_link is not None:
+                external_moments[link_index_by_id[id(found_link)]] += moment
 
     return external_forces, external_moments, point_forces, point_force_link_indices, point_force_local_positions
 
@@ -2066,7 +2088,7 @@ def build_optimized_gravity_torque_fn(robot_model, link_list=None,
             gravity = jnp.asarray(gravity, dtype=dtype)
 
         # Reorder input
-        q_sorted = q[original_to_sorted]
+        q_sorted = q[sorted_to_original]
 
         # Forward kinematics using lax.scan
         def fk_step(carry, i):
@@ -2171,7 +2193,7 @@ def build_optimized_gravity_torque_fn(robot_model, link_list=None,
         tau_sorted = jax.vmap(compute_torque)(jnp.arange(n_joints))
 
         # Gravity's moment about each axis; holding takes the opposite.
-        tau = -tau_sorted[sorted_to_original]
+        tau = -tau_sorted[original_to_sorted]
 
         return tau
 
@@ -2290,7 +2312,7 @@ def build_gravity_torque_fn_vectorized(robot_model, link_list=None,
         else:
             gravity = jnp.asarray(gravity, dtype=dtype)
 
-        q_sorted = q[original_to_sorted]
+        q_sorted = q[sorted_to_original]
         delta_angles = q_sorted - ref_angles
 
         # Compute joint rotations
@@ -2353,7 +2375,7 @@ def build_gravity_torque_fn_vectorized(robot_model, link_list=None,
 
         tau_sorted = jax.vmap(compute_torque)(jnp.arange(n_joints))
         # Gravity's moment about each axis; holding takes the opposite.
-        tau = -tau_sorted[sorted_to_original]
+        tau = -tau_sorted[original_to_sorted]
 
         return tau
 
@@ -2551,7 +2573,7 @@ def build_rnea_gravity_fn(robot_model, link_list=None, use_float32=False):
         else:
             gravity = jnp.asarray(gravity, dtype=dtype)
 
-        q_sorted = q[original_to_sorted]
+        q_sorted = q[sorted_to_original]
 
         # ===== Forward pass: compute FK =====
         def fk_step(carry, i):
@@ -2697,7 +2719,7 @@ def build_rnea_gravity_fn(robot_model, link_list=None, use_float32=False):
         )
 
         # Gravity's moment about each axis; holding takes the opposite.
-        tau = -taus_sorted[sorted_to_original]
+        tau = -taus_sorted[original_to_sorted]
 
         return tau
 
@@ -2780,7 +2802,7 @@ def build_rnea_serial_gravity_fn(robot_model, link_list=None, use_float32=False)
         else:
             gravity = jnp.asarray(gravity, dtype=dtype)
 
-        q_sorted = q[original_to_sorted]
+        q_sorted = q[sorted_to_original]
 
         # Forward pass: compute FK
         def fk_step(carry, i):
@@ -2915,6 +2937,6 @@ def build_rnea_serial_gravity_fn(robot_model, link_list=None, use_float32=False)
         taus_sorted = jnp.sum(total_moment * axes_world, axis=1)
 
         # Gravity's moment about each axis; holding takes the opposite.
-        return -taus_sorted[sorted_to_original]
+        return -taus_sorted[original_to_sorted]
 
     return jax.jit(gravity_torque_fn)
