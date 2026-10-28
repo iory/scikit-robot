@@ -23,6 +23,7 @@ from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometr
 from skrobot.urdf.ros_package_exporter import ROSPackageExporter
 from skrobot.urdf.sanitize import sanitize_name
 from skrobot.urdf.sanitize import sanitize_urdf_names
+from skrobot.urdf.sanitize import unique_sanitized_names
 from skrobot.urdf.scale_urdf import scale_urdf
 from skrobot.urdf.structure import kinematic_tree
 from skrobot.urdf.structure import print_urdf_tree
@@ -67,6 +68,7 @@ __all__ = [
     'compute_jaw_gripper_frame',
     'sanitize_name',
     'sanitize_urdf_names',
+    'unique_sanitized_names',
     'canonicalize_urdf',
     'canonicalize_urdf_file',
     'geometry_centroid',

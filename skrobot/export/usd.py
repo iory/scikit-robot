@@ -24,6 +24,7 @@ import warnings
 import numpy as np
 
 from skrobot.urdf.sanitize import sanitize_name
+from skrobot.urdf.sanitize import unique_sanitized_names
 from skrobot.utils.convex_decomposition import convex_decomposition
 from skrobot.utils.convex_decomposition import is_coacd_available
 
@@ -33,6 +34,12 @@ from skrobot.utils.convex_decomposition import is_coacd_available
 # articulation dynamics; these tiny positive values keep such frames valid.
 _MASSLESS_FLOOR_KG = 1e-5
 _MASSLESS_INERTIA_FLOOR = 1e-6
+
+# Prims urdf_to_usd adds itself: the planar mobile base's dummy links under
+# /robot and the base joints under /robot/joints.
+_PLANAR_BASE_LINKS = ("base_anchor", "base_planar_x", "base_planar_y")
+_BASE_JOINTS = ("base_anchor_fixed", "base_fixed", "base_x_joint",
+                "base_y_joint", "base_yaw_joint")
 
 # decompose_links=True auto-decomposes a link only when its single convex hull
 # is at least this many times the true mesh volume, i.e. the link is measurably
@@ -529,6 +536,17 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         "physxArticulation:enabledSelfCollisions", Sdf.ValueTypeNames.Bool
     ).Set(bool(self_collision))
 
+    # Prim names: sanitize_name maps distinct URDF names (``a.b``, ``a_b``) to
+    # the same prim, which would silently merge two links (or joints) into
+    # one; the names under /robot that are not links are kept free too.
+    planar = mobile_base and not floating_base
+    link_prim = unique_sanitized_names(
+        [link.name for link in urdf.links],
+        reserved=("joints", _LOOKS_PATH.rsplit("/", 1)[-1])
+        + (_PLANAR_BASE_LINKS if planar else ()))
+    joint_prim = unique_sanitized_names(
+        [joint.name for joint in urdf.joints], reserved=_BASE_JOINTS)
+
     link_path = {}
     if decompose_links and decompose_links is not True:
         link_names = [link.name for link in urdf.links]
@@ -553,7 +571,7 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
                 RuntimeWarning, stacklevel=2)
 
     for link in urdf.links:
-        path = Sdf.Path("/robot/" + sanitize_name(link.name))
+        path = Sdf.Path("/robot/" + link_prim[link.name])
         link_path[link.name] = path
         xf = UsdGeom.Xform.Define(stage, path)
         xf.AddTransformOp().Set(_mat_to_gf(None, world.get(link.name, np.eye(4))))
@@ -624,7 +642,7 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         # all three planar joints are INTERNAL (a prismatic/revolute joint whose
         # body0 is the world is the articulation's root joint, which PhysX does
         # not expose as a controllable/reported DOF -- so the anchor is required).
-        for dummy in ("base_anchor", "base_planar_x", "base_planar_y"):
+        for dummy in _PLANAR_BASE_LINKS:
             dpath = Sdf.Path("/robot/" + dummy)
             dxf = UsdGeom.Xform.Define(stage, dpath)
             dxf.AddTransformOp().Set(_mat_to_gf(None, np.eye(4)))
@@ -670,8 +688,8 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
 
     for joint in urdf.joints:
         stiff, damp = joint_gain.get(joint.name, (drive_stiffness, drive_damping))
-        _emit_joint(stage, UsdPhysics, Gf, Sdf, joint, link_path,
-                    stiff, damp,
+        _emit_joint(stage, UsdPhysics, Gf, Sdf, joint, joint_prim[joint.name],
+                    link_path, stiff, damp,
                     float(home_positions.get(joint.name, 0.0)),
                     armature=armature)
 
@@ -1069,12 +1087,12 @@ def _preview_surface(stage, diffuse_rgb, pbr, texture=None):
     return material
 
 
-def _emit_joint(stage, UsdPhysics, Gf, Sdf, joint, link_path, stiffness, damping,
-                home=0.0, armature=0.0):
+def _emit_joint(stage, UsdPhysics, Gf, Sdf, joint, prim_name, link_path,
+                stiffness, damping, home=0.0, armature=0.0):
     if joint.parent not in link_path or joint.child not in link_path:
         return
     jtype = joint.joint_type
-    jpath = Sdf.Path("/robot/joints/" + sanitize_name(joint.name))
+    jpath = Sdf.Path("/robot/joints/" + prim_name)
     origin = np.asarray(joint.origin, dtype=float)
     pos0 = origin[:3, 3]
     align = _align_z_to(getattr(joint, "axis", [0, 0, 1]))
