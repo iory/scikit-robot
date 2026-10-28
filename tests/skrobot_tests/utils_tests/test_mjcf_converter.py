@@ -1,3 +1,4 @@
+import importlib
 import os
 import shutil
 import tempfile
@@ -299,3 +300,80 @@ class TestAutoHomeBaseHeight(unittest.TestCase):
         folded = self._qpos(home_base_height='auto',
                             home={'hip': np.pi / 2.0})
         self.assertLess(folded[2], straight[2])
+
+
+_TWO_LINK_URDF = """<?xml version="1.0"?>
+<robot name="hand">
+  <link name="base_link">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+    <collision><geometry><mesh filename="part.glb"/></geometry></collision>
+  </link>
+  <joint name="finger_joint" type="revolute">
+    <parent link="base_link"/><child link="finger"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/><axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="1.0" velocity="1.0"/>
+  </joint>
+  <link name="finger">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="0.1"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+    <collision><geometry><mesh filename="part.glb"/></geometry></collision>
+  </link>
+</robot>
+"""
+
+
+class TestDecomposeLinks(unittest.TestCase):
+    """``convex_decompose_links`` decomposes only the links it names, and a
+    file's sub-meshes as one mesh rather than patch by patch."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Two boxes in one file: two sub-meshes, as a CAD export splits them.
+        scene = trimesh.Scene([
+            trimesh.creation.box(extents=(0.02, 0.02, 0.02)),
+            trimesh.creation.box(extents=(0.02, 0.02, 0.02)).apply_translation(
+                (0.05, 0.0, 0.0)),
+        ])
+        scene.export(os.path.join(self.tmpdir, 'part.glb'))
+        self.urdf = os.path.join(self.tmpdir, 'hand.urdf')
+        with open(self.urdf, 'w') as f:
+            f.write(_TWO_LINK_URDF)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_only_named_link_is_decomposed_as_one_mesh(self):
+        from unittest import mock
+
+        calls = []
+
+        def fake_decomposition(mesh, quality='balanced', **params):
+            calls.append(len(mesh.vertices))
+            return [trimesh.creation.box(extents=(0.02, 0.02, 0.02)),
+                    trimesh.creation.box(extents=(0.02, 0.02, 0.02))
+                    .apply_translation((0.05, 0.0, 0.0)),
+                    trimesh.creation.box(extents=(0.01, 0.01, 0.01))]
+
+        out_path = os.path.join(self.tmpdir, 'hand.xml')
+        # By the module object: skrobot.utils also exports a function named
+        # convex_decomposition, which shadows the module as an attribute.
+        module = importlib.import_module('skrobot.utils.convex_decomposition')
+        with mock.patch.object(module, 'convex_decomposition_cached',
+                               fake_decomposition):
+            urdf_to_mjcf(self.urdf, out_path, add_ground=False,
+                         convex_decompose_links=['finger'])
+        root = ET.parse(out_path).getroot()
+
+        def collision_geoms(body_name):
+            body = [b for b in root.iter('body')
+                    if b.get('name') == body_name][0]
+            return [g for g in body.findall('geom')
+                    if 'collision' in (g.get('name') or '')]
+
+        # One CoACD run, on both boxes merged (8 + 8 vertices).
+        self.assertEqual(calls, [16])
+        self.assertEqual(len(collision_geoms('finger')), 3)
+        self.assertEqual(len(collision_geoms('base_link')), 2)
