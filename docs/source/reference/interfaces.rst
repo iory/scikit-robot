@@ -26,3 +26,28 @@ You can use a Pybullet interface using skrobot.
 .. figure:: ../../image/pybullet_interface.png
     :scale: 60%
     :align: center
+
+
+MuJoCo Interface
+----------------
+
+Simulate the robot in MuJoCo behind the same calls as the ROS interface.
+See :doc:`../examples_guide/mujoco_robot_interface`; it also runs in the
+browser, in `scikit-robot-web <https://github.com/iory/scikit-robot-web>`_.
+
+.. module:: skrobot.interfaces._mujoco
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   MujocoRobotInterface
+
+>>> import skrobot
+>>> from skrobot.interfaces import MujocoRobotInterface
+>>> robot = skrobot.models.Jedy()
+>>> robot.reset_pose()
+>>> ri = MujocoRobotInterface(robot, planar_base=True)
+>>> ri.angle_vector(robot.angle_vector(), 2.0)
+>>> ri.wait_interpolation()
+>>> ri.go_pos(0.3, 0.0, 0.0)

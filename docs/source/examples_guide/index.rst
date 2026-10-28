@@ -17,6 +17,7 @@ https://github.com/iory/scikit-robot/tree/main/examples
    self_collision_free_trajectory
    trimesh_scene_viewer
    pybullet_interface
+   mujoco_robot_interface
    signed_distance_functions
    swept_sphere
    batch_ik
