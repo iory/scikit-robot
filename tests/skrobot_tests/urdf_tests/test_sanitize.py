@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 
 from skrobot.urdf import sanitize_name
 from skrobot.urdf import sanitize_urdf_names
+from skrobot.urdf import unique_sanitized_names
 
 
 class TestSanitizeName(unittest.TestCase):
@@ -18,6 +19,23 @@ class TestSanitizeName(unittest.TestCase):
     def test_idempotent_on_valid_names(self):
         for name in ('base_link', 'joint_1', 'c_42'):
             self.assertEqual(sanitize_name(name), name)
+
+
+class TestUniqueSanitizedNames(unittest.TestCase):
+
+    def test_colliding_names_get_suffixes(self):
+        mapping = unique_sanitized_names(['arm.1', 'arm-1', 'arm_1'])
+        self.assertEqual(mapping['arm.1'], 'arm_1')
+        self.assertEqual(len(set(mapping.values())), 3)
+
+    def test_repeats_map_to_the_same_name(self):
+        mapping = unique_sanitized_names(['a.b', 'a.b'])
+        self.assertEqual(mapping, {'a.b': 'a_b'})
+
+    def test_reserved_names_are_avoided(self):
+        mapping = unique_sanitized_names(['joints', 'Looks'],
+                                         reserved=('joints', 'Looks'))
+        self.assertEqual(mapping, {'joints': 'joints_2', 'Looks': 'Looks_2'})
 
 
 class TestSanitizeUrdfNames(unittest.TestCase):

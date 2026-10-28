@@ -565,5 +565,79 @@ class TestSilentWrongSceneGuards(unittest.TestCase):
         self.assertFalse(any('recompute_inertia=True' in m for m in msgs))
 
 
+_COLLIDING_NAMES_URDF = """\
+<robot name="colliding_names">
+  <link name="base_link">
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+    <collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>
+  </link>
+  <link name="arm.1">
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+    <collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>
+  </link>
+  <link name="arm_1">
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+    <collision><geometry><sphere radius="0.05"/></geometry></collision>
+  </link>
+  <joint name="j.1" type="revolute">
+    <parent link="base_link"/><child link="arm.1"/>
+    <origin xyz="0 0 0.2"/><axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="10" velocity="1"/>
+  </joint>
+  <joint name="j_1" type="revolute">
+    <parent link="arm.1"/><child link="arm_1"/>
+    <origin xyz="0 0 0.4"/><axis xyz="0 1 0"/>
+    <limit lower="-1" upper="1" effort="10" velocity="1"/>
+  </joint>
+</robot>
+"""
+
+
+@unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
+class TestCollidingPrimNames(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_links_and_joints_that_sanitize_alike_stay_apart(self):
+        urdf_path = os.path.join(self.tmpdir, 'colliding_names.urdf')
+        _write_text(urdf_path, _COLLIDING_NAMES_URDF)
+        out = os.path.join(self.tmpdir, 'colliding_names.usd')
+        stage = urdf_to_usd(urdf_path, out)
+
+        bodies = [p for p in stage.Traverse()
+                  if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+        self.assertEqual(len(bodies), 3)
+        # each arm link keeps its own pose and its own collider
+        arm, arm2 = stage.GetPrimAtPath('/robot/arm_1'), \
+            stage.GetPrimAtPath('/robot/arm_1_2')
+        self.assertTrue(arm.IsValid() and arm2.IsValid())
+        z = [UsdGeom.Xformable(p).ComputeLocalToWorldTransform(
+            Usd.TimeCode.Default()).ExtractTranslation()[2]
+            for p in (arm, arm2)]
+        np.testing.assert_allclose(z, [0.2, 0.6], atol=1e-6)
+        self.assertEqual(len(_link_collision_prims(stage, 'arm_1')), 1)
+        self.assertEqual(len(_link_collision_prims(stage, 'arm_1_2')), 1)
+
+        joints = [p for p in stage.Traverse()
+                  if p.IsA(UsdPhysics.RevoluteJoint)]
+        self.assertEqual(len(joints), 2)
+        bodies1 = sorted(str(UsdPhysics.RevoluteJoint(j).GetBody1Rel()
+                             .GetTargets()[0]) for j in joints)
+        self.assertEqual(bodies1, ['/robot/arm_1', '/robot/arm_1_2'])
+
+
 if __name__ == '__main__':
     unittest.main()

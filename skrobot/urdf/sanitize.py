@@ -12,6 +12,7 @@ import re
 __all__ = [
     'sanitize_name',
     'sanitize_urdf_names',
+    'unique_sanitized_names',
 ]
 
 
@@ -48,6 +49,47 @@ def sanitize_name(raw):
     return name
 
 
+def unique_sanitized_names(names, reserved=()):
+    """Map each name to a sanitized one that no other name maps to.
+
+    :func:`sanitize_name` is not injective (``'a.b'``, ``'a-b'`` and
+    ``'a_b'`` all become ``'a_b'``); a numeric suffix keeps distinct names
+    apart, the first name in order keeping the plain spelling.
+
+    Parameters
+    ----------
+    names : iterable of str
+        The identifiers, in order; repeats map to the same result.
+    reserved : iterable of str
+        Clean names that must not be produced (e.g. names the caller uses
+        for something else).
+
+    Returns
+    -------
+    mapping : dict
+        ``{name: unique sanitized name}``.
+
+    Examples
+    --------
+    >>> from skrobot.urdf.sanitize import unique_sanitized_names
+    >>> unique_sanitized_names(['a.b', 'a_b'])
+    {'a.b': 'a_b', 'a_b': 'a_b_2'}
+    """
+    mapping = {}
+    used = set(reserved)
+    for orig in names:
+        if orig in mapping:
+            continue
+        cand = sanitize_name(orig)
+        i = 1
+        while cand in used:      # two dirty names -> the same clean one
+            i += 1
+            cand = '{}_{}'.format(sanitize_name(orig), i)
+        mapping[orig] = cand
+        used.add(cand)
+    return mapping
+
+
 def sanitize_urdf_names(root):
     """Sanitize every link / joint name in a parsed URDF, in place.
 
@@ -66,20 +108,8 @@ def sanitize_urdf_names(root):
         Root ``<robot>`` element; modified in place.
     """
     def _remap(elems, attr):
-        mapping = {}
-        used = set()
-        for el in elems:
-            orig = el.get(attr)
-            if orig is None or orig in mapping:
-                continue
-            cand = sanitize_name(orig)
-            i = 1
-            while cand in used:      # two dirty names -> the same clean one
-                i += 1
-                cand = '{}_{}'.format(sanitize_name(orig), i)
-            mapping[orig] = cand
-            used.add(cand)
-        return mapping
+        return unique_sanitized_names([el.get(attr) for el in elems
+                                       if el.get(attr) is not None])
 
     links = root.findall('link')
     joints = root.findall('joint')
