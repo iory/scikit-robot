@@ -94,11 +94,25 @@ class TestPbrMaterials(unittest.TestCase):
         self.assertEqual(shader.GetIdAttr().Get(), 'UsdPreviewSurface')
         self.assertAlmostEqual(shader.GetInput('metallic').Get(), 1.0)
         self.assertAlmostEqual(shader.GetInput('roughness').Get(), 0.08)
-        # 128/255 sRGB -> 0.216 linear, the same value displayColor carries
+        # glTF's baseColorFactor is linear already: 128/255 stays 0.502
         diffuse = shader.GetInput('diffuseColor').Get()
-        self.assertAlmostEqual(diffuse[0], 0.2158605, places=4)
+        self.assertAlmostEqual(diffuse[0], 128 / 255.0, places=4)
         self.assertIn('chrome', material.GetPath().pathString)
         self.assertTrue(material.GetPath().pathString.startswith('/robot/Looks/'))
+
+    def test_glb_display_color_is_the_linear_base_color(self):
+        from pxr import UsdGeom
+        prim = self.stage.GetPrimAtPath('/robot/base_link/visual_0_0')
+        color = UsdGeom.Gprim(prim).GetDisplayColorAttr().Get()
+        self.assertAlmostEqual(color[0][0], 128 / 255.0, places=4)
+
+    def test_urdf_material_color_is_linearised(self):
+        # URDF rgba is an sRGB display colour: 1 0 0 stays 1 0 0
+        from pxr import UsdGeom
+        prim = self.stage.GetPrimAtPath('/robot/plain_link/visual_0_0')
+        color = UsdGeom.Gprim(prim).GetDisplayColorAttr().Get()
+        self.assertAlmostEqual(color[0][0], 1.0, places=4)
+        self.assertAlmostEqual(color[0][1], 0.0, places=4)
 
     def test_vertex_colour_visual_keeps_no_material(self):
         # an STL with a URDF <material> colour: displayColor only, as before
@@ -115,6 +129,35 @@ class TestPbrMaterials(unittest.TestCase):
                  if p.GetPath().pathString.startswith('/robot/Looks/')
                  and p.IsA(UsdShade.Material)]
         self.assertEqual(len(looks), 1)
+
+
+@unittest.skipUnless(_HAS_PXR, 'usd-core (pxr) not installed')
+class TestColladaColorStaysSrgb(unittest.TestCase):
+
+    def test_collada_diffuse_is_linearised(self):
+        import trimesh
+        from pxr import UsdGeom
+        tmp = tempfile.mkdtemp()
+        try:
+            box = trimesh.creation.box(extents=(0.02, 0.03, 0.04))
+            box.visual = trimesh.visual.ColorVisuals(
+                box, face_colors=[128, 128, 128, 255])
+            with open(os.path.join(tmp, 'grey.dae'), 'wb') as f:
+                f.write(trimesh.exchange.dae.export_collada(box))
+            urdf = os.path.join(tmp, 'dae.urdf')
+            with open(urdf, 'w') as f:
+                f.write('<robot name="dae"><link name="base_link"><visual>'
+                        '<geometry><mesh filename="grey.dae"/></geometry>'
+                        '</visual></link></robot>')
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                stage = urdf_to_usd(urdf, os.path.join(tmp, 'dae.usda'))
+            prim = stage.GetPrimAtPath('/robot/base_link/visual_0_0')
+            color = UsdGeom.Gprim(prim).GetDisplayColorAttr().Get()
+            # COLLADA colours are sRGB: 128/255 -> 0.216 linear
+            self.assertAlmostEqual(color[0][0], 0.2158605, places=4)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _textured_box_glb(path):

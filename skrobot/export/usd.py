@@ -19,6 +19,7 @@ USD on a laptop, load it in Isaac Sim on a GPU box. Entry point: :func:`urdf_to_
 
 from __future__ import annotations
 
+import os
 import warnings
 
 import numpy as np
@@ -679,6 +680,13 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
     return stage
 
 
+def _is_gltf(mesh_geometry):
+    """Whether a URDF Mesh geometry was loaded from a glTF file (.glb/.gltf),
+    whose colours are linear rather than sRGB."""
+    filename = getattr(mesh_geometry, "filename", None) or ""
+    return os.path.splitext(str(filename))[1].lower() in (".glb", ".gltf")
+
+
 def _srgb_to_linear(c):
     """sRGB channel (0..1) -> linear. USD displayColor is a linear albedo."""
     c = float(c)
@@ -861,6 +869,7 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
         return
 
     submeshes = list(_submesh_geometry(geom.mesh))
+    gltf = _is_gltf(geom.mesh)
 
     if collision:
         # ONE convex hull per collision element. PhysX's convex cooker only uses
@@ -956,11 +965,15 @@ def _emit_one(stage, UsdGeom, UsdPhysics, Gf, Vt, link_path, vc, index, collisio
             dc.Set(Vt.Vec3fArray([Gf.Vec3f(*urdf_rgb)]))
             lin = np.asarray([urdf_rgb], dtype=float)
         elif rgb is not None:
-            # Mesh colours are sRGB too (COLLADA diffuse, glTF baseColorFactor),
-            # so they need the same linearisation as the URDF ones.
+            # COLLADA diffuse and OBJ Kd are sRGB display colours like the URDF
+            # ones, so they are linearised the same way. glTF's baseColorFactor
+            # and COLOR_0 are linear already (glTF 2.0 spec, "baseColorFactor":
+            # "linear multipliers"; "COLOR_n": "vertex color linear multiplier")
+            # and are taken as they are.
             lin = np.asarray(rgb, dtype=float)
-            lin = np.where(lin <= 0.04045, lin / 12.92,
-                           ((lin + 0.055) / 1.055) ** 2.4)
+            if not gltf:
+                lin = np.where(lin <= 0.04045, lin / 12.92,
+                               ((lin + 0.055) / 1.055) ** 2.4)
             dc = mesh.CreateDisplayColorPrimvar(
                 UsdGeom.Tokens.vertex if len(rgb) == len(pts)
                 else UsdGeom.Tokens.constant)
