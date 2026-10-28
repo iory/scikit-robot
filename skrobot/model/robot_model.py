@@ -3543,7 +3543,7 @@ class RobotModel(CascadedLink):
 
         Parameters
         ----------
-        urdf_string : str
+        urdf_input : str
             Either the URDF model description as a string, or the path to a
             URDF file.
         include_mimic_joints : bool, optional

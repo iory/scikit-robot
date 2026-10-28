@@ -1482,7 +1482,7 @@ def quaternion2matrix(q, normalize=False):
 
     Parameters
     ----------
-    quaternion : list or numpy.ndarray
+    q : list or numpy.ndarray
         quaternion [w, x, y, z] order
     normalize : bool
         if normalize is True, input quaternion is normalized.
