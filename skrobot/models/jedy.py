@@ -28,9 +28,18 @@ class Jedy(RobotModelFromURDF):
     end +X -> link -Z, end +Y -> link +Y, end +Z -> link +X.
     ``head_end_coords`` is attached to ``camera_depth_optical_frame`` with
     zero offset and identity mapping.
+
+    Parameters
+    ----------
+    light : bool
+        If True, load the light model, whose meshes have about 110,000
+        faces instead of 700,000 (circuit boards and small parts dropped,
+        the rest simplified within 0.5 mm). It loads and simulates faster;
+        joints, links and collision geometry are the same.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, light=False, **kwargs):
+        self.light = light
         super(Jedy, self).__init__(*args, **kwargs)
 
         self.rarm_end_coords = CascadedCoords(
@@ -52,7 +61,7 @@ class Jedy(RobotModelFromURDF):
 
     @cached_property
     def default_urdf_path(self):
-        return jedy_urdfpath()
+        return jedy_urdfpath(light=self.light)
 
     def reset_pose(self):
         self.rarm_joint0.joint_angle(np.deg2rad(30))
