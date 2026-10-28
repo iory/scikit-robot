@@ -36,7 +36,7 @@ def transform_coords(c1, c2, out=None):
     c1 : skrobot.coordinates.Coordinates
     c2 : skrobot.coordinates.Coordinates
         Coordinates
-    c3 : skrobot.coordinates.Coordinates or None
+    out : skrobot.coordinates.Coordinates or None
         Output argument. If this value is specified, the results will be
         in-placed.
 
@@ -90,7 +90,7 @@ class Transform(object):
     ----------
     translation : list(3,) or numpy.ndarray(3,)
         translation
-    rot : numpy.ndarray(3, 3)
+    rotation : numpy.ndarray(3, 3)
         3x3 rotation matrix
     """
 

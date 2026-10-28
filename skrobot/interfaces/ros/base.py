@@ -759,7 +759,7 @@ class ROSRobotInterfaceBase(object):
             if designated each tmn is faster than fastest speed,
                 use fastest speed
             if tmn is nil, then it will use 1/time_scale of the fastest speed.
-        ctype : string
+        controller_type : string
             controller method name
         start_time : float
             time to start moving
