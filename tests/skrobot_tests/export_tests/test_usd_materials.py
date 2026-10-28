@@ -135,8 +135,8 @@ class TestPbrMaterials(unittest.TestCase):
 class TestColladaColorStaysSrgb(unittest.TestCase):
 
     def test_collada_diffuse_is_linearised(self):
-        import trimesh
         from pxr import UsdGeom
+        import trimesh
         tmp = tempfile.mkdtemp()
         try:
             box = trimesh.creation.box(extents=(0.02, 0.03, 0.04))
