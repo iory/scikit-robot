@@ -231,15 +231,29 @@ def g1_urdfpath(dof=23):
     return path
 
 
-def jedy_urdfpath():
-    path = osp.join(get_cache_dir(),
-                    'jedy_description', 'urdf', 'jedy.urdf')
+def jedy_urdfpath(light=False):
+    """Return the path to the Jedy URDF.
+
+    Parameters
+    ----------
+    light : bool
+        If True, return the light model: circuit boards and parts under
+        1 cm are dropped and the other meshes simplified within 0.5 mm
+        (about 110,000 faces instead of 700,000), for simulators and
+        browsers. Joints, links and collision geometry are the same.
+    """
+    if light:
+        name, md5 = ('jedy_light_description',
+                     'c11a5d5e30b69c8c248935ee489fd8e0')
+    else:
+        name, md5 = 'jedy_description', '620dd412c96ed492e4c2f224c36ab798'
+    path = osp.join(get_cache_dir(), name, 'urdf', 'jedy.urdf')
     if osp.exists(path):
         return path
     _retrieve(
-        url='https://github.com/iory/scikit-robot-models/raw/main/jedy_description.tar.gz',  # NOQA
-        fname='jedy_description.tar.gz',
-        md5='620dd412c96ed492e4c2f224c36ab798',
+        url='https://github.com/iory/scikit-robot-models/raw/main/{}.tar.gz'.format(name),  # NOQA
+        fname='{}.tar.gz'.format(name),
+        md5=md5,
         extract=True,
     )
     return path

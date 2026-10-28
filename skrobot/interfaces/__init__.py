@@ -25,6 +25,11 @@ pybullet = LazyPybulletModule()
 def __getattr__(name):
     if name == 'PybulletRobotInterface':
         return pybullet.PybulletRobotInterface
+    elif name == 'MujocoRobotInterface':
+        # mujoco itself is imported when the interface is constructed, so
+        # this import never fails for want of it.
+        return importlib.import_module(
+            'skrobot.interfaces._mujoco').MujocoRobotInterface
     elif name == '_pybullet':
         # Force lazy loading - only import when explicitly requested
         if pybullet._module is None:

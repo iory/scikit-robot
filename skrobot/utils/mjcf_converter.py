@@ -28,6 +28,7 @@ Entry point: :func:`urdf_to_mjcf`.
 
 from __future__ import annotations
 
+import logging
 import os
 import xml.etree.ElementTree as ET
 
@@ -35,6 +36,9 @@ import numpy as np
 
 from skrobot.coordinates.math import matrix2translation_quaternion_wxyz
 from skrobot.coordinates.math import quaternion2matrix
+
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt(values):
@@ -84,6 +88,9 @@ class _MeshAssets:
         # collision-only: run CoACD on collision meshes so MuJoCo gets accurate
         # convex parts instead of one coarse convex hull. Set by urdf_to_mjcf.
         self.convex_decompose = False
+        # links whose collision meshes are decomposed even when
+        # convex_decompose is off
+        self.decompose_links = frozenset()
         self.coacd_quality = 'balanced'
         os.makedirs(mesh_dir, exist_ok=True)
 
@@ -187,30 +194,43 @@ class _MeshAssets:
 
     def add_convex_parts(self, mesh_geometry):
         """CoACD-decompose a collision mesh into convex parts and return one
-        ``(asset_name, scale, None)`` entry per part. Falls back to the plain
-        convex hull if CoACD is unavailable or fails. Results are cached by
-        sub-mesh id since CoACD is expensive."""
+        ``(asset_name, scale, None)`` entry per part.
+
+        The file's sub-meshes are decomposed as one: a CAD export splits a
+        part by material or surface patch, and decomposing each patch on its
+        own yields hundreds of slivers (a single Jedy finger is five
+        sub-meshes) without separating what matters, such as a finger's
+        hinge from its pad. The parts are cached on disk
+        (:func:`convex_decomposition_cached`), so a model converted before
+        -- on another machine, even -- needs no ``coacd`` at all. If CoACD is
+        unavailable or fails the plain convex hull is used, with a warning."""
         import trimesh
         from trimesh.exchange.stl import export_stl
 
-        from skrobot.utils.convex_decomposition import convex_decomposition
+        from skrobot.utils.convex_decomposition import convex_decomposition_cached
 
         submeshes = [m for m in (getattr(mesh_geometry, "meshes", None) or [])
                      if isinstance(m, trimesh.Trimesh) and self._meshable(m)]
         scale = getattr(mesh_geometry, "scale", None)
         base = os.path.splitext(os.path.basename(
             getattr(mesh_geometry, "filename", "") or "mesh"))[0]
+        if not submeshes:
+            return []
 
         out = []
-        for sub in submeshes:
-            key = ("coacd", id(sub))
+        for sub in [trimesh.util.concatenate(submeshes)]:
+            key = ("coacd", tuple(id(m) for m in submeshes))
             if key in self._by_id:
                 for name in self._by_id[key]:
                     out.append((name, scale, None))
                 continue
             try:
-                parts = convex_decomposition(sub, quality=self.coacd_quality)
-            except Exception:
+                parts = convex_decomposition_cached(
+                    sub, quality=self.coacd_quality)
+            except Exception as e:
+                logger.warning(
+                    'convex decomposition of %s failed (%s); using its '
+                    'single convex hull instead', base, e)
                 parts = [sub.convex_hull]
             names = []
             for part in parts:
@@ -291,7 +311,9 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
         ET.SubElement(parent_el, "geom", _named(a))
         return True
     if geom.mesh is not None:
-        if collision and getattr(assets, "convex_decompose", False):
+        if collision and (getattr(assets, "convex_decompose", False)
+                          or name_prefix in getattr(assets, "decompose_links",
+                                                    ())):
             subs = assets.add_convex_parts(geom.mesh)
         else:
             subs = assets.add(geom.mesh)
@@ -524,7 +546,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  add_ground=True, gravity=(0, 0, -9.81),
                  self_collision=False, add_actuator_forcerange=True,
                  home=None, home_base_height=0.0,
-                 convex_decompose_collision=False, coacd_quality='balanced'):
+                 convex_decompose_collision=False, coacd_quality='balanced',
+                 convex_decompose_links=()):
     """Convert a URDF to an MJCF file.
 
     Parameters
@@ -574,10 +597,17 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         as separate geoms, instead of letting MuJoCo collapse the mesh to a
         single coarse convex hull. Off by default because CoACD is slow
         (seconds to tens of seconds per mesh). Needs the optional ``coacd``
-        package; falls back to the plain convex hull per mesh if it fails.
+        package unless the result is cached (see
+        :func:`skrobot.utils.convex_decomposition.convex_decomposition_cached`);
+        falls back to the plain convex hull per mesh, with a warning, if it
+        fails.
     coacd_quality : str
-        CoACD preset when ``convex_decompose_collision`` is True: ``'balanced'``
-        (default, faster) or ``'fine'`` (tighter fit).
+        CoACD preset for the decomposition: ``'balanced'`` (default, faster)
+        or ``'fine'`` (tighter fit).
+    convex_decompose_links : iterable of str
+        Links whose collision meshes are decomposed even when
+        ``convex_decompose_collision`` is False -- typically the fingers, where
+        a single convex hull fills the space the gripper closes on.
 
     Returns
     -------
@@ -594,6 +624,7 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         mesh_dir = os.path.join(out_dir, "assets")
     assets = _MeshAssets(mesh_dir)
     assets.convex_decompose = convex_decompose_collision
+    assets.decompose_links = frozenset(convex_decompose_links)
     assets.coacd_quality = coacd_quality
 
     # children map: parent link name -> [joints]

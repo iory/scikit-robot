@@ -78,6 +78,9 @@ usd = ["usd-core"]
 #     pip install "git+https://github.com/brentyi/jaxls.git"
 # and skrobot.planner.trajectory_optimization says so when it is missing.
 collision = ["python-fcl"]
+# MuJoCo simulation behind skrobot.interfaces.MujocoRobotInterface, which
+# raises with this install line in the message when the package is missing.
+mujoco = ["mujoco"]
 all = [
     "pybullet>=2.1.9",
     # open3d has no wheels for Python 3.13 yet
@@ -90,6 +93,7 @@ all = [
     "jaxlib",
     "jaxlie",
     "python-fcl",
+    "mujoco",
     # mitsuba powers the headless MitsubaViewer
     "mitsuba",
     # matplotlib backs MitsubaViewer.show()/pause() (the interactive window)
