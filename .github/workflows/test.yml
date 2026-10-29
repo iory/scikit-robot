@@ -52,9 +52,9 @@ jobs:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
     - name: Install Formatting
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -82,9 +82,9 @@ jobs:
     name: Build Sphinx Documentation
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
         cache: 'pip'
@@ -117,25 +117,27 @@ jobs:
     strategy:
       matrix:
         include:
+          # The pinned 3.10.10 and 3.12.3 builds exist for Ubuntu 24.04 but
+          # not for 26.04, which ubuntu-latest became; the rest follow latest.
           - python-version: 3.10.10
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: false
 
           # The numpy and scipy apt installs on Ubuntu 24.04 (ROS Jazzy).
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "1.26.4"
             scipy-version: "1.11.4"
             remove-setuptools: false
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: false
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: true  # <- this one uses the latest setuptools
@@ -165,9 +167,9 @@ jobs:
             skip-all-extras: true
       fail-fast: false
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
@@ -193,7 +195,7 @@ jobs:
       # every run. It is keyed by version alone, so one download populates the
       # cache for the whole matrix. Kept under $HOME rather than /opt because
       # the cache action restores as the runner user, which cannot write there.
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/blender-archive
         key: blender-${{ env.BLENDER_VERSION }}-linux-x64
@@ -366,7 +368,7 @@ jobs:
           - ros-distribution: jazzy
             os: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Add the ROS 2 apt repository
       # Done by hand instead of via ros-tooling/setup-ros@v0.7, because that
       # action resolves which ros-apt-source release to fetch with an
@@ -456,9 +458,9 @@ jobs:
       matrix:
         python-version: ['3.10', '3.12']
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
