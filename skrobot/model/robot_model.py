@@ -3292,6 +3292,21 @@ class RobotModel(CascadedLink):
                         authored_normals = _transform_vertex_normals(
                             authored_normals, scale_transform)
 
+            texture = None
+            if visual.material is not None \
+                    and visual.material.texture is not None:
+                texture = visual.material.texture
+            # A URDF <texture> paints a mesh whose file brings UVs but no
+            # image of its own (PR2's wheel.obj).
+            uv = getattr(mesh.visual, 'uv', None)
+            own_image = getattr(
+                getattr(mesh.visual, 'material', None), 'image', None)
+            if texture is not None and texture.image is not None \
+                    and uv is not None and len(uv) == len(mesh.vertices) \
+                    and own_image is None:
+                mesh.visual = trimesh.visual.TextureVisuals(
+                    uv=uv, image=texture.image)
+
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
                 mesh.visual = mesh.visual.to_color()
@@ -3308,12 +3323,17 @@ class RobotModel(CascadedLink):
                  == trimesh.visual.DEFAULT_COLOR).all()
                 and visual.material
             ):
-                if visual.material.texture is not None:
-                    warnings.warn(
-                        'texture specified in URDF is not supported'
-                    )
-                elif visual.material.color is not None:
+                if visual.material.color is not None:
                     mesh.visual.face_colors = visual.material.color
+                elif texture is not None and texture.image is not None:
+                    # No UVs to lay the image on (an STL): its mean colour
+                    rgba = np.asarray(texture.image.convert('RGBA'))
+                    mesh.visual.face_colors = np.round(
+                        rgba.reshape(-1, 4).mean(axis=0)).astype(np.uint8)
+                elif texture is not None and texture.filename:
+                    warnings.warn(
+                        'texture image {} could not be loaded'.format(
+                            texture.filename))
 
             mesh.apply_transform(visual.origin)
             if authored_normals is not None:

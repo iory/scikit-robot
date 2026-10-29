@@ -1220,7 +1220,7 @@ class Texture(URDFType):
 
     @filename.setter
     def filename(self, value):
-        self._filename = str(value)
+        self._filename = None if value is None else str(value)
 
     @property
     def image(self):
