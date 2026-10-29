@@ -3296,8 +3296,13 @@ class RobotModel(CascadedLink):
             if visual.material is not None \
                     and visual.material.texture is not None:
                 texture = visual.material.texture
+            if texture is not None and texture.image is None \
+                    and texture.filename:
+                warnings.warn('texture image {} could not be loaded'.format(
+                    texture.filename))
             # A URDF <texture> paints a mesh whose file brings UVs but no
-            # image of its own (PR2's wheel.obj).
+            # image of its own (PR2's wheel.obj, or a dae). One without UVs
+            # (an STL) has nowhere to put it and keeps its colour.
             uv = getattr(mesh.visual, 'uv', None)
             own_image = getattr(
                 getattr(mesh.visual, 'material', None), 'image', None)
@@ -3316,24 +3321,15 @@ class RobotModel(CascadedLink):
                             mesh.vertices.shape[0], axis=0
                         )
 
-            # If color or texture is not specified in mesh file,
+            # If color is not specified in mesh file,
             # use information specified in URDF.
             if (
                 (mesh.visual.face_colors
                  == trimesh.visual.DEFAULT_COLOR).all()
                 and visual.material
+                and visual.material.color is not None
             ):
-                if visual.material.color is not None:
-                    mesh.visual.face_colors = visual.material.color
-                elif texture is not None and texture.image is not None:
-                    # No UVs to lay the image on (an STL): its mean colour
-                    rgba = np.asarray(texture.image.convert('RGBA'))
-                    mesh.visual.face_colors = np.round(
-                        rgba.reshape(-1, 4).mean(axis=0)).astype(np.uint8)
-                elif texture is not None and texture.filename:
-                    warnings.warn(
-                        'texture image {} could not be loaded'.format(
-                            texture.filename))
+                mesh.visual.face_colors = visual.material.color
 
             mesh.apply_transform(visual.origin)
             if authored_normals is not None:

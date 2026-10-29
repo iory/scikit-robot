@@ -8,6 +8,7 @@ import warnings
 
 import numpy as np
 import PIL.Image
+import trimesh
 
 from skrobot.models.urdf import RobotModelFromURDF
 
@@ -61,7 +62,7 @@ class TestURDFTexture(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir)
 
-    def load(self, geometry, material):
+    def load(self, geometry, material, warned=()):
         path = os.path.join(self.dir, 'robot.urdf')
         with open(path, 'w') as f:
             f.write(urdf(geometry, material))
@@ -69,8 +70,8 @@ class TestURDFTexture(unittest.TestCase):
             warnings.simplefilter('always')
             robot = RobotModelFromURDF(urdf_file=path)
         self.assertEqual(
-            [], [str(w.message) for w in caught
-                 if 'texture' in str(w.message)])
+            list(warned), [str(w.message) for w in caught
+                           if 'texture' in str(w.message)])
         mesh = robot.base.visual_mesh
         return mesh[0] if isinstance(mesh, list) else mesh
 
@@ -82,11 +83,20 @@ class TestURDFTexture(unittest.TestCase):
         np.testing.assert_array_equal(colors[u == 0], [[255, 0, 0]] * 2)
         np.testing.assert_array_equal(colors[u == 1], [[0, 0, 255]] * 2)
 
-    def test_without_uvs_its_mean_colour(self):
+    def test_without_uvs_untouched(self):
         mesh = self.load('<box size="1 1 1"/>',
                          '<texture filename="rb.png"/>')
-        np.testing.assert_allclose(
-            mesh.visual.face_colors, [[128, 0, 128, 255]] * 12, atol=1)
+        np.testing.assert_array_equal(
+            mesh.visual.face_colors,
+            [trimesh.visual.DEFAULT_COLOR] * 12)
+
+    def test_image_not_found_warned(self):
+        mesh = self.load('<mesh filename="quad.obj"/>',
+                         '<texture filename="missing.png"/>',
+                         warned=['texture image missing.png '
+                                 'could not be loaded'])
+        self.assertEqual(
+            1, len(np.unique(mesh.visual.vertex_colors, axis=0)))
 
     def test_without_uvs_the_colour_given(self):
         mesh = self.load('<box size="1 1 1"/>',
