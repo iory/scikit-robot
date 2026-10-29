@@ -117,25 +117,27 @@ jobs:
     strategy:
       matrix:
         include:
+          # The pinned 3.10.10 and 3.12.3 builds exist for Ubuntu 24.04 but
+          # not for 26.04, which ubuntu-latest became; the rest follow latest.
           - python-version: 3.10.10
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: false
 
           # The numpy and scipy apt installs on Ubuntu 24.04 (ROS Jazzy).
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "1.26.4"
             scipy-version: "1.11.4"
             remove-setuptools: false
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: false
           - python-version: 3.12.3
-            os: ubuntu-latest
+            os: ubuntu-24.04
             numpy-version: "latest"
             scipy-version: "latest"
             remove-setuptools: true  # <- this one uses the latest setuptools
