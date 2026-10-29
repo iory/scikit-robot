@@ -11,8 +11,27 @@ class PR2(RobotModelFromURDF):
 
     """PR2 Robot Model.
 
+    Parameters
+    ----------
+    use_tight_joint_limit : bool
+        If True (default), the torso, arm and head joints get the URDF's
+        ``safety_controller`` soft limits instead of its ``<limit>``
+        values. See Notes.
+
     Notes
     -----
+    **Joint limits.**
+    With ``use_tight_joint_limit=True`` the ``min_angle`` / ``max_angle`` of
+    ``torso_lift_joint``, the arm joints except the forearm and wrist rolls,
+    ``head_pan_joint`` and ``head_tilt_joint`` are the URDF's
+    ``safety_controller`` ``soft_lower_limit`` / ``soft_upper_limit``, which
+    are narrower than its ``<limit>`` (e.g. ``torso_lift_joint`` is
+    [0.0115, 0.325] instead of [0.0, 0.33]). The forearm and wrist rolls are
+    continuous. Other joints keep the URDF's ``<limit>``. Code that reads the
+    URDF directly gets the wider limits; pass
+    ``use_tight_joint_limit=False`` to make the model match it.
+
+
     **End-effector frame.**
     ``rarm_end_coords`` and ``larm_end_coords`` are attached to
     ``{r,l}_gripper_tool_frame`` with zero offset and identity mapping
