@@ -3292,6 +3292,26 @@ class RobotModel(CascadedLink):
                         authored_normals = _transform_vertex_normals(
                             authored_normals, scale_transform)
 
+            texture = None
+            if visual.material is not None \
+                    and visual.material.texture is not None:
+                texture = visual.material.texture
+            if texture is not None and texture.image is None \
+                    and texture.filename:
+                warnings.warn('texture image {} could not be loaded'.format(
+                    texture.filename))
+            # A URDF <texture> paints a mesh whose file brings UVs but no
+            # image of its own (PR2's wheel.obj, or a dae). One without UVs
+            # (an STL) has nowhere to put it and keeps its colour.
+            uv = getattr(mesh.visual, 'uv', None)
+            own_image = getattr(
+                getattr(mesh.visual, 'material', None), 'image', None)
+            if texture is not None and texture.image is not None \
+                    and uv is not None and len(uv) == len(mesh.vertices) \
+                    and own_image is None:
+                mesh.visual = trimesh.visual.TextureVisuals(
+                    uv=uv, image=texture.image)
+
             # TextureVisuals is usually slow to render
             if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
                 mesh.visual = mesh.visual.to_color()
@@ -3301,19 +3321,15 @@ class RobotModel(CascadedLink):
                             mesh.vertices.shape[0], axis=0
                         )
 
-            # If color or texture is not specified in mesh file,
+            # If color is not specified in mesh file,
             # use information specified in URDF.
             if (
                 (mesh.visual.face_colors
                  == trimesh.visual.DEFAULT_COLOR).all()
                 and visual.material
+                and visual.material.color is not None
             ):
-                if visual.material.texture is not None:
-                    warnings.warn(
-                        'texture specified in URDF is not supported'
-                    )
-                elif visual.material.color is not None:
-                    mesh.visual.face_colors = visual.material.color
+                mesh.visual.face_colors = visual.material.color
 
             mesh.apply_transform(visual.origin)
             if authored_normals is not None:

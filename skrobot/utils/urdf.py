@@ -1184,6 +1184,14 @@ class Geometry(URDFType):
         return geo.meshes
 
 
+def _open_image(path):
+    """Read an image whole, so its file is not held open (Windows cannot
+    delete or replace a file that is)."""
+    with PIL.Image.open(path) as image:
+        image.load()
+    return image
+
+
 class Texture(URDFType):
     """An image-based texture.
 
@@ -1208,7 +1216,7 @@ class Texture(URDFType):
         self.filename = filename
         if image is None:
             if filename and os.path.exists(filename):
-                image = PIL.Image.open(filename)
+                image = _open_image(filename)
         self.image = image
 
     @property
@@ -1220,7 +1228,7 @@ class Texture(URDFType):
 
     @filename.setter
     def filename(self, value):
-        self._filename = str(value)
+        self._filename = None if value is None else str(value)
 
     @property
     def image(self):
@@ -1235,7 +1243,7 @@ class Texture(URDFType):
             self._image = None
             return
         if isinstance(value, str):
-            value = PIL.Image.open(value)
+            value = _open_image(value)
         if isinstance(value, np.ndarray):
             value = PIL.Image.fromarray(value)
         elif not isinstance(value, PIL.Image.Image):
@@ -1252,7 +1260,7 @@ class Texture(URDFType):
         if filename:
             fn = get_filename(path, filename)
             if fn and os.path.exists(fn):
-                kwargs['image'] = PIL.Image.open(fn)
+                kwargs['image'] = _open_image(fn)
 
         return Texture(**kwargs)
 
@@ -1333,7 +1341,7 @@ class Material(URDFType):
     def texture(self, value):
         if value is not None:
             if isinstance(value, str):
-                image = PIL.Image.open(value)
+                image = _open_image(value)
                 value = Texture(filename=value, image=image)
             elif not isinstance(value, Texture):
                 raise ValueError('Invalid type for texture -- expect path to '
