@@ -52,9 +52,9 @@ jobs:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
     - name: Install Formatting
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -82,9 +82,9 @@ jobs:
     name: Build Sphinx Documentation
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
         cache: 'pip'
@@ -167,9 +167,9 @@ jobs:
             skip-all-extras: true
       fail-fast: false
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
@@ -195,7 +195,7 @@ jobs:
       # every run. It is keyed by version alone, so one download populates the
       # cache for the whole matrix. Kept under $HOME rather than /opt because
       # the cache action restores as the runner user, which cannot write there.
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/blender-archive
         key: blender-${{ env.BLENDER_VERSION }}-linux-x64
@@ -368,7 +368,7 @@ jobs:
           - ros-distribution: jazzy
             os: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Add the ROS 2 apt repository
       # Done by hand instead of via ros-tooling/setup-ros@v0.7, because that
       # action resolves which ros-apt-source release to fetch with an
@@ -458,9 +458,9 @@ jobs:
       matrix:
         python-version: ['3.10', '3.12']
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
