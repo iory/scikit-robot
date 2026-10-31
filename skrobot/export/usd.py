@@ -447,6 +447,7 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
                 drive_damping=200.0, gravity=(0.0, 0.0, -9.81),
                 self_collision=False, home_positions=None, mobile_base=False,
                 base_drive_stiffness=1e5, base_drive_damping=1e4,
+                base_limit=None,
                 auto_gain=True, gain_max_scale=25.0, gain_ref_percentile=35.0,
                 recompute_inertia=True, armature=0.0, inertia_floor=0.0,
                 decompose_links=None, coacd_params=None):
@@ -470,6 +471,9 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         of many robots self-collides, and although self-collision is disabled in
         PhysX the links still visibly interpenetrate at zero. Driving to a
         reset pose gives a clean, collision-free resting posture.
+    base_limit : float or None
+        With ``mobile_base``, how far [m] the base may travel from the origin
+        along x and along y. ``None`` (default) leaves it free.
     decompose_links : bool, list[str], or None
         Which links get their collision mesh convex-DECOMPOSED with CoACD
         instead of reduced to a single convex hull. ``None`` (default) decomposes
@@ -659,10 +663,12 @@ def urdf_to_usd(urdf, out_path, floating_base=False, drive_stiffness=1000.0,
         anchor_fix.CreateBody1Rel().SetTargets([link_path["base_anchor"]])
         _emit_planar_joint(stage, UsdPhysics, Gf, Sdf, "base_x_joint", "prismatic",
                            "X", link_path["base_anchor"], link_path["base_planar_x"],
-                           base_drive_stiffness, base_drive_damping, limit=6.0)
+                           base_drive_stiffness, base_drive_damping,
+                           limit=base_limit)
         _emit_planar_joint(stage, UsdPhysics, Gf, Sdf, "base_y_joint", "prismatic",
                            "Y", link_path["base_planar_x"], link_path["base_planar_y"],
-                           base_drive_stiffness, base_drive_damping, limit=6.0)
+                           base_drive_stiffness, base_drive_damping,
+                           limit=base_limit)
         _emit_planar_joint(stage, UsdPhysics, Gf, Sdf, "base_yaw_joint", "revolute",
                            "Z", link_path["base_planar_y"], base,
                            base_drive_stiffness, base_drive_damping, limit=None)
