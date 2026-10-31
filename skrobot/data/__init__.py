@@ -134,13 +134,16 @@ def aero_urdfpath(use_hand=True):
 
 
 def fetch_urdfpath():
-    path = osp.join(get_cache_dir(), 'fetch_description', 'fetch.urdf')
+    # v2 turns head_camera_rgb_optical_frame to face forward. It lives in its
+    # own cache directory so that a cached v1 is not picked up.
+    path = osp.join(get_cache_dir(), 'fetch_description_v2',
+                    'fetch_description', 'fetch.urdf')
     if osp.exists(path):
         return path
     _retrieve(
-        url='https://github.com/iory/scikit-robot-models/raw/main/fetch_description.tar.gz',  # NOQA
-        fname='fetch_description.tar.gz',
-        md5='fbe29ab5f3d029d165a625175b43a265',
+        url='https://github.com/iory/scikit-robot-models/raw/main/fetch_description_v2.tar.gz',  # NOQA
+        fname=osp.join('fetch_description_v2', 'fetch_description.tar.gz'),
+        md5='c56bc7a94cc70e772d03c13dc2b41625',
         extract=True,
     )
     return path
