@@ -137,6 +137,26 @@ class TestUrdfToUsd(unittest.TestCase):
         # USD angular targets are in DEGREES
         self.assertAlmostEqual(float(target), np.rad2deg(0.5), places=3)
 
+    def test_mobile_base_travel_limit(self):
+        def limits(stage, name):
+            j = UsdPhysics.PrismaticJoint(
+                stage.GetPrimAtPath('/robot/joints/' + name))
+            return j.GetLowerLimitAttr().Get(), j.GetUpperLimitAttr().Get()
+
+        # free by default; an unauthored limit means unlimited
+        stage = urdf_to_usd(KUKA_URDF,
+                            os.path.join(self.tmpdir, 'kuka_mobile.usdc'),
+                            mobile_base=True)
+        for name in ('base_x_joint', 'base_y_joint'):
+            lower, upper = limits(stage, name)
+            self.assertTrue(lower is None or lower == -np.inf)
+            self.assertTrue(upper is None or upper == np.inf)
+        stage = urdf_to_usd(KUKA_URDF,
+                            os.path.join(self.tmpdir, 'kuka_mobile_lim.usdc'),
+                            mobile_base=True, base_limit=3.0)
+        for name in ('base_x_joint', 'base_y_joint'):
+            self.assertEqual(limits(stage, name), (-3.0, 3.0))
+
     def test_sanitized_prim_paths(self):
         # names with URDF-legal but USD-illegal characters must not appear raw
         for prim in self.stage.Traverse():
