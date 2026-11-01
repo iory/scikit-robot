@@ -165,6 +165,15 @@ class TestMujocoMobileScene(unittest.TestCase):
         # The caller's model stays put until they move it.
         np.testing.assert_allclose(self.robot.worldpos(), [0.0, 0.0, 0.0])
 
+    def test_blocked_go_pos_starts_next_from_where_it_stopped(self):
+        # The table's near face is at x = 1.75 and the base is 0.4 wide.
+        self.assertFalse(self.ri.go_pos(3.0, 0.0, 0.0))
+        stopped = self.ri.odom.worldpos()
+        self.assertLess(stopped[0], 1.6)
+        self.assertTrue(self.ri.go_pos(-0.5, 0.0, 0.0))
+        np.testing.assert_allclose(self.ri.odom.worldpos(),
+                                   stopped - [0.5, 0.0, 0.0], atol=5e-3)
+
     def test_go_velocity_follows_arc(self):
         # 0.2 m/s forward while turning 1 rad/s for a quarter turn ends
         # 0.2 m ahead and 0.2 m to the left.

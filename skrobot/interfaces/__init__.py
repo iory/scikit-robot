@@ -30,6 +30,11 @@ def __getattr__(name):
         # this import never fails for want of it.
         return importlib.import_module(
             'skrobot.interfaces._mujoco').MujocoRobotInterface
+    elif name == 'IsaacSimRobotInterface':
+        # Isaac Sim is started (or found running) when the interface is
+        # constructed, not here: its modules import only after that.
+        return importlib.import_module(
+            'skrobot.interfaces._isaacsim').IsaacSimRobotInterface
     elif name == '_pybullet':
         # Force lazy loading - only import when explicitly requested
         if pybullet._module is None:
