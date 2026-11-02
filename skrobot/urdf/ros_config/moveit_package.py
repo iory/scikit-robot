@@ -338,6 +338,148 @@ def _patch_dae_for_gazebo(dae_path):
     dae_path.write_text(data, encoding="utf-8")
 
 
+def _rpy_xyz_matrix(element):
+    """4x4 transform of a URDF ``<origin>`` (identity when absent)."""
+    import numpy as np
+
+    mat = np.eye(4)
+    if element is None:
+        return mat
+    x, y, z = (float(v) for v in element.get("xyz", "0 0 0").split())
+    roll, pitch, yaw = (float(v) for v in element.get("rpy", "0 0 0").split())
+    cr, sr = np.cos(roll), np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    # URDF rpy is fixed-axis X, then Y, then Z: R = Rz(yaw) Ry(pitch) Rx(roll)
+    mat[:3, :3] = np.array([
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ])
+    mat[:3, 3] = (x, y, z)
+    return mat
+
+
+def _collision_points(collision, package_dir, package_name):
+    """Points spanning one ``<collision>`` geometry in its own frame, or None."""
+    import numpy as np
+
+    geometry = collision.find("geometry")
+    if geometry is None:
+        return None
+    box = geometry.find("box")
+    if box is not None:
+        half = np.array([float(v) for v in box.get("size").split()]) / 2.0
+        signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+        return signs * half
+    sphere = geometry.find("sphere")
+    if sphere is not None:
+        r = float(sphere.get("radius"))
+        return np.array([[0, 0, -r], [0, 0, r]])
+    cylinder = geometry.find("cylinder")
+    if cylinder is not None:
+        r, half = float(cylinder.get("radius")), float(cylinder.get("length")) / 2.0
+        return np.array([[sx * r, sy * r, sz * half] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+    mesh = geometry.find("mesh")
+    if mesh is None:
+        return None
+    filename = mesh.get("filename", "")
+    prefix = f"package://{package_name}/"
+    path = Path(package_dir) / filename[len(prefix):] if filename.startswith(prefix) else Path(filename)
+    if not path.exists():
+        return None
+    import trimesh
+
+    loaded = trimesh.load(str(path), force="mesh")
+    if loaded is None or len(getattr(loaded, "vertices", [])) == 0:
+        return None
+    scale = np.array([float(v) for v in mesh.get("scale", "1 1 1").split()])
+    return np.asarray(loaded.vertices) * scale
+
+
+def lowest_collision_height(urdf_path, package_dir, package_name):
+    """Lowest z of any collision geometry at the zero pose, or None if unknown.
+
+    Every joint is taken at zero, which is the pose the generated Gazebo
+    launch starts in (``initial_positions.yaml``).
+
+    Parameters
+    ----------
+    urdf_path : str or Path
+        URDF whose ``package://<package_name>/`` paths resolve under
+        *package_dir*.
+    package_dir : str or Path
+        Root of the generated package.
+    package_name : str
+        Package name used in the URDF's ``package://`` references.
+
+    Returns
+    -------
+    float or None
+        Height in metres, in the frame of the URDF's root link.
+    """
+    import numpy as np
+
+    root = ET.parse(str(urdf_path)).getroot()
+    children = {}
+    for joint in root.findall("joint"):
+        parent = joint.find("parent").get("link")
+        children.setdefault(parent, []).append(joint)
+    child_links = {j.find("child").get("link") for j in root.findall("joint")}
+    links = {link.get("name"): link for link in root.findall("link")}
+    roots = [name for name in links if name not in child_links]
+    world = {name: np.eye(4) for name in roots}
+    stack = list(roots)
+    while stack:
+        name = stack.pop()
+        for joint in children.get(name, []):
+            child = joint.find("child").get("link")
+            world[child] = world[name] @ _rpy_xyz_matrix(joint.find("origin"))
+            stack.append(child)
+    lowest = None
+    for name, link in links.items():
+        for collision in link.findall("collision"):
+            points = _collision_points(collision, package_dir, package_name)
+            if points is None:
+                continue
+            mat = world.get(name, np.eye(4)) @ _rpy_xyz_matrix(collision.find("origin"))
+            z = float((points @ mat[:3, :3].T + mat[:3, 3])[:, 2].min())
+            lowest = z if lowest is None else min(lowest, z)
+    return lowest
+
+
+def set_gazebo_spawn_height(package_dir, robot_name, package_name=None, clearance=0.01):
+    """Raise the Gazebo spawn so the robot's collision geometry clears the ground.
+
+    Parameters
+    ----------
+    package_dir : str or Path
+        Root of a package written by :func:`build_moveit_package`.
+    robot_name : str
+        Robot name (the config URDF is ``config/<robot_name>.urdf``).
+    package_name : str, optional
+        Defaults to *robot_name*.
+    clearance : float
+        Gap left between the lowest point and the ground, in metres.
+
+    Returns
+    -------
+    float
+        The spawn height written into ``launch/gazebo.launch.py``.
+    """
+    package_dir = Path(package_dir)
+    package_name = package_name or robot_name
+    lowest = lowest_collision_height(package_dir / "config" / f"{robot_name}.urdf", package_dir, package_name)
+    spawn_z = 0.0 if lowest is None or lowest >= 0.0 else round(-lowest + clearance, 4)
+    launch = package_dir / "launch" / "gazebo.launch.py"
+    text = launch.read_text(encoding="utf-8")
+    new_text, count = re.subn(r"^(\s*spawn_z = )[-0-9.eE]+$", rf"\g<1>{spawn_z!r}", text, flags=re.M)
+    if count != 1:
+        raise ValueError(f"{launch} has no single 'spawn_z = ...' line to update")
+    launch.write_text(new_text, encoding="utf-8")
+    return spawn_z
+
+
 def _convert_urdf_meshes(urdf_path, output_path, visual_format="stl", collision_format="stl"):
     """Convert URDF meshes using scikit-robot's export pipeline.
 
@@ -577,6 +719,12 @@ def build_moveit_package(
                         "command_interfaces": ["position"],
                         "state_interfaces": ["position", "velocity"],
                         "allow_nonzero_velocity_at_trajectory_end": True,
+                        # MoveIt plans per group (one limb at a time) and sends
+                        # only that group's joints. One controller owns every
+                        # joint, so without this it rejects any goal that does
+                        # not name all of them ("Joints on incoming trajectory
+                        # don't match the controller joints").
+                        "allow_partial_joints_goal": True,
                     },
                 },
             },
@@ -598,7 +746,9 @@ def build_moveit_package(
     # Gazebo launch (Gazebo + RViz + controllers)
     gazebo_tmpl = _load_template("gazebo.launch.py.template")
     _write_file(
-        gazebo_tmpl.substitute(robot_name=robot_name, package_name=package_name),
+        # set_gazebo_spawn_height() replaces this once the collision meshes
+        # are in a readable format.
+        gazebo_tmpl.substitute(robot_name=robot_name, package_name=package_name, spawn_z="0.0"),
         launch_dir / "gazebo.launch.py",
     )
 

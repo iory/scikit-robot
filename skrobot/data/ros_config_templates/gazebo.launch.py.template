@@ -25,6 +25,12 @@ def _resolve_find_directives(urdf_text):
 def generate_launch_description():
     package_name = '${package_name}'
     robot_name = '${robot_name}'
+    # Height the robot is spawned at, so that its lowest collision geometry
+    # (zero pose) clears the ground plane. A robot fixed to ``world`` stays
+    # where it is spawned; spawned at 0 with feet or wheels below its base,
+    # it would be fixed inside the ground and the contact solver would stall
+    # the simulation.
+    spawn_z = ${spawn_z}
 
     pkg_share = get_package_share_directory(package_name)
 
@@ -71,6 +77,7 @@ def generate_launch_description():
             '-topic', 'robot_description',
             '-name', robot_name,
             '-allow_renaming', 'true',
+            '-z', str(spawn_z),
         ],
         output='screen',
     )
