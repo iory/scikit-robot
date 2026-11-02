@@ -320,4 +320,4 @@ def test_gazebo_spawn_clears_geometry_below_the_base(tmp_path):
 def test_gazebo_spawn_stays_at_zero_when_nothing_is_below(serial_package):
     from skrobot.urdf.ros_config.moveit_package import set_gazebo_spawn_height
 
-    assert set_gazebo_spawn_height(serial_package, ROBOT_NAME, package_name=PACKAGE_NAME) == 0.0
+    assert set_gazebo_spawn_height(serial_package, ROBOT_NAME) == 0.0

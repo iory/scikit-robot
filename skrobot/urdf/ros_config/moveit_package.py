@@ -338,66 +338,45 @@ def _patch_dae_for_gazebo(dae_path):
     dae_path.write_text(data, encoding="utf-8")
 
 
-def _rpy_xyz_matrix(element):
-    """4x4 transform of a URDF ``<origin>`` (identity when absent)."""
+def _collision_points(collision, base_path):
+    """Points spanning one ``<collision>`` geometry in its own frame, or None.
+
+    Meshes are resolved and loaded the way
+    :func:`skrobot.urdf.link_origins.geometry_centroid` does it.
+    """
     import numpy as np
 
-    mat = np.eye(4)
-    if element is None:
-        return mat
-    x, y, z = (float(v) for v in element.get("xyz", "0 0 0").split())
-    roll, pitch, yaw = (float(v) for v in element.get("rpy", "0 0 0").split())
-    cr, sr = np.cos(roll), np.sin(roll)
-    cp, sp = np.cos(pitch), np.sin(pitch)
-    cy, sy = np.cos(yaw), np.sin(yaw)
-    # URDF rpy is fixed-axis X, then Y, then Z: R = Rz(yaw) Ry(pitch) Rx(roll)
-    mat[:3, :3] = np.array([
-        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-        [-sp, cp * sr, cp * cr],
-    ])
-    mat[:3, 3] = (x, y, z)
-    return mat
-
-
-def _collision_points(collision, package_dir, package_name):
-    """Points spanning one ``<collision>`` geometry in its own frame, or None."""
-    import numpy as np
+    from skrobot.utils.urdf import get_filename
+    from skrobot.utils.urdf import load_meshes
 
     geometry = collision.find("geometry")
     if geometry is None:
         return None
+    corners = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
     box = geometry.find("box")
     if box is not None:
-        half = np.array([float(v) for v in box.get("size").split()]) / 2.0
-        signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
-        return signs * half
+        return corners * np.array([float(v) for v in box.get("size").split()]) / 2.0
     sphere = geometry.find("sphere")
     if sphere is not None:
-        r = float(sphere.get("radius"))
-        return np.array([[0, 0, -r], [0, 0, r]])
+        return corners * float(sphere.get("radius"))
     cylinder = geometry.find("cylinder")
     if cylinder is not None:
-        r, half = float(cylinder.get("radius")), float(cylinder.get("length")) / 2.0
-        return np.array([[sx * r, sy * r, sz * half] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+        r = float(cylinder.get("radius"))
+        return corners * np.array([r, r, float(cylinder.get("length")) / 2.0])
     mesh = geometry.find("mesh")
-    if mesh is None:
+    if mesh is None or mesh.get("filename") is None:
         return None
-    filename = mesh.get("filename", "")
-    prefix = f"package://{package_name}/"
-    path = Path(package_dir) / filename[len(prefix):] if filename.startswith(prefix) else Path(filename)
-    if not path.exists():
+    filename = get_filename(str(base_path), mesh.get("filename"))
+    if filename is None:
         return None
-    import trimesh
-
-    loaded = trimesh.load(str(path), force="mesh")
-    if loaded is None or len(getattr(loaded, "vertices", [])) == 0:
+    meshes = load_meshes(filename)
+    if not meshes:
         return None
     scale = np.array([float(v) for v in mesh.get("scale", "1 1 1").split()])
-    return np.asarray(loaded.vertices) * scale
+    return np.vstack([np.asarray(m.vertices) for m in meshes]) * scale
 
 
-def lowest_collision_height(urdf_path, package_dir, package_name):
+def lowest_collision_height(urdf_path):
     """Lowest z of any collision geometry at the zero pose, or None if unknown.
 
     Every joint is taken at zero, which is the pose the generated Gazebo
@@ -406,49 +385,33 @@ def lowest_collision_height(urdf_path, package_dir, package_name):
     Parameters
     ----------
     urdf_path : str or Path
-        URDF whose ``package://<package_name>/`` paths resolve under
-        *package_dir*.
-    package_dir : str or Path
-        Root of the generated package.
-    package_name : str
-        Package name used in the URDF's ``package://`` references.
+        URDF file. Relative and ``package://`` mesh paths are resolved from
+        its directory.
 
     Returns
     -------
     float or None
         Height in metres, in the frame of the URDF's root link.
     """
-    import numpy as np
+    from skrobot.assembly.module_assembly import RobotAssembly
+    from skrobot.utils.urdf import parse_origin
 
+    urdf_path = Path(urdf_path)
     root = ET.parse(str(urdf_path)).getroot()
-    children = {}
-    for joint in root.findall("joint"):
-        parent = joint.find("parent").get("link")
-        children.setdefault(parent, []).append(joint)
-    child_links = {j.find("child").get("link") for j in root.findall("joint")}
-    links = {link.get("name"): link for link in root.findall("link")}
-    roots = [name for name in links if name not in child_links]
-    world = {name: np.eye(4) for name in roots}
-    stack = list(roots)
-    while stack:
-        name = stack.pop()
-        for joint in children.get(name, []):
-            child = joint.find("child").get("link")
-            world[child] = world[name] @ _rpy_xyz_matrix(joint.find("origin"))
-            stack.append(child)
+    link_to_world = RobotAssembly._link_transforms(root)
     lowest = None
-    for name, link in links.items():
+    for link in root.findall("link"):
         for collision in link.findall("collision"):
-            points = _collision_points(collision, package_dir, package_name)
+            points = _collision_points(collision, urdf_path.parent)
             if points is None:
                 continue
-            mat = world.get(name, np.eye(4)) @ _rpy_xyz_matrix(collision.find("origin"))
+            mat = link_to_world[link.get("name")] @ parse_origin(collision)
             z = float((points @ mat[:3, :3].T + mat[:3, 3])[:, 2].min())
             lowest = z if lowest is None else min(lowest, z)
     return lowest
 
 
-def set_gazebo_spawn_height(package_dir, robot_name, package_name=None, clearance=0.01):
+def set_gazebo_spawn_height(package_dir, robot_name, clearance=0.01):
     """Raise the Gazebo spawn so the robot's collision geometry clears the ground.
 
     Parameters
@@ -457,8 +420,6 @@ def set_gazebo_spawn_height(package_dir, robot_name, package_name=None, clearanc
         Root of a package written by :func:`build_moveit_package`.
     robot_name : str
         Robot name (the config URDF is ``config/<robot_name>.urdf``).
-    package_name : str, optional
-        Defaults to *robot_name*.
     clearance : float
         Gap left between the lowest point and the ground, in metres.
 
@@ -468,8 +429,7 @@ def set_gazebo_spawn_height(package_dir, robot_name, package_name=None, clearanc
         The spawn height written into ``launch/gazebo.launch.py``.
     """
     package_dir = Path(package_dir)
-    package_name = package_name or robot_name
-    lowest = lowest_collision_height(package_dir / "config" / f"{robot_name}.urdf", package_dir, package_name)
+    lowest = lowest_collision_height(package_dir / "config" / f"{robot_name}.urdf")
     spawn_z = 0.0 if lowest is None or lowest >= 0.0 else round(-lowest + clearance, 4)
     launch = package_dir / "launch" / "gazebo.launch.py"
     text = launch.read_text(encoding="utf-8")
