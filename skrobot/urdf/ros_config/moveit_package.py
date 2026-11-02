@@ -338,6 +338,108 @@ def _patch_dae_for_gazebo(dae_path):
     dae_path.write_text(data, encoding="utf-8")
 
 
+def _collision_points(collision, base_path):
+    """Points spanning one ``<collision>`` geometry in its own frame, or None.
+
+    Meshes are resolved and loaded the way
+    :func:`skrobot.urdf.link_origins.geometry_centroid` does it.
+    """
+    import numpy as np
+
+    from skrobot.utils.urdf import get_filename
+    from skrobot.utils.urdf import load_meshes
+
+    geometry = collision.find("geometry")
+    if geometry is None:
+        return None
+    corners = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
+    box = geometry.find("box")
+    if box is not None:
+        return corners * np.array([float(v) for v in box.get("size").split()]) / 2.0
+    sphere = geometry.find("sphere")
+    if sphere is not None:
+        return corners * float(sphere.get("radius"))
+    cylinder = geometry.find("cylinder")
+    if cylinder is not None:
+        r = float(cylinder.get("radius"))
+        return corners * np.array([r, r, float(cylinder.get("length")) / 2.0])
+    mesh = geometry.find("mesh")
+    if mesh is None or mesh.get("filename") is None:
+        return None
+    filename = get_filename(str(base_path), mesh.get("filename"))
+    if filename is None:
+        return None
+    meshes = load_meshes(filename)
+    if not meshes:
+        return None
+    scale = np.array([float(v) for v in mesh.get("scale", "1 1 1").split()])
+    return np.vstack([np.asarray(m.vertices) for m in meshes]) * scale
+
+
+def lowest_collision_height(urdf_path):
+    """Lowest z of any collision geometry at the zero pose, or None if unknown.
+
+    Every joint is taken at zero, which is the pose the generated Gazebo
+    launch starts in (``initial_positions.yaml``).
+
+    Parameters
+    ----------
+    urdf_path : str or Path
+        URDF file. Relative and ``package://`` mesh paths are resolved from
+        its directory.
+
+    Returns
+    -------
+    float or None
+        Height in metres, in the frame of the URDF's root link.
+    """
+    from skrobot.assembly.module_assembly import RobotAssembly
+    from skrobot.utils.urdf import parse_origin
+
+    urdf_path = Path(urdf_path)
+    root = ET.parse(str(urdf_path)).getroot()
+    link_to_world = RobotAssembly._link_transforms(root)
+    lowest = None
+    for link in root.findall("link"):
+        for collision in link.findall("collision"):
+            points = _collision_points(collision, urdf_path.parent)
+            if points is None:
+                continue
+            mat = link_to_world[link.get("name")] @ parse_origin(collision)
+            z = float((points @ mat[:3, :3].T + mat[:3, 3])[:, 2].min())
+            lowest = z if lowest is None else min(lowest, z)
+    return lowest
+
+
+def set_gazebo_spawn_height(package_dir, robot_name, clearance=0.01):
+    """Raise the Gazebo spawn so the robot's collision geometry clears the ground.
+
+    Parameters
+    ----------
+    package_dir : str or Path
+        Root of a package written by :func:`build_moveit_package`.
+    robot_name : str
+        Robot name (the config URDF is ``config/<robot_name>.urdf``).
+    clearance : float
+        Gap left between the lowest point and the ground, in metres.
+
+    Returns
+    -------
+    float
+        The spawn height written into ``launch/gazebo.launch.py``.
+    """
+    package_dir = Path(package_dir)
+    lowest = lowest_collision_height(package_dir / "config" / f"{robot_name}.urdf")
+    spawn_z = 0.0 if lowest is None or lowest >= 0.0 else round(-lowest + clearance, 4)
+    launch = package_dir / "launch" / "gazebo.launch.py"
+    text = launch.read_text(encoding="utf-8")
+    new_text, count = re.subn(r"^(\s*spawn_z = )[-0-9.eE]+$", rf"\g<1>{spawn_z!r}", text, flags=re.M)
+    if count != 1:
+        raise ValueError(f"{launch} has no single 'spawn_z = ...' line to update")
+    launch.write_text(new_text, encoding="utf-8")
+    return spawn_z
+
+
 def _convert_urdf_meshes(urdf_path, output_path, visual_format="stl", collision_format="stl"):
     """Convert URDF meshes using scikit-robot's export pipeline.
 
@@ -577,6 +679,12 @@ def build_moveit_package(
                         "command_interfaces": ["position"],
                         "state_interfaces": ["position", "velocity"],
                         "allow_nonzero_velocity_at_trajectory_end": True,
+                        # MoveIt plans per group (one limb at a time) and sends
+                        # only that group's joints. One controller owns every
+                        # joint, so without this it rejects any goal that does
+                        # not name all of them ("Joints on incoming trajectory
+                        # don't match the controller joints").
+                        "allow_partial_joints_goal": True,
                     },
                 },
             },
@@ -598,7 +706,9 @@ def build_moveit_package(
     # Gazebo launch (Gazebo + RViz + controllers)
     gazebo_tmpl = _load_template("gazebo.launch.py.template")
     _write_file(
-        gazebo_tmpl.substitute(robot_name=robot_name, package_name=package_name),
+        # set_gazebo_spawn_height() replaces this once the collision meshes
+        # are in a readable format.
+        gazebo_tmpl.substitute(robot_name=robot_name, package_name=package_name, spawn_z="0.0"),
         launch_dir / "gazebo.launch.py",
     )
 

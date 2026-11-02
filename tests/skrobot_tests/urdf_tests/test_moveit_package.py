@@ -241,6 +241,18 @@ def test_branching_urdf_produces_one_group_per_limb(tmp_path):
     assert set(_read_yaml(package_dir / "config" / "kinematics.yaml")) == {"limb_1", "limb_2"}
 
 
+def test_one_controller_accepts_a_single_limbs_trajectory(tmp_path):
+    """MoveIt executes one group at a time, so the one controller that owns
+    every joint must accept a goal naming only that group's joints."""
+    package_dir = tmp_path / PACKAGE_NAME
+    build_moveit_package(package_dir, BRANCHING_URDF, "r", package_name=PACKAGE_NAME)
+
+    ros2 = _read_yaml(package_dir / "config" / "ros2_controllers.yaml")
+    params = ros2["all_joints_controller"]["ros__parameters"]
+    assert sorted(params["joints"]) == ["l_j1", "l_j2", "r_j1", "r_j2"]
+    assert params["allow_partial_joints_goal"] is True
+
+
 def test_urdf_without_controllable_joints_generates_nothing(tmp_path):
     """A fixed-only URDF bails out before creating the package directory."""
     package_dir = tmp_path / PACKAGE_NAME
@@ -261,3 +273,51 @@ def test_meshes_are_not_required(serial_package):
     """The exported URDF keeps its primitive geometry through mesh conversion."""
     urdf_text = Path(serial_package / "urdf" / f"{ROBOT_NAME}.urdf").read_text()
     assert "<box" in urdf_text
+
+
+# A base whose wheel hangs 0.15 m below the base origin, on a revolute joint
+# so that a planning group exists.
+LEGGED_URDF = """<?xml version="1.0"?>
+<robot name="legged">
+  <link name="base_link">
+    <collision><geometry><box size="0.2 0.2 0.1"/></geometry></collision>
+  </link>
+  <link name="wheel">
+    <collision>
+      <origin xyz="0 0 -0.1" rpy="1.5707963 0 0"/>
+      <geometry><cylinder radius="0.05" length="0.02"/></geometry>
+    </collision>
+  </link>
+  <joint name="wheel_joint" type="revolute">
+    <parent link="base_link"/><child link="wheel"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1" upper="1" effort="1" velocity="1"/>
+  </joint>
+</robot>
+"""
+
+
+def test_gazebo_spawn_clears_geometry_below_the_base(tmp_path):
+    """A robot fixed to world stays where it is spawned, so geometry below
+    its base must be lifted above the ground plane, not fixed inside it."""
+    from skrobot.urdf.ros_config.moveit_package import set_gazebo_spawn_height
+
+    package_dir = tmp_path / "legged"
+    build_moveit_package(package_dir, LEGGED_URDF, "legged")
+    launch = package_dir / "launch" / "gazebo.launch.py"
+    assert "spawn_z = 0.0" in launch.read_text()
+
+    spawn_z = set_gazebo_spawn_height(package_dir, "legged")
+
+    # The wheel's lowest point is 0.1 + 0.05 = 0.15 m below the base origin.
+    assert spawn_z == pytest.approx(0.15 + 0.01)
+    text = launch.read_text()
+    assert f"spawn_z = {spawn_z!r}" in text
+    assert "'-z', str(spawn_z)" in text
+    ast.parse(text)
+
+
+def test_gazebo_spawn_stays_at_zero_when_nothing_is_below(serial_package):
+    from skrobot.urdf.ros_config.moveit_package import set_gazebo_spawn_height
+
+    assert set_gazebo_spawn_height(serial_package, ROBOT_NAME) == 0.0

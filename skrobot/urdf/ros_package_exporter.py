@@ -330,6 +330,7 @@ class ROSPackageExporter:
             # Generate MoveIt 2 package (launch files, configs, ROS 2 metadata)
             from skrobot.urdf.ros_config.moveit_package import _convert_urdf_meshes
             from skrobot.urdf.ros_config.moveit_package import build_moveit_package
+            from skrobot.urdf.ros_config.moveit_package import set_gazebo_spawn_height
 
             if self.urdf_content:
                 moveit_urdf = self._rewrite_registered_mesh_paths(self.urdf_content)
@@ -354,6 +355,13 @@ class ROSPackageExporter:
                         )
                     except Exception as e:
                         logger.warning("Mesh conversion failed (meshes will remain in original format): %s", e)
+
+                    # Needs readable collision meshes, so it runs after the
+                    # conversion above.
+                    try:
+                        set_gazebo_spawn_height(package_dir, self.package_name)
+                    except Exception as e:
+                        logger.warning("Could not compute the Gazebo spawn height (robot spawns at z=0): %s", e)
 
             if progress_callback:
                 progress_callback("Generated MoveIt package", 4, 4)
