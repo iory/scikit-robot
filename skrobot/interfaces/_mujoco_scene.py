@@ -51,7 +51,8 @@ def _link_frame(root, name):
     body = _body(root, name)
     if body is not None:
         return body, np.zeros(3), np.eye(3)
-    for body in root.iter('body'):
+    # a frame hung straight off a URDF 'world' root is a site on <worldbody>
+    for body in [root.find('worldbody'), *root.iter('body')]:
         for site in body.findall('site'):
             if site.get('name') == name:
                 pos = [float(v) for v in site.get('pos', '0 0 0').split()]
@@ -164,7 +165,7 @@ def add_objects(root, objects, movable):
             raise ValueError(
                 'every object needs a name, to read its pose back by: '
                 '{!r}'.format(obj))
-        if _body(root, obj.name) is not None:
+        if _link_frame(root, obj.name) is not None:
             raise ValueError('object name {} is already taken'.format(
                 obj.name))
         coords = obj.worldcoords()
