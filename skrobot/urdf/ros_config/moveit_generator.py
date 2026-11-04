@@ -124,7 +124,8 @@ def generate_controllers_yaml(
         Controller update rate in Hz.
     joint_state_broadcaster : bool
         Also declare a ``joint_state_broadcaster``, without which nothing
-        publishes ``/joint_states`` and robot_state_publisher has no TF.
+        publishes ``/joint_states`` and robot_state_publisher has no TF
+        (unless ``controllers`` already has one by that name).
 
     Returns
     -------
@@ -152,7 +153,8 @@ def generate_controllers_yaml(
     # manager's OWN parameter namespace when spawning, so the type
     # declarations must be nested here, not in the controllers' node
     # namespaces.
-    if joint_state_broadcaster:
+    if joint_state_broadcaster and not any(
+            c["name"] == "joint_state_broadcaster" for c in controllers):
         lines.append("    joint_state_broadcaster:")
         lines.append("      type: joint_state_broadcaster/JointStateBroadcaster")
         lines.append("")

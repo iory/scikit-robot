@@ -203,6 +203,25 @@ class TestGenerators(unittest.TestCase):
         self.assertEqual(params['command_interfaces'], ['position'])
         self.assertEqual(params['state_interfaces'], ['position', 'velocity'])
 
+    def test_ros2_control_xacro_does_not_lock_a_joint_without_limits(self):
+        from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
+        urdf = _URDF.replace(
+            '    <limit lower="-1.5" upper="1.5" effort="10" velocity="1"/>\n',
+            '')
+        xacro = generate_ros2_control_xacro(parse_urdf_content(urdf)['joints'])
+        self.assertIn('<joint name="shoulder">', xacro)
+        self.assertNotIn('name="min"', xacro)
+        self.assertNotIn('name="max"', xacro)
+
+    def test_controllers_yaml_keeps_a_callers_broadcaster(self):
+        import yaml
+        text = generate_controllers_yaml(
+            [{'name': 'joint_state_broadcaster',
+              'type': 'joint_state_broadcaster/JointStateBroadcaster'},
+             {'name': 'arm_controller', 'joints': ['shoulder']}])
+        self.assertEqual(text.count('    joint_state_broadcaster:\n'), 1)
+        yaml.safe_load(text)
+
     def test_controllers_yaml_options(self):
         import yaml
         cfg = yaml.safe_load(generate_controllers_yaml(

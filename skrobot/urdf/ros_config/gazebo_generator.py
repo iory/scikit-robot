@@ -212,7 +212,10 @@ def generate_ros2_control_xacro(
                                       joint["upper_limit"])
                       for joint in driven
                       if joint.get("type") in ("revolute", "prismatic")
-                      and "lower_limit" in joint and "upper_limit" in joint})
+                      # a joint with no <limit> parses as 0..0: writing that
+                      # would lock it, so only a real range is passed on
+                      and joint.get("lower_limit", 0.0)
+                      < joint.get("upper_limit", 0.0)})
 
     for element in (ros2_control, gazebo):
         if hasattr(ET, "indent"):
