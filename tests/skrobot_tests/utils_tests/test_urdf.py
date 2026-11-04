@@ -265,16 +265,16 @@ class TestResolveFilepathWithoutRospkg(unittest.TestCase):
 
 
 class TestGlbExportPreservesMaterialColor(unittest.TestCase):
-    """GLB export must bake a material-only color into per-vertex colors.
+    """GLB export must keep a material-only color.
 
     ``TextureVisuals.to_color`` can return a color array whose length does
     not match the vertex count when the mesh has a material color but no UV
     coordinates. The GLB exporter then drops the mismatched colors and the
-    mesh becomes the default gray. The exporter must broadcast the material
-    color to every vertex so the original color survives.
+    mesh becomes the default gray. The exporter must keep the original
+    color, which it writes as the material's base color.
     """
 
-    def test_material_color_baked_into_vertex_colors(self):
+    def test_material_color_survives(self):
         import trimesh
         from trimesh.visual.material import PBRMaterial
 
@@ -297,11 +297,9 @@ class TestGlbExportPreservesMaterialColor(unittest.TestCase):
             geometries = list(scene.geometry.values())
             self.assertEqual(len(geometries), 1)
             geometry = geometries[0]
-            vertex_colors = np.asarray(geometry.visual.vertex_colors)
-            self.assertEqual(len(vertex_colors), len(geometry.vertices))
             np.testing.assert_array_equal(
-                np.unique(vertex_colors.reshape(-1, 4), axis=0),
-                np.array([color], dtype=np.uint8))
+                geometry.visual.material.baseColorFactor,
+                np.array(color, dtype=np.uint8))
 
 
 class TestEnvPrefixResolver(unittest.TestCase):
@@ -1139,3 +1137,113 @@ class TestWriteCollada(unittest.TestCase):
         colors = sorted(tuple(int(c) for c in m.visual.material.main_color[:3])
                         for m in loaded)
         self.assertEqual(colors, [(0, 0, 255), (255, 0, 0)])
+
+
+class TestWriteGltf(unittest.TestCase):
+    """A written GLB has to render in Gazebo (ogre2), not only in trimesh.
+
+    A primitive without a material gets the glTF default, which is fully
+    metallic and renders black without an environment map; Gazebo ignores
+    ``COLOR_0``; and unnamed materials have had their textures mixed up.
+    """
+
+    RED = (255, 0, 0, 255)
+    GREEN = (0, 255, 0, 255)
+    BLUE = (0, 0, 255, 255)
+
+    def setUp(self):
+        import trimesh
+
+        self._tmp = tempfile.mkdtemp()
+        red = trimesh.creation.box(extents=[0.1, 0.1, 0.1])
+        red.visual.face_colors = self.RED
+        # One mesh with two colors, as a multi-material DAE loads.
+        two = trimesh.creation.icosphere()
+        colors = np.tile(np.array(self.GREEN, dtype=np.uint8),
+                         (len(two.faces), 1))
+        colors[len(two.faces) // 2:] = self.BLUE
+        two.visual.face_colors = colors
+        # No color at all, as an STL loads.
+        plain = trimesh.creation.cylinder(radius=0.05, height=0.1)
+        self._meshes = [red, two, plain]
+        self._faces = sum(len(m.faces) for m in self._meshes)
+        self._path = os.path.join(self._tmp, 'parts.glb')
+        urdf_mesh._write_gltf(self._meshes, self._path)
+        self._gltf = self._read_gltf_json(self._path)
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    @staticmethod
+    def _read_gltf_json(path):
+        import json
+        import struct
+
+        with open(path, 'rb') as f:
+            data = f.read()
+        length = struct.unpack('<I', data[12:16])[0]
+        return json.loads(data[20:20 + length])
+
+    def _primitives(self):
+        return [primitive for mesh in self._gltf['meshes']
+                for primitive in mesh['primitives']]
+
+    def test_every_primitive_has_a_material(self):
+        materials = self._gltf.get('materials', [])
+        self.assertTrue(materials)
+        for primitive in self._primitives():
+            self.assertIn('material', primitive)
+            self.assertLess(primitive['material'], len(materials))
+
+    def test_materials_are_not_metallic(self):
+        for material in self._gltf['materials']:
+            self.assertEqual(
+                material['pbrMetallicRoughness']['metallicFactor'], 0.0)
+
+    def test_material_names_are_unique(self):
+        names = [m.get('name') for m in self._gltf['materials']]
+        self.assertNotIn(None, names)
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_colors_are_base_colors(self):
+        """Gazebo ignores ``COLOR_0``, so the colors have to be in the
+        materials."""
+        colors = set()
+        for primitive in self._primitives():
+            self.assertNotIn('COLOR_0', primitive['attributes'])
+            factor = self._gltf['materials'][primitive['material']][
+                'pbrMetallicRoughness']['baseColorFactor']
+            colors.add(tuple(int(round(c * 255)) for c in factor))
+        self.assertEqual(colors, {self.RED, self.GREEN, self.BLUE,
+                                  (102, 102, 102, 255)})
+
+    def test_geometry_is_unchanged(self):
+        import trimesh
+
+        scene = trimesh.load(self._path, force='scene', process=False)
+        self.assertEqual(
+            sum(len(m.faces) for m in scene.geometry.values()), self._faces)
+        expected = trimesh.util.concatenate(
+            [m.copy() for m in self._meshes]).bounds
+        np.testing.assert_allclose(scene.bounds, expected)
+
+    def test_texture_is_kept(self):
+        from PIL import Image
+        import trimesh
+
+        box = trimesh.creation.box(extents=[0.1, 0.1, 0.1])
+        uv = np.random.RandomState(0).uniform(size=(len(box.vertices), 2))
+        image = Image.new('RGB', (4, 4), (10, 200, 30))
+        box.visual = trimesh.visual.TextureVisuals(
+            uv=uv, material=trimesh.visual.material.SimpleMaterial(
+                image=image))
+        path = os.path.join(self._tmp, 'textured.glb')
+        urdf_mesh._write_gltf([box], path)
+        gltf = self._read_gltf_json(path)
+        self.assertEqual(len(gltf['materials']), 1)
+        pbr = gltf['materials'][0]['pbrMetallicRoughness']
+        self.assertIn('baseColorTexture', pbr)
+        self.assertEqual(pbr['metallicFactor'], 0.0)
+        self.assertTrue(gltf['materials'][0].get('name'))

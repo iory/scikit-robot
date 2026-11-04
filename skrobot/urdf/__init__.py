@@ -17,6 +17,8 @@ from skrobot.urdf.merge_fixed_links import merge_fixed_links
 from skrobot.urdf.merge_fixed_links import merge_fixed_links_file
 from skrobot.urdf.modularize_urdf import find_root_link
 from skrobot.urdf.modularize_urdf import transform_urdf_to_macro
+from skrobot.urdf.prepare_for_gazebo import prepare_urdf_for_gazebo
+from skrobot.urdf.prepare_for_gazebo import prepare_urdf_for_gazebo_file
 from skrobot.urdf.primitives_converter import convert_meshes_to_primitives
 from skrobot.urdf.robot_class_generator import generate_groups_from_geometry
 from skrobot.urdf.robot_class_generator import generate_robot_class_from_geometry
@@ -75,4 +77,6 @@ __all__ = [
     'normalize_link_origins',
     'normalize_link_origins_file',
     'urdf_to_mjcf',
+    'prepare_urdf_for_gazebo',
+    'prepare_urdf_for_gazebo_file',
 ]
