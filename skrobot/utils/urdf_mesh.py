@@ -1178,8 +1178,9 @@ def _write_gltf(meshes, output_file):
     """Write ``meshes`` as glTF/GLB, keeping colors that carry no image.
 
     Many DAE files store a per-material diffuse color as a texture visual
-    with no image; without converting it to vertex colors the color is
-    lost on the way into glTF.
+    with no image; without converting it to colors the color is lost on
+    the way into glTF.  Without Draco compression each color is then
+    written as a material, see :func:`_with_gltf_materials`.
     """
     from skrobot.utils.mesh import _material_color_to_vertex_colors
 
@@ -1209,10 +1210,86 @@ def _write_gltf(meshes, output_file):
         from skrobot.utils.draco import export_glb_with_draco
         export_glb_with_draco(meshes, output_file)
         return
+    name = os.path.splitext(os.path.basename(output_file))[0]
     scene = trimesh.Scene()
-    for mesh in meshes:
+    for mesh in _with_gltf_materials(meshes, name):
         scene.add_geometry(mesh)
     scene.export(output_file)
+
+
+# Roughness given to a material made from a plain color.  Collada and STL
+# carry no roughness, and a near-matte surface keeps the color the source
+# showed instead of washing it out with a highlight.
+_GLTF_ROUGHNESS = 0.9
+
+
+def _with_gltf_materials(meshes, name):
+    """Give every mesh a named, non-metallic glTF material.
+
+    A glTF primitive without a material falls back to the spec's default
+    material, which is fully metallic.  Gazebo (ogre2) has no environment
+    map to reflect, so such a surface renders black; it also ignores
+    ``COLOR_0``, so colors kept only per vertex come out white.  Each mesh
+    is therefore split per face color, and each color becomes the
+    ``baseColorFactor`` of a material of its own.  A mesh with a texture
+    keeps it, with ``metallicFactor`` set to 0 when the source left it
+    unset.  Gazebo has been seen to show one unnamed material's texture
+    on another's surfaces, so every material gets a name of its own.
+
+    Parameters
+    ----------
+    meshes : list of :class:`~trimesh.base.Trimesh`
+        Meshes making up one URDF geometry element.
+    name : str
+        Prefix of the material names, normally the output file's stem.
+
+    Returns
+    -------
+    list of :class:`~trimesh.base.Trimesh`
+        Meshes whose visuals are :class:`~trimesh.visual.TextureVisuals`
+        with a :class:`~trimesh.visual.material.PBRMaterial`.  Meshes with
+        a texture are the given ones with a copied material; the others
+        are new meshes, one per face color.
+    """
+    from skrobot.utils.mesh import split_mesh_by_face_color
+
+    trimesh = _lazy_trimesh()
+    PBRMaterial = trimesh.visual.material.PBRMaterial
+    result = []
+    for mesh in meshes:
+        if mesh.visual.kind == 'texture':
+            material = mesh.visual.material
+            if isinstance(material, PBRMaterial):
+                material = material.copy()
+            else:
+                material = material.to_pbr()
+            if material.metallicFactor is None:
+                material.metallicFactor = 0.0
+            if material.roughnessFactor is None:
+                material.roughnessFactor = _GLTF_ROUGHNESS
+            mesh.visual = trimesh.visual.TextureVisuals(
+                uv=mesh.visual.uv, material=material)
+            result.append(mesh)
+            continue
+        # An STL loads with ``visual.defined`` False; reading its face
+        # colors gives the default gray every viewer shows for it.
+        if not mesh.visual.defined:
+            mesh.visual.face_colors = mesh.visual.face_colors
+        for part in split_mesh_by_face_color(mesh):
+            color = np.asarray(part.visual.face_colors[0], dtype=np.float64)
+            material = PBRMaterial(
+                baseColorFactor=color / 255.0,
+                metallicFactor=0.0,
+                roughnessFactor=_GLTF_ROUGHNESS,
+                alphaMode='BLEND' if color[3] < 255 else 'OPAQUE')
+            vertex_normals = part._cache.cache.get('vertex_normals')
+            part.visual = trimesh.visual.TextureVisuals(material=material)
+            if vertex_normals is not None:
+                part.vertex_normals = vertex_normals
+            result.append(part)
+    for index, mesh in enumerate(result):
+        mesh.visual.material.name = '{}_material_{}'.format(name, index)
+    return result
 
 
 def _write_meshes(meshes, output_file):
