@@ -25,7 +25,11 @@ def main():
     parser.add_argument('--format', '-f',
                         default='dae',
                         choices=['dae', 'stl', 'glb'],
-                        help='Mesh format for visual mesh export. Default is dae.')
+                        help='Mesh format for visual mesh export. Default is dae. '
+                        'glb files keep the URDF\'s Z-up coordinates, which '
+                        'is how RViz and Gazebo read them; glTF viewers that '
+                        'follow the spec (Y-up), such as Blender or three.js, '
+                        'show them lying on their side.')
     parser.add_argument('--collision-mesh-format',
                         default='stl',
                         choices=['dae', 'stl', 'glb'],
