@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from skrobot.coordinates.math import matrix2quaternion
+from skrobot.coordinates.math import quaternion2matrix
 from skrobot.model.primitives import Box
 from skrobot.model.primitives import Cylinder
 from skrobot.model.primitives import Sphere
@@ -37,6 +38,25 @@ def _body(root, name):
     for body in root.iter('body'):
         if body.get('name') == name:
             return body
+    return None
+
+
+def _link_frame(root, name):
+    """``(body, pos, rot)``: the body a link's frame rides on, and the link's
+    position and orientation in that body; ``None`` if there is no such link.
+
+    A link is a body, or -- for a frame link such as a camera's optical frame,
+    which the converter writes as a site -- a site on its nearest real body.
+    """
+    body = _body(root, name)
+    if body is not None:
+        return body, np.zeros(3), np.eye(3)
+    for body in root.iter('body'):
+        for site in body.findall('site'):
+            if site.get('name') == name:
+                pos = [float(v) for v in site.get('pos', '0 0 0').split()]
+                quat = [float(v) for v in site.get('quat', '1 0 0 0').split()]
+                return body, np.array(pos), quaternion2matrix(quat)
     return None
 
 
@@ -188,16 +208,17 @@ def add_cameras(root, cameras):
         'frame': 'optical' or 'x_forward'}``.
     """
     for name, spec in cameras.items():
-        body = _body(root, spec['link'])
-        if body is None:
+        mount = _link_frame(root, spec['link'])
+        if mount is None:
             raise ValueError('camera {}: link {} is not in the model'.format(
                 name, spec['link']))
+        body, link_pos, link_rot = mount
         frame = spec['frame']
         if frame not in _CAMERA_IN_LINK:
             raise ValueError('camera {}: frame must be one of {}, not '
                              '{!r}'.format(name, sorted(_CAMERA_IN_LINK),
                                            frame))
         ET.SubElement(body, 'camera', {
-            'name': name, 'pos': '0 0 0',
-            'quat': _fmt(matrix2quaternion(_CAMERA_IN_LINK[frame])),
+            'name': name, 'pos': _fmt(link_pos),
+            'quat': _fmt(matrix2quaternion(link_rot @ _CAMERA_IN_LINK[frame])),
             'fovy': '{:.9g}'.format(spec['fovy'])})

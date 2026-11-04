@@ -193,6 +193,17 @@ class TestMujocoMobileScene(unittest.TestCase):
         self.assertAlmostEqual(K[1, 1], 24.0 / np.tan(np.deg2rad(30.0)))
         self.assertEqual((K[0, 2], K[1, 2]), (32.0, 24.0))
 
+    def test_frame_link_coords_and_contacts(self):
+        # camera_optical_frame has no geometry and no mass, so the converter
+        # writes it as a site; it is still a link to look up by name.
+        link = self.robot.camera_optical_frame
+        coords = self.ri.object_coords('camera_optical_frame')
+        np.testing.assert_allclose(coords.worldpos(), link.worldpos(),
+                                   atol=1e-6)
+        np.testing.assert_allclose(coords.worldrot(), link.worldrot(),
+                                   atol=1e-6)
+        self.assertEqual(self.ri.contacts('camera_optical_frame'), [])
+
     def test_x_forward_camera_has_same_optical_frame(self):
         # Mounted on the head (x forward), it must look where the optical
         # frame link does.

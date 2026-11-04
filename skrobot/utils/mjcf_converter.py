@@ -388,6 +388,34 @@ def _backemf_damping(limit):
     return float(effort) / float(velocity)
 
 
+def _is_frame(link, joint_from_parent, urdf, children_map):
+    """Whether ``link`` is a pure frame: hung from its parent by a fixed
+    joint, with no geometry and no mass of its own, and nothing but frames
+    below it -- a tool tip, a sensor mount, a named coordinate system."""
+    if joint_from_parent is None or joint_from_parent.joint_type != "fixed":
+        return False
+    if getattr(link, "visuals", None) or getattr(link, "collisions", None):
+        return False
+    inertial = getattr(link, "inertial", None)
+    if inertial is not None and getattr(inertial, "mass", 0.0):
+        return False
+    return all(_is_frame(urdf.link_map[j.child], j, urdf, children_map)
+               for j in children_map.get(link.name, []))
+
+
+def _emit_frame_sites(link, transform, urdf, children_map, parent_el):
+    """Write the frame ``link``, and the frames below it, as sites on
+    ``parent_el``; ``transform`` is its pose in that body's frame."""
+    pos, quat = matrix2translation_quaternion_wxyz(transform)
+    ET.SubElement(parent_el, "site", {"name": link.name, "pos": _fmt(pos),
+                                      "quat": _fmt(quat), "size": "0.005",
+                                      "group": "4"})
+    for child_joint in children_map.get(link.name, []):
+        _emit_frame_sites(urdf.link_map[child_joint.child],
+                          transform @ child_joint.origin, urdf, children_map,
+                          parent_el)
+
+
 def _emit_body(link, joint_from_parent, urdf, assets, children_map,
                parent_el, actuated, qpos_layout, add_free_joint=False,
                backemf_damping=False):
@@ -398,7 +426,18 @@ def _emit_body(link, joint_from_parent, urdf, assets, children_map,
     virtual ``world`` link whose single child (the real base, e.g. a torso) is
     attached by a fixed joint: with ``floating_base`` the weld must become a
     free joint instead. Recursive children always default to False.
+
+    A pure frame link (see :func:`_is_frame`) becomes a ``<site>`` on
+    ``parent_el`` instead: that is how MuJoCo names a point on a body (sensors,
+    weld/connect constraints, ``MjSpec.attach`` and ``data.site_xpos`` all take
+    a site), and an empty body would also pass for the end of a limb to
+    anything that looks for leaf bodies.
     """
+    if not add_free_joint and _is_frame(link, joint_from_parent, urdf,
+                                        children_map):
+        _emit_frame_sites(link, joint_from_parent.origin, urdf, children_map,
+                          parent_el)
+        return
     body_attrib = {"name": link.name}
     if joint_from_parent is not None:
         pos, quat = matrix2translation_quaternion_wxyz(joint_from_parent.origin)
@@ -549,6 +588,10 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  convex_decompose_collision=False, coacd_quality='balanced',
                  convex_decompose_links=()):
     """Convert a URDF to an MJCF file.
+
+    A link with no geometry and no mass, fixed to its parent with only such
+    links below it, is a frame (a tool tip, a sensor mount) and is written as a
+    ``<site>`` of the same name on the nearest real body, not as an empty body.
 
     Parameters
     ----------

@@ -377,3 +377,98 @@ class TestDecomposeLinks(unittest.TestCase):
         self.assertEqual(calls, [16])
         self.assertEqual(len(collision_geoms('finger')), 3)
         self.assertEqual(len(collision_geoms('base_link')), 2)
+
+
+# The legged robot with frames on it: a tool tip under the foot (yawed 90 deg)
+# with a marker under that, and a mount on the base that carries a real
+# (massive) link, so it is not a pure frame and must stay a body.
+_FRAMED_URDF = _LEGGED_URDF.replace("</robot>", """
+  <joint name="tip_joint" type="fixed">
+    <origin xyz="0 0 -0.15" rpy="0 0 1.5707963267948966"/>
+    <parent link="foot"/><child link="tip"/>
+  </joint>
+  <link name="tip"/>
+  <joint name="marker_joint" type="fixed">
+    <origin xyz="0.01 0 0" rpy="0 0 0"/>
+    <parent link="tip"/><child link="marker"/>
+  </joint>
+  <link name="marker"/>
+  <joint name="mount_joint" type="fixed">
+    <origin xyz="0.1 0 0" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="mount"/>
+  </joint>
+  <link name="mount"/>
+  <joint name="camera_joint" type="fixed">
+    <origin xyz="0 0 0.02" rpy="0 0 0"/>
+    <parent link="mount"/><child link="camera"/>
+  </joint>
+  <link name="camera">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="0.05"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+</robot>""")
+
+
+class TestFrameLinksBecomeSites(unittest.TestCase):
+    """A link with no geometry and no mass is a frame, and MuJoCo names a point
+    on a body with a site: an empty body would also pass for the end of the
+    leg to anything that looks for leaf bodies."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.urdf = os.path.join(self.tmpdir, 'robot.urdf')
+        with open(self.urdf, 'w') as f:
+            f.write(_FRAMED_URDF)
+        self.out_path = os.path.join(self.tmpdir, 'robot.xml')
+        urdf_to_mjcf(self.urdf, self.out_path, floating_base=True)
+        self.root = ET.parse(self.out_path).getroot()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _body(self, name):
+        return [b for b in self.root.iter('body') if b.get('name') == name][0]
+
+    def test_frames_are_sites_on_the_real_body(self):
+        bodies = {b.get('name') for b in self.root.iter('body')}
+        self.assertFalse({'tip', 'marker'} & bodies)
+        sites = {s.get('name'): s for s in self._body('foot').findall('site')}
+        self.assertEqual(set(sites), {'tip', 'marker'})
+
+        def floats(el, key):
+            return np.array([float(v) for v in el.get(key).split()])
+
+        np.testing.assert_allclose(floats(sites['tip'], 'pos'), [0, 0, -0.15],
+                                   atol=1e-9)
+        half = np.pi / 4.0
+        np.testing.assert_allclose(floats(sites['tip'], 'quat'),
+                                   [np.cos(half), 0, 0, np.sin(half)],
+                                   atol=1e-9)
+        # +x of the tip is +y of the foot, so the marker lands 1 cm along +y
+        np.testing.assert_allclose(floats(sites['marker'], 'pos'),
+                                   [0, 0.01, -0.15], atol=1e-9)
+
+    def test_a_frame_carrying_a_real_link_stays_a_body(self):
+        mount = self._body('mount')
+        self.assertEqual([b.get('name') for b in mount.findall('body')],
+                         ['camera'])
+
+    def test_the_foot_is_the_leaf_body(self):
+        leaves = {b.get('name') for b in self.root.iter('body')
+                  if b.find('body') is None}
+        self.assertEqual(leaves, {'foot', 'camera'})
+
+    def test_mujoco_places_the_sites(self):
+        try:
+            import mujoco
+        except ImportError:
+            self.skipTest('mujoco is not installed')
+        model = mujoco.MjModel.from_xml_path(self.out_path)
+        data = mujoco.MjData(model)
+        mujoco.mj_forward(model, data)
+        foot = data.body('foot').xpos
+        np.testing.assert_allclose(data.site('tip').xpos - foot,
+                                   [0, 0, -0.15], atol=1e-9)
+        np.testing.assert_allclose(data.site('marker').xpos - foot,
+                                   [0, 0.01, -0.15], atol=1e-9)
