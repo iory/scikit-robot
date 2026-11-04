@@ -89,6 +89,23 @@ Coordinate Systems
   - Useful when your source is in the assembly coordinate system (like ``.3dxml``).
   - Highly recommended if you plan to use these meshes in **MuJoCo**.
 
+.. note::
+
+   **glTF (.glb) up axis.** The glTF specification says +Y is up, but the
+   ROS tools do not convert: RViz and Gazebo use a ``.glb`` file's vertex
+   coordinates as they are, in the URDF's frame, exactly as they do for
+   ``.stl`` and ``.dae``. scikit-robot follows the same rule, both when it
+   loads a URDF and when ``convert-urdf-mesh --format glb`` writes one, so a
+   robot looks the same in scikit-robot, RViz and Gazebo.
+
+   The catch is a ``.glb`` made by a spec-following tool. Blender, for
+   example, rotates its Z-up scene to Y-up when it exports, so its ``.glb``
+   lies on its side in a URDF (RViz, Gazebo and scikit-robot alike). Export
+   such a file with the tool's Y-up conversion turned off (Blender: uncheck
+   *+Y Up* under *Transform*). Conversely, a ``.glb`` written by
+   scikit-robot shows up rotated by 90 degrees about X when opened in
+   Blender or a three.js viewer; the file is fine for ROS.
+
 Installation
 ------------
 
