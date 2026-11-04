@@ -168,6 +168,14 @@ def test_mimic_joint_is_excluded_from_controllers(serial_package):
     assert controller_types["joint_state_broadcaster"]["type"] == "joint_state_broadcaster/JointStateBroadcaster"
 
 
+def test_mimic_joint_is_excluded_from_ros2_control_xacro(serial_package):
+    """The MoveIt-side ros2_control xacro leaves the mimic joint out too."""
+    xacro = (serial_package / "config" / f"{ROBOT_NAME}.ros2_control.xacro").read_text()
+    assert '<joint name="joint1">' in xacro
+    assert '<joint name="joint2">' in xacro
+    assert "finger_mimic" not in xacro
+
+
 def test_config_urdf_carries_gazebo_sim_ros2_control(serial_package):
     """config/<robot>.urdf is the simulation URDF: gz_ros2_control wired in."""
     root = ET.parse(serial_package / "config" / f"{ROBOT_NAME}.urdf").getroot()

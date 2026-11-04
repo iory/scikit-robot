@@ -87,12 +87,17 @@ def build_ros2_control_elements(
     name: str = "GazeboSimSystem",
     command_interfaces: Sequence[str] = ("position",),
     state_interfaces: Sequence[str] = ("position", "velocity"),
+    hardware_plugin: str = GZ_HARDWARE_PLUGIN,
+    joint_limits: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[ET.Element, ET.Element]:
     """
     Build the ``<ros2_control>`` and ``<gazebo>`` elements for gz_ros2_control.
 
     Callers either serialize these into a standalone xacro snippet (see
     :func:`generate_ros2_control_xacro`) or append them to a URDF tree.
+    With another ``hardware_plugin`` (``mock_components/GenericSystem``, or
+    a real robot's driver) the ``<ros2_control>`` element stands on its own
+    and the ``<gazebo>`` one is simply not used.
 
     Parameters
     ----------
@@ -112,26 +117,46 @@ def build_ros2_control_elements(
         Command interfaces to declare per joint.
     state_interfaces : sequence of str
         State interfaces to declare per joint.
+    hardware_plugin : str
+        ros2_control hardware interface: gz_ros2_control by default,
+        ``mock_components/GenericSystem`` to run controllers with no
+        simulator or robot, or a real robot's driver.
+    joint_limits : dict of str to (float, float), optional
+        ``(lower, upper)`` per joint name. A listed joint's position command
+        interface gets them as ``min``/``max``, and its position state
+        interface an ``initial_value`` of 0 clamped into them -- the pose a
+        mock or simulated joint starts in, which must be a reachable one.
 
     Returns
     -------
     tuple of xml.etree.ElementTree.Element
         The ``<ros2_control>`` and ``<gazebo>`` elements.
     """
+    joint_limits = joint_limits or {}
     ros2_control = ET.Element("ros2_control", attrib={"name": name,
                                                       "type": "system"})
     hardware = ET.SubElement(ros2_control, "hardware")
-    ET.SubElement(hardware, "plugin").text = GZ_HARDWARE_PLUGIN
+    ET.SubElement(hardware, "plugin").text = hardware_plugin
+
+    def param(parent, key, value):
+        ET.SubElement(parent, "param", attrib={"name": key}).text = \
+            "{:.10g}".format(value)
 
     for joint_name in joint_names:
         joint_el = ET.SubElement(ros2_control, "joint",
                                  attrib={"name": joint_name})
+        limits = joint_limits.get(joint_name)
         for interface in command_interfaces:
-            ET.SubElement(joint_el, "command_interface",
-                          attrib={"name": interface})
+            el = ET.SubElement(joint_el, "command_interface",
+                               attrib={"name": interface})
+            if limits is not None and interface == "position":
+                param(el, "min", limits[0])
+                param(el, "max", limits[1])
         for interface in state_interfaces:
-            ET.SubElement(joint_el, "state_interface",
-                          attrib={"name": interface})
+            el = ET.SubElement(joint_el, "state_interface",
+                               attrib={"name": interface})
+            if limits is not None and interface == "position":
+                param(el, "initial_value", min(max(0.0, limits[0]), limits[1]))
 
     gazebo = ET.Element("gazebo")
     plugin = ET.SubElement(gazebo, "plugin",
@@ -146,6 +171,7 @@ def generate_ros2_control_xacro(
     joints: list[dict[str, Any]],
     package_name: str = "robot_config",
     controllers_file: str = "controllers.yaml",
+    hardware_plugin: str = GZ_HARDWARE_PLUGIN,
 ) -> str:
     """
     Generate a ros2_control URDF/Xacro snippet for Gazebo.
@@ -157,26 +183,36 @@ def generate_ros2_control_xacro(
         - name: Joint name
         - type: Joint type (revolute, prismatic, etc.)
         - is_mimic: Whether the joint is passively driven by another
+        - lower_limit, upper_limit: Its range, written as the position
+          interface's ``min``/``max`` (not for a continuous joint)
     package_name : str
         ROS package the plugin loads its controller config from
         (``$(find <package_name>)``).  Pass the exported package's name.
     controllers_file : str
         Controller config filename inside that package's ``config/``.
+    hardware_plugin : str
+        ros2_control hardware interface (see
+        :func:`build_ros2_control_elements`).
 
     Returns
     -------
     str
         ros2_control Xacro snippet.
     """
-    joint_names = [joint["name"] for joint in joints
-                   if joint.get("type") != "fixed"
-                   and not joint.get("is_mimic")]
+    driven = [joint for joint in joints
+              if joint.get("type") != "fixed" and not joint.get("is_mimic")]
     ros2_control, gazebo = build_ros2_control_elements(
-        joint_names,
+        [joint["name"] for joint in driven],
         package_name=package_name,
         controllers_file=controllers_file,
         command_interfaces=("position", "velocity"),
-        state_interfaces=("position", "velocity", "effort"))
+        state_interfaces=("position", "velocity", "effort"),
+        hardware_plugin=hardware_plugin,
+        joint_limits={joint["name"]: (joint["lower_limit"],
+                                      joint["upper_limit"])
+                      for joint in driven
+                      if joint.get("type") in ("revolute", "prismatic")
+                      and "lower_limit" in joint and "upper_limit" in joint})
 
     for element in (ros2_control, gazebo):
         if hasattr(ET, "indent"):

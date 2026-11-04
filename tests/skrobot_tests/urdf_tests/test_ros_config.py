@@ -152,6 +152,75 @@ class TestGenerators(unittest.TestCase):
         self.assertNotIn('follower', xacro)
         self.assertNotIn('weld', xacro)
 
+    def test_ros2_control_hardware_plugin_and_limits(self):
+        from skrobot.urdf.ros_config.gazebo_generator import build_ros2_control_elements
+        ros2_control, _gazebo = build_ros2_control_elements(
+            ['shoulder', 'wheel'], package_name='my_bot',
+            hardware_plugin='mock_components/GenericSystem',
+            joint_limits={'shoulder': (0.2, 1.0)})
+        self.assertEqual(ros2_control.find('hardware/plugin').text,
+                         'mock_components/GenericSystem')
+        joints = {j.get('name'): j for j in ros2_control.findall('joint')}
+
+        def params(joint, kind):
+            return {p.get('name'): float(p.text)
+                    for el in joint.findall(kind)
+                    if el.get('name') == 'position'
+                    for p in el.findall('param')}
+
+        self.assertEqual(params(joints['shoulder'], 'command_interface'),
+                         {'min': 0.2, 'max': 1.0})
+        # a mock or simulated joint starts at initial_value: 0 is out of
+        # [0.2, 1.0], so it starts at the nearest reachable angle
+        self.assertEqual(params(joints['shoulder'], 'state_interface'),
+                         {'initial_value': 0.2})
+        # no limits given (a continuous joint): nothing is invented
+        self.assertEqual(params(joints['wheel'], 'command_interface'), {})
+        self.assertEqual(params(joints['wheel'], 'state_interface'), {})
+
+    def test_ros2_control_xacro_writes_the_urdf_limits(self):
+        from skrobot.urdf.ros_config.gazebo_generator import generate_ros2_control_xacro
+        joints = parse_urdf_content(_URDF)['joints']
+        xacro = generate_ros2_control_xacro(
+            joints, hardware_plugin='mock_components/GenericSystem')
+        self.assertIn('<plugin>mock_components/GenericSystem</plugin>', xacro)
+        self.assertIn('<param name="min">-1.5</param>', xacro)
+        self.assertIn('<param name="max">1.5</param>', xacro)
+        self.assertIn('<param name="initial_value">0</param>', xacro)
+
+    def test_controllers_yaml_is_loadable_by_ros2_control(self):
+        import yaml
+        cfg = yaml.safe_load(generate_controllers_yaml(
+            [{'name': 'arm_controller',
+              'type': 'joint_trajectory_controller',
+              'joints': ['shoulder']}]))
+        manager = cfg['controller_manager']['ros__parameters']
+        # without a broadcaster nothing publishes /joint_states
+        self.assertEqual(manager['joint_state_broadcaster']['type'],
+                         'joint_state_broadcaster/JointStateBroadcaster')
+        # a joint trajectory controller refuses to configure without these
+        params = cfg['arm_controller']['ros__parameters']
+        self.assertEqual(params['command_interfaces'], ['position'])
+        self.assertEqual(params['state_interfaces'], ['position', 'velocity'])
+
+    def test_controllers_yaml_options(self):
+        import yaml
+        cfg = yaml.safe_load(generate_controllers_yaml(
+            [{'name': 'arm_controller',
+              'joints': ['shoulder'],
+              'command_interfaces': ['velocity']},
+             {'name': 'hand', 'type': 'position_controller',
+              'joints': ['finger']}],
+            joint_state_broadcaster=False))
+        manager = cfg['controller_manager']['ros__parameters']
+        self.assertNotIn('joint_state_broadcaster', manager)
+        self.assertEqual(
+            cfg['arm_controller']['ros__parameters']['command_interfaces'],
+            ['velocity'])
+        # interfaces are a joint trajectory controller's parameters only
+        self.assertNotIn('command_interfaces',
+                         cfg['hand']['ros__parameters'])
+
     def test_gazebo_config(self):
         text = generate_gazebo_config({'gravity': [0, 0, -9.81]}, [])
         self.assertTrue(text.strip())

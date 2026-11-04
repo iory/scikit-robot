@@ -105,6 +105,7 @@ def generate_srdf(
 def generate_controllers_yaml(
     controllers: list[dict[str, Any]],
     update_rate: int = 100,
+    joint_state_broadcaster: bool = True,
 ) -> str:
     """
     Generate ros2_control controllers.yaml configuration.
@@ -116,8 +117,14 @@ def generate_controllers_yaml(
         - name: Controller name
         - type: Controller type (joint_trajectory_controller, gripper_controller, etc.)
         - joints: List of joint names
+        - command_interfaces, state_interfaces: optional, for a joint
+          trajectory controller (default position / position + velocity),
+          which refuses to configure without them
     update_rate : int
         Controller update rate in Hz.
+    joint_state_broadcaster : bool
+        Also declare a ``joint_state_broadcaster``, without which nothing
+        publishes ``/joint_states`` and robot_state_publisher has no TF.
 
     Returns
     -------
@@ -145,6 +152,10 @@ def generate_controllers_yaml(
     # manager's OWN parameter namespace when spawning, so the type
     # declarations must be nested here, not in the controllers' node
     # namespaces.
+    if joint_state_broadcaster:
+        lines.append("    joint_state_broadcaster:")
+        lines.append("      type: joint_state_broadcaster/JointStateBroadcaster")
+        lines.append("")
     for controller in controllers:
         name = controller["name"]
         ctrl_type = controller.get("type", "joint_trajectory_controller")
@@ -156,12 +167,21 @@ def generate_controllers_yaml(
     for controller in controllers:
         name = controller["name"]
         joints = controller.get("joints", [])
+        ctrl_type = controller.get("type", "joint_trajectory_controller")
+        full_type = type_map.get(ctrl_type, ctrl_type)
 
         lines.append(f"{name}:")
         lines.append("  ros__parameters:")
         lines.append("    joints:")
         for joint in joints:
             lines.append(f"      - {joint}")
+        if full_type == type_map["joint_trajectory_controller"]:
+            for key, default in (("command_interfaces", ("position",)),
+                                 ("state_interfaces",
+                                  ("position", "velocity"))):
+                lines.append(f"    {key}:")
+                for interface in controller.get(key, default):
+                    lines.append(f"      - {interface}")
         lines.append("")
 
     return "\n".join(lines)

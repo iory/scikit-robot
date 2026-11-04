@@ -238,7 +238,7 @@ def _generate_srdf(robot_name, base_link_name, chains, connected_links, all_link
         disabled_collision_reason="Default")
 
 
-def _generate_ros2_control_xacro(robot_name, chains):
+def _generate_ros2_control_xacro(robot_name, chains, passive=()):
     """Generate ros2_control xacro content.
 
     Parameters
@@ -247,16 +247,22 @@ def _generate_ros2_control_xacro(robot_name, chains):
         Robot name.
     chains : dict
         Kinematic chain mapping.
+    passive : iterable of str
+        Joints to leave out: mimic joints, which follow their driver through
+        the URDF ``<mimic>`` tag and must not be commanded as well.
 
     Returns
     -------
     str
         Xacro file content.
     """
+    passive = set(passive)
     joint_tmpl = _load_template("ros2_control.xacro.joint.template")
     joint_blocks = ""
     for chain_joints in chains.values():
         for jn in chain_joints:
+            if jn in passive:
+                continue
             joint_blocks += joint_tmpl.substitute(joint_name=jn) + "\n"
 
     main_tmpl = _load_template("ros2_control.xacro.template")
@@ -623,8 +629,14 @@ def build_moveit_package(
         )
         _write_file(srdf_content, config_dir / f"{robot_name}.srdf")
 
+        # Mimic (passive) joints follow a driving joint via the URDF <mimic>
+        # tag, so neither ros2_control nor a trajectory controller may
+        # command them directly.
+        mimic_joint_names = {j.get("name") for j in urdf_root.findall("joint") if j.find("mimic") is not None}
+
         # ros2_control xacro
-        ros2_ctrl_xacro = _generate_ros2_control_xacro(robot_name, chains)
+        ros2_ctrl_xacro = _generate_ros2_control_xacro(
+            robot_name, chains, passive=mimic_joint_names)
         _write_file(ros2_ctrl_xacro, config_dir / f"{robot_name}.ros2_control.xacro")
 
         # Kinematics
@@ -638,9 +650,6 @@ def build_moveit_package(
         _write_yaml(kinematics, config_dir / "kinematics.yaml")
 
         # All joint names across chains, excluding mimic (passive) joints.
-        # Mimic joints follow a driving joint via the URDF <mimic> tag, so a
-        # trajectory controller must not command them directly.
-        mimic_joint_names = {j.get("name") for j in urdf_root.findall("joint") if j.find("mimic") is not None}
         all_joints = [jn for chain_joints in chains.values() for jn in chain_joints if jn not in mimic_joint_names]
 
         # MoveIt controllers
