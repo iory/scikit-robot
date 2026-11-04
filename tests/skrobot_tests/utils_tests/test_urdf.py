@@ -1247,3 +1247,43 @@ class TestWriteGltf(unittest.TestCase):
         self.assertIn('baseColorTexture', pbr)
         self.assertEqual(pbr['metallicFactor'], 0.0)
         self.assertTrue(gltf['materials'][0].get('name'))
+
+    def _write_textured(self, directory, color):
+        from PIL import Image
+        import trimesh
+
+        box = trimesh.creation.box(extents=[0.1, 0.1, 0.1])
+        uv = np.random.RandomState(0).uniform(size=(len(box.vertices), 2))
+        box.visual = trimesh.visual.TextureVisuals(
+            uv=uv, material=trimesh.visual.material.SimpleMaterial(
+                image=Image.new('RGB', (4, 4), color)))
+        directory = os.path.join(self._tmp, directory)
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, 'base_link.glb')
+        urdf_mesh._write_gltf([box], path)
+        return {m['name'] for m in self._read_gltf_json(path)['materials']}
+
+    def test_material_names_differ_between_files_of_one_name(self):
+        """Gazebo Harmonic keys an embedded texture by file stem and
+        material name, so ``left/base_link.glb`` and
+        ``right/base_link.glb`` must not share material names, or one
+        shows the other's texture."""
+        left = self._write_textured('left', (255, 0, 0))
+        right = self._write_textured('right', (0, 255, 0))
+        self.assertTrue(left)
+        self.assertTrue(right)
+        self.assertFalse(left & right)
+        for name in left | right:
+            self.assertTrue(name.startswith('base_link_'), name)
+
+    def test_material_names_are_stable(self):
+        """The same meshes give the same names, wherever they are
+        written."""
+        self.assertEqual(self._write_textured('first', (255, 0, 0)),
+                         self._write_textured('second', (255, 0, 0)))
+        path = os.path.join(self._tmp, 'again', 'parts.glb')
+        os.makedirs(os.path.dirname(path))
+        urdf_mesh._write_gltf([m.copy() for m in self._meshes], path)
+        self.assertEqual(
+            [m['name'] for m in self._read_gltf_json(path)['materials']],
+            [m['name'] for m in self._gltf['materials']])

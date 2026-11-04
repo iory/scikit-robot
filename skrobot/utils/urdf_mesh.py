@@ -1234,14 +1234,17 @@ def _with_gltf_materials(meshes, name):
     ``baseColorFactor`` of a material of its own.  A mesh with a texture
     keeps it, with ``metallicFactor`` set to 0 when the source left it
     unset.  Gazebo has been seen to show one unnamed material's texture
-    on another's surfaces, so every material gets a name of its own.
+    on another's surfaces, so every material gets a name of its own:
+    ``<name>_<digest>_material_<i>``, where the digest of the meshes
+    (:func:`_gltf_content_digest`) keeps the names apart from those of
+    another file with the same stem.
 
     Parameters
     ----------
     meshes : list of :class:`~trimesh.base.Trimesh`
         Meshes making up one URDF geometry element.
     name : str
-        Prefix of the material names, normally the output file's stem.
+        Start of the material names, normally the output file's stem.
 
     Returns
     -------
@@ -1287,9 +1290,80 @@ def _with_gltf_materials(meshes, name):
             if vertex_normals is not None:
                 part.vertex_normals = vertex_normals
             result.append(part)
+    prefix = '{}_{}'.format(name, _gltf_content_digest(result))
     for index, mesh in enumerate(result):
-        mesh.visual.material.name = '{}_material_{}'.format(name, index)
+        mesh.visual.material.name = '{}_material_{}'.format(prefix, index)
     return result
+
+
+# Hex digits of the content digest put in each material name.  Eight give
+# a chance of about 1 in 4 billion that two different meshes collide.
+_GLTF_DIGEST_LENGTH = 8
+
+# Material attributes holding an image that a glTF file embeds.
+_GLTF_TEXTURE_ATTRIBUTES = (
+    'image', 'baseColorTexture', 'metallicRoughnessTexture',
+    'normalTexture', 'occlusionTexture', 'emissiveTexture')
+
+# Material attributes holding a plain value that a glTF file stores.
+_GLTF_FACTOR_ATTRIBUTES = (
+    'baseColorFactor', 'metallicFactor', 'roughnessFactor',
+    'emissiveFactor', 'alphaMode', 'alphaCutoff', 'doubleSided')
+
+
+def _gltf_content_digest(meshes):
+    """Return a short digest of what a glTF file of ``meshes`` shows.
+
+    Gazebo Harmonic (gz-common 5) names a texture embedded in a glTF
+    file ``<file stem>_<scene name>_<material name>_<slot>``, and
+    gz-rendering uploads a texture only the first time it sees its
+    name.  Meshes in different directories often share a file stem
+    (``left/base_link.glb`` and ``right/base_link.glb``), so a material
+    named after the stem alone would show the first file's texture on
+    the second.  The digest covers the geometry, UVs, material values
+    and texture pixels, so two files get the same material names only
+    when they would show the same thing.  It depends on nothing but the
+    meshes, so the same input gives the same names on every machine.
+
+    Parameters
+    ----------
+    meshes : list of :class:`~trimesh.base.Trimesh`
+        Meshes whose visuals are :class:`~trimesh.visual.TextureVisuals`,
+        as :func:`_with_gltf_materials` makes them.
+
+    Returns
+    -------
+    digest : str
+        ``_GLTF_DIGEST_LENGTH`` lowercase hex digits.
+    """
+    digest = hashlib.sha1()
+
+    def add_array(array):
+        array = np.ascontiguousarray(array)
+        digest.update(str((array.dtype.str, array.shape)).encode())
+        digest.update(array.tobytes())
+
+    for mesh in meshes:
+        add_array(mesh.vertices)
+        add_array(mesh.faces)
+        uv = getattr(mesh.visual, 'uv', None)
+        if uv is not None:
+            add_array(uv)
+        material = mesh.visual.material
+        for attribute in _GLTF_FACTOR_ATTRIBUTES:
+            value = getattr(material, attribute, None)
+            if value is not None:
+                value = np.asarray(value)
+            digest.update(repr((attribute, value is None)).encode())
+            if value is not None:
+                add_array(value)
+        for attribute in _GLTF_TEXTURE_ATTRIBUTES:
+            image = getattr(material, attribute, None)
+            digest.update(repr((attribute, image is None)).encode())
+            if image is not None:
+                digest.update(repr((image.mode, image.size)).encode())
+                digest.update(image.tobytes())
+    return digest.hexdigest()[:_GLTF_DIGEST_LENGTH]
 
 
 def _write_meshes(meshes, output_file):
