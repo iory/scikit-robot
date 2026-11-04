@@ -118,6 +118,7 @@ convert-wheel-collision = "skrobot.apps.convert_wheel_collision:main"
 urdf-tree = "skrobot.apps.urdf_tree:main"
 convert-urdf-to-mjcf = "skrobot.apps.convert_urdf_to_mjcf:main"
 convert-urdf-to-usd = "skrobot.apps.convert_urdf_to_usd:main"
+convert-urdf-for-gazebo = "skrobot.apps.convert_urdf_for_gazebo:main"
 canonicalize-urdf = "skrobot.apps.canonicalize_urdf:main"
 
 [tool.setuptools]
