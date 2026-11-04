@@ -67,6 +67,25 @@ class TestMeshMassProperties(unittest.TestCase):
             self.assertIsNotNone(props)
             self.assertEqual(props[3], 'hull')
 
+    def test_declared_unit_and_per_axis_scale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # A 100 x 200 x 300 box in a COLLADA file that declares mm.
+            path = os.path.join(tmp, 'mm_box.dae')
+            trimesh.creation.box(extents=(100.0, 200.0, 300.0)).export(path)
+            with open(path) as f:
+                text = f.read()
+            self.assertIn('<asset>', text)
+            with open(path, 'w') as f:
+                f.write(text.replace(
+                    '<asset>',
+                    '<asset><unit meter="0.001" name="millimeter"/>', 1))
+            mass = mesh_mass_properties(path, density=1000.0)[0]
+            self.assertAlmostEqual(mass, 1000.0 * 0.1 * 0.2 * 0.3, places=6)
+            mass = mesh_mass_properties(path, density=1000.0,
+                                        scale=(2.0, 1.0, 1.0))[0]
+            self.assertAlmostEqual(mass, 2 * 1000.0 * 0.1 * 0.2 * 0.3,
+                                   places=6)
+
     def test_missing_file_returns_none(self):
         self.assertIsNone(mesh_mass_properties('/nonexistent/mesh.stl'))
 

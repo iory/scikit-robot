@@ -83,8 +83,11 @@ def mesh_mass_properties(mesh_path, density=DEFAULT_DENSITY, scale=1.0):
         Path to the mesh (any format trimesh can load).
     density : float
         Material density in kg/m^3.
-    scale : float
-        Mesh-unit to metre factor (e.g. 0.001 for millimetre meshes).
+    scale : float or sequence of 3 floats
+        Factor applied after the file's own declared unit (for example a
+        COLLADA ``<unit>``) has been converted to metres: 0.001 for a
+        millimetre mesh that declares no unit, or a per-axis factor such as
+        a URDF ``<mesh scale="sx sy sz">``.
 
     Returns
     -------
@@ -94,9 +97,10 @@ def mesh_mass_properties(mesh_path, density=DEFAULT_DENSITY, scale=1.0):
         scaled mesh coordinates) and ``method`` is ``'mesh'``, ``'hull'``
         or ``'bbox'``.  None if no usable geometry was found.
     """
+    scale = np.broadcast_to(np.asarray(scale, dtype=np.float64), (3,))
     try:
         key = (os.path.abspath(mesh_path), os.path.getmtime(mesh_path),
-               float(density), float(scale))
+               float(density), tuple(float(v) for v in scale))
     except OSError:
         return None
     if key in _PROPS_CACHE:
@@ -108,7 +112,15 @@ def mesh_mass_properties(mesh_path, density=DEFAULT_DENSITY, scale=1.0):
         if mesh is not None and hasattr(mesh, 'vertices') \
                 and len(mesh.vertices):
             mesh = mesh.copy()
-            mesh.apply_scale(scale)
+            # Honour the unit the file declares (e.g. COLLADA
+            # <unit meter="0.001">), as load_meshes() and Gazebo do;
+            # otherwise a millimetre mesh weighs 1e9 times too much.
+            if mesh.units is not None and mesh.units != 'meter':
+                mesh = mesh.convert_units('meter')
+            if np.allclose(scale, scale[0]):
+                mesh.apply_scale(float(scale[0]))
+            else:
+                mesh.apply_transform(np.diag(np.append(scale, 1.0)))
             method = 'mesh'
             props = _solid_properties(mesh, density) \
                 if mesh.is_watertight else None
@@ -202,8 +214,9 @@ def link_inertial_from_mesh(mesh_path, visual_xyz, visual_rpy,
         The link's visual origin (mesh to link), in metres / radians.
     density : float
         Material density in kg/m^3.
-    scale : float
-        Mesh-unit to metre factor (e.g. 0.001 for millimetre meshes).
+    scale : float or sequence of 3 floats
+        Mesh-unit to metre factor (e.g. 0.001 for millimetre meshes), or a
+        per-axis factor.
 
     Returns
     -------
