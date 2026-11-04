@@ -53,20 +53,22 @@ def parse_urdf_content(urdf_content: str) -> dict[str, Any]:
         link_info = _parse_link(link_elem)
         links.append(link_info)
 
-    # Find root link (link that is not a child of any joint)
+    # Find root link (link that is not a child of any joint), in DOCUMENT
+    # order: a set.pop() here picks a different root from run to run on a
+    # multi-root / disconnected URDF.
     child_links = {j["child_link"] for j in joints}
-    link_names = {link["name"] for link in links}
-    root_links = link_names - child_links
+    root_candidates = [link["name"] for link in links
+                       if link["name"] not in child_links]
 
     root_link = None
-    if len(root_links) == 1:
-        root_link = root_links.pop()
-    elif len(root_links) > 1:
-        # If multiple root candidates, pick the one that's a parent
+    if len(root_candidates) == 1:
+        root_link = root_candidates[0]
+    elif len(root_candidates) > 1:
+        # several roots: the first that drives a joint (a real kinematic
+        # root) over a stray link with no joints, else simply the first
         parent_links = {j["parent_link"] for j in joints}
-        candidates = root_links & parent_links
-        if candidates:
-            root_link = candidates.pop()
+        root_link = next((c for c in root_candidates if c in parent_links),
+                         root_candidates[0])
 
     return {
         "joints": joints,

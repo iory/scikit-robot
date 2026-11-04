@@ -34,6 +34,26 @@ class TestParseUrdfContent(unittest.TestCase):
             sorted(link['name'] for link in parsed['links']),
             ['arm_link', 'base_link'])
 
+    def test_root_of_a_multi_root_urdf_is_stable(self):
+        # two disconnected trees and a stray link: the first root in document
+        # order that drives a joint, the same one on every run
+        urdf = """<robot name="multi">
+          <link name="stray"/>
+          <link name="b_base"/><link name="b_tip"/>
+          <link name="a_base"/><link name="a_tip"/>
+          <joint name="jb" type="fixed">
+            <parent link="b_base"/><child link="b_tip"/></joint>
+          <joint name="ja" type="fixed">
+            <parent link="a_base"/><child link="a_tip"/></joint>
+        </robot>"""
+        roots = {parse_urdf_content(urdf)['root_link'] for _ in range(20)}
+        self.assertEqual(roots, {'b_base'})
+
+    def test_root_falls_back_to_the_first_link(self):
+        # no link drives a joint: the first in document order, not None
+        urdf = '<robot name="loose"><link name="p"/><link name="q"/></robot>'
+        self.assertEqual(parse_urdf_content(urdf)['root_link'], 'p')
+
     def test_invalid_xml_raises(self):
         with self.assertRaises(ValueError):
             parse_urdf_content('<not-urdf/>')
