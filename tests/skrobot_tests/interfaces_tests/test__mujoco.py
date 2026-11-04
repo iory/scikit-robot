@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
@@ -193,6 +194,17 @@ class TestMujocoMobileScene(unittest.TestCase):
         self.assertAlmostEqual(K[1, 1], 24.0 / np.tan(np.deg2rad(30.0)))
         self.assertEqual((K[0, 2], K[1, 2]), (32.0, 24.0))
 
+    def test_frame_link_coords_and_contacts(self):
+        # camera_optical_frame has no geometry and no mass, so the converter
+        # writes it as a site; it is still a link to look up by name.
+        link = self.robot.camera_optical_frame
+        coords = self.ri.object_coords('camera_optical_frame')
+        np.testing.assert_allclose(coords.worldpos(), link.worldpos(),
+                                   atol=1e-6)
+        np.testing.assert_allclose(coords.worldrot(), link.worldrot(),
+                                   atol=1e-6)
+        self.assertEqual(self.ri.contacts('camera_optical_frame'), [])
+
     def test_x_forward_camera_has_same_optical_frame(self):
         # Mounted on the head (x forward), it must look where the optical
         # frame link does.
@@ -270,3 +282,30 @@ class TestMujocoWheels(unittest.TestCase):
         self.ri.wait_interpolation()
         self.assertAlmostEqual(self.ri.time - start, 0.5, delta=0.01)
         self.assertAlmostEqual(self.ri.angle_vector()[0], 10.0, delta=0.1)
+
+
+class TestSceneEditsFindFrameSites(unittest.TestCase):
+    """The converter writes a frame link as a site, on <worldbody> when it hangs
+    straight off a URDF 'world' root; scene edits still treat it as a link."""
+
+    _XML = """<mujoco><worldbody>
+      <site name="world_cam" pos="1 0 2" quat="1 0 0 0"/>
+      <body name="base_link"><site name="optical" pos="0 0 0.3"/></body>
+    </worldbody></mujoco>"""
+
+    def test_camera_mounts_on_a_worldbody_site(self):
+        from skrobot.interfaces import _mujoco_scene
+        root = ET.fromstring(self._XML)
+        _mujoco_scene.add_cameras(
+            root, {'cam': {'link': 'world_cam', 'fovy': 60,
+                           'frame': 'optical'}})
+        cam = root.find('worldbody').find('camera')
+        self.assertEqual(cam.get('pos'), '1 0 2')
+
+    def test_an_object_cannot_take_a_frame_site_name(self):
+        from skrobot.interfaces import _mujoco_scene
+        from skrobot.model.primitives import Box
+        root = ET.fromstring(self._XML)
+        with self.assertRaises(ValueError):
+            _mujoco_scene.add_objects(
+                root, [Box((0.1, 0.1, 0.1), name='optical')], movable=False)

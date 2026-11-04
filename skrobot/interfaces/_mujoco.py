@@ -976,6 +976,14 @@ class MujocoRobotInterface(object):
         -------
         skrobot.coordinates.Coordinates
         """
+        # a frame link (no geometry, no mass) is a site, not a body
+        sid = self.mujoco.mj_name2id(
+            self.model, self.mujoco.mjtObj.mjOBJ_SITE, name)
+        if sid >= 0 and self.mujoco.mj_name2id(
+                self.model, self.mujoco.mjtObj.mjOBJ_BODY, name) < 0:
+            return Coordinates(
+                pos=self.data.site_xpos[sid].copy(),
+                rot=self.data.site_xmat[sid].reshape(3, 3).copy())
         return self._body_coords(self._body_id(name))
 
     def contacts(self, name):
@@ -990,8 +998,11 @@ class MujocoRobotInterface(object):
         -------
         list[str]
         """
-        bid = self._body_id(name)
         mj = self.mujoco
+        if mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, name) < 0 \
+                and mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SITE, name) >= 0:
+            return []  # a frame link has no geometry to touch anything with
+        bid = self._body_id(name)
         touching = set()
         for i in range(self.data.ncon):
             contact = self.data.contact[i]
