@@ -1,5 +1,5 @@
 import importlib
-import time
+import time as _time
 
 import numpy as np
 
@@ -8,6 +8,9 @@ from skrobot.coordinates import matrix2quaternion
 from skrobot.coordinates import quaternion2rpy
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
+from skrobot.interfaces.base import DEFAULT_CONTROLLER
+from skrobot.interfaces.base import RobotInterfaceBase
+from skrobot.interpolation import hermite_trajectory
 
 
 _available = False
@@ -54,9 +57,34 @@ def _check_available(silent=False):
     return _available
 
 
-class PybulletRobotInterface(Coordinates):
+class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
 
     """Pybullet Interface Class
+
+    It is a :class:`skrobot.interfaces.base.RobotInterfaceBase` as well as
+    the robot's base pose (:class:`skrobot.coordinates.Coordinates`). The
+    calls it had before behave as before:
+
+    - ``angle_vector(av)`` / ``angle_vector(av, realtime_simulation=...)``
+      sets the joint motor targets at once (and, unless realtime
+      simulation is on, puts the joints there with ``resetJointState``);
+      ``angle_vector()`` sends the robot model's angle vector.
+    - ``wait_interpolation(thresh, timeout)`` steps the simulation until
+      every joint is slower than ``thresh`` and returns True, or False after
+      ``timeout`` seconds of wall-clock time.
+    - ``sync()`` copies the simulated joints into the robot model.
+
+    Timed motions are what the base class adds: ``angle_vector(av, 2.0)``
+    (any ``time`` that is a number, not a bool), a ``{joint_name: angle}``
+    goal, or any of ``controller_type``, ``start_time``, ``time_scale``,
+    ``velocities`` sends a trajectory that :meth:`step` and
+    :meth:`wait_interpolation` carry out in simulation time. The
+    simulation only advances in :meth:`step`, which writes the trajectory's
+    motor targets and calls ``pybullet.stepSimulation``; a program that
+    calls ``stepSimulation`` itself does not move a timed trajectory.
+    :meth:`measured_angle_vector`, :meth:`measured_joint_angles` and
+    :meth:`outside_limits` report the simulated joints without the robot
+    model's clamping.
 
     Parameters
     ----------
@@ -85,13 +113,18 @@ class PybulletRobotInterface(Coordinates):
     >>> client_id = pybullet.connect(pybullet.GUI)
     >>> robot_model = PR2()
     >>> interface = PybulletRobotInterface(robot_model, connect=client_id)
+
+    A timed motion, carried out in simulation time
+
+    >>> interface.angle_vector({'r_shoulder_pan_joint': 0.5}, 2.0)
+    >>> interface.wait_interpolation()
     """
 
     def __init__(self, robot, urdf_path=None, use_fixed_base=False,
                  connect=1, *args, **kwargs):
         if _check_available() is False:
             raise ImportError('pybullet is not available.')
-        super(PybulletRobotInterface, self).__init__(*args, **kwargs)
+        Coordinates.__init__(self, *args, **kwargs)
         if urdf_path is None:
             if robot.urdf_path is not None:
                 urdf_path = robot.urdf_path
@@ -111,6 +144,16 @@ class PybulletRobotInterface(Coordinates):
 
         self.load_bullet()
         self.realtime_simulation = False
+        # Timed trajectories: simulation time [s] advanced by step(), and
+        # for each joint still moving ``name -> (trajectory, column, end
+        # time)``, one hermite_trajectory covering all joints of a send.
+        self.sim_time = 0.0
+        self._motions = {}
+        RobotInterfaceBase.__init__(self, robot, controllers={
+            DEFAULT_CONTROLLER: [
+                j.name for j in robot.joint_list
+                if j.joint_dof == 1
+                and j.name in self.joint_name_to_joint_id]})
 
     @staticmethod
     def available():
@@ -207,11 +250,14 @@ class PybulletRobotInterface(Coordinates):
         self._reset_position_and_orientation()
         return self
 
-    def newcoords(self, c, pos=None):
+    def newcoords(self, c, pos=None, **kwargs):
         """Update of position and orientation.
 
+        Keyword arguments (``check_validity``, ``relative_coords``) are
+        passed to :meth:`skrobot.coordinates.Coordinates.newcoords`, which
+        ``translate``, ``rotate`` and ``transform`` call with them.
         """
-        super(PybulletRobotInterface, self).newcoords(c, pos)
+        super(PybulletRobotInterface, self).newcoords(c, pos, **kwargs)
         self._reset_position_and_orientation()
         return self
 
@@ -242,36 +288,82 @@ class PybulletRobotInterface(Coordinates):
         self.target_velocity = 0.0
         self.velocity_gain = 0.1
 
-    def angle_vector(self, angle_vector=None, realtime_simulation=None):
-        """Send a angle vector to pybullet's physics engine.
+    def angle_vector(self, av=None, time=None, controller_type=None,
+                     start_time=None, time_scale=None, velocities=None,
+                     realtime_simulation=None, angle_vector=None):
+        """Send an angle vector to pybullet's physics engine.
+
+        Called as before -- ``angle_vector(av)``,
+        ``angle_vector(av, realtime_simulation=True)`` or the old positional
+        ``angle_vector(av, True)`` -- it sets the motor targets at once.
+        Given a ``time`` (a number), a dict, or any of the timed-motion
+        arguments, it sends a timed trajectory instead, as
+        :meth:`skrobot.interfaces.base.RobotInterfaceBase.angle_vector`
+        does; :meth:`step` and :meth:`wait_interpolation` carry it out.
 
         Parameters
         ----------
-        angle_vector : None or numpy.ndarray
-            angle vector. If `None`, send self.robot.angle_vector()
+        av : None, numpy.ndarray or dict
+            angle vector, or ``{joint_name: angle}`` for a timed motion of
+            those joints. If `None`, send self.robot.angle_vector().
+        time : None, float or bool
+            Time to the goal [s] of a timed motion. A bool is taken as
+            ``realtime_simulation``, the old second positional argument.
+        controller_type, start_time, time_scale, velocities
+            Timed motion only; see
+            :meth:`skrobot.interfaces.base.RobotInterfaceBase.angle_vector`.
+            ``start_time`` defaults to 0 and ``time_scale`` to 5.
         realtime_simulation : None or bool
             If this value is `True`, send angle_vector
-            by pybullet.setJointMotorControl2.
+            by pybullet.setJointMotorControl2 only, without resetting the
+            joints. The setting is kept for later calls.
+        angle_vector : None or numpy.ndarray
+            Old name of ``av``.
 
         Returns
         -------
-        angle_vector : numpy.ndarray
+        angle_vector : numpy.ndarray or dict
             return sent angle vector.
         """
+        if angle_vector is not None:
+            if av is not None:
+                raise TypeError('give av or angle_vector, not both')
+            av = angle_vector
+        if isinstance(time, bool):
+            if realtime_simulation is not None:
+                raise TypeError('realtime_simulation given twice')
+            realtime_simulation = time
+            time = None
         if realtime_simulation is not None and isinstance(
                 realtime_simulation, bool):
             self.realtime_simulation = realtime_simulation
 
+        timed = (time is not None or isinstance(av, dict)
+                 or controller_type is not None or start_time is not None
+                 or time_scale is not None or velocities is not None)
+        if timed:
+            if self.robot_id is None:
+                raise RuntimeError('no robot is loaded in pybullet')
+            if av is None:
+                av = self.robot.angle_vector()
+            return RobotInterfaceBase.angle_vector(
+                self, av, time, controller_type=controller_type,
+                start_time=0.0 if start_time is None else start_time,
+                time_scale=5.0 if time_scale is None else time_scale,
+                velocities=velocities)
+
         if self.robot_id is None:
             return self.robot.angle_vector()
-        if angle_vector is None:
-            angle_vector = self.robot.angle_vector()
+        if av is None:
+            av = self.robot.angle_vector()
 
         for i, (joint, angle) in enumerate(
-                zip(self.robot.joint_list, angle_vector)):
+                zip(self.robot.joint_list, av)):
             idx = self.joint_name_to_joint_id[joint.name]
 
             joint = self.robot.joint_list[i]
+            # A direct command replaces a timed motion of this joint.
+            self._motions.pop(joint.name, None)
 
             if self.realtime_simulation is False:
                 p.resetJointState(self.robot_id, idx, angle)
@@ -286,37 +378,45 @@ class PybulletRobotInterface(Coordinates):
                                     velocityGain=self.velocity_gain,
                                     maxVelocity=self.max_velocity)
 
-        return angle_vector
+        return av
 
     def wait_interpolation(self, thresh=0.05, timeout=60.0):
         """Wait robot movement.
 
         This function usually called after self.angle_vector.
-        Wait while the robot joints are moving or until time of timeout.
-        This function called internally pybullet.stepSimulation().
+        Wait while a timed motion is running and while the robot joints
+        are moving, or until time of timeout.
+        This function steps the simulation (see :meth:`step`).
 
         Parameters
         ----------
         thresh : float
             velocity threshold for detecting movement stop.
         timeout : float
-            maximum time of timeout.
+            maximum time of timeout (wall-clock seconds).
+
+        Returns
+        -------
+        bool
+            True when the robot stopped, False on timeout.
         """
-        start = time.time()
+        start = _time.time()
         while True:
-            p.stepSimulation()
-            wait = False
-            for idx in self.joint_ids:
-                if idx is None:
-                    continue
-                _, velocity, _, _ = p.getJointState(self.robot_id,
-                                                    idx)
-                if abs(velocity) > thresh:
-                    wait = True
+            self.step()
+            wait = bool(self._motions)
+            if not wait:
+                for idx in self.joint_ids:
+                    if idx is None:
+                        continue
+                    _, velocity, _, _ = p.getJointState(self.robot_id,
+                                                        idx)
+                    if abs(velocity) > thresh:
+                        wait = True
             if wait is False:
                 break
-            if time.time() - start > timeout:
+            if _time.time() - start > timeout:
                 return False
+        self.update_robot_state()
         return True
 
     def sync(self):
@@ -337,6 +437,95 @@ class PybulletRobotInterface(Coordinates):
         self.robot.root_link.newcoords(np.array([rpy[0], rpy[1], rpy[2]]),
                                        pos=pos)
         return self.angle_vector()
+
+    # ------------------------------------------------------------------
+    # Timed motions (RobotInterfaceBase backend)
+    # ------------------------------------------------------------------
+
+    def _timestep(self):
+        return p.getPhysicsEngineParameters()['fixedTimeStep']
+
+    def _motor_target(self, name, position):
+        joint = getattr(self.robot, name)
+        kwargs = {}
+        # The timed trajectory sets the pace; max_velocity (the cap of a
+        # direct command) is only raised to the joint's own limit.
+        velocity_limit = float(joint.max_joint_velocity)
+        if np.isfinite(velocity_limit):
+            kwargs['maxVelocity'] = max(self.max_velocity, velocity_limit)
+        p.setJointMotorControl2(bodyIndex=self.robot_id,
+                                jointIndex=self.joint_name_to_joint_id[name],
+                                controlMode=p.POSITION_CONTROL,
+                                targetPosition=position,
+                                targetVelocity=self.target_velocity,
+                                force=joint.max_joint_torque,
+                                positionGain=self.position_gain,
+                                velocityGain=self.velocity_gain,
+                                **kwargs)
+
+    def _trajectory_target(self, name, t):
+        trajectory, column, _ = self._motions[name]
+        return float(trajectory(t)[column])
+
+    def step(self, n=1):
+        """Advance the simulation ``n`` steps, following timed motions.
+
+        Before each ``pybullet.stepSimulation`` the motor target of every
+        joint with a timed motion is set to where the trajectory is at
+        :attr:`sim_time`.
+
+        Parameters
+        ----------
+        n : int
+            Number of simulation steps.
+        """
+        dt = self._timestep()
+        for _ in range(n):
+            for name in list(self._motions):
+                self._motor_target(
+                    name, self._trajectory_target(name, self.sim_time))
+                if self.sim_time >= self._motions[name][2]:
+                    del self._motions[name]
+            p.stepSimulation()
+            self.sim_time += dt
+
+    def _send_trajectory(self, controller_type, joint_names, positions,
+                         velocities, times, start_time):
+        state = self._read_joint_state()
+        t_start = self.sim_time + start_time
+        # The motion starts at rest from where the joints are now.
+        knot_times = np.concatenate([[t_start], t_start + np.asarray(times)])
+        trajectory = hermite_trajectory(
+            knot_times,
+            np.vstack([[state[name] for name in joint_names], positions]),
+            np.vstack([np.zeros(len(joint_names)), velocities]))
+        for j, name in enumerate(joint_names):
+            self._motions[name] = (trajectory, j, knot_times[-1])
+
+    def _read_joint_state(self):
+        state = {}
+        for name in self._controllers[DEFAULT_CONTROLLER]:
+            idx = self.joint_name_to_joint_id[name]
+            state[name] = float(p.getJointState(self.robot_id, idx)[0])
+        return state
+
+    def _is_interpolating(self, controller_type):
+        return any(name in self._motions
+                   for name in self._controllers[controller_type])
+
+    def _cancel(self, controller_type):
+        state = self._read_joint_state()
+        for name in self._controllers[controller_type]:
+            if self._motions.pop(name, None) is not None:
+                self._motor_target(name, state[name])
+
+    def _wait_interpolation(self, controller_type, timeout):
+        dt = self._timestep()
+        end = self.sim_time + timeout if timeout is not None else None
+        while self._is_interpolating(controller_type):
+            if end is not None and self.sim_time + 0.5 * dt >= end:
+                return
+            self.step()
 
 
 remove_user_item_indices = []
