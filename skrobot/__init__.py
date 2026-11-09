@@ -12,6 +12,7 @@ if (sys.version_info[0] == 3 and sys.version_info[1] >= 7) \
         "data",
         "planner",
         "interfaces",
+        "interpolation",
         "model",
         "models",
         "viewers",
@@ -76,6 +77,7 @@ else:
     from skrobot import data
     from skrobot import planner
     from skrobot import interfaces
+    from skrobot import interpolation
     from skrobot import model
     from skrobot import models
     from skrobot import viewers

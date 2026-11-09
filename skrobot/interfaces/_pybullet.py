@@ -9,8 +9,8 @@ from skrobot.coordinates import quaternion2rpy
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.interfaces.base import DEFAULT_CONTROLLER
-from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
+from skrobot.interpolation import hermite_trajectory
 
 
 _available = False

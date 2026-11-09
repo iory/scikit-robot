@@ -3,9 +3,9 @@ import time
 import numpy as np
 import pytest
 
-from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
 from skrobot.interfaces.fake import FakeRobotInterface
+from skrobot.interpolation import hermite_trajectory
 from skrobot.model import RobotModel
 
 

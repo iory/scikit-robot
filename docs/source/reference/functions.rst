@@ -110,3 +110,15 @@ Please use their replacements instead.
 - :func:`~skrobot.coordinates.math.matrix_exponent` → Use :func:`~skrobot.coordinates.math.axis_angle_vector_to_rotation_matrix` instead
 - :func:`~skrobot.coordinates.math.midrot` → Use :func:`~skrobot.coordinates.math.interpolate_rotation_matrices` instead
 - :func:`~skrobot.coordinates.math.outer_product_matrix` → Use :func:`~skrobot.coordinates.math.skew_symmetric_matrix` instead
+
+
+Trajectory interpolation
+------------------------
+
+.. module:: skrobot.interpolation
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   hermite_trajectory

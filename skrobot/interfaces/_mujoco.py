@@ -30,7 +30,7 @@ from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.interfaces import _mujoco_scene
-from skrobot.interfaces.base import hermite_trajectory
+from skrobot.interpolation import hermite_trajectory
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 

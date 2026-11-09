@@ -3,7 +3,7 @@
 :class:`FakeRobotInterface` is the smallest complete backend of
 :class:`skrobot.interfaces.base.RobotInterfaceBase`: it "executes" the
 trajectories it is sent by cubic Hermite interpolation over time
-(:func:`skrobot.interfaces.base.hermite_trajectory`) and
+(:func:`skrobot.interpolation.hermite_trajectory`) and
 reports the interpolated positions as the measured state. There is no
 physics, no tracking error and no joint limit, so what it reports is
 exactly what was commanded -- and a state injected with
@@ -17,8 +17,8 @@ By default time is virtual: it stands still until :meth:`advance` or
 
 import numpy as np
 
-from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
+from skrobot.interpolation import hermite_trajectory
 
 
 class FakeRobotInterface(RobotInterfaceBase):

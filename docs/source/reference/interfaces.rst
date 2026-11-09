@@ -31,7 +31,6 @@ there for the values as published on ``joint_states``.
    :nosignatures:
 
    RobotInterfaceBase
-   hermite_trajectory
 
 .. module:: skrobot.interfaces.fake
 
