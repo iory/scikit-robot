@@ -23,7 +23,13 @@ pybullet = LazyPybulletModule()
 
 
 def __getattr__(name):
-    if name == 'PybulletRobotInterface':
+    if name == 'RobotInterfaceBase':
+        return importlib.import_module(
+            'skrobot.interfaces.base').RobotInterfaceBase
+    elif name == 'FakeRobotInterface':
+        return importlib.import_module(
+            'skrobot.interfaces.fake').FakeRobotInterface
+    elif name == 'PybulletRobotInterface':
         return pybullet.PybulletRobotInterface
     elif name == 'MujocoRobotInterface':
         # mujoco itself is imported when the interface is constructed, so

@@ -2,6 +2,70 @@ Interfaces
 ==========
 
 
+Writing an Interface for Your Robot
+-----------------------------------
+
+``RobotInterfaceBase`` gives any robot the ``ri.angle_vector(av, time)`` /
+``ri.wait_interpolation()`` / ``ri.potentio_vector()`` call shape without ROS.
+It handles controller groups, goals given as a vector or as a
+``{joint_name: angle}`` dict, durations from the joint velocity limits
+(``time=None`` and ``time_scale``), via-point velocities of
+``angle_vector_sequence``, and the measured state. A backend implements four
+hooks: ``_send_trajectory``, ``_read_joint_state``, ``_is_interpolating`` and
+``_cancel`` (plus ``_set_servo`` if it can switch torque, and
+``_wait_interpolation`` if it runs on its own clock).
+
+Measured angles are kept by joint name and never pass through the robot
+model, which clamps into the URDF limits: ``potentio_vector()`` reports an
+angle past a limit as it is, and ``outside_limits()`` lists such joints.
+``FakeRobotInterface`` is an in-memory backend for tests and examples.
+
+.. module:: skrobot.interfaces.base
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   RobotInterfaceBase
+
+.. module:: skrobot.interfaces.fake
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   FakeRobotInterface
+
+.. code-block:: python
+
+    from skrobot.interfaces.base import RobotInterfaceBase
+
+    class MyArmInterface(RobotInterfaceBase):
+
+        def __init__(self, robot, device):
+            self.dev = device
+            super(MyArmInterface, self).__init__(robot)
+
+        def _send_trajectory(self, controller_type, joint_names,
+                             positions, velocities, times, start_time):
+            self.dev.play(joint_names, positions, times, delay=start_time)
+
+        def _read_joint_state(self):
+            return dict(zip(self.dev.joint_names(), self.dev.positions()))
+
+        def _is_interpolating(self, controller_type):
+            return self.dev.busy()
+
+        def _cancel(self, controller_type):
+            self.dev.stop()
+
+    ri = MyArmInterface(robot, device)
+    ri.angle_vector({'elbow_joint': 0.5}, 2.0)
+    ri.wait_interpolation()
+    print(ri.outside_limits())
+
+
+
 Pybullet Interface
 ------------------
 
