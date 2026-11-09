@@ -91,6 +91,15 @@ You can use a Pybullet interface using skrobot.
 >>> interface = PybulletRobotInterface(robot_model, connect=client_id)
 >>> interface.angle_vector(robot_model.reset_pose())
 
+``PybulletRobotInterface`` is a ``RobotInterfaceBase``. The calls above keep
+setting the motor targets at once; a ``time``, a ``{joint_name: angle}`` goal
+or another timed-motion argument sends a trajectory that ``step()`` and
+``wait_interpolation()`` carry out in simulation time:
+
+>>> interface.angle_vector({'r_shoulder_pan_joint': 0.5}, 2.0)
+>>> interface.wait_interpolation()
+>>> interface.measured_angle_vector()
+
 .. figure:: ../../image/pybullet_interface.png
     :scale: 60%
     :align: center
