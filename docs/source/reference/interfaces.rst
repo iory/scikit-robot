@@ -16,8 +16,12 @@ hooks: ``_send_trajectory``, ``_read_joint_state``, ``_is_interpolating`` and
 ``_wait_interpolation`` if it runs on its own clock).
 
 Measured angles are kept by joint name and never pass through the robot
-model, which clamps into the URDF limits: ``potentio_vector()`` reports an
-angle past a limit as it is, and ``outside_limits()`` lists such joints.
+model, which clamps into the URDF limits: ``measured_angle_vector()`` (and,
+in the base class, ``potentio_vector()``) reports an angle past a limit as it
+is, and ``outside_limits()`` lists such joints. ``ROS2RobotInterfaceBase`` is
+a ``RobotInterfaceBase`` too; for compatibility its ``potentio_vector()``
+still returns the clamped model angles, so use ``measured_angle_vector()``
+there for the values as published on ``joint_states``.
 ``FakeRobotInterface`` is an in-memory backend for tests and examples.
 
 .. module:: skrobot.interfaces.base

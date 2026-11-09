@@ -130,16 +130,24 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
                  poll_period=0.01):
         self.robot = robot
         self.poll_period = poll_period
-        self._joints = {}
-        for joint in robot.joint_list:
-            self._joints[joint.name] = joint
-        self._model_joint_names = [j.name for j in robot.joint_list]
+        # Measured positions by joint name, exactly as the backend reported
+        # them (never passed through the clamping model).
+        self._measured = {}
+        self._init_controllers(controllers, controller_type)
 
+    def _init_controllers(self, controllers, controller_type):
+        """Validate and store the controller groups.
+
+        A backend that keeps its controller groups elsewhere (the ROS 2
+        interface builds them from its action servers) overrides this and
+        the :attr:`_controllers` property.
+        """
         if controllers is None:
             controllers = {DEFAULT_CONTROLLER: list(self._model_joint_names)}
         if len(controllers) == 0:
             raise ValueError('controllers must name at least one group')
-        self._controllers = {}
+        joints = self._joints
+        groups = {}
         for name, joint_names in controllers.items():
             joint_names = list(joint_names)
             self._check_names(joint_names)
@@ -148,20 +156,32 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
                     'controller {} lists a joint twice: {}'.format(
                         name, joint_names))
             multi_dof = [n for n in joint_names
-                         if self._joints[n].joint_dof != 1]
+                         if joints[n].joint_dof != 1]
             if multi_dof:
                 raise ValueError(
                     'only 1-DOF joints can be commanded, but controller {} '
                     'has {}'.format(name, multi_dof))
-            self._controllers[name] = joint_names
+            groups[name] = joint_names
+        self._controller_groups = groups
         if controller_type is None:
-            controller_type = next(iter(self._controllers))
+            controller_type = next(iter(groups))
         self._check_controller(controller_type)
         self.controller_type = controller_type
 
-        # Measured positions by joint name, exactly as the backend reported
-        # them (never passed through the clamping model).
-        self._measured = {}
+    @property
+    def _controllers(self):
+        """``{controller_type: [joint names]}`` of the controller groups."""
+        return self._controller_groups
+
+    @property
+    def _joints(self):
+        """``{joint_name: joint}`` of the current ``self.robot``."""
+        return {j.name: j for j in self.robot.joint_list}
+
+    @property
+    def _model_joint_names(self):
+        """Joint names of the current ``self.robot``, in model order."""
+        return [j.name for j in self.robot.joint_list]
 
     # ------------------------------------------------------------------
     # Backend hooks
@@ -331,15 +351,16 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
             values = np.array([av[n] for n in names], dtype=np.float64)
         else:
             vector = np.asarray(av, dtype=np.float64)
-            if vector.shape != (len(self._model_joint_names),):
+            model_names = self._model_joint_names
+            if vector.shape != (len(model_names),):
                 raise ValueError(
                     'angle vector must have shape ({},) in robot.joint_list '
                     'order, but got {}'.format(
-                        len(self._model_joint_names), vector.shape))
+                        len(model_names), vector.shape))
+            index = {n: i for i, n in enumerate(model_names)}
             names = list(group)
-            values = np.array(
-                [vector[self._model_joint_names.index(n)] for n in names],
-                dtype=np.float64)
+            values = np.array([vector[index[n]] for n in names],
+                              dtype=np.float64)
         if not np.all(np.isfinite(values)):
             bad = [n for n, v in zip(names, values) if not np.isfinite(v)]
             raise ValueError('goal is not finite for {}'.format(bad))
@@ -348,8 +369,9 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
     def _diff(self, names, goal, start):
         """``goal - start``, the short way round for continuous joints."""
         diff = np.asarray(goal, dtype=np.float64) - start
+        joints = self._joints
         for i, name in enumerate(names):
-            joint = self._joints[name]
+            joint = joints[name]
             if np.isinf(joint.min_angle) and np.isinf(joint.max_angle):
                 diff[i] = (diff[i] + np.pi) % (2 * np.pi) - np.pi
         return diff
@@ -407,6 +429,20 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
     def potentio_vector(self):
         """Last measured joint angles, in ``robot.joint_list`` order.
 
+        Same as :meth:`measured_angle_vector` here. A backend may override
+        it for compatibility (the ROS 2 interface returns its model's,
+        clamped, angles); :meth:`measured_angle_vector` stays unclamped.
+
+        Returns
+        -------
+        numpy.ndarray
+            ``(len(robot.joint_list),)`` float64 vector.
+        """
+        return self.measured_angle_vector()
+
+    def measured_angle_vector(self):
+        """Last measured joint angles, unclamped, in ``robot.joint_list`` order.
+
         Built from the measured values by joint name, without going through
         the robot model, so an angle past its URDF limit is returned as it
         is. Joints that have never been measured are ``nan``. Call
@@ -447,14 +483,16 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
             angles = av
         else:
             vector = np.asarray(av, dtype=np.float64)
-            if vector.shape != (len(self._model_joint_names),):
+            model_names = self._model_joint_names
+            if vector.shape != (len(model_names),):
                 raise ValueError(
                     'angle vector must have shape ({},), but got {}'.format(
-                        len(self._model_joint_names), vector.shape))
-            angles = dict(zip(self._model_joint_names, vector))
+                        len(model_names), vector.shape))
+            angles = dict(zip(model_names, vector))
         result = {}
+        joints = self._joints
         for name, angle in angles.items():
-            joint = self._joints[name]
+            joint = joints[name]
             if joint.joint_dof != 1 or np.isnan(angle):
                 continue
             lower = float(joint.min_angle)
@@ -475,8 +513,9 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
         """
         diff = self._diff(names, goal, start)
         times = []
+        joints = self._joints
         for name, d in zip(names, diff):
-            joint = self._joints[name]
+            joint = joints[name]
             eps = _LINEAR_EPS if isinstance(joint, LinearJoint) \
                 else _ROTATIONAL_EPS
             if abs(d) < eps:
@@ -605,7 +644,7 @@ class RobotInterfaceBase(object, metaclass=abc.ABCMeta):
         """
         if av is None:
             self.update_robot_state()
-            return self.potentio_vector()
+            return self.measured_angle_vector()
         controller_type = self._controller(controller_type)
         names, goal = self._resolve(av, controller_type)
         start = self._start_positions(names)

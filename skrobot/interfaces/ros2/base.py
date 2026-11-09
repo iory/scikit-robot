@@ -17,6 +17,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import JointState
 import trajectory_msgs.msg
 
+from skrobot.interfaces.base import RobotInterfaceBase
 from skrobot.model import LinearJoint
 from skrobot.model import RotationalJoint
 
@@ -40,13 +41,22 @@ def _flatten(xlst):
     return reduce(lambda x, y: x + y, xlst)
 
 
-class ROS2RobotInterfaceBase(Node):
+class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
 
     """ROS2RobotInterface is a class for interacting with a real robot.
 
     ROS2RobotInterface is a class for interacting with a real robot through
     JointTrajectoryAction servers and JointState topics.
 
+    It is both a :class:`skrobot.interfaces.base.RobotInterfaceBase` and an
+    ``rclpy.node.Node``. The calls it had before keep their behaviour: in
+    particular ``self.robot`` mirrors the measured joint states through the
+    model (so it is clamped into the URDF limits), and ``potentio_vector()``
+    and ``angle_vector()`` return the model's angles. The base class adds
+    the unclamped view: :meth:`measured_angle_vector`,
+    :meth:`measured_joint_angles` and :meth:`outside_limits` report the
+    joint_states values as published. ``servo_on`` / ``servo_off`` raise
+    ``NotImplementedError`` unless a subclass implements ``_set_servo``.
     """
 
     def __init__(self, robot,
@@ -89,9 +99,11 @@ class ROS2RobotInterfaceBase(Node):
             Timeout in seconds for the ``wait_for_joint_states`` option.
 
         """
-        super().__init__(node_name)
+        # Two parents with different constructor arguments: initialise each
+        # explicitly (a cooperative super() chain would hand Node the robot).
+        Node.__init__(self, node_name)
+        RobotInterfaceBase.__init__(self, copy.deepcopy(robot))
 
-        self.robot = copy.deepcopy(robot)
         self.robot_state = dict()
         self.moving_status = dict()
         self.prev_moving_status = dict()
@@ -372,6 +384,62 @@ class ROS2RobotInterfaceBase(Node):
                 "All received joints have stamps but none newer than "
                 "initial_time. Check use_sim_time / clock alignment.")
 
+    # ------------------------------------------------------------------
+    # RobotInterfaceBase plumbing
+    # ------------------------------------------------------------------
+
+    def _init_controllers(self, controllers, controller_type):
+        # Controller groups come from the action servers add_controller
+        # connects to (controller_param_table), not from the constructor.
+        pass
+
+    @property
+    def _controllers(self):
+        """``{controller_type: [joint names]}`` from controller_param_table."""
+        table = getattr(self, 'controller_param_table', {})
+        groups = {}
+        for controller_type, params in table.items():
+            names = []
+            for param in params:
+                names.extend(n for n in param['joint_names']
+                             if n not in names)
+            groups[controller_type] = names
+        return groups
+
+    def _read_joint_state(self):
+        if 'name' not in self.robot_state:
+            return {}
+        return {name: float(position) for name, position in zip(
+                    self.robot_state['name'], self.robot_state['position'])
+                if name in self._received_joint_names}
+
+    def _send_trajectory(self, controller_type, joint_names, positions,
+                         velocities, times, start_time):
+        joint_names = list(joint_names)
+        cacts = self.controller_table[controller_type]
+        params = self.controller_param_table[controller_type]
+        for action, param in zip(cacts, params):
+            names = [n for n in param['joint_names'] if n in joint_names]
+            if not names:
+                continue
+            cols = [joint_names.index(n) for n in names]
+            points = [(positions[i, cols], velocities[i, cols], times[i])
+                      for i in range(len(times))]
+            self._send_follow_joint_trajectory(
+                action, names, start_time, points)
+
+    def _is_interpolating(self, controller_type):
+        return any(action.is_interpolating()
+                   for action in self.controller_table[controller_type])
+
+    def _cancel(self, controller_type):
+        for action in self.controller_table[controller_type]:
+            action.cancel_all_goals()
+
+    def _wait_interpolation(self, controller_type, timeout):
+        self.wait_interpolation(controller_type, timeout=timeout or 0,
+                                wait_for_state_update=False)
+
     def set_robot_state(self, key, msg):
         self.robot_state[key] = msg
 
@@ -448,6 +516,11 @@ class ROS2RobotInterfaceBase(Node):
         # wait_until_update_all_joints only waits for joints that are
         # actually being published.
         self._received_joint_names.update(msg.name)
+        # The measured state of RobotInterfaceBase: positions as published,
+        # by name, without the model's clamping.
+        if len(msg.name) == len(msg.position):
+            for name, position in zip(msg.name, msg.position):
+                self._measured[name] = float(position)
 
         if 'name' in self.robot_state:
             robot_state_names = self.robot_state['name']
@@ -755,16 +828,8 @@ class ROS2RobotInterfaceBase(Node):
         -------
         TODO
         """
-        goal_msg = control_msgs.action.FollowJointTrajectory.Goal()
-        goal_points = []
-        if isinstance(start_time, Number):
-            current_time = self.get_clock().now()
-            start_duration = Duration(seconds=start_time)
-            st = Time(nanoseconds=current_time.nanoseconds + start_duration.nanoseconds)
         joints = [getattr(self.robot, jn) for jn in joint_names]
-
-        goal_msg.trajectory.joint_names = joint_names
-        goal_msg.trajectory.header.stamp = st.to_msg()
+        points = []
         for traj_point in traj_points:
             all_positions = traj_point[0]
             all_velocities = traj_point[1]
@@ -779,10 +844,46 @@ class ROS2RobotInterfaceBase(Node):
                 v = all_velocities[idx]
                 positions[i] = p
                 velocities[i] = v
+            points.append((positions, velocities, duration))
+        return self._send_follow_joint_trajectory(
+            action, joint_names, start_time, points)
+
+    def _send_follow_joint_trajectory(self, action, joint_names, start_time,
+                                      points):
+        """Send one FollowJointTrajectory goal to ``action``.
+
+        Parameters
+        ----------
+        action : ControllerActionClient
+            Action client of the controller.
+        joint_names : list[str]
+            Joints of the goal.
+        start_time : float
+            Delay [s] from now; the goal's header stamp.
+        points : list[tuple]
+            ``(positions, velocities, time_from_start)`` per point, the
+            first two in ``joint_names`` order.
+
+        Returns
+        -------
+        rclpy.task.Future
+            Future of the goal request.
+        """
+        goal_msg = control_msgs.action.FollowJointTrajectory.Goal()
+        goal_points = []
+        if isinstance(start_time, Number):
+            current_time = self.get_clock().now()
+            start_duration = Duration(seconds=start_time)
+            st = Time(nanoseconds=current_time.nanoseconds + start_duration.nanoseconds)
+
+        goal_msg.trajectory.joint_names = list(joint_names)
+        goal_msg.trajectory.header.stamp = st.to_msg()
+        for positions, velocities, duration in points:
             goal_points.append(
                 trajectory_msgs.msg.JointTrajectoryPoint(
-                    positions=positions.tolist(),
-                    velocities=velocities.tolist(),
+                    positions=np.asarray(positions, dtype=np.float64).tolist(),
+                    velocities=np.asarray(
+                        velocities, dtype=np.float64).tolist(),
                     time_from_start=Duration(seconds=duration).to_msg()))
         goal_msg.trajectory.points = goal_points
         future = action.send_goal_async(goal_msg)
