@@ -30,6 +30,7 @@ from skrobot.coordinates import Coordinates
 from skrobot.coordinates.math import matrix2quaternion
 from skrobot.coordinates.math import quaternion2matrix
 from skrobot.interfaces import _mujoco_scene
+from skrobot.interfaces.base import hermite_trajectory
 from skrobot.model.joint import LinearJoint
 from skrobot.model.joint import RotationalJoint
 
@@ -66,37 +67,6 @@ def _compose_planar(pose, delta):
     return np.array([pose[0] + c * delta[0] - s * delta[1],
                      pose[1] + s * delta[0] + c * delta[1],
                      pose[2] + delta[2]])
-
-
-def _hermite(t, t0, t1, p0, p1, v0, v1):
-    """Cubic Hermite segment, the shape a joint trajectory controller follows.
-
-    Parameters
-    ----------
-    t : float
-        Query time, clipped to ``[t0, t1]``.
-    t0, t1 : float
-        Segment start and end time.
-    p0, p1 : numpy.ndarray
-        Positions at ``t0`` and ``t1``.
-    v0, v1 : numpy.ndarray
-        Velocities at ``t0`` and ``t1``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Position at ``t``.
-    """
-    duration = t1 - t0
-    if duration <= 0.0:
-        return p1.copy()
-    s = min(max((t - t0) / duration, 0.0), 1.0)
-    h00 = 2 * s ** 3 - 3 * s ** 2 + 1
-    h10 = s ** 3 - 2 * s ** 2 + s
-    h01 = -2 * s ** 3 + 3 * s ** 2
-    h11 = s ** 3 - s ** 2
-    return (h00 * p0 + h10 * duration * v0
-            + h01 * p1 + h11 * duration * v1)
 
 
 class MujocoRobotInterface(object):
@@ -488,7 +458,8 @@ class MujocoRobotInterface(object):
         av = np.asarray(av, dtype=np.float64)
         self.mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[self._qpos_index] = av
-        self._segments = []
+        self._trajectory = None
+        self._trajectory_end = -np.inf
         self._hold = av.copy()
         self._wheel_angles = av[self._wheel_index].copy()
         self._write_ctrl(av)
@@ -514,11 +485,8 @@ class MujocoRobotInterface(object):
 
     def _target(self, t):
         """Commanded angle vector at simulation time ``t``."""
-        for t0, t1, p0, p1, v0, v1 in self._segments:
-            if t <= t1:
-                if t < t0:
-                    return p0.copy()
-                return _hermite(t, t0, t1, p0, p1, v0, v1)
+        if self._trajectory is not None and t <= self._trajectory_end:
+            return self._trajectory(t)
         return self._hold.copy()
 
     def step(self, n=1):
@@ -680,19 +648,18 @@ class MujocoRobotInterface(object):
             velocities.append(vel)
         velocities.append(np.zeros_like(points[0]))
 
-        segments = []
-        t = now + start_time
-        for i, duration in enumerate(durations):
-            segments.append((t, t + duration, points[i], points[i + 1],
-                             velocities[i], velocities[i + 1]))
-            t += duration
-        self._segments = segments
+        knot_times = now + start_time + np.concatenate(
+            [[0.0], np.cumsum(durations)])
+        self._trajectory = hermite_trajectory(
+            knot_times, np.array(points), np.array(velocities))
+        self._trajectory_end = knot_times[-1]
         self._hold = avs[-1].copy()
         return avs
 
     def is_interpolating(self):
         """Whether a sent trajectory has time left to run."""
-        return bool(self._segments) and self.data.time < self._segments[-1][1]
+        return (self._trajectory is not None
+                and self.data.time < self._trajectory_end)
 
     def wait_interpolation(self, timeout=0):
         """Simulate until the trajectory sent last has run out.
@@ -709,8 +676,8 @@ class MujocoRobotInterface(object):
             ``[is_interpolating()]`` afterwards, as the ROS interface returns
             one entry per controller.
         """
-        if self._segments:
-            end = self._segments[-1][1]
+        if self._trajectory is not None:
+            end = self._trajectory_end
             if timeout > 0:
                 end = min(end, self.data.time + timeout)
             n = int(np.ceil((end - self.data.time) / self.model.opt.timestep))
@@ -723,7 +690,8 @@ class MujocoRobotInterface(object):
     def cancel_angle_vector(self):
         """Stop where the commanded trajectory is now."""
         self._hold = self._target(self.data.time)
-        self._segments = []
+        self._trajectory = None
+        self._trajectory_end = -np.inf
 
     def sync(self):
         """Copy the simulated joints (and base) into ``ri.robot``.
@@ -829,11 +797,9 @@ class MujocoRobotInterface(object):
         goal[2] = start[2] + np.arctan2(np.sin(goal[2] - start[2]),
                                         np.cos(goal[2] - start[2]))
         duration = self._base_duration(start, goal)
-        zero = np.zeros(3)
         t0 = self.data.time
-
-        def path(t):
-            return _hermite(t, t0, t0 + duration, start, goal, zero, zero)
+        path = hermite_trajectory(
+            [t0, t0 + duration], [start, goal], np.zeros((2, 3)))
         return self._send_base(duration, path, wait)
 
     def go_pos(self, x=0.0, y=0.0, yaw=0.0, wait=True):
@@ -857,11 +823,9 @@ class MujocoRobotInterface(object):
         start = self._base_target(self.data.time)
         goal = _compose_planar(start, (x, y, yaw))
         duration = self._base_duration(start, goal)
-        zero = np.zeros(3)
         t0 = self.data.time
-
-        def path(t):
-            return _hermite(t, t0, t0 + duration, start, goal, zero, zero)
+        path = hermite_trajectory(
+            [t0, t0 + duration], [start, goal], np.zeros((2, 3)))
         return self._send_base(duration, path, wait)
 
     def go_velocity(self, x=0.0, y=0.0, yaw=0.0, sec=1.0, wait=False):

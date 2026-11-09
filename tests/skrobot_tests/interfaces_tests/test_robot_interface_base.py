@@ -3,6 +3,7 @@ import time
 import numpy as np
 import pytest
 
+from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
 from skrobot.interfaces.fake import FakeRobotInterface
 from skrobot.model import RobotModel
@@ -253,3 +254,59 @@ def test_interface_never_writes_the_model(ri, robot):
     ri.angle_vector({'shoulder': 0.7}, 1.0)
     ri.wait_interpolation()
     np.testing.assert_array_equal(robot.angle_vector(), before)
+
+
+def _reference_hermite(t, times, positions, velocities):
+    """The closed-form cubic Hermite the interfaces used before scipy."""
+    if t < times[0]:
+        return positions[0]
+    for k in range(len(times) - 1):
+        t0, t1 = times[k], times[k + 1]
+        if t <= t1:
+            h = t1 - t0
+            if h <= 0.0:
+                return positions[k + 1]
+            s = (t - t0) / h
+            return ((2 * s ** 3 - 3 * s ** 2 + 1) * positions[k]
+                    + (s ** 3 - 2 * s ** 2 + s) * h * velocities[k]
+                    + (-2 * s ** 3 + 3 * s ** 2) * positions[k + 1]
+                    + (s ** 3 - s ** 2) * h * velocities[k + 1])
+    return positions[-1]
+
+
+def test_hermite_trajectory_matches_closed_form():
+    times = np.array([0.5, 1.5, 2.0, 3.5])
+    positions = np.array([[0.0, 1.0], [0.8, 0.2], [0.3, -0.4], [1.0, 0.0]])
+    velocities = np.array([[0.0, 0.0], [0.4, -0.9], [-0.2, 0.3], [0.0, 0.0]])
+    trajectory = hermite_trajectory(times, positions, velocities)
+    for t in np.linspace(0.0, 4.0, 401):
+        np.testing.assert_allclose(
+            trajectory(t),
+            _reference_hermite(t, times, positions, velocities),
+            rtol=0, atol=1e-12)
+    np.testing.assert_array_equal(trajectory(times[1]), positions[1])
+    np.testing.assert_array_equal(trajectory(10.0), positions[-1])
+    np.testing.assert_array_equal(trajectory(-1.0), positions[0])
+
+
+def test_hermite_trajectory_zero_length_segments():
+    # A jump at the start (delayed, zero-duration motion) and one in the
+    # middle, as the old segment-by-segment helper answered them.
+    times = np.array([1.0, 1.0, 2.0, 2.0, 3.0])
+    positions = np.array([[0.0], [0.5], [0.7], [0.9], [1.0]])
+    velocities = np.array([[0.0], [0.0], [0.3], [0.1], [0.0]])
+    trajectory = hermite_trajectory(times, positions, velocities)
+    for t in [0.0, 0.999, 1.0, 1.25, 1.999, 2.0, 2.001, 2.5, 3.0, 4.0]:
+        np.testing.assert_allclose(
+            trajectory(t),
+            _reference_hermite(t, times, positions, velocities),
+            rtol=0, atol=1e-12)
+    only_jump = hermite_trajectory([2.0, 2.0], [[0.0], [1.0]], [[0], [0]])
+    assert only_jump(1.0)[0] == 0.0
+    assert only_jump(2.0)[0] == 1.0
+    assert only_jump(3.0)[0] == 1.0
+
+
+def test_hermite_trajectory_refuses_decreasing_times():
+    with pytest.raises(ValueError):
+        hermite_trajectory([1.0, 0.5], [[0.0], [1.0]], [[0.0], [0.0]])

@@ -2,7 +2,8 @@
 
 :class:`FakeRobotInterface` is the smallest complete backend of
 :class:`skrobot.interfaces.base.RobotInterfaceBase`: it "executes" the
-trajectories it is sent by cubic Hermite interpolation over time and
+trajectories it is sent by cubic Hermite interpolation over time
+(:func:`skrobot.interfaces.base.hermite_trajectory`) and
 reports the interpolated positions as the measured state. There is no
 physics, no tracking error and no joint limit, so what it reports is
 exactly what was commanded -- and a state injected with
@@ -16,19 +17,8 @@ By default time is virtual: it stands still until :meth:`advance` or
 
 import numpy as np
 
+from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
-
-
-def _hermite(t, t0, t1, p0, p1, v0, v1):
-    """Cubic Hermite interpolation between ``(t0, p0, v0)``, ``(t1, p1, v1)``."""
-    h = t1 - t0
-    if h <= 0.0:
-        return p1
-    s = (t - t0) / h
-    s2 = s * s
-    s3 = s2 * s
-    return ((2 * s3 - 3 * s2 + 1) * p0 + (s3 - 2 * s2 + s) * h * v0
-            + (-2 * s3 + 3 * s2) * p1 + (s3 - s2) * h * v1)
 
 
 class FakeRobotInterface(RobotInterfaceBase):
@@ -84,10 +74,11 @@ class FakeRobotInterface(RobotInterfaceBase):
             self._check_names(list(initial_state))
             positions.update(
                 {k: float(v) for k, v in initial_state.items()})
-        # joint name -> (hold position, [segments]); a segment is
-        # (t0, t1, p0, p1, v0, v1).
+        # Where each joint rests, and for joints with a trajectory sent
+        # ``name -> (trajectory, column, end time)``: one trajectory (see
+        # hermite_trajectory) covers all joints of a send.
         self._hold = positions
-        self._segments = {name: [] for name in positions}
+        self._motions = {}
         self.sent = []
         self.servo_states = {name: True for name in positions}
         self.update_robot_state()
@@ -118,18 +109,15 @@ class FakeRobotInterface(RobotInterfaceBase):
     # State --------------------------------------------------------------
 
     def _position(self, name, t):
-        for t0, t1, p0, p1, v0, v1 in self._segments[name]:
-            if t <= t1:
-                if t < t0:
-                    return p0
-                return _hermite(t, t0, t1, p0, p1, v0, v1)
-        return self._hold[name]
+        if name not in self._motions:
+            return self._hold[name]
+        trajectory, column, _ = self._motions[name]
+        return float(trajectory(t)[column])
 
     def _end_time(self, name):
-        segments = self._segments[name]
-        if not segments:
+        if name not in self._motions:
             return -np.inf
-        return segments[-1][1]
+        return self._motions[name][2]
 
     def set_joint_positions(self, positions):
         """Put joints at ``positions`` at once, dropping their motion.
@@ -145,7 +133,7 @@ class FakeRobotInterface(RobotInterfaceBase):
         self._check_names(list(positions))
         for name, value in positions.items():
             self._hold[name] = float(value)
-            self._segments[name] = []
+            self._motions.pop(name, None)
 
     # Backend hooks ------------------------------------------------------
 
@@ -157,17 +145,15 @@ class FakeRobotInterface(RobotInterfaceBase):
             positions=np.array(positions), velocities=np.array(velocities),
             times=np.array(times), start_time=start_time, received=now))
         t_start = now + start_time
+        # The motion starts at rest from where the joints are now.
+        start = [self._position(name, now) for name in joint_names]
+        knot_times = np.concatenate([[t_start], t_start + np.asarray(times)])
+        trajectory = hermite_trajectory(
+            knot_times,
+            np.vstack([start, positions]),
+            np.vstack([np.zeros(len(joint_names)), velocities]))
         for j, name in enumerate(joint_names):
-            p = self._position(name, now)
-            v = 0.0
-            t = t_start
-            segments = []
-            for i in range(len(times)):
-                t_next = t_start + times[i]
-                segments.append((t, t_next, p, positions[i, j],
-                                 v, velocities[i, j]))
-                t, p, v = t_next, positions[i, j], velocities[i, j]
-            self._segments[name] = segments
+            self._motions[name] = (trajectory, j, knot_times[-1])
             self._hold[name] = float(positions[-1, j])
 
     def _read_joint_state(self):
@@ -183,7 +169,7 @@ class FakeRobotInterface(RobotInterfaceBase):
         t = self.now()
         for name in self._controllers[controller_type]:
             self._hold[name] = float(self._position(name, t))
-            self._segments[name] = []
+            self._motions.pop(name, None)
 
     def _wait_interpolation(self, controller_type, timeout):
         if self._clock is not None:

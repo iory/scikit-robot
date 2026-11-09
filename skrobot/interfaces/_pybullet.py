@@ -9,8 +9,8 @@ from skrobot.coordinates import quaternion2rpy
 from skrobot.coordinates.math import wxyz2xyzw
 from skrobot.coordinates.math import xyzw2wxyz
 from skrobot.interfaces.base import DEFAULT_CONTROLLER
+from skrobot.interfaces.base import hermite_trajectory
 from skrobot.interfaces.base import RobotInterfaceBase
-from skrobot.interfaces.fake import _hermite
 
 
 _available = False
@@ -145,9 +145,10 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
         self.load_bullet()
         self.realtime_simulation = False
         # Timed trajectories: simulation time [s] advanced by step(), and
-        # per joint (hold target, [(t0, t1, p0, p1, v0, v1), ...]).
+        # for each joint still moving ``name -> (trajectory, column, end
+        # time)``, one hermite_trajectory covering all joints of a send.
         self.sim_time = 0.0
-        self._segments = {}
+        self._motions = {}
         RobotInterfaceBase.__init__(self, robot, controllers={
             DEFAULT_CONTROLLER: [
                 j.name for j in robot.joint_list
@@ -362,7 +363,7 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
 
             joint = self.robot.joint_list[i]
             # A direct command replaces a timed motion of this joint.
-            self._segments.pop(joint.name, None)
+            self._motions.pop(joint.name, None)
 
             if self.realtime_simulation is False:
                 p.resetJointState(self.robot_id, idx, angle)
@@ -402,7 +403,7 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
         start = _time.time()
         while True:
             self.step()
-            wait = bool(self._segments)
+            wait = bool(self._motions)
             if not wait:
                 for idx in self.joint_ids:
                     if idx is None:
@@ -463,13 +464,8 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
                                 **kwargs)
 
     def _trajectory_target(self, name, t):
-        segments = self._segments[name]
-        for t0, t1, p0, p1, v0, v1 in segments:
-            if t <= t1:
-                if t < t0:
-                    return p0
-                return _hermite(t, t0, t1, p0, p1, v0, v1)
-        return segments[-1][3]
+        trajectory, column, _ = self._motions[name]
+        return float(trajectory(t)[column])
 
     def step(self, n=1):
         """Advance the simulation ``n`` steps, following timed motions.
@@ -485,11 +481,11 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
         """
         dt = self._timestep()
         for _ in range(n):
-            for name in list(self._segments):
+            for name in list(self._motions):
                 self._motor_target(
                     name, self._trajectory_target(name, self.sim_time))
-                if self.sim_time >= self._segments[name][-1][1]:
-                    del self._segments[name]
+                if self.sim_time >= self._motions[name][2]:
+                    del self._motions[name]
             p.stepSimulation()
             self.sim_time += dt
 
@@ -497,17 +493,14 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
                          velocities, times, start_time):
         state = self._read_joint_state()
         t_start = self.sim_time + start_time
+        # The motion starts at rest from where the joints are now.
+        knot_times = np.concatenate([[t_start], t_start + np.asarray(times)])
+        trajectory = hermite_trajectory(
+            knot_times,
+            np.vstack([[state[name] for name in joint_names], positions]),
+            np.vstack([np.zeros(len(joint_names)), velocities]))
         for j, name in enumerate(joint_names):
-            p0 = state[name]
-            v0 = 0.0
-            t = t_start
-            segments = []
-            for i in range(len(times)):
-                t_next = t_start + times[i]
-                segments.append((t, t_next, p0, positions[i, j],
-                                 v0, velocities[i, j]))
-                t, p0, v0 = t_next, positions[i, j], velocities[i, j]
-            self._segments[name] = segments
+            self._motions[name] = (trajectory, j, knot_times[-1])
 
     def _read_joint_state(self):
         state = {}
@@ -517,13 +510,13 @@ class PybulletRobotInterface(Coordinates, RobotInterfaceBase):
         return state
 
     def _is_interpolating(self, controller_type):
-        return any(name in self._segments
+        return any(name in self._motions
                    for name in self._controllers[controller_type])
 
     def _cancel(self, controller_type):
         state = self._read_joint_state()
         for name in self._controllers[controller_type]:
-            if self._segments.pop(name, None) is not None:
+            if self._motions.pop(name, None) is not None:
                 self._motor_target(name, state[name])
 
     def _wait_interpolation(self, controller_type, timeout):
