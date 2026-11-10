@@ -166,6 +166,22 @@ class TestRos2InterfaceIsRobotInterfaceBase(unittest.TestCase):
         assert goal.points[-1].positions[0] == pytest.approx(0.2)
         assert goal.points[-1].time_from_start.sec == 1
 
+    def test_sequence_start_time_delays_the_goal_once(self):
+        # start_time goes into the header stamp; the points' time_from_start
+        # count from there and must not include it a second time.
+        self._publish_state({n: 0.0 for n in _ARM})
+        av1 = self.ri.robot.angle_vector().copy()
+        av1[self.ri.robot.joint_list.index(self.ri.robot.panda_joint1)] = 0.1
+        av2 = av1.copy()
+        av2[self.ri.robot.joint_list.index(self.ri.robot.panda_joint1)] = 0.2
+        before = self.ri.get_clock().now().nanoseconds
+        self.ri.angle_vector_sequence([av1, av2], [1.0, 1.0], start_time=2.0)
+        after = self.ri.get_clock().now().nanoseconds
+        goal = self._last_goal()
+        assert [p.time_from_start.sec for p in goal.points] == [1, 2]
+        stamp = goal.header.stamp.sec * 10**9 + goal.header.stamp.nanosec
+        assert before + 2 * 10**9 <= stamp <= after + 2 * 10**9
+
     def test_cancel_reaches_the_action_clients(self):
         cancelled = []
         for action in self.ri.controller_table[_CONTROLLER]:

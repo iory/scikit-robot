@@ -960,7 +960,10 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
         prev_av = self.angle_vector()
         traj_points = []
         total_steps = len(avs)
-        next_start_time = start_time
+        # time_from_start counts from the goal's header stamp, which is
+        # already start_time ahead of now (send_ros_controller): the points
+        # start from 0, or the motion would start 2 * start_time late.
+        next_start_time = 0.0
         for i_step in range(total_steps):
             av = avs[i_step]
             fastest_time = self.angle_vector_duration(
