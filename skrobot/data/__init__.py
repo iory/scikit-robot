@@ -234,7 +234,7 @@ def g1_urdfpath(dof=23):
     return path
 
 
-def jedy_urdfpath(light=False):
+def jedy_urdfpath(light=False, draco=False):
     """Return the path to the Jedy URDF.
 
     Parameters
@@ -244,8 +244,37 @@ def jedy_urdfpath(light=False):
         1 cm are dropped and the other meshes simplified within 0.5 mm
         (about 110,000 faces instead of 700,000), for simulators and
         browsers. Joints, links and collision geometry are the same.
+    draco : bool
+        If True, return the Draco model, rebuilt from the CAD: circuit
+        boards removed, meshes simplified within 0.5 mm per part (about
+        370,000 faces) and Draco-compressed (0.8 MB download), inertial
+        parameters summed from the CAD parts, per-part convex collision
+        hulls, and the camera, laser, wheel and base_footprint frames
+        taken from the CAD. Arm and head joints are the same as the full
+        model's relative to ``base_link``; ``base_footprint`` lies on the
+        floor, 10.75 mm above ``base_link``, where the full model has the
+        two coincide. Loading it needs DracoPy (``pip install DracoPy``);
+        Gazebo and RViz cannot read its meshes.
+
+    Raises
+    ------
+    ValueError
+        If both ``light`` and ``draco`` are True.
+    ImportError
+        If ``draco`` is True and DracoPy is not installed.
     """
-    if light:
+    if light and draco:
+        raise ValueError('light and draco are separate models; '
+                         'choose one')
+    if draco:
+        from skrobot.utils.draco import is_dracopy_available
+        if not is_dracopy_available():
+            raise ImportError(
+                'The Draco Jedy model needs DracoPy to decode its meshes. '
+                'Install it with: pip install DracoPy')
+        name, md5 = ('jedy_draco_description',
+                     'eaaa5dc19a12ab01e3144a1964184ce9')
+    elif light:
         name, md5 = ('jedy_light_description',
                      'c11a5d5e30b69c8c248935ee489fd8e0')
     else:
