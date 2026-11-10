@@ -15,7 +15,11 @@ mimic couplings) and emits a clean MJCF:
   assets and referenced from ``<asset>``. Empty geometry is skipped, as is a
   sub-mesh MuJoCo cannot compile (fewer than 4 vertices); a flat sub-mesh that
   encloses no volume is marked ``inertia="shell"``.
-* ``mimic`` -> ``<equality><joint polycoef=...>``.
+* ``mimic`` -> ``<equality><joint polycoef=...>``. MuJoCo enforces an equality
+  only through the constraint solver (``mj_step``); ``mj_forward`` on a qpos
+  written by hand leaves the mimic joint where it was. Call
+  :func:`apply_mimic_qpos` before ``mj_forward`` when using the model for
+  kinematics or rendering.
 * one ``<position>`` actuator per actuated (non-mimic) joint (optional).
 * ``joint_damping='backemf'`` -> each joint's own ``effort / velocity``, so a
   robot built from several motor types is not damped as if it had one.
@@ -23,7 +27,7 @@ mimic couplings) and emits a clean MJCF:
   the emitted geometry, so the model rests on the floor.
 * ``<compiler angle="radian">`` so radians match ROS.
 
-Entry point: :func:`urdf_to_mjcf`.
+Entry points: :func:`urdf_to_mjcf`, :func:`apply_mimic_qpos`.
 """
 
 from __future__ import annotations
@@ -833,10 +837,15 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     return ET.tostring(root, encoding="unicode")
 
 
-def _inertial_attrib(inertial):
+def _inertial_attrib(inertial, link_name=None):
     """Return MJCF <inertial> attributes as pos + mass + diaginertia + quat,
     regularizing the tensor so MuJoCo accepts it (positive eigenvalues and the
-    triangle inequality, both of which raw URDF inertias frequently violate)."""
+    triangle inequality, both of which raw URDF inertias frequently violate).
+
+    A negative principal moment or a violated triangle inequality means the
+    URDF itself is wrong (often a mistyped off-diagonal term), so the
+    correction is logged as a warning naming the link; raising a tiny positive
+    moment to the 1e-9 floor is not."""
     origin = np.asarray(getattr(inertial, "origin", np.eye(4)), dtype=float)
     pos = origin[:3, 3]
     rot = origin[:3, :3]
@@ -845,11 +854,26 @@ def _inertial_attrib(inertial):
     moments, axes = np.linalg.eigh(inertia)             # ascending, orthonormal cols
     if np.linalg.det(axes) < 0:                         # make it a proper rotation
         axes[:, 0] = -axes[:, 0]
+    raw_moments = moments.copy()
     moments = np.clip(moments, 1e-9, None)              # positive-definite
     lo, mid, hi = moments                               # ascending
     if hi > lo + mid:                                   # triangle inequality
         hi = lo + mid
     moments = np.array([lo, mid, hi])
+    scale = max(float(np.abs(raw_moments).max()), 1e-12)
+    negative = raw_moments[0] < -1e-6 * scale
+    triangle = raw_moments[2] > (raw_moments[0] + raw_moments[1]) + 1e-6 * scale
+    if negative or triangle:
+        reasons = []
+        if negative:
+            reasons.append('not positive definite')
+        if triangle:
+            reasons.append('violates the triangle inequality')
+        logger.warning(
+            'link %s: URDF inertia %s; principal moments %s replaced by %s '
+            '(check the <inertia> values)',
+            link_name, ' and '.join(reasons), _fmt(raw_moments),
+            _fmt(moments))
     from skrobot.coordinates.math import matrix2quaternion
     quat = matrix2quaternion(axes)                      # principal-axes frame [wxyz]
     return {
@@ -860,11 +884,77 @@ def _inertial_attrib(inertial):
     }
 
 
+def apply_mimic_qpos(model, qpos):
+    """Set every mimic joint in ``qpos`` from the joint it follows.
+
+    :func:`urdf_to_mjcf` writes a URDF ``mimic`` as a joint equality, which
+    MuJoCo satisfies only through the constraint solver while stepping.
+    ``mj_forward`` on a hand-written qpos (forward kinematics, rendering a
+    pose) leaves the mimic joint at its previous value, so a gripper finger
+    driven by a mimic stays where it was. Call this after writing the
+    actuated joints and before ``mj_forward``.
+
+    Every active one-to-one joint equality is applied, using MuJoCo's
+    definition ``y - y0 = a0 + a1 d + a2 d^2 + a3 d^3 + a4 d^4`` with
+    ``d = x - x0``, where ``x``/``y`` are the followed/mimic joint positions
+    and ``x0``/``y0`` their ``qpos0``.
+
+    Parameters
+    ----------
+    model : mujoco.MjModel
+        Model whose ``<equality><joint>`` elements define the couplings.
+    qpos : numpy.ndarray
+        Joint positions of length ``model.nq``, modified in place.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``qpos``.
+
+    Raises
+    ------
+    ValueError
+        If a mimic joint follows another mimic joint (a chain), whose result
+        would depend on the order the equalities are listed in.
+
+    Examples
+    --------
+    >>> data.qpos[model.jnt_qposadr[gripper_id]] = 0.5  # doctest: +SKIP
+    >>> apply_mimic_qpos(model, data.qpos)              # doctest: +SKIP
+    >>> mujoco.mj_forward(model, data)                  # doctest: +SKIP
+    """
+    import mujoco
+
+    couplings = []
+    for e in range(model.neq):
+        if model.eq_type[e] != mujoco.mjtEq.mjEQ_JOINT:
+            continue
+        if not model.eq_active0[e] or model.eq_obj2id[e] < 0:
+            continue  # inactive, or a joint locked to a constant
+        follower = model.jnt_qposadr[model.eq_obj1id[e]]
+        leader = model.jnt_qposadr[model.eq_obj2id[e]]
+        couplings.append((follower, leader, model.eq_data[e][:5]))
+    followers = {f for f, _, _ in couplings}
+    for follower, leader, _ in couplings:
+        if leader in followers:
+            raise ValueError(
+                'mimic chains are not supported: the joint at qpos[{}] '
+                'follows another mimic joint'.format(follower))
+    for follower, leader, coef in couplings:
+        d = qpos[leader] - model.qpos0[leader]
+        qpos[follower] = model.qpos0[follower] + (
+            coef[0] + coef[1] * d + coef[2] * d ** 2 + coef[3] * d ** 3
+            + coef[4] * d ** 4)
+    return qpos
+
+
 def _emit_link_content(link, body_el, assets):
     inertial = getattr(link, "inertial", None)
     if inertial is not None and getattr(inertial, "mass", 0.0):
         try:
-            ET.SubElement(body_el, "inertial", _inertial_attrib(inertial))
+            ET.SubElement(body_el, "inertial",
+                          _inertial_attrib(inertial,
+                                           getattr(link, "name", None)))
         except Exception:
             pass  # degenerate inertial -> let MuJoCo infer from geoms
     # One counter per link so names are unique and stable across sub-meshes.
