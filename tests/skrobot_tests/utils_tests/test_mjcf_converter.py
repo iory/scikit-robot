@@ -472,3 +472,91 @@ class TestFrameLinksBecomeSites(unittest.TestCase):
                                    [0, 0, -0.15], atol=1e-9)
         np.testing.assert_allclose(data.site('marker').xpos - foot,
                                    [0, 0.01, -0.15], atol=1e-9)
+
+
+# A two-finger gripper: finger_b mimics finger_a with multiplier -1 and an
+# offset, and finger_a carries an inertia whose off-diagonal terms make it
+# indefinite (eigenvalues -1e-4, 2e-4, 2e-4), as a mistyped URDF does.
+_GRIPPER_URDF = """<?xml version="1.0"?>
+<robot name="gripper">
+  <link name="palm">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="0.2"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+  </link>
+  <joint name="finger_a_joint" type="revolute">
+    <origin xyz="0 0.02 0" rpy="0 0 0"/>
+    <parent link="palm"/><child link="finger_a"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="1.0" velocity="1.0"/>
+  </joint>
+  <link name="finger_a">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="0.01"/>
+      <inertia ixx="1e-4" ixy="-1e-4" ixz="-1e-4"
+               iyy="1e-4" iyz="-1e-4" izz="1e-4"/>
+    </inertial>
+  </link>
+  <joint name="finger_b_joint" type="revolute">
+    <origin xyz="0 -0.02 0" rpy="0 0 0"/>
+    <parent link="palm"/><child link="finger_b"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1" upper="1" effort="1.0" velocity="1.0"/>
+    <mimic joint="finger_a_joint" multiplier="-1.0" offset="0.1"/>
+  </joint>
+  <link name="finger_b">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="0.01"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+</robot>
+"""
+
+
+class TestInertiaWarningAndMimicQpos(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.urdf = os.path.join(self.tmpdir, 'gripper.urdf')
+        with open(self.urdf, 'w') as f:
+            f.write(_GRIPPER_URDF)
+        self.out_path = os.path.join(self.tmpdir, 'gripper.xml')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _convert(self):
+        urdf_to_mjcf(self.urdf, self.out_path, add_ground=False,
+                     add_position_actuators=False)
+
+    def test_invalid_inertia_is_reported_with_the_link_name(self):
+        with self.assertLogs('skrobot.utils.mjcf_converter',
+                             level='WARNING') as logs:
+            self._convert()
+        warned = [r.getMessage() for r in logs.records]
+        self.assertTrue(any('finger_a' in m and 'not positive definite' in m
+                            for m in warned), warned)
+        # the valid inertias are not reported
+        self.assertFalse(any('palm' in m or 'finger_b' in m for m in warned),
+                         warned)
+
+    def test_mimic_joint_follows_after_apply_mimic_qpos(self):
+        try:
+            import mujoco
+        except ImportError:
+            self.skipTest('mujoco is not installed')
+        from skrobot.urdf import apply_mimic_qpos
+
+        self._convert()
+        model = mujoco.MjModel.from_xml_path(self.out_path)
+        data = mujoco.MjData(model)
+        a = model.jnt_qposadr[model.joint('finger_a_joint').id]
+        b = model.jnt_qposadr[model.joint('finger_b_joint').id]
+        data.qpos[a] = 0.5
+        # mj_forward alone does not move the mimic joint
+        mujoco.mj_forward(model, data)
+        self.assertEqual(data.qpos[b], 0.0)
+        apply_mimic_qpos(model, data.qpos)
+        self.assertAlmostEqual(data.qpos[b], 0.1 - 0.5)
+        mujoco.mj_forward(model, data)
+        # the equality is now satisfied, so the solver sees no violation
+        self.assertTrue(np.allclose(data.efc_pos[:data.nefc], 0.0))
