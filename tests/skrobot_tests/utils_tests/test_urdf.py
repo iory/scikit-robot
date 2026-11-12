@@ -302,6 +302,60 @@ class TestGlbExportPreservesMaterialColor(unittest.TestCase):
                 np.array(color, dtype=np.uint8))
 
 
+class TestColladaMaterialNames(unittest.TestCase):
+    """DAE export gives every material a name of its own.
+
+    trimesh names every material ``defaultmaterial``; OGRE (Gazebo) keeps
+    materials by name, so two colors in one file could be drawn as one.
+    """
+
+    def test_two_colors_two_names(self):
+        import trimesh
+
+        boxes = []
+        for color, offset in (([255, 0, 0, 255], 0.0), ([0, 0, 255, 255], 0.2)):
+            box = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+            box.apply_translation((offset, 0, 0))
+            box.visual.face_colors = color
+            boxes.append(box)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'two.dae')
+            urdf_mesh._write_meshes(boxes, path)
+            root = etree.parse(path).getroot()
+        ns = '{http://www.collada.org/2005/11/COLLADASchema}'
+        names = [m.get('name') for m in root.iter(ns + 'material')]
+        self.assertEqual(len(names), 2)
+        self.assertEqual(len(set(names)), 2)
+        self.assertNotIn('defaultmaterial', names)
+
+
+class TestWriteMeshesRefusesEmptyGeometry(unittest.TestCase):
+    """A mesh that did not load is an error, not an empty file.
+
+    A Draco-compressed glTF read without DracoPy is skipped (no meshes) or
+    comes back with every vertex at the origin; writing either out used to
+    produce a file and a run that looked successful.
+    """
+
+    def test_no_meshes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'part.dae')
+            with self.assertRaises(ValueError):
+                urdf_mesh._write_meshes([], path)
+            self.assertFalse(os.path.exists(path))
+
+    def test_collapsed_vertices(self):
+        import trimesh
+
+        flat = trimesh.Trimesh(vertices=np.zeros((3, 3)), faces=[[0, 1, 2]],
+                               process=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'part.stl')
+            with self.assertRaises(ValueError):
+                urdf_mesh._write_meshes([flat], path)
+            self.assertFalse(os.path.exists(path))
+
+
 class TestEnvPrefixResolver(unittest.TestCase):
     """_try_env_prefixes resolves package:// from the shell environment alone,
     so a frozen binary (no ament_index_python / rospkg) still finds meshes
