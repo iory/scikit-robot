@@ -55,14 +55,30 @@ def remesh_and_bake_file(input_path, output_path, voxel_size=0.002, export_forma
 
     clear_scene()
 
-    # Import with fix_orientation to ensure proper handling in Blender
-    # Blender uses Z-up, so this converts Y-up to Z-up properly
-    bpy.ops.wm.collada_import(
-        filepath=str(input_path),
-        fix_orientation=True,
-        auto_connect=False,
-        import_units=True
-    )
+    suffix = input_path.suffix.lower()
+    if suffix == '.dae':
+        # Import with fix_orientation to ensure proper handling in Blender
+        # Blender uses Z-up, so this converts Y-up to Z-up properly
+        bpy.ops.wm.collada_import(
+            filepath=str(input_path),
+            fix_orientation=True,
+            auto_connect=False,
+            import_units=True
+        )
+    elif suffix in ('.obj', '.stl'):
+        # A URDF mesh is in its link's frame, Z up. Blender's OBJ and STL
+        # importers would otherwise treat the file as Y-up and rotate it,
+        # so import the axes as they are, and keep Z-up on export.
+        # (Reading these through the Collada importer, as before, failed
+        # on every file.)
+        importer = (bpy.ops.wm.obj_import if suffix == '.obj'
+                    else bpy.ops.wm.stl_import)
+        importer(filepath=str(input_path), forward_axis='Y', up_axis='Z')
+        original_up_axis = 'Z_UP'
+    else:
+        raise ValueError(
+            'cannot remesh {}: Blender remeshing reads .dae, .obj and '
+            '.stl files'.format(input_path))
 
     # --- 1. COLLECT ORIGINAL COLORS ---
     source_objects = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
