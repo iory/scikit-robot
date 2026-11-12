@@ -29,6 +29,7 @@ import os
 import pickle
 import re
 import sys
+import weakref
 
 from lxml import etree as ET
 import numpy as np
@@ -68,6 +69,7 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         'target_triangles': None,
                         'enable_mesh_cache': False,
                         'force_visual_mesh_origin_to_zero': False,
+                        'keep_texture': True,
                         'overwrite_mesh': False,
                         'scale_factor': 1.0,
                         'blender_remesh': False,
@@ -79,6 +81,11 @@ _CONFIGURABLE_VALUES = {"mesh_simplify_factor": np.inf,
                         '_source_urdf_path': None,  # Original URDF file path for mesh resolution
                         }
 _MESH_CACHE = {}
+# Texture images of loaded mesh files, by (path, mtime, mesh index): a
+# file loaded again (the same mesh on many links) shares its images
+# instead of decoding another copy. Weak, so they go with the last model
+# that uses them.
+_TEXTURE_IMAGES = weakref.WeakValueDictionary()
 _REMESHED_FILES_CACHE = {}  # Cache to track which files have been remeshed
 # Mesh files written by the save currently in progress, mapping the
 # normalized output path to the geometry context ('visual' or 'collision')
@@ -194,6 +201,34 @@ def enable_mesh_cache():
 @contextlib.contextmanager
 def force_visual_mesh_origin_to_zero():
     with _configured(force_visual_mesh_origin_to_zero=True):
+        yield
+
+
+@contextlib.contextmanager
+def keep_texture(enabled=True):
+    """Choose whether textured visual meshes stay textured on load.
+
+    Textured meshes keep their UVs and images by default, so a viewer
+    that draws textures (``ViserViewer``) shows them; a link's
+    ``concatenated_visual_mesh`` (what the other viewers draw and
+    ``set_color`` paints) bakes them to vertex colours when first asked
+    for. ``keep_texture(False)`` bakes them on load instead, as
+    scikit-robot did before: one colour per vertex, so a photo on a few
+    large faces turns into a flat average.
+
+    Parameters
+    ----------
+    enabled : bool
+        Keep the textures (True, the default) or bake them on load.
+
+    Examples
+    --------
+    >>> from skrobot.model import RobotModel
+    >>> from skrobot.utils.urdf import keep_texture
+    >>> with keep_texture(False):
+    ...     robot = RobotModel.from_urdf('robot.urdf')  # doctest: +SKIP
+    """
+    with _configured(keep_texture=bool(enabled)):
         yield
 
 
@@ -757,7 +792,96 @@ def _load_meshes(filename):
             if isinstance(mesh.visual.material,
                           trimesh.visual.material.PBRMaterial):
                 mesh.visual.material.baseColorFactor[3] = 255
+    if _CONFIGURABLE_VALUES['keep_texture']:
+        _share_texture_images(filename, meshes)
     return meshes
+
+
+def _has_material_image(mesh):
+    """Return whether a mesh's material carries a texture image.
+
+    A mesh can have UVs and a material without an image (many COLLADA
+    exports do); such a mesh has nothing to keep and is baked to its
+    colour like before.
+
+    Parameters
+    ----------
+    mesh : trimesh.Trimesh
+        Mesh to look at.
+
+    Returns
+    -------
+    bool
+        True when the material's ``image`` or ``baseColorTexture`` is set.
+    """
+    material = getattr(getattr(mesh, 'visual', None), 'material', None)
+    if material is None:
+        return False
+    return any(getattr(material, attr, None) is not None
+               for attr in ('image', 'baseColorTexture'))
+
+
+def _share_material_images(source, target):
+    """Point ``target``'s material at ``source``'s texture images.
+
+    ``Trimesh.copy`` deep-copies the visual, images included; a copy that
+    only gets its vertices moved can keep the original's images.
+
+    Parameters
+    ----------
+    source : trimesh.Trimesh
+        Mesh whose images to keep.
+    target : trimesh.Trimesh
+        Copy of ``source``; its material is changed in place.
+    """
+    src = getattr(getattr(source, 'visual', None), 'material', None)
+    dst = getattr(getattr(target, 'visual', None), 'material', None)
+    if src is None or dst is None:
+        return
+    for attr in ('image', 'baseColorTexture'):
+        image = getattr(src, attr, None)
+        if image is not None and getattr(dst, attr, None) is not None:
+            setattr(dst, attr, image)
+
+
+def _share_texture_images(filename, meshes):
+    """Give meshes the texture images an earlier load of the file decoded.
+
+    The same mesh file on many links (a robot's repeated parts, a room's
+    tables) would otherwise hold one decoded copy of each image per link.
+    Images are only read after loading (drawn, or baked to colours), so
+    sharing them is safe.
+
+    Parameters
+    ----------
+    filename : str
+        Path the meshes were loaded from.
+    meshes : list of trimesh.Trimesh
+        The loaded meshes, in the file's order; their materials' images
+        are replaced in place.
+    """
+    try:
+        mtime = os.path.getmtime(filename)
+    except OSError:
+        return
+    path = os.path.abspath(filename)
+    for i, mesh in enumerate(meshes):
+        material = getattr(getattr(mesh, 'visual', None), 'material', None)
+        for attr in ('image', 'baseColorTexture'):
+            image = getattr(material, attr, None)
+            if image is None:
+                continue
+            key = (path, mtime, i, attr)
+            shared = _TEXTURE_IMAGES.get(key)
+            if shared is not None and shared.size == image.size \
+                    and shared.mode == image.mode:
+                setattr(material, attr, shared)
+            else:
+                try:
+                    _TEXTURE_IMAGES[key] = image
+                except TypeError:
+                    # not weak-referenceable: leave it unshared
+                    pass
 
 
 def _replace_extension(filename, suffix, ext):
