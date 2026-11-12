@@ -36,10 +36,17 @@ class Jedy(RobotModelFromURDF):
         faces instead of 700,000 (circuit boards and small parts dropped,
         the rest simplified within 0.5 mm). It loads and simulates faster;
         joints, links and collision geometry are the same.
+    draco : bool
+        If True, load the Draco model, rebuilt from the CAD with circuit
+        boards removed, inertial parameters from the CAD parts and
+        Draco-compressed meshes (0.8 MB download). Arm and head joints are
+        the same. Needs DracoPy (``pip install DracoPy``). See
+        :func:`skrobot.data.jedy_urdfpath`.
     """
 
-    def __init__(self, *args, light=False, **kwargs):
+    def __init__(self, *args, light=False, draco=False, **kwargs):
         self.light = light
+        self.draco = draco
         super(Jedy, self).__init__(*args, **kwargs)
 
         self.rarm_end_coords = CascadedCoords(
@@ -61,7 +68,7 @@ class Jedy(RobotModelFromURDF):
 
     @cached_property
     def default_urdf_path(self):
-        return jedy_urdfpath(light=self.light)
+        return jedy_urdfpath(light=self.light, draco=self.draco)
 
     def reset_pose(self):
         self.rarm_joint0.joint_angle(np.deg2rad(30))
