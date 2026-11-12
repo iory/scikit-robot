@@ -1095,9 +1095,9 @@ _COLLADA_NS = '{http://www.collada.org/2005/11/COLLADASchema}'
 
 
 def _portable_collada(data):
-    """Rewrite trimesh's Collada output so that Gazebo classic can use it.
+    """Rewrite trimesh's Collada output so that Gazebo can use it.
 
-    trimesh writes two things that other loaders tolerate and Gazebo does
+    trimesh writes three things that other loaders tolerate and Gazebo does
     not:
 
     * every ``<geometry>`` carries the same local ids (``verts-array``,
@@ -1108,6 +1108,9 @@ def _portable_collada(data):
     * every material has a black ``<ambient>``, so each face turned away
       from the light renders black and the model looks as if it had lost
       its colors.
+    * every material is named ``defaultmaterial``. OGRE, which Gazebo
+      renders with, keeps materials by name, so differently colored parts
+      can end up drawn with one of their colors.
 
     Parameters
     ----------
@@ -1119,10 +1122,16 @@ def _portable_collada(data):
     -------
     bytes
         The same document with the ids inside each ``<geometry>`` prefixed
-        by that geometry's id, and each black or missing ambient color
-        replaced by the diffuse color.
+        by that geometry's id, each black or missing ambient color replaced
+        by the diffuse color, and each material that shares its name with
+        another renamed to its own id.
     """
     root = ET.fromstring(data)
+    materials = list(root.iter(_COLLADA_NS + 'material'))
+    names = [m.get('name') for m in materials]
+    for material, name in zip(materials, names):
+        if names.count(name) > 1 or name == 'defaultmaterial':
+            material.set('name', material.get('id'))
     for geometry in root.iter(_COLLADA_NS + 'geometry'):
         prefix = geometry.get('id') + '-'
         local_ids = set()
@@ -1378,6 +1387,17 @@ def _write_meshes(meshes, output_file):
         :func:`_should_skip_mesh_export`'s decision, not this one's.
     """
     trimesh = _lazy_trimesh()
+    if not meshes or not any(
+            len(m.faces) and np.ptp(m.vertices, axis=0).max() > 0
+            for m in meshes):
+        # The source did not load: a Draco-compressed glTF without DracoPy
+        # comes back as no meshes (skipped) or as faces with every vertex at
+        # the origin. Writing that out would leave a file that loads as an
+        # invisible part and a run that looks successful.
+        raise ValueError(
+            'no geometry to write to {}: its source mesh did not load. A '
+            'Draco-compressed glTF/GLB needs DracoPy (pip install DracoPy).'
+            .format(output_file))
     if output_file.endswith('.dae'):
         _write_collada(meshes, output_file)
     elif output_file.endswith('.stl'):

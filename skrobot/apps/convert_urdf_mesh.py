@@ -208,10 +208,10 @@ def _process_urdf(urdf_file, args):
             draco_compression=args.draco)
     except ValueError as e:
         print(f"[ERROR] {e}")
-        return
+        sys.exit(1)
     except Exception as e:
         print(f"[ERROR] Failed to convert URDF: {e}")
-        return
+        sys.exit(1)
 
     if args.inplace:
         print(f"Moving {output_path} to {urdf_path} (inplace)")
