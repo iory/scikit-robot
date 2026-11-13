@@ -47,6 +47,15 @@ try:
                 action_type=FollowJointTrajectory,
                 joint_names=['panda_joint1'])
                 for name in self.controller_names]
+
+    class _NoStateInterface(_TwoControllerInterface):
+        """The same two controllers, without their state topics."""
+
+        def default_controller(self):
+            params = super().default_controller()
+            params[0]['controller_state'] = None
+            del params[1]['controller_state']
+            return params
 except ImportError:
     ROS2_AVAILABLE = False
 
@@ -312,6 +321,37 @@ class TestRos2BaseControllerCallbacks(unittest.TestCase):
         assert received
         assert self.ri.moving_status == {first: True}
         assert self.ri.is_moving(controller_type=first)
+
+
+class TestRos2BaseWithoutControllerState(TestRos2BaseControllerCallbacks):
+    """controller_state None or absent: no state subscription, the rest as before."""
+
+    def setUp(self):
+        self.server_node = rclpy.create_node('aux_trajectory_servers_nostate')
+        self.servers = [
+            ActionServer(self.server_node, FollowJointTrajectory,
+                         name + '/follow_joint_trajectory',
+                         lambda goal_handle: FollowJointTrajectory.Result())
+            for name in _NoStateInterface.controller_names]
+        self.executor = SingleThreadedExecutor()
+        self.executor.add_node(self.server_node)
+        self.spin_thread = threading.Thread(
+            target=self.executor.spin, daemon=True)
+        self.spin_thread.start()
+        self.ri = _NoStateInterface(
+            robot=Panda(), node_name='test_no_state',
+            joint_states_topic='_test_joint_states_no_state',
+            controller_timeout=5.0)
+        assert self.ri.joint_action_enable
+
+    # Inherited: the trajectory status is still followed. Not inherited:
+    # there is no state to store.
+    test_state_is_stored_under_its_own_controller = None
+
+    def test_no_state_subscription(self):
+        topics = [sub.topic_name for sub in self.ri.subscriptions
+                  if sub.msg_type is JointTrajectoryControllerState]
+        assert topics == []
 
 
 if ROS2_AVAILABLE:

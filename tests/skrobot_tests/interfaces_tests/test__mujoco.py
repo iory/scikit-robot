@@ -309,3 +309,103 @@ class TestSceneEditsFindFrameSites(unittest.TestCase):
         with self.assertRaises(ValueError):
             _mujoco_scene.add_objects(
                 root, [Box((0.1, 0.1, 0.1), name='optical')], movable=False)
+
+
+# A room: a floor slab whose top is at z = 0, a wall the robot can drive
+# into, a desk top on a hinge, and a photo-textured quad on the wall.
+_ROOM_URDF = """<?xml version="1.0"?>
+<robot name="room">
+  <link name="world"/>
+  <joint name="world_to_floor" type="fixed">
+    <parent link="world"/><child link="floor"/>
+    <origin xyz="0 0 -0.05" rpy="0 0 0"/>
+  </joint>
+  <link name="floor">
+    <collision><geometry><box size="10 10 0.1"/></geometry></collision>
+  </link>
+  <joint name="floor_to_wall" type="fixed">
+    <parent link="floor"/><child link="wall"/>
+    <origin xyz="1.5 0 0.55" rpy="0 0 0"/>
+  </joint>
+  <link name="wall">
+    <visual><geometry><mesh filename="poster.obj"/></geometry></visual>
+    <collision><geometry><box size="0.1 4 1"/></geometry></collision>
+  </link>
+  <joint name="desk_hinge" type="revolute">
+    <parent link="floor"/><child link="desk_top"/>
+    <origin xyz="-1.5 0 0.8" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.5708" upper="0" effort="10" velocity="1"/>
+  </joint>
+  <link name="desk_top">
+    <inertial><mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+    <collision><origin xyz="0.3 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.6 1 0.02"/></geometry></collision>
+  </link>
+</robot>
+"""
+
+
+def _write_textured_quad(directory):
+    """poster.obj + .mtl + .png: one textured quad facing -x."""
+    from PIL import Image
+
+    Image.new('RGB', (8, 4), (200, 30, 30)).save(
+        os.path.join(directory, 'poster.png'))
+    with open(os.path.join(directory, 'poster.mtl'), 'w') as f:
+        f.write('newmtl poster\nKd 1 1 1\nmap_Kd poster.png\n')
+    with open(os.path.join(directory, 'poster.obj'), 'w') as f:
+        f.write('mtllib poster.mtl\nusemtl poster\n'
+                'v -0.06 -0.5 -0.25\nv -0.06 0.5 -0.25\n'
+                'v -0.06 0.5 0.25\nv -0.06 -0.5 0.25\n'
+                'vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n'
+                'f 1/1 2/2 3/3\nf 1/1 3/3 4/4\n')
+
+
+class TestMujocoStaticModel(unittest.TestCase):
+    """A room loaded from a URDF, passed as an object."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        urdf_path = os.path.join(self.tmpdir, 'mobile.urdf')
+        with open(urdf_path, 'w') as f:
+            f.write(_MOBILE_URDF)
+        self.robot = RobotModelFromURDF(urdf_file=urdf_path)
+        _write_textured_quad(self.tmpdir)
+        room_path = os.path.join(self.tmpdir, 'room.urdf')
+        with open(room_path, 'w') as f:
+            f.write(_ROOM_URDF)
+        self.room = RobotModelFromURDF(urdf_file=room_path)
+        # Folded up, as a desk is put away.
+        self.room.desk_hinge.joint_angle(-np.pi / 2)
+        self.ri = MujocoRobotInterface(self.robot, planar_base=True,
+                                       objects=[self.room])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_links_are_fixed_where_posed(self):
+        self.assertEqual(self.ri.model.njnt, 4)  # base x, y, yaw and pan
+        top = self.ri.object_coords('desk_top')
+        np.testing.assert_allclose(top.worldpos(), [-1.5, 0.0, 0.75])
+        np.testing.assert_allclose(top.worldrot(),
+                                   self.room.desk_top.worldrot(), atol=1e-9)
+
+    def test_texture_is_kept(self):
+        self.assertEqual(self.ri.model.ntex, 1)
+        self.assertEqual(self.ri.model.nmat, 1)
+
+    def test_robot_drives_over_the_floor_and_stops_at_the_wall(self):
+        self.ri.go_pos(2.0, 0.0, 0.0)
+        self.ri.simulate(0.5)
+        # The base (0.4 m across) stops at the wall's face, x = 1.45.
+        x = self.ri.odom.worldpos()[0]
+        self.assertLess(x, 1.26)
+        self.assertGreater(x, 1.0)
+        self.assertNotIn('floor', self.ri.contacts('base_link'))
+        self.assertIn('wall', self.ri.contacts('base_link'))
+
+    def test_a_model_cannot_be_movable(self):
+        with self.assertRaises(TypeError):
+            MujocoRobotInterface(self.robot, movable_objects=[self.room])
