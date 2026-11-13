@@ -117,19 +117,18 @@ class TestDegenerateMeshes(unittest.TestCase):
         return [] if asset is None else asset.findall('mesh')
 
     def test_solid_mesh_is_not_marked_shell(self):
-        # <visual> and <collision> load the file separately, so one mesh file
-        # becomes two assets; neither is a shell.
+        # <visual> and <collision> name the same file, which loads once,
+        # so they share one asset; it is not a shell.
         _, root = self._convert(_solid_box())
         assets = self._mesh_assets(root)
-        self.assertEqual(len(assets), 2)
-        self.assertEqual([a.get('inertia') for a in assets], [None, None])
+        self.assertEqual(len(assets), 1)
+        self.assertEqual([a.get('inertia') for a in assets], [None])
 
     def test_zero_volume_mesh_is_marked_shell(self):
         _, root = self._convert(_thin_shell())
         assets = self._mesh_assets(root)
-        self.assertEqual(len(assets), 2)
-        self.assertEqual([a.get('inertia') for a in assets],
-                         ['shell', 'shell'])
+        self.assertEqual(len(assets), 1)
+        self.assertEqual([a.get('inertia') for a in assets], ['shell'])
 
     def test_three_vertex_mesh_is_dropped(self):
         # Too few vertices for MuJoCo, so no asset and no geom referencing one.
@@ -560,3 +559,74 @@ class TestInertiaWarningAndMimicQpos(unittest.TestCase):
         mujoco.mj_forward(model, data)
         # the equality is now satisfied, so the solver sees no violation
         self.assertTrue(np.allclose(data.efc_pos[:data.nefc], 0.0))
+
+
+class TestTexturedMesh(unittest.TestCase):
+    """An OBJ + MTL + image keeps its texture in the MJCF."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_texture_material_and_uv(self):
+        from PIL import Image
+
+        Image.new('RGB', (8, 4), (10, 200, 30)).save(
+            os.path.join(self.tmpdir, 'part.png'))
+        box = _solid_box()
+        # One texture coordinate per vertex is all the test needs.
+        uv = (box.vertices[:, :2] - box.vertices[:, :2].min(axis=0)) / 0.1
+        box.visual = trimesh.visual.TextureVisuals(
+            uv=uv, image=Image.open(os.path.join(self.tmpdir, 'part.png')))
+        box.export(os.path.join(self.tmpdir, 'part.obj'))
+        urdf_path = os.path.join(self.tmpdir, 'robot.urdf')
+        with open(urdf_path, 'w') as f:
+            f.write(_URDF_TEMPLATE.format(mesh='part.obj'))
+        out_path = os.path.join(self.tmpdir, 'robot.xml')
+        urdf_to_mjcf(urdf_path, out_path, add_ground=False)
+        root = ET.parse(out_path).getroot()
+        asset = root.find('asset')
+        self.assertEqual(len(asset.findall('texture')), 1)
+        self.assertEqual(len(asset.findall('material')), 1)
+        self.assertTrue(asset.find('mesh').get('file').endswith('.obj'))
+        material = asset.find('material').get('name')
+        geoms = {g.get('group'): g for g in root.iter('geom')}
+        self.assertEqual(geoms['2'].get('material'), material)
+        self.assertIsNone(geoms['3'].get('material'))
+        try:
+            import mujoco
+        except ImportError:
+            return
+        model = mujoco.MjModel.from_xml_path(out_path)
+        self.assertEqual(model.ntex, 1)
+        self.assertEqual(model.mesh_texcoord.shape[0] > 0, True)
+
+
+class TestMtlDissolve(unittest.TestCase):
+    """An OBJ material with ``d`` (glass) keeps its transparency."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_glass_is_translucent(self):
+        with open(os.path.join(self.tmpdir, 'part.mtl'), 'w') as f:
+            f.write('newmtl glass\nKd 0.8 0.85 0.88\nd 0.150\n')
+        box = _solid_box()
+        lines = ['mtllib part.mtl', 'usemtl glass']
+        lines += ['v {} {} {}'.format(*v) for v in box.vertices]
+        lines += ['f {} {} {}'.format(*(f + 1)) for f in box.faces]
+        with open(os.path.join(self.tmpdir, 'part.obj'), 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        urdf_path = os.path.join(self.tmpdir, 'robot.urdf')
+        with open(urdf_path, 'w') as f:
+            f.write(_URDF_TEMPLATE.format(mesh='part.obj'))
+        out_path = os.path.join(self.tmpdir, 'robot.xml')
+        urdf_to_mjcf(urdf_path, out_path, add_ground=False)
+        visual = [g for g in ET.parse(out_path).getroot().iter('geom')
+                  if g.get('group') == '2'][0]
+        self.assertAlmostEqual(float(visual.get('rgba').split()[3]), 0.15)

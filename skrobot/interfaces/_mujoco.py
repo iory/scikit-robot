@@ -111,9 +111,16 @@ class MujocoRobotInterface(object):
         angles. Only for the look: the base does not touch the ground,
         so the wheels do not drive it, and what an angle vector sent to
         the interface asks of them is ignored.
-    objects : list[skrobot.model.Link]
-        Box, Cylinder and Sphere primitives fixed in the world where they
-        are now, such as a table. Each needs a unique ``name``.
+    objects : list[skrobot.model.Link or skrobot.model.RobotModel]
+        Things fixed in the world where they are now, each with a unique
+        ``name``: Box, Cylinder and Sphere primitives, such as a table, and
+        models loaded from a URDF, such as a room
+        (``RobotModelFromURDF(urdf_file=skrobot.data.room13bc_urdfpath())``).
+        A model's links keep the pose they have, its joints are not
+        simulated, and its visual meshes keep their textures. Its
+        collision geoms at floor level (top at most 1 mm above z = 0)
+        collide as the ground does, so with ``planar_base`` the robot does
+        not touch the room's floor either.
     movable_objects : list[skrobot.model.Link]
         Primitives free to be pushed and picked up, such as a cube on that
         table. Their mass follows from their volume at the density of water.
@@ -311,7 +318,8 @@ class MujocoRobotInterface(object):
             _mujoco_scene.compensate_gravity(root)
         if self.planar_base:
             _mujoco_scene.add_planar_base(root, self.robot.root_link.name)
-        _mujoco_scene.add_objects(root, objects, movable=False)
+        _mujoco_scene.add_objects(root, objects, movable=False,
+                                  mjcf_dir=os.path.dirname(mjcf_path))
         _mujoco_scene.add_objects(root, movable_objects, movable=True)
         _mujoco_scene.add_cameras(root, self.cameras)
         stem, ext = os.path.splitext(mjcf_path)
