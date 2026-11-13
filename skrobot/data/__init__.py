@@ -336,6 +336,56 @@ def r8_6_urdfpath():
     return osp.join(data_dir, 'robot_descriptions', 'urdf', 'r8_6.urdf')
 
 
+#: URDF file names in ``room13bc_description/urdf`` by ``model``.
+ROOM13BC_URDFS = {
+    'scene': 'room13bc_scene',
+    'room': 'room13bc',
+    'desk': 'desk',
+}
+
+
+def room13bc_urdfpath(model='scene', glb=False):
+    """Return the path to a URDF of room 13BC, the Jedy exercise room.
+
+    Parameters
+    ----------
+    model : str
+        ``'scene'``: the room and its 48 folding desks, each desk top on a
+        revolute hinge (0 flat, -1.5708 folded up). ``'room'``: floor,
+        walls, ceiling, glass partition and whiteboard wall only, all
+        fixed. ``'desk'``: a single desk.
+    glb : bool
+        If True, the URDF whose visuals are GLB meshes (textures embedded,
+        Y up as glTF defines). Otherwise OBJ + MTL + PNG.
+
+    Returns
+    -------
+    str
+        Path to the URDF. Z is up, the floor is at z = 0, units are
+        metres; X runs along the room (26.83 m) and Y across it (9.56 m).
+
+    Raises
+    ------
+    ValueError
+        If ``model`` is not one of ``'scene'``, ``'room'``, ``'desk'``.
+    """
+    if model not in ROOM13BC_URDFS:
+        raise ValueError('model must be one of {}, not {!r}'.format(
+            sorted(ROOM13BC_URDFS), model))
+    name = ROOM13BC_URDFS[model] + ('_glb' if glb else '')
+    path = osp.join(get_cache_dir(), 'room13bc_description', 'urdf',
+                    '{}.urdf'.format(name))
+    if osp.exists(path):
+        return path
+    _retrieve(
+        url='https://github.com/iory/scikit-robot-models/raw/main/room13bc_description.tar.gz',  # NOQA
+        fname='room13bc_description.tar.gz',
+        md5='9dccdf6455fc40fa80b7d61664b4b239',
+        extract=True,
+    )
+    return path
+
+
 def rover_armed_tycoon_urdfpath():
     path = osp.join(get_cache_dir(),
                     'tycoon_description', 'urdf', 'tycoon_arm_assem.urdf')
