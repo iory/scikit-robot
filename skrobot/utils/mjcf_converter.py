@@ -209,7 +209,8 @@ class _MeshAssets:
                         f.write(export_stl(mesh))  # MuJoCo needs BINARY STL
                 else:
                     fname = name + ".obj"
-                    with open(os.path.join(self.mesh_dir, fname), "w") as f:
+                    with open(os.path.join(self.mesh_dir, fname), "w",
+                              encoding="utf-8") as f:
                         f.write(_obj_with_uv(mesh, uv))
                     self.materials[name] = self._material(image, name)
                 self._by_id[key] = name
