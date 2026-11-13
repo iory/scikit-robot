@@ -621,27 +621,35 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
                     self.get_logger().info('Actionlib interface {} is enabled'
                                            .format(action_name))
             for param in self.default_controller():
-                controller_state = param['controller_state']
+                # None (or no key): do not subscribe to the controller's
+                # state. Nothing in this class reads it; it is only stored
+                # in robot_state, and at a controller's 100 Hz or more it
+                # costs every other callback of this process time.
+                controller_state = param.get('controller_state')
                 trajectory_status = '{}/status'.format(
                     param['controller_action'])
                 if self.namespace is not None:
-                    controller_state_topic_name = '{}/{}'.format(
-                        self.namespace,
-                        controller_state)
                     trajectory_status_topic_name = '{}/{}'.format(
                         self.namespace,
                         trajectory_status)
                 else:
-                    controller_state_topic_name = controller_state
                     trajectory_status_topic_name = trajectory_status
-                # Bind the key of this controller now. A bare closure reads
-                # the loop variable when a message arrives, so every
-                # subscription would store under the last controller's key.
-                self._controller_entities.append(self.create_subscription(
-                    control_msgs.msg.JointTrajectoryControllerState,
-                    controller_state_topic_name,
-                    partial(self.set_robot_state, controller_state),
-                    10))
+                if controller_state is not None:
+                    if self.namespace is not None:
+                        controller_state_topic_name = '{}/{}'.format(
+                            self.namespace,
+                            controller_state)
+                    else:
+                        controller_state_topic_name = controller_state
+                    # Bind the key of this controller now. A bare closure
+                    # reads the loop variable when a message arrives, so
+                    # every subscription would store under the last
+                    # controller's key.
+                    self._controller_entities.append(self.create_subscription(
+                        control_msgs.msg.JointTrajectoryControllerState,
+                        controller_state_topic_name,
+                        partial(self.set_robot_state, controller_state),
+                        10))
                 self._controller_entities.append(self.create_subscription(
                     action_msgs.msg.GoalStatusArray,
                     trajectory_status_topic_name,
