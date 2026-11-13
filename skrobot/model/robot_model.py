@@ -3253,6 +3253,8 @@ class RobotModel(CascadedLink):
         # Imported here, not at module level: skrobot.utils.mesh pulls in
         # trimesh, and this module is careful not to (see _lazy_trimesh).
         from skrobot.utils.mesh import _transform_vertex_normals
+        from skrobot.utils.urdf_mesh import _has_material_image
+        from skrobot.utils.urdf_mesh import _share_material_images
 
         trimesh = None
         meshes = []
@@ -3267,7 +3269,12 @@ class RobotModel(CascadedLink):
             # rather than by ``apply_transform``, whose plain matrix multiply
             # is wrong for a mirroring scale such as ``1 -1 1``.
             authored_normals = mesh._cache.cache.get('vertex_normals')
+            source = mesh
             mesh = mesh.copy()
+            # copy() duplicates the texture images too; the loaded mesh's
+            # are shared between loads of one file (urdf_mesh), so keep
+            # those: images are only read from here on
+            _share_material_images(source, mesh)
             if authored_normals is not None \
                     and len(authored_normals) != len(mesh.vertices):
                 authored_normals = None
@@ -3312,8 +3319,14 @@ class RobotModel(CascadedLink):
                 mesh.visual = trimesh.visual.TextureVisuals(
                     uv=uv, image=texture.image)
 
-            # TextureVisuals is usually slow to render
-            if not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
+            # A textured mesh keeps its texture (ViserViewer draws it);
+            # Link.concatenated_visual_mesh bakes it to vertex colours for
+            # the other viewers. keep_texture(False) bakes it here instead.
+            keep = (urdf._CONFIGURABLE_VALUES.get('keep_texture', True)
+                    and getattr(mesh.visual, 'uv', None) is not None
+                    and _has_material_image(mesh))
+            if not keep and \
+                    not isinstance(mesh.visual, trimesh.visual.ColorVisuals):
                 mesh.visual = mesh.visual.to_color()
                 if mesh.visual.vertex_colors.ndim == 1:
                     mesh.visual.vertex_colors = \
@@ -3324,8 +3337,9 @@ class RobotModel(CascadedLink):
             # If color is not specified in mesh file,
             # use information specified in URDF.
             if (
-                (mesh.visual.face_colors
-                 == trimesh.visual.DEFAULT_COLOR).all()
+                isinstance(mesh.visual, trimesh.visual.ColorVisuals)
+                and (mesh.visual.face_colors
+                     == trimesh.visual.DEFAULT_COLOR).all()
                 and visual.material
                 and visual.material.color is not None
             ):

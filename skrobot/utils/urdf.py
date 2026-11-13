@@ -36,6 +36,7 @@ from skrobot.utils.urdf_mesh import force_visual_mesh_origin_to_zero
 from skrobot.utils.urdf_mesh import geometry_key
 from skrobot.utils.urdf_mesh import get_filename
 from skrobot.utils.urdf_mesh import get_path_with_cache  # NOQA: F401
+from skrobot.utils.urdf_mesh import keep_texture  # NOQA: F401
 from skrobot.utils.urdf_mesh import load_meshes
 from skrobot.utils.urdf_mesh import mesh_processing_key
 from skrobot.utils.urdf_mesh import mesh_simplify_factor  # NOQA: F401

@@ -135,6 +135,34 @@ def _alpha_blended_mesh(mesh):
     return blended
 
 
+def _has_texture_image(meshes):
+    """Return whether any of a link's visual meshes carries a texture image.
+
+    Parameters
+    ----------
+    meshes : trimesh.Trimesh or list of trimesh.Trimesh or None
+        A link's ``visual_mesh``.
+
+    Returns
+    -------
+    bool
+        True when a mesh's material has an image (meshes loaded under
+        :func:`skrobot.utils.urdf.keep_texture`).
+    """
+    if meshes is None:
+        return False
+    if not isinstance(meshes, (list, tuple)):
+        meshes = [meshes]
+    for mesh in meshes:
+        material = getattr(getattr(mesh, 'visual', None), 'material', None)
+        if material is None:
+            continue
+        if getattr(material, 'image', None) is not None \
+                or getattr(material, 'baseColorTexture', None) is not None:
+            return True
+    return False
+
+
 class ViserViewer(_InteractiveViewerMixin):
     """Viser-based 3D viewer for scikit-robot.
 
@@ -3641,6 +3669,9 @@ class ViserViewer(_InteractiveViewerMixin):
                 )
         elif isinstance(link, LineString):
             handle = self._add_line_string(link_id, link)
+        elif _has_texture_image(link.visual_mesh) \
+                and not getattr(link, 'color_overridden', False):
+            handle = self._add_textured_link(link_id, link)
         else:
             mesh = link.concatenated_visual_mesh
             if mesh is not None:
@@ -3668,6 +3699,44 @@ class ViserViewer(_InteractiveViewerMixin):
         if handle is not None:
             self._linkid_to_link[link_id] = link
             self._linkid_to_handle[link_id] = handle
+
+    def _add_textured_link(self, link_id, link):
+        """Add a link whose visual meshes carry texture images.
+
+        ``concatenated_visual_mesh`` packs the meshes' images into one
+        atlas, which cannot repeat a tiled texture (UVs outside 0 .. 1
+        get squeezed into the atlas cell) and can outgrow the browser's
+        texture size limit. Instead, each mesh is sent on its own under
+        a frame at the link's pose: the frame is the handle that moves
+        with the link, and removing it removes the meshes too.
+
+        Parameters
+        ----------
+        link_id : str
+            Scene node name of the link.
+        link : skrobot.model.Link
+            Link to add.
+
+        Returns
+        -------
+        viser.FrameHandle
+            Frame carrying the link's meshes.
+        """
+        meshes = link.visual_mesh
+        if not isinstance(meshes, (list, tuple)):
+            meshes = [meshes]
+        handle = self._server.scene.add_frame(
+            link_id,
+            show_axes=False,
+            wxyz=matrix2quaternion(link.worldrot()),
+            position=link.worldpos(),
+        )
+        for i, mesh in enumerate(meshes):
+            self._server.scene.add_mesh_trimesh(
+                '{}/visual_{}'.format(link_id, i),
+                mesh=_alpha_blended_mesh(mesh),
+            )
+        return handle
 
     def _ensure_gui_initialized(self):
         """Initialize GUI section folders in the correct order."""

@@ -10,6 +10,50 @@ from skrobot._lazy_imports import _lazy_trimesh
 from skrobot.coordinates import CascadedCoords
 
 
+def _color_concatenate(meshes):
+    """Concatenate meshes into one, each textured mesh baked to colours.
+
+    ``trimesh.util.concatenate`` packs textured meshes' images into one
+    atlas: slow, memory hungry for large images, and wrong for a tiled
+    texture (UVs outside 0 .. 1 are squeezed into the atlas cell). The
+    concatenated mesh is what the viewers draw as one piece and what
+    ``set_color`` paints, so a colour per vertex is what it needs.
+
+    Parameters
+    ----------
+    meshes : trimesh.Trimesh or sequence of trimesh.Trimesh
+        A link's visual meshes.
+
+    Returns
+    -------
+    trimesh.Trimesh
+        The meshes as one, textured meshes carrying ``ColorVisuals``.
+    """
+    trimesh = _lazy_trimesh()
+    if isinstance(meshes, trimesh.Trimesh):
+        meshes = [meshes]
+    elif not isinstance(meshes, Sequence):
+        return trimesh.util.concatenate(meshes)
+    colored = []
+    for mesh in meshes:
+        if not isinstance(mesh, trimesh.Trimesh) \
+                or isinstance(mesh.visual, trimesh.visual.ColorVisuals):
+            colored.append(mesh)
+            continue
+        # copy() drops the cache, where normals loaded from the file live
+        normals = mesh._cache.cache.get('vertex_normals')
+        baked = mesh.copy()
+        baked.visual = mesh.visual.to_color()
+        if baked.visual.vertex_colors.ndim == 1:
+            baked.visual.vertex_colors = \
+                baked.visual.vertex_colors[None].repeat(
+                    len(baked.vertices), axis=0)
+        if normals is not None and len(normals) == len(baked.vertices):
+            baked.vertex_normals = normals
+        colored.append(baked)
+    return trimesh.util.concatenate(colored)
+
+
 class Link(CascadedCoords):
 
     def __init__(self, centroid=None,
@@ -28,12 +72,6 @@ class Link(CascadedCoords):
         self.inertia_tensor = inertia_tensor
         self._collision_mesh = collision_mesh
         self.visual_mesh = visual_mesh
-        if visual_mesh is not None:
-            trimesh = _lazy_trimesh()
-            self._concatenated_visual_mesh = trimesh.util.concatenate(
-                self._visual_mesh)
-        else:
-            self._concatenated_visual_mesh = None
         self._visual_mesh_changed = False
         self._sdf = None
 
@@ -127,6 +165,8 @@ class Link(CascadedCoords):
         if mesh is None or (isinstance(mesh, Sequence) and len(mesh) == 0):
             self._visual_mesh = mesh
             self._concatenated_visual_mesh = None
+            self._concatenated_stale = False
+            self._color_overridden = False
             self._visual_mesh_changed = True
             return
         trimesh = _lazy_trimesh()
@@ -143,7 +183,11 @@ class Link(CascadedCoords):
         if isinstance(mesh, str):
             mesh = trimesh.load(mesh)
         self._visual_mesh = mesh
-        self._concatenated_visual_mesh = trimesh.util.concatenate(mesh)
+        # made when first asked for (concatenated_visual_mesh): a textured
+        # link that a viewer draws mesh by mesh never needs it
+        self._concatenated_visual_mesh = None
+        self._concatenated_stale = True
+        self._color_overridden = False
         self._visual_mesh_changed = True
 
     @property
@@ -174,12 +218,32 @@ class Link(CascadedCoords):
     def concatenated_visual_mesh(self):
         """Concatenated visual mesh for visualization.
 
+        Made when first asked for, with textured meshes baked to vertex
+        colours (the meshes in ``visual_mesh`` keep their textures).
+
         Returns
         -------
         self._concatenated_visual_mesh : None, trimesh.base.Trimesh
             A concatenated visual meshes for the link in the link frame.
         """
-        return self._concatenated_visual_mesh
+        if getattr(self, '_concatenated_stale', False):
+            self._concatenated_visual_mesh = _color_concatenate(
+                self._visual_mesh)
+            self._concatenated_stale = False
+        return getattr(self, '_concatenated_visual_mesh', None)
+
+    @property
+    def color_overridden(self):
+        """Whether ``set_color`` or ``set_alpha`` repainted the link.
+
+        Returns
+        -------
+        bool
+            True until ``reset_color`` or a new ``visual_mesh``. A viewer
+            that draws the textured ``visual_mesh`` draws
+            ``concatenated_visual_mesh`` instead while this is True.
+        """
+        return getattr(self, '_color_overridden', False)
 
     @property
     def visual_mesh_changed(self):
@@ -187,13 +251,14 @@ class Link(CascadedCoords):
 
     @property
     def colors(self):
-        if self._concatenated_visual_mesh is not None:
-            return self._concatenated_visual_mesh.visual.face_colors
+        mesh = self.concatenated_visual_mesh
+        if mesh is not None:
+            return mesh.visual.face_colors
         else:
             return None
 
     def set_color(self, color):
-        mesh = self._concatenated_visual_mesh
+        mesh = self.concatenated_visual_mesh
         if mesh is None:
             return
         color = np.array(color)
@@ -202,13 +267,16 @@ class Link(CascadedCoords):
         else:
             n_facet = len(mesh.visual.face_colors)
             mesh.visual.face_colors = np.array([color] * n_facet)
+        self._color_overridden = True
         self._visual_mesh_changed = True
 
     def reset_color(self):
-        trimesh = _lazy_trimesh()
-        concat_mesh = trimesh.util.concatenate(self._visual_mesh)
-        self._concatenated_visual_mesh.visual.face_colors = \
-            concat_mesh.visual.face_colors
+        mesh = self.concatenated_visual_mesh
+        if mesh is None:
+            return
+        mesh.visual.face_colors = \
+            _color_concatenate(self._visual_mesh).visual.face_colors
+        self._color_overridden = False
         self._visual_mesh_changed = True
 
     def set_alpha(self, alpha):
@@ -219,12 +287,13 @@ class Link(CascadedCoords):
         alpha : float
             Alpha value between 0.0 (transparent) and 1.0 (opaque)
         """
-        mesh = self._concatenated_visual_mesh
+        mesh = self.concatenated_visual_mesh
         if mesh is None:
             return
         alpha = np.clip(alpha, 0.0, 1.0)  # Ensure alpha is in valid range
         # Update alpha channel (4th component) of all face colors
         mesh.visual.face_colors[:, 3] = np.round(alpha * 255).astype(np.uint8)
+        self._color_overridden = True
         self._visual_mesh_changed = True
 
     @property
