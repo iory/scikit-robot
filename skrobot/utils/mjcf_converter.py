@@ -12,7 +12,10 @@ mimic couplings) and emits a clean MJCF:
 * revolute/continuous -> ``hinge``, prismatic -> ``slide`` (limits -> range).
 * URDF ``<inertial>`` -> MJCF ``<inertial ... fullinertia=...>``.
 * box/cylinder/sphere primitives and meshes -> geoms; meshes exported to STL
-  assets and referenced from ``<asset>``. Empty geometry is skipped, as is a
+  assets and referenced from ``<asset>``. A textured sub-mesh (an OBJ + MTL
+  with ``map_Kd``, a textured glTF) is exported to OBJ with its texture
+  coordinates instead, its image to PNG (the one format MuJoCo reads), and
+  its visual geom gets a ``<material>`` with that ``<texture>``. Empty geometry is skipped, as is a
   sub-mesh MuJoCo cannot compile (fewer than 4 vertices); a flat sub-mesh that
   encloses no volume is marked ``inertia="shell"``.
 * ``mimic`` -> ``<equality><joint polycoef=...>``. MuJoCo enforces an equality
@@ -50,7 +53,8 @@ def _fmt(values):
 
 
 class _MeshAssets:
-    """Collects unique meshes, exports them to STL, and hands out asset names."""
+    """Collects unique meshes, exports them to STL (OBJ when textured), and
+    hands out asset names."""
 
     # MuJoCo's STL decoder rejects meshes with more than this many faces.
     MAX_FACES = 200000
@@ -89,6 +93,12 @@ class _MeshAssets:
         # the emitted geometry without re-reading the STLs. These are references
         # to meshes the URDF already holds, so the common path costs nothing.
         self.meshes = {}
+        # asset name -> material name, for a textured sub-mesh
+        self.materials = {}
+        # (material name, texture name), and (texture name, PNG file name)
+        self.material_entries = []
+        self.texture_entries = []
+        self._texture_by_id = {}  # id(PIL image) -> texture name
         # collision-only: run CoACD on collision meshes so MuJoCo gets accurate
         # convex parts instead of one coarse convex hull. Set by urdf_to_mjcf.
         self.convex_decompose = False
@@ -128,7 +138,13 @@ class _MeshAssets:
     @classmethod
     def _is_shell(cls, mesh):
         """True if the mesh encloses no usable volume, so MuJoCo has to treat it
-        as a surface (``inertia="shell"``) instead of a solid."""
+        as a surface (``inertia="shell"``) instead of a solid.
+
+        A flat sheet is one whatever trimesh's volume says: the volume of an
+        open surface is not zero but arbitrary (a wall's photo quad, two
+        triangles, comes out at -6.5 m^3), and MuJoCo refuses it."""
+        if cls._is_coplanar(mesh):
+            return True
         try:
             # a zero-volume mesh is exactly the case being detected here, and
             # trimesh divides the first moment by that volume to get the centre
@@ -185,9 +201,17 @@ class _MeshAssets:
                 if not self._meshable(mesh):
                     continue
                 name = "{}_{}".format(base or "mesh", len(self.entries))
-                fname = name + ".stl"
-                with open(os.path.join(self.mesh_dir, fname), "wb") as f:
-                    f.write(export_stl(mesh))  # MuJoCo needs BINARY STL
+                image, uv = (_texture(mesh) if mesh is sub
+                             else (None, None))
+                if image is None:
+                    fname = name + ".stl"
+                    with open(os.path.join(self.mesh_dir, fname), "wb") as f:
+                        f.write(export_stl(mesh))  # MuJoCo needs BINARY STL
+                else:
+                    fname = name + ".obj"
+                    with open(os.path.join(self.mesh_dir, fname), "w") as f:
+                        f.write(_obj_with_uv(mesh, uv))
+                    self.materials[name] = self._material(image, name)
                 self._by_id[key] = name
                 self.entries.append((name, fname, scale, self._is_shell(mesh)))
                 self.meshes[name] = mesh
@@ -195,6 +219,21 @@ class _MeshAssets:
                     self.coplanar.add(name)
             out.append((name, scale, color))
         return out
+
+    def _material(self, image, mesh_name):
+        """Name of the material showing ``image``, written once as PNG."""
+        key = id(image)
+        texture = self._texture_by_id.get(key)
+        if texture is None:
+            texture = "{}_tex".format(mesh_name)
+            fname = texture + ".png"
+            # Fast compression: the PNG is only read back by MuJoCo.
+            image.convert("RGB").save(os.path.join(self.mesh_dir, fname),
+                                      "PNG", compress_level=1)
+            self._texture_by_id[key] = texture
+            self.texture_entries.append((texture, fname))
+            self.material_entries.append((texture, texture))
+        return texture
 
     def add_convex_parts(self, mesh_geometry):
         """CoACD-decompose a collision mesh into convex parts and return one
@@ -253,6 +292,28 @@ class _MeshAssets:
             for name in names:
                 out.append((name, scale, None))
         return out
+
+
+def _texture(mesh):
+    """``(image, uv)`` of a textured trimesh, or ``(None, None)``."""
+    visual = getattr(mesh, "visual", None)
+    uv = getattr(visual, "uv", None)
+    image = getattr(getattr(visual, "material", None), "image", None)
+    if image is None:
+        image = getattr(getattr(visual, "material", None),
+                        "baseColorTexture", None)
+    if image is None or uv is None or len(uv) != len(mesh.vertices):
+        return None, None
+    return image, np.asarray(uv, dtype=float)
+
+
+def _obj_with_uv(mesh, uv):
+    """Wavefront OBJ text of ``mesh`` with one texture coordinate per vertex."""
+    lines = ["v {}".format(_fmt(v)) for v in mesh.vertices]
+    lines += ["vt {}".format(_fmt(t)) for t in uv]
+    lines += ["f {0}/{0} {1}/{1} {2}/{2}".format(*(face + 1))
+              for face in np.asarray(mesh.faces)]
+    return "\n".join(lines) + "\n"
 
 
 def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
@@ -331,8 +392,14 @@ def _add_geom(parent_el, visual_or_collision, assets, *, collision, rgba=None,
                 continue
             emitted = True
             a = dict(base_attrib, type="mesh", mesh=name)
-            # URDF <material> colour wins; else the sub-mesh's own colour.
-            eff = rgba if rgba is not None else mesh_color
+            material = (None if collision
+                        else getattr(assets, "materials", {}).get(name))
+            # URDF <material> colour wins; else the texture, or the
+            # sub-mesh's own colour.
+            eff = rgba if rgba is not None else (
+                None if material is not None else mesh_color)
+            if material is not None and rgba is None:
+                a["material"] = material
             if eff is not None:
                 a["rgba"] = _fmt(eff)
             ET.SubElement(parent_el, "geom", _named(a))
@@ -359,9 +426,18 @@ def _submesh_rgba(mesh):
     if mc is None:
         return None
     try:
-        return [float(c) / 255.0 for c in mc]
+        rgba = [float(c) / 255.0 for c in mc]
     except (TypeError, ValueError):
         return None
+    # An MTL's dissolve ("d 0.15", glass): trimesh keeps it aside, unparsed,
+    # and reports the colour opaque.
+    kwargs = getattr(getattr(visual, "material", None), "kwargs", None)
+    dissolve = kwargs.get("d") if isinstance(kwargs, dict) else None
+    if dissolve is not None and len(rgba) == 4:
+        if isinstance(dissolve, (list, tuple)):
+            dissolve = dissolve[0]
+        rgba[3] = float(dissolve)
+    return rgba
 
 
 def _visual_rgba(visual):
@@ -662,9 +738,13 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         The MJCF XML written to ``out_path``.
     """
     from skrobot.utils.urdf import URDF
+    from skrobot.utils.urdf_mesh import enable_mesh_cache
 
     if isinstance(urdf, str):
-        urdf = URDF.load(urdf)
+        # One file referenced by many links (a room's 48 desks) loads once,
+        # so it is also written once.
+        with enable_mesh_cache():
+            urdf = URDF.load(urdf)
 
     out_dir = os.path.dirname(os.path.abspath(out_path)) or "."
     if mesh_dir is None:
@@ -682,7 +762,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     root = ET.Element("mujoco", {"model": urdf.name or "robot"})
     ET.SubElement(root, "compiler", {
         "angle": "radian", "autolimits": "true",
-        "meshdir": os.path.relpath(mesh_dir, out_dir)})
+        "meshdir": os.path.relpath(mesh_dir, out_dir),
+        "texturedir": os.path.relpath(mesh_dir, out_dir)})
     ET.SubElement(root, "option", {"gravity": _fmt(gravity)})
 
     # 'backemf' damping is per joint, so it is written on each <joint> as the
@@ -771,6 +852,15 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
             # inertia spreads the mass over the surface instead
             attrs["inertia"] = "shell"
         ET.SubElement(asset_el, "mesh", attrs)
+    used = {g.get("material") for g in root.iter("geom")}
+    for texture, fname in assets.texture_entries:
+        if texture in used:
+            ET.SubElement(asset_el, "texture", {
+                "name": texture, "type": "2d", "file": fname})
+    for material, texture in assets.material_entries:
+        if material in used:
+            ET.SubElement(asset_el, "material", {
+                "name": material, "texture": texture})
 
     # mimic joints -> equality constraints
     mimic_joints = [j for j in urdf.joints

@@ -344,7 +344,14 @@ ROOM13BC_URDFS = {
 }
 
 
-def room13bc_urdfpath(model='scene', glb=False):
+#: ``light`` -> (bundle name, md5 of its .tar.gz).
+ROOM13BC_BUNDLES = {
+    False: ('room13bc_description', 'ddf85094076e17b3ebfd7245e04425ad'),
+    True: ('room13bc_light_description', 'b725f0d85b5e20771040e942b9740a01'),
+}
+
+
+def room13bc_urdfpath(model='scene', glb=False, light=False):
     """Return the path to a URDF of room 13BC, the Jedy exercise room.
 
     Room 13BC is on the 1st floor of Engineering Building No. 2, the
@@ -360,6 +367,11 @@ def room13bc_urdfpath(model='scene', glb=False):
     glb : bool
         If True, the URDF whose visuals are GLB meshes (textures embedded,
         Y up as glTF defines). Otherwise OBJ + MTL + PNG.
+    light : bool
+        If True, the light bundle (``room13bc_light_description``, 1.1 MB
+        instead of 54 MB): the same URDFs and OBJ meshes, with textures of
+        at most 1024 px stored as JPEG and no GLB. For simulators and
+        browsers. Cannot be combined with ``glb``.
 
     Returns
     -------
@@ -370,20 +382,24 @@ def room13bc_urdfpath(model='scene', glb=False):
     Raises
     ------
     ValueError
-        If ``model`` is not one of ``'scene'``, ``'room'``, ``'desk'``.
+        If ``model`` is not one of ``'scene'``, ``'room'``, ``'desk'``, or
+        both ``glb`` and ``light`` are set.
     """
     if model not in ROOM13BC_URDFS:
         raise ValueError('model must be one of {}, not {!r}'.format(
             sorted(ROOM13BC_URDFS), model))
+    if glb and light:
+        raise ValueError('the light bundle has no GLB meshes; pass glb or '
+                         'light, not both')
     name = ROOM13BC_URDFS[model] + ('_glb' if glb else '')
-    path = osp.join(get_cache_dir(), 'room13bc_description', 'urdf',
-                    '{}.urdf'.format(name))
+    bundle, md5 = ROOM13BC_BUNDLES[light]
+    path = osp.join(get_cache_dir(), bundle, 'urdf', '{}.urdf'.format(name))
     if osp.exists(path):
         return path
     _retrieve(
-        url='https://github.com/iory/scikit-robot-models/raw/main/room13bc_description.tar.gz',  # NOQA
-        fname='room13bc_description.tar.gz',
-        md5='ddf85094076e17b3ebfd7245e04425ad',
+        url='https://github.com/iory/scikit-robot-models/raw/main/{}.tar.gz'.format(bundle),  # NOQA
+        fname='{}.tar.gz'.format(bundle),
+        md5=md5,
         extract=True,
     )
     return path

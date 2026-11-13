@@ -8,6 +8,7 @@ XML before it is loaded; they are plain ``xml.etree`` edits so they run under
 Pyodide as well.
 """
 
+import os
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -28,6 +29,13 @@ PLANAR_BASE_JOINTS = ('base_x', 'base_y', 'base_yaw')
 # its wheels and casters.
 _OBJECT_MASK = {'contype': '1', 'conaffinity': '1'}
 _GROUND_MASK_WITHOUT_ROBOT = {'contype': '4', 'conaffinity': '5'}
+# A static model's collision geom whose top is no higher than this [m] is
+# part of the floor (a room's floor slab), and collides as the ground does.
+_FLOOR_HEIGHT = 1e-3
+
+# (MJCF path, URDF path, URDF mtime) -> converted MJCF text, so a program
+# run again does not convert the same room again.
+_converted_models = {}
 
 
 def _fmt(values):
@@ -146,21 +154,181 @@ def _primitive_rgba(obj):
     return _fmt(np.asarray(colors[0], dtype=np.float64) / 255.0)
 
 
-def add_objects(root, objects, movable):
+def _geom_top(geom, rot, pos):
+    """Highest world z of a box, cylinder or sphere geom on a body at
+    ``(rot, pos)``; None for other types."""
+    size = [float(v) for v in geom.get('size', '0').split()]
+    gtype = geom.get('type', 'sphere')
+    if gtype == 'box':
+        half = np.array(size[:3])
+    elif gtype == 'cylinder':
+        half = np.array([size[0], size[0], size[1]])
+    elif gtype == 'sphere':
+        half = np.full(3, size[0])
+    else:
+        return None
+    geom_rot = rot @ quaternion2matrix(
+        [float(v) for v in geom.get('quat', '1 0 0 0').split()])
+    centre = rot @ np.array(
+        [float(v) for v in geom.get('pos', '0 0 0').split()]) + pos
+    # The box's corners reach np.abs(R) @ half above its centre.
+    return float(centre[2] + np.abs(geom_rot[2]) @ half)
+
+
+def _convert_model(model, out_dir):
+    """Convert a RobotModel's URDF into ``out_dir``.
+
+    Returns
+    -------
+    xml.etree.ElementTree.Element
+        The converted ``<mujoco>`` element; its meshes and textures are in
+        ``out_dir``.
+    """
+    from skrobot.urdf import urdf_to_mjcf
+
+    urdf_path = getattr(model, 'urdf_path', None)
+    if urdf_path is None:
+        raise ValueError(
+            'a RobotModel object must be loaded from a URDF file '
+            '(urdf_path is None): {!r}'.format(model.name))
+    out_path = os.path.join(out_dir, 'model.xml')
+    key = (out_path, os.path.abspath(urdf_path), os.path.getmtime(urdf_path))
+    xml = _converted_models.get(key)
+    if xml is None or not os.path.exists(out_path):
+        xml = urdf_to_mjcf(urdf_path, out_path, mesh_dir=out_dir,
+                           add_ground=False, add_position_actuators=False,
+                           self_collision=True)
+        _converted_models[key] = xml
+    return ET.fromstring(xml)
+
+
+def add_static_model(root, model, mjcf_dir):
+    """Put a model loaded from a URDF (a room, furniture) into the world,
+    fixed as it is posed now.
+
+    Each link becomes a body named after it, welded where the link is now:
+    the model's joints (a desk top's hinge) are not simulated. Visual
+    meshes keep their textures. Collision geoms collide with the robot and
+    objects; those whose top is at the floor (z of at most 1 mm), such as
+    a room's floor slab, collide as the ground does, so a planar base that
+    does not touch the ground does not touch them either.
+
+    Parameters
+    ----------
+    root : xml.etree.ElementTree.Element
+        ``<mujoco>`` element.
+    model : skrobot.model.RobotModel
+        Model with ``urdf_path`` set and a ``name``.
+    mjcf_dir : str
+        Directory of the MJCF ``root`` will be written to. The model's
+        converted meshes go in a subdirectory of its ``meshdir`` named
+        after the model, so the scene's files stay in one tree.
+    """
+    if not model.name:
+        raise ValueError('every object needs a name: {!r}'.format(model))
+    if _body(root, model.name) is not None:
+        raise ValueError('object name {} is already taken'.format(
+            model.name))
+    compiler = root.find('compiler')
+    if compiler is None:
+        compiler = ET.Element('compiler')
+        root.insert(0, compiler)
+    asset_dir = os.path.join(mjcf_dir, compiler.get('meshdir', '.'),
+                             model.name)
+    converted = _convert_model(model, asset_dir)
+
+    def relative(kind):
+        # MuJoCo finds a mesh under meshdir and a texture under texturedir,
+        # both relative to the MJCF's directory.
+        return os.path.relpath(
+            asset_dir, os.path.join(mjcf_dir, compiler.get(kind, '.')))
+
+    prefix = model.name + '/'
+    asset = root.find('asset')
+    if asset is None:
+        asset = ET.Element('asset')
+        root.insert(list(root).index(root.find('worldbody')), asset)
+    for element in converted.find('asset'):
+        element = ET.SubElement(asset, element.tag, dict(element.attrib))
+        element.set('name', prefix + element.get('name'))
+        if element.tag == 'mesh':
+            element.set('file', os.path.join(relative('meshdir'),
+                                              element.get('file')))
+        elif element.tag == 'texture':
+            element.set('file', os.path.join(relative('texturedir'),
+                                             element.get('file')))
+        elif element.tag == 'material' and element.get('texture'):
+            element.set('texture', prefix + element.get('texture'))
+
+    ground = _ground(root)
+    floor_mask = ({'contype': ground.get('contype', '1'),
+                   'conaffinity': ground.get('conaffinity', '1')}
+                  if ground is not None else _OBJECT_MASK)
+    links = {link.name: link for link in model.link_list}
+    worldbody = root.find('worldbody')
+    for body in converted.find('worldbody').iter('body'):
+        name = body.get('name')
+        if name not in links:
+            raise ValueError('body {} of {} is not a link of the model'.format(
+                name, model.name))
+        if _link_frame(root, name) is not None:
+            raise ValueError('link {} of {} is already a name in the '
+                             'scene'.format(name, model.name))
+        coords = links[name].worldcoords()
+        rot, pos = coords.rotation, coords.translation
+        static = ET.SubElement(worldbody, 'body', {
+            'name': name, 'pos': _fmt(pos),
+            'quat': _fmt(matrix2quaternion(rot))})
+        for child in body:
+            if child.tag not in ('geom', 'site'):
+                continue  # joints, inertia and the bodies below it
+            child = ET.SubElement(static, child.tag, dict(child.attrib))
+            for ref in ('mesh', 'material'):
+                if child.get(ref):
+                    child.set(ref, prefix + child.get(ref))
+            if child.tag == 'geom' and child.get('group') == '3':
+                top = _geom_top(child, rot, pos)
+                child.attrib.update(
+                    floor_mask if top is not None and top <= _FLOOR_HEIGHT
+                    else _OBJECT_MASK)
+    for child in converted.find('worldbody'):
+        if child.tag in ('geom', 'site'):
+            raise ValueError(
+                '{}: geometry on the URDF root link "world" is not '
+                'supported; attach it to a link'.format(model.name))
+
+
+def add_objects(root, objects, movable, mjcf_dir=None):
     """Put skrobot primitives into the world at their current coordinates.
 
     Parameters
     ----------
     root : xml.etree.ElementTree.Element
         ``<mujoco>`` element.
-    objects : list[skrobot.model.Link]
-        Box, Cylinder or Sphere, each with a unique ``name``.
+    objects : list[skrobot.model.Link or skrobot.model.RobotModel]
+        Box, Cylinder or Sphere, each with a unique ``name``; or, when not
+        ``movable``, a model loaded from a URDF (see
+        :func:`add_static_model`).
     movable : bool
         Give each a free joint (mass from MuJoCo's default density, that of
         water) instead of fixing it in place.
+    mjcf_dir : str or None
+        Directory of the MJCF ``root`` will be written to; needed for a
+        model loaded from a URDF.
     """
+    from skrobot.model.robot_model import RobotModel
+
     worldbody = root.find('worldbody')
     for obj in objects:
+        if isinstance(obj, RobotModel):
+            if movable:
+                raise TypeError(
+                    'a RobotModel cannot be a movable object, only a fixed '
+                    'one: {}'.format(obj.name))
+            if mjcf_dir is None:
+                raise ValueError('add_objects needs mjcf_dir for a RobotModel')
+            add_static_model(root, obj, mjcf_dir)
+            continue
         if not obj.name:
             raise ValueError(
                 'every object needs a name, to read its pose back by: '
