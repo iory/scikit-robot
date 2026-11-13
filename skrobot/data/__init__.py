@@ -347,6 +347,9 @@ ROOM13BC_URDFS = {
 def room13bc_urdfpath(model='scene', glb=False):
     """Return the path to a URDF of room 13BC, the Jedy exercise room.
 
+    Room 13BC is on the 1st floor of Engineering Building No. 2, the
+    University of Tokyo, known as "Mechasta" (メカスタ).
+
     Parameters
     ----------
     model : str
@@ -380,7 +383,7 @@ def room13bc_urdfpath(model='scene', glb=False):
     _retrieve(
         url='https://github.com/iory/scikit-robot-models/raw/main/room13bc_description.tar.gz',  # NOQA
         fname='room13bc_description.tar.gz',
-        md5='9dccdf6455fc40fa80b7d61664b4b239',
+        md5='ddf85094076e17b3ebfd7245e04425ad',
         extract=True,
     )
     return path
