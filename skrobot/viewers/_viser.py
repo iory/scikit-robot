@@ -1119,6 +1119,7 @@ class ViserViewer(_InteractiveViewerMixin):
             rotation_mask=constrain_rot,
             stop=30,
             revert_if_fail=True,
+            warn_if_fail=False,
         )
         if result is False or result is None:
             # Single-shot IK failed (often a local minimum / singularity).

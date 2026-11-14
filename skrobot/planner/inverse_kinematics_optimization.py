@@ -596,6 +596,7 @@ def _solve_ik_multi_ee(
         position_mask=pmasks,
         rotation_mask=rmasks,
         revert_if_fail=False,
+        warn_if_fail=False,
         stop=200,
         thre=[0.001] * len(move_target),
         rthre=[np.deg2rad(1.0)] * len(move_target),
