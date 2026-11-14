@@ -21,6 +21,46 @@ _default_max_joint_torque = 1.0
 _limit_rounding = 1e-6
 
 
+def _warn_joint_limit(joint, v, limit, min_angle, max_angle, side, linear):
+    """Warn that a joint target was clipped to one of its limits.
+
+    The value is shown in the unit the API takes (rad / m) and, in
+    parentheses, in the unit people usually think in (deg / mm), so the
+    message can be matched against what was passed.
+
+    Parameters
+    ----------
+    joint : skrobot.model.Joint
+        Joint whose target was clipped.
+    v : float
+        Requested joint angle [rad] or translation [m].
+    limit : float
+        The limit ``v`` was clipped to.
+    min_angle : float
+        Lower limit of the joint.
+    max_angle : float
+        Upper limit of the joint.
+    side : str
+        ``'max'`` or ``'min'``.
+    linear : bool
+        True for a linear joint (m / mm), False for rotational (rad / deg).
+    """
+    if linear:
+        unit, sub_unit, scale = 'm', 'mm', 1000.0
+    else:
+        unit, sub_unit, scale = 'rad', 'deg', 180.0 / math.pi
+    v = float(v)
+    limit = float(limit)
+    lo = float(min_angle)
+    hi = float(max_angle)
+    logger.warning(
+        '%s: %.4f %s (%.1f %s) exceeds %s %.4f %s (%.1f %s); '
+        'clipped to %s. range [%.4f, %.4f] %s ([%.1f, %.1f] %s)',
+        joint.name, v, unit, v * scale, sub_unit,
+        side, limit, unit, limit * scale, sub_unit, side,
+        lo, hi, unit, lo * scale, hi * scale, sub_unit)
+
+
 def calc_angle_speed_gain_scalar(joint, dav, i, periodic_time):
     """Calculate angle speed gain
 
@@ -649,11 +689,13 @@ class RotationalJoint(Joint):
             v = 0.5 * (float(min_angle) + float(max_angle))
         elif v > max_angle:
             if not relative and v - max_angle > _limit_rounding:
-                logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
+                _warn_joint_limit(self, v, max_angle, min_angle, max_angle,
+                                  'max', False)
             v = max_angle
         elif v < min_angle:
             if not relative and min_angle - v > _limit_rounding:
-                logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
+                _warn_joint_limit(self, v, min_angle, min_angle, max_angle,
+                                  'min', False)
             v = min_angle
         prev_angle = self._joint_angle
         self._joint_angle = v
@@ -840,11 +882,13 @@ class LinearJoint(Joint):
             min_angle = self.min_angle
             if v > max_angle:
                 if not relative and v - max_angle > _limit_rounding:
-                    logger.warning('%s :joint-angle(%s) violate max-angle(%s)', self, v, max_angle)
+                    _warn_joint_limit(self, v, max_angle, min_angle, max_angle,
+                                      'max', True)
                 v = max_angle
             elif v < min_angle:
                 if not relative and min_angle - v > _limit_rounding:
-                    logger.warning('%s :joint-angle(%s) violate min-angle(%s)', self, v, min_angle)
+                    _warn_joint_limit(self, v, min_angle, min_angle, max_angle,
+                                      'min', True)
                 v = min_angle
             prev = self._joint_angle
             self._joint_angle = v
