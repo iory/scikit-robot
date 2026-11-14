@@ -100,12 +100,14 @@ joint. The first inserted part (the body) becomes ``base_link``.
 
     The finished quadruped assembly in SolidWorks.
 
-.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/build_assembly.gif
-    :width: 480px
-    :align: center
-    :alt: Each leg part goes in, then the concentric and coincident mates attach it
+.. only:: html
 
-    Each leg part is inserted, put on the axle by a concentric mate, and seated by a coincident mate.
+   .. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/build_assembly.gif
+       :width: 480px
+       :align: center
+       :alt: Each leg part goes in, then the concentric and coincident mates attach it
+
+       Each leg part is inserted, put on the axle by a concentric mate, and seated by a coincident mate.
 
 **2. Extract the URDF and clean it up in the editor.**
 Open the assembly from the sw2robot editor (or run ``sw2urdf``). The link tree
@@ -136,13 +138,15 @@ exported URDF can be loaded directly with scikit-robot:
 The walk page takes the same quadruped into MuJoCo and trains a walking policy
 with reinforcement learning (PPO) on a CPU in under an hour.
 
-.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/walk_mujoco.gif
-    :width: 600px
-    :align: center
-    :alt: The tutorial quadruped trotting in MuJoCo
+.. only:: html
 
-    The tutorial quadruped trotting in MuJoCo
-    (from `Make it walk in MuJoCo <https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/walk/>`_).
+   .. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/walk_mujoco.gif
+       :width: 600px
+       :align: center
+       :alt: The tutorial quadruped trotting in MuJoCo
+
+       The tutorial quadruped trotting in MuJoCo
+       (from `Make it walk in MuJoCo <https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/walk/>`_).
 
 .. note::
 
