@@ -70,6 +70,80 @@ mode (``coacd`` or ``primitive`` for physics) right in the export dialog. See th
 `project README <https://github.com/jsk-ros-pkg/solidworks_urdf_exporter2#readme>`_
 for the full workflow.
 
+Tutorial: a quadruped robot from SolidWorks to MuJoCo
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sw2robot documentation site has a step-by-step tutorial that builds a
+small **4-legged robot** (9 links, 8 revolute joints) from scratch in
+SolidWorks, turns it into a URDF, and then makes it walk in MuJoCo.
+
+- `Tutorial: a quadruped from scratch <https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/tutorial/>`_
+- `Make it walk in MuJoCo <https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/walk/>`_
+
+The overall flow looks like this:
+
+.. code-block:: text
+
+   SolidWorks assembly  ──(extract)──▶  URDF + meshes  ──(edit in browser)──▶  ROS 2 / MuJoCo package
+   (parts + mates)                      (link tree from mates)                 (--ros2 / --mujoco)
+
+**1. Model the parts and assemble them with mates.**
+Three parts (body, thigh, shin) are assembled into four legs. Each joint is
+just two ordinary SolidWorks mates — *concentric* (the joint axis) plus
+*coincident* (seats the part) — and sw2robot turns that into a ``revolute``
+joint. The first inserted part (the body) becomes ``base_link``.
+
+.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/sw_assembly.png
+    :width: 480px
+    :align: center
+    :alt: The tutorial quadruped assembled in SolidWorks
+
+    The finished quadruped assembly in SolidWorks.
+
+.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/build_assembly.gif
+    :width: 480px
+    :align: center
+    :alt: Each leg part goes in, then the concentric and coincident mates attach it
+
+    Each leg part is inserted, put on the axle by a concentric mate, and seated by a coincident mate.
+
+**2. Extract the URDF and clean it up in the editor.**
+Open the assembly from the sw2robot editor (or run ``sw2urdf``). The link tree
+and joint axes are inferred from the mates. In the editor you rename links and
+joints, set joint limits, and flip axes where needed (e.g. the right-hand knees).
+
+.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/editor_en.jpg
+    :width: 600px
+    :align: center
+    :alt: The same robot in the sw2robot browser editor
+
+    The same robot opened in the sw2robot browser editor.
+
+**3. Export and use it.**
+Export a ROS 2 package (``--ros2``) or an MJCF for MuJoCo (``--mujoco``). The
+exported URDF can be loaded directly with scikit-robot:
+
+.. code-block:: python
+
+   import skrobot
+
+   robot = skrobot.models.urdf.RobotModelFromURDF(urdf_file='quadruped.urdf')
+   viewer = skrobot.viewers.TrimeshSceneViewer()
+   viewer.add(robot)
+   viewer.show()
+
+**4. Make it walk in MuJoCo.**
+The walk page takes the same quadruped into MuJoCo and trains a walking policy
+with reinforcement learning (PPO) on a CPU in under an hour.
+
+.. figure:: https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/images/walk_mujoco.gif
+    :width: 600px
+    :align: center
+    :alt: The tutorial quadruped trotting in MuJoCo
+
+    The tutorial quadruped trotting in MuJoCo
+    (from `Make it walk in MuJoCo <https://jsk-ros-pkg.github.io/solidworks_urdf_exporter2/walk/>`_).
+
 .. note::
 
    The ``convert-urdf-mesh`` workflow described below still applies when you are
