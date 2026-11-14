@@ -41,6 +41,11 @@ def _flatten(xlst):
     return reduce(lambda x, y: x + y, xlst)
 
 
+# Seconds without a joint_states message after which a timeout log calls
+# the topic silent and suggests checking the robot / simulator.
+_JOINT_STATES_SILENT_AFTER = 1.0
+
+
 class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
 
     """ROS2RobotInterface is a class for interacting with a real robot.
@@ -117,6 +122,10 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
         # finger joints when the gripper node is not running) do not cause
         # an indefinite wait.
         self._received_joint_names = set()
+        # time.monotonic() of the last joint_states message, so a timeout
+        # can say whether the topic has gone silent (robot / simulator
+        # stopped) or is still publishing.
+        self._last_joint_state_time = None
         self._not_updated_joints = []
         self._timeout_reason = ""
 
@@ -349,10 +358,31 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
             if timeout and (time.time() - start) > timeout:
                 self._set_timeout_reason(initial_time)
                 logger.warning(
-                    "wait_until_update_all_joints timeout. %s",
+                    "wait_until_update_all_joints timeout (%.1f s): %s %s",
+                    timeout, self._joint_states_reception_summary(),
                     self._timeout_reason)
                 return False
             time.sleep(0.005)
+
+    def _joint_states_reception_summary(self):
+        """Describe when joint_states was last received, for timeout logs.
+
+        Returns
+        -------
+        str
+            Names the subscribed topic and how long it has been silent, with
+            a hint to check the robot / simulator when it is silent.
+        """
+        topic = self.joint_state_sub.topic_name
+        if self._last_joint_state_time is None:
+            return ("no message on {} (never received). "
+                    "Is the robot or the simulator running?".format(topic))
+        age = time.monotonic() - self._last_joint_state_time
+        if age > _JOINT_STATES_SILENT_AFTER:
+            return ("no message on {} for {:.1f} s. "
+                    "Is the robot or the simulator running?".format(
+                        topic, age))
+        return "last message on {} {:.1f} s ago.".format(topic, age)
 
     def _set_timeout_reason(self, initial_time):
         """Populate self._timeout_reason for diagnostic logging."""
@@ -512,6 +542,7 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
 
     def joint_state_callback(self, msg):
         self._joint_state_msg = msg
+        self._last_joint_state_time = time.monotonic()
         # Track every joint name we have ever seen on this topic so that
         # wait_until_update_all_joints only waits for joints that are
         # actually being published.

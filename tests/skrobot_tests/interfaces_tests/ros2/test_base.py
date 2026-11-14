@@ -128,6 +128,18 @@ class TestRos2BaseJointStateBookkeeping(unittest.TestCase):
         finally:
             ri.destroy_node()
 
+    def test_timeout_log_names_topic_and_whether_anything_arrived(self):
+        ri = _make_interface('test_timeout_summary')
+        try:
+            summary = ri._joint_states_reception_summary()
+            assert '_test_joint_states_test_timeout_summary' in summary
+            assert 'never received' in summary
+            ri.joint_state_callback(_make_joint_state(
+                ri, ['panda_joint1'], [0.0]))
+            assert 'last message on' in ri._joint_states_reception_summary()
+        finally:
+            ri.destroy_node()
+
     def test_wait_returns_true_after_fresh_message(self):
         ri = _make_interface('test_wait_fresh')
         try:
