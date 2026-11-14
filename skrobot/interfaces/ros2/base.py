@@ -44,6 +44,9 @@ def _flatten(xlst):
 # Seconds without a joint_states message after which a timeout log calls
 # the topic silent and suggests checking the robot / simulator.
 _JOINT_STATES_SILENT_AFTER = 1.0
+# How many not-updated joints a timeout log lists by name before it
+# abbreviates the rest as "... (+N more)".
+_MAX_LOGGED_NOT_UPDATED_JOINTS = 5
 
 
 class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
@@ -358,9 +361,8 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
             if timeout and (time.time() - start) > timeout:
                 self._set_timeout_reason(initial_time)
                 logger.warning(
-                    "wait_until_update_all_joints timeout (%.1f s): %s %s",
-                    timeout, self._joint_states_reception_summary(),
-                    self._timeout_reason)
+                    "wait_until_update_all_joints timeout (%.1f s): %s",
+                    timeout, self._timeout_log_detail())
                 return False
             time.sleep(0.005)
 
@@ -369,20 +371,55 @@ class ROS2RobotInterfaceBase(RobotInterfaceBase, Node):
 
         Returns
         -------
-        str
+        summary : str
             Names the subscribed topic and how long it has been silent, with
             a hint to check the robot / simulator when it is silent.
+        silent : bool
+            True if nothing was ever received or the topic has been quiet
+            for longer than ``_JOINT_STATES_SILENT_AFTER``.
         """
         topic = self.joint_state_sub.topic_name
         if self._last_joint_state_time is None:
             return ("no message on {} (never received). "
-                    "Is the robot or the simulator running?".format(topic))
+                    "Is the robot or the simulator running?".format(topic),
+                    True)
         age = time.monotonic() - self._last_joint_state_time
         if age > _JOINT_STATES_SILENT_AFTER:
             return ("no message on {} for {:.1f} s. "
                     "Is the robot or the simulator running?".format(
-                        topic, age))
-        return "last message on {} {:.1f} s ago.".format(topic, age)
+                        topic, age), True)
+        return "last message on {} {:.1f} s ago.".format(topic, age), False
+
+    def _timeout_log_detail(self):
+        """Build the body of the wait_until_update_all_joints timeout log.
+
+        When the topic is silent every joint is trivially not updated, so
+        only the silence is reported.  Otherwise the not-updated joints are
+        appended, abbreviated so the line stays readable.  The full list
+        stays in ``self._not_updated_joints``.
+
+        Returns
+        -------
+        str
+            Text following ``timeout (N s): `` in the log line.
+        """
+        summary, silent = self._joint_states_reception_summary()
+        if silent:
+            return summary
+        not_updated = self._not_updated_joints
+        if not not_updated:
+            return '{} {}'.format(summary, self._timeout_reason)
+        n_received = sum(1 for name in self.robot_state.get('name', [])
+                         if name in self._received_joint_names)
+        if len(not_updated) == n_received:
+            return '{} Not updated joints: all {}'.format(
+                summary, len(not_updated))
+        shown = not_updated[:_MAX_LOGGED_NOT_UPDATED_JOINTS]
+        rest = len(not_updated) - len(shown)
+        listed = ', '.join(shown)
+        if rest > 0:
+            listed += ', ... (+{} more)'.format(rest)
+        return '{} Not updated joints: {}'.format(summary, listed)
 
     def _set_timeout_reason(self, initial_time):
         """Populate self._timeout_reason for diagnostic logging."""
