@@ -1719,6 +1719,7 @@ class CascadedLink(CascadedCoords):
             base_weight=None,
             joint_list=None,
             invariant_joint_list=None,
+            warn_if_fail=True,
             **kwargs):
         """Solve inverse kinematics to reach target coordinates.
 
@@ -1757,7 +1758,15 @@ class CascadedLink(CascadedCoords):
             default arm chain while keeping a specific joint locked.  Raises
             ``ValueError`` if it would remove every actuated joint.
         revert_if_fail : bool
-            If True, revert to initial joint angles on failure.
+            If True (default), a failed solve puts the joint angles back to
+            where they were before the call and returns False.  If False,
+            the joint angles are left at the last iterate and that angle
+            vector is returned even though the target was not reached.
+        warn_if_fail : bool
+            If True (default), a failed solve logs a warning naming each
+            unreached ``move_target`` with its remaining position [m] and
+            rotation [deg] error.  Set False when failure is expected and
+            handled by the caller (e.g. retrying from other seeds).
         position_mask : str, bool, list, numpy.ndarray, or None
             Specifies which position axes to CONSTRAIN.
             - True: constrain all axes (default)
@@ -1804,7 +1813,10 @@ class CascadedLink(CascadedCoords):
         Returns
         -------
         numpy.ndarray or False
-            Joint angle vector if successful, False otherwise.
+            Joint angle vector if successful.  On failure (e.g. the target
+            is out of reach), False with ``revert_if_fail=True`` (the
+            default), or the last iterate's angle vector with
+            ``revert_if_fail=False``.
 
         See Also
         --------
@@ -2072,6 +2084,11 @@ class CascadedLink(CascadedCoords):
             # reset joint angle limit weight
             self.reset_joint_angle_limit_weight(union_link_list)
 
+            if not success and warn_if_fail:
+                self._warn_ik_failure(
+                    loop, move_target, dif_pos, dif_rot, thre, rthre,
+                    revert_if_fail)
+
             # TODO(add collision check)
             if success or not revert_if_fail:
                 # Apply joint limit table constraints to ensure
@@ -2087,6 +2104,46 @@ class CascadedLink(CascadedCoords):
         finally:
             if _base_state is not None:
                 self._detach_virtual_base_joint(_base_state)
+
+    def _warn_ik_failure(self, n_iteration, move_target, dif_pos, dif_rot,
+                         thre, rthre, reverted):
+        """Log why inverse_kinematics did not converge.
+
+        Parameters
+        ----------
+        n_iteration : int
+            Number of iterations run.
+        move_target : list[skrobot.coordinates.CascadedCoords]
+            End-effector frames.
+        dif_pos : list[numpy.ndarray]
+            Remaining (masked) position error [m] per move_target.
+        dif_rot : list[numpy.ndarray]
+            Remaining (masked) rotation error [rad] per move_target.
+        thre : list[float]
+            Position thresholds [m].
+        rthre : list[float]
+            Rotation thresholds [rad].
+        reverted : bool
+            Whether the joint angles are put back to the initial pose.
+        """
+        errors = []
+        for mt, dp, dr, pt, rt in zip(
+                move_target, dif_pos, dif_rot, thre, rthre):
+            errors.append(
+                '{}: position error {:.4f} m (threshold {:.4f} m), '
+                'rotation error {:.1f} deg (threshold {:.1f} deg)'.format(
+                    getattr(mt, 'name', None) or 'move_target',
+                    LA.norm(dp), pt,
+                    np.rad2deg(LA.norm(dr)), np.rad2deg(rt)))
+        if reverted:
+            after = 'joint angles were reverted to the initial pose'
+        else:
+            after = 'joint angles were left at the last iterate'
+        logger.warning(
+            'inverse_kinematics failed after %d iterations: %s; %s. '
+            'The target may be out of reach; check it, or retry with '
+            'batch_inverse_kinematics.',
+            n_iteration, '; '.join(errors), after)
 
     def ik_convergence_check(self, dif_pos, dif_rot, thre, rthre):
         """Check IK convergence.
