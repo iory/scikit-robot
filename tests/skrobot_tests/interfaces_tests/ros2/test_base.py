@@ -131,12 +131,39 @@ class TestRos2BaseJointStateBookkeeping(unittest.TestCase):
     def test_timeout_log_names_topic_and_whether_anything_arrived(self):
         ri = _make_interface('test_timeout_summary')
         try:
-            summary = ri._joint_states_reception_summary()
+            summary, silent = ri._joint_states_reception_summary()
             assert '_test_joint_states_test_timeout_summary' in summary
             assert 'never received' in summary
+            assert silent
             ri.joint_state_callback(_make_joint_state(
                 ri, ['panda_joint1'], [0.0]))
-            assert 'last message on' in ri._joint_states_reception_summary()
+            summary, silent = ri._joint_states_reception_summary()
+            assert 'last message on' in summary
+            assert not silent
+        finally:
+            ri.destroy_node()
+
+    def test_timeout_log_abbreviates_the_not_updated_joints(self):
+        ri = _make_interface('test_timeout_log_detail')
+        try:
+            names = ['panda_joint{}'.format(i) for i in range(1, 8)]
+            ri.joint_state_callback(_make_joint_state(
+                ri, names, [0.0] * len(names)))
+            # Silent topic: only the silence, no joint list.
+            ri._last_joint_state_time -= 10.0
+            ri._not_updated_joints = list(names)
+            detail = ri._timeout_log_detail()
+            assert 'Is the robot or the simulator running?' in detail
+            assert 'Not updated' not in detail
+            # Publishing, but no joint is newer: count instead of names.
+            ri._last_joint_state_time += 10.0
+            assert ri._timeout_log_detail().endswith(
+                'Not updated joints: all 7')
+            # Only some lag: first few names, the rest counted.
+            ri._not_updated_joints = names[:6]
+            assert ri._timeout_log_detail().endswith(
+                'Not updated joints: panda_joint1, panda_joint2, '
+                'panda_joint3, panda_joint4, panda_joint5, ... (+1 more)')
         finally:
             ri.destroy_node()
 
