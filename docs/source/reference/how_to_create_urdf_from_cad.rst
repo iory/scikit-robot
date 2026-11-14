@@ -84,7 +84,7 @@ The overall flow looks like this:
 
 .. code-block:: text
 
-   SolidWorks assembly  ──(extract)──▶  URDF + meshes  ──(edit in browser)──▶  ROS 2 / MuJoCo package
+   SolidWorks assembly  --(extract)-->  URDF + meshes  --(edit in browser)-->  ROS 2 / MuJoCo package
    (parts + mates)                      (link tree from mates)                 (--ros2 / --mujoco)
 
 **1. Model the parts and assemble them with mates.**
