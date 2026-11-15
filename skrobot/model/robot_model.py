@@ -2834,13 +2834,27 @@ class CascadedLink(CascadedCoords):
         vel = np.zeros(len(pairs), 'f')
         return vel
 
-    def self_collision_check(self):
+    def self_collision_check(self, ignore_adjacent=True, ignore_pairs=None):
         """Return collision link pair
 
         Note: This function uses trimesh.collision.CollisionManager internally.
         We need to install python-fcl to use this function.
         If you want to use this function, please install python-fcl by
         `pip install python-fcl`.
+
+        Parameters
+        ----------
+        ignore_adjacent : bool
+            If True (default), pairs of links joined by a joint are not
+            reported. Their collision meshes usually overlap at the joint
+            in every pose (for example all 19 reported pairs of
+            ``skrobot.models.Jedy`` at its initial pose are parent-child
+            links), so reporting them made the result True for every pose.
+            A link without a collision mesh is skipped over, so a link is
+            adjacent to its nearest ancestor that has one.
+        ignore_pairs : iterable of 2-tuple of str, optional
+            Further pairs of link names not to report, in any order, e.g.
+            pairs that already touch at a known collision-free pose.
 
         Returns
         -------
@@ -2868,7 +2882,32 @@ class CascadedLink(CascadedCoords):
                     transform = link.worldcoords().T()
                     self._collision_manager.set_transform(
                         link.name, transform=transform)
-        return self._collision_manager.in_collision_internal(return_names=True)
+        _, names = self._collision_manager.in_collision_internal(
+            return_names=True)
+        ignored = set()
+        if ignore_adjacent:
+            ignored |= self._adjacent_collision_link_pairs()
+        if ignore_pairs is not None:
+            ignored |= {tuple(sorted(pair)) for pair in ignore_pairs}
+        names = {pair for pair in names if tuple(sorted(pair)) not in ignored}
+        return len(names) > 0, names
+
+    def _adjacent_collision_link_pairs(self):
+        """Sorted name pairs of links joined by a joint.
+
+        Each link with a collision mesh is paired with its nearest ancestor
+        that also has one.
+        """
+        pairs = set()
+        for link in self.link_list:
+            if link.collision_mesh is None:
+                continue
+            parent = link.parent_link
+            while parent is not None and parent.collision_mesh is None:
+                parent = parent.parent_link
+            if parent is not None:
+                pairs.add(tuple(sorted((link.name, parent.name))))
+        return pairs
 
 
 class BatchIKAttempts(object):
