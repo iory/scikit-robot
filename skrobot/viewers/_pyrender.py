@@ -280,6 +280,11 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
         super(PyrenderViewer, self).__init__(**self._kwargs)
         window_title = title if title is not None else 'scikit-robot PyrenderViewer'
         self.viewer_flags['window_title'] = window_title
+        # Set once the window has been torn down by on_close(). pyrender's
+        # on_close() removes the camera and light nodes from the scene and
+        # frees the renderer, so it must run at most once per window, and
+        # show() has to rebuild that state before opening a new window.
+        self._closed = False
         self._initialized = True
 
     def __new__(cls, *args, **kwargs):
@@ -290,6 +295,8 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
     def show(self):
         if self.thread is not None and self.thread.is_alive():
             return
+        if self._closed:
+            self._reset_after_close()
         # Reset rendering flag for new viewer session
         self._allow_rendering = False
         distance = self._calculate_camera_distance()
@@ -373,6 +380,73 @@ class PyrenderViewer(pyrender.Viewer, _InteractiveViewerMixin):
         else:
             clock.schedule_once(enable_rendering, 0.1)
             pyglet.app.run()
+
+    def _reset_after_close(self):
+        """Restore the state that on_close() tore down so show() can reopen.
+
+        pyrender's on_close() removes the viewer's camera and light nodes
+        from the scene and deletes the renderer. Re-running
+        ``pyrender.Viewer.__init__`` on the same scene recreates them. The
+        render lock is kept so that threads already holding a reference to
+        it keep synchronizing with the new window, and user-modified viewer
+        and render flags are carried over.
+        """
+        render_lock = self._render_lock
+        viewer_flags = dict(self.viewer_flags)
+        render_flags = dict(self.render_flags)
+        registered_keys = self._registered_keys
+        viewer_flags['mouse_pressed'] = False
+        pyrender.Viewer.__init__(self, **self._kwargs)
+        self._render_lock = render_lock
+        self._viewer_flags.update(viewer_flags)
+        self._render_flags.update(render_flags)
+        self._registered_keys = registered_keys
+        self.has_exit = False
+        self._redraw = True
+        self._context_initialized = False
+        self._closed = False
+
+    def close(self, timeout=10.0):
+        """Close the viewer window.
+
+        The window, its OpenGL context and the renderer belong to the viewer
+        thread, so they are torn down there. When called from another thread
+        (for example an interactive session that started the viewer with
+        :meth:`show`), this requests the close and waits for the viewer
+        thread to finish.
+
+        Parameters
+        ----------
+        timeout : float or None, optional
+            Seconds to wait for the viewer thread to finish when called from
+            another thread. ``None`` waits indefinitely. Default is 10.0.
+        """
+        thread = self.thread
+        if thread is not None and thread.is_alive() \
+                and thread is not threading.current_thread():
+            self._should_close = True
+            thread.join(timeout)
+            if thread.is_alive():
+                raise RuntimeError(
+                    'PyrenderViewer thread did not finish within {} seconds '
+                    'after a close request.'.format(timeout))
+            return
+        if self._closed or not self.context:
+            # Called from on_close() itself, or no window is open.
+            super(PyrenderViewer, self).close()
+            return
+        self.on_close()
+
+    def on_close(self):
+        # The window manager's close event, a close request from close()
+        # and pyglet's own close path can all end up here; tear the window
+        # down only once.
+        if self._closed:
+            return
+        self._closed = True
+        pyglet.clock.unschedule(pyrender.Viewer._time_event)
+        with self._render_lock:
+            super(PyrenderViewer, self).on_close()
 
     def redraw(self):
         self._redraw = True

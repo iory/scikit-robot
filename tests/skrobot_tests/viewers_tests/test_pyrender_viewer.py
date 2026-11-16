@@ -202,6 +202,82 @@ def test_pointcloud_with_mismatched_colors_does_not_kill_render_thread():
             completed.stdout, completed.stderr))
 
 
+def test_close_and_reopen_from_another_thread_and_window_event():
+    script = textwrap.dedent(
+        """
+        import json
+        import threading
+        import time
+
+        import pyglet
+
+        from skrobot.model import Box
+        from skrobot.viewers import PyrenderViewer
+
+        thread_errors = []
+
+        def hook(args):
+            thread_errors.append('{}: {}'.format(
+                args.exc_type.__name__, args.exc_value))
+
+        threading.excepthook = hook
+
+        def wait_until(predicate, timeout=10.0):
+            start = time.time()
+            while not predicate() and time.time() - start < timeout:
+                time.sleep(0.05)
+            return predicate()
+
+        def thread_alive():
+            return viewer.thread is not None and viewer.thread.is_alive()
+
+        viewer = PyrenderViewer(resolution=(160, 120))
+        viewer.add(Box(extents=(0.1, 0.1, 0.1)))
+        result = {}
+
+        # close() from the main thread while the viewer thread is running.
+        viewer.show()
+        time.sleep(1.0)
+        viewer.close()
+        result['closed_by_close'] = [viewer.is_active, thread_alive()]
+
+        # Reopen and close through the window close event, the path a
+        # window manager's close button takes, delivered on the viewer
+        # thread.
+        viewer.show()
+        time.sleep(1.0)
+        result['reopened'] = [viewer.is_active, thread_alive()]
+        pyglet.clock.schedule_once(
+            lambda dt: viewer.dispatch_event('on_close'), 0.0)
+        wait_until(lambda: not thread_alive())
+        result['closed_by_event'] = [viewer.is_active, thread_alive()]
+
+        # Reopen once more, then close() followed by a late close event.
+        viewer.show()
+        time.sleep(1.0)
+        result['reopened_again'] = [viewer.is_active, thread_alive()]
+        viewer.close()
+        viewer.on_close()
+        viewer.close()
+        result['closed_twice'] = [viewer.is_active, thread_alive()]
+        result['thread_errors'] = thread_errors
+        print('RESULT:{}'.format(json.dumps(result, sort_keys=True)))
+        """)
+    completed = _run_display_script(script, timeout=120)
+    assert completed.returncode == 0, (
+        'close/reopen subprocess failed\nstdout:\n{}\nstderr:\n{}'.format(
+            completed.stdout, completed.stderr))
+    result = _extract_result(completed.stdout)
+    message = 'stdout:\n{}\nstderr:\n{}'.format(
+        completed.stdout, completed.stderr)
+    assert result['thread_errors'] == [], message
+    assert result['closed_by_close'] == [False, False], message
+    assert result['reopened'] == [True, True], message
+    assert result['closed_by_event'] == [False, False], message
+    assert result['reopened_again'] == [True, True], message
+    assert result['closed_twice'] == [False, False], message
+
+
 def _pyrender_available():
     try:
         import pyrender  # noqa: F401
