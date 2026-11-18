@@ -630,3 +630,97 @@ class TestMtlDissolve(unittest.TestCase):
         visual = [g for g in ET.parse(out_path).getroot().iter('geom')
                   if g.get('group') == '2'][0]
         self.assertAlmostEqual(float(visual.get('rgba').split()[3]), 0.15)
+
+
+# A fixed base with two fingers side by side. Each finger's first link
+# overlaps the base where it is bolted on (as a modular hand's finger
+# modules overlap the palm); the fingers are 30 mm apart and touch only
+# when they swing toward each other.
+_TWO_FINGER_URDF = """<?xml version="1.0"?>
+<robot name="two_fingers">
+  <link name="base">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/></inertial>
+    <collision><origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.1 0.04 0.02"/></geometry></collision>
+  </link>
+  <joint name="left" type="revolute">
+    <parent link="base"/><child link="left_finger"/>
+    <origin xyz="-0.02 0 0.01" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.5" upper="1.5" effort="1" velocity="5"/>
+  </joint>
+  <link name="left_finger">
+    <inertial><origin xyz="0 0 0.03" rpy="0 0 0"/><mass value="0.02"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/></inertial>
+    <collision><origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry><box size="0.01 0.01 0.06"/></geometry></collision>
+  </link>
+  <joint name="right" type="revolute">
+    <parent link="base"/><child link="right_finger"/>
+    <origin xyz="0.02 0 0.01" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-1.5" upper="1.5" effort="1" velocity="5"/>
+  </joint>
+  <link name="right_finger">
+    <inertial><origin xyz="0 0 0.03" rpy="0 0 0"/><mass value="0.02"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/></inertial>
+    <collision><origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry><box size="0.01 0.01 0.06"/></geometry></collision>
+  </link>
+</robot>
+"""
+
+
+class TestSelfCollisionAuto(unittest.TestCase):
+    """``self_collision='auto'`` keeps real self-contacts, drops mounting overlaps."""
+
+    def setUp(self):
+        try:
+            import mujoco  # noqa: F401
+        except ImportError:
+            self.skipTest('mujoco not installed')
+        self.tmpdir = tempfile.mkdtemp()
+        self.urdf = os.path.join(self.tmpdir, 'two_fingers.urdf')
+        with open(self.urdf, 'w') as f:
+            f.write(_TWO_FINGER_URDF)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _model(self, **kwargs):
+        import mujoco
+        out_path = os.path.join(self.tmpdir, 'two_fingers.xml')
+        urdf_to_mjcf(self.urdf, out_path, floating_base=False,
+                     add_ground=False, add_position_actuators=False,
+                     **kwargs)
+        return mujoco.MjModel.from_xml_path(out_path), out_path
+
+    def _contacts(self, model, left, right):
+        import mujoco
+        data = mujoco.MjData(model)
+        data.qpos[model.joint('left').qposadr[0]] = left
+        data.qpos[model.joint('right').qposadr[0]] = right
+        mujoco.mj_forward(model, data)
+        return {tuple(sorted((model.body(model.geom_bodyid[c.geom1]).name,
+                              model.body(model.geom_bodyid[c.geom2]).name)))
+                for c in data.contact[:data.ncon]}
+
+    def test_mounting_overlaps_are_excluded(self):
+        model, out_path = self._model(self_collision='auto')
+        root = ET.parse(out_path).getroot()
+        excluded = {tuple(sorted((e.get('body1'), e.get('body2'))))
+                    for e in root.find('contact').findall('exclude')}
+        # each finger's first link sits in the base: parent welded to the
+        # world, so MuJoCo's own parent filter would not drop it
+        self.assertEqual(excluded, {('base', 'left_finger'),
+                                    ('base', 'right_finger')})
+        self.assertEqual(self._contacts(model, 0.0, 0.0), set())
+
+    def test_fingers_swung_together_collide(self):
+        model, _ = self._model(self_collision='auto')
+        self.assertIn(('left_finger', 'right_finger'),
+                      self._contacts(model, 0.6, -0.6))
+
+    def test_default_keeps_no_self_collision(self):
+        model, out_path = self._model()
+        self.assertIsNone(ET.parse(out_path).getroot().find('contact'))
+        self.assertEqual(self._contacts(model, 0.6, -0.6), set())
