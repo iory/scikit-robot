@@ -661,9 +661,9 @@ def _ground_clearance(worldbody, assets, home):
 
 def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  add_position_actuators=True, actuator_kp=50.0,
-                 actuator_type="position", actuator_kv=1.0,
+                 actuator_type="position", actuator_kv=None,
                  joint_armature=0.0, joint_damping=0.0,
-                 add_ground=True, gravity=(0, 0, -9.81),
+                 add_ground=True, gravity=(0, 0, -9.81), integrator=None,
                  self_collision=False, add_actuator_forcerange=True,
                  self_collision_margin=0.001,
                  home=None, home_base_height=0.0,
@@ -688,6 +688,25 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         Emit one ``<position>`` actuator per actuated joint.
     actuator_kp : float
         Proportional gain for the position actuators.
+    actuator_type : str
+        ``'position'`` (default), ``'velocity'`` or ``'motor'``: which
+        actuator element is emitted per joint.
+    actuator_kv : float or None
+        Velocity gain. For ``'velocity'`` actuators it is the tracking gain
+        (``None`` means 1.0). For ``'position'`` actuators it is the
+        D term of the servo's PD loop, written as the ``kv`` attribute
+        (MuJoCo >= 3.1.0); ``None`` or 0 writes no ``kv`` (pure P control).
+        MuJoCo integrates actuator ``kv`` implicitly only with the
+        ``implicit``/``implicitfast`` integrators, not with Euler -- pass
+        ``integrator='implicitfast'`` together with it on stiff, light
+        joints (https://mujoco.readthedocs.io/en/stable/XMLreference.html).
+    joint_armature : float
+        Rotor inertia (``armature``) put on every joint through
+        ``<default><joint>``; 0 writes none.
+    integrator : str or None
+        MuJoCo integrator written on ``<option>`` (``'Euler'``,
+        ``'RK4'``, ``'implicit'``, ``'implicitfast'``). ``None`` leaves
+        MuJoCo's default (Euler).
     add_ground : bool
         Add a ground plane + light for a usable scene.
     self_collision : bool or 'auto'
@@ -776,7 +795,10 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         "angle": "radian", "autolimits": "true",
         "meshdir": os.path.relpath(mesh_dir, out_dir),
         "texturedir": os.path.relpath(mesh_dir, out_dir)})
-    ET.SubElement(root, "option", {"gravity": _fmt(gravity)})
+    option = {"gravity": _fmt(gravity)}
+    if integrator is not None:
+        option["integrator"] = integrator
+    ET.SubElement(root, "option", option)
 
     # 'backemf' damping is per joint, so it is written on each <joint> as the
     # tree is emitted rather than once on <default>.
@@ -899,7 +921,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
             a = {"name": j.name + "_act", "joint": j.name}
             effort = getattr(limit, "effort", None) if limit is not None else None
             if actuator_type == "velocity":
-                a["kv"] = "{:.9g}".format(actuator_kv)
+                kv = 1.0 if actuator_kv is None else actuator_kv
+                a["kv"] = "{:.9g}".format(kv)
                 if limit is not None and getattr(limit, "velocity", None):
                     a["ctrlrange"] = _fmt([-limit.velocity, limit.velocity])
                 if add_actuator_forcerange and effort:
@@ -911,6 +934,8 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                 ET.SubElement(act, "motor", a)
             else:  # position
                 a["kp"] = "{:.9g}".format(actuator_kp)
+                if actuator_kv:
+                    a["kv"] = "{:.9g}".format(actuator_kv)
                 if has_pos_range:
                     a["ctrlrange"] = _fmt([limit.lower, limit.upper])
                 # Cap the torque a position servo can apply to the real motor's
