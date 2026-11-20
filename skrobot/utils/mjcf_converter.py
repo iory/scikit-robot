@@ -665,6 +665,7 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
                  joint_armature=0.0, joint_damping=0.0,
                  add_ground=True, gravity=(0, 0, -9.81),
                  self_collision=False, add_actuator_forcerange=True,
+                 self_collision_margin=0.001,
                  home=None, home_base_height=0.0,
                  convex_decompose_collision=False, coacd_quality='balanced',
                  convex_decompose_links=()):
@@ -689,13 +690,23 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
         Proportional gain for the position actuators.
     add_ground : bool
         Add a ground plane + light for a usable scene.
-    self_collision : bool
+    self_collision : bool or 'auto'
         If False (default) the robot's collision geoms are put on a
         ``contype=2 conaffinity=1`` mask while the ground stays ``1/1``, so the
         robot collides with the ground but *not with itself*. Legged-locomotion
         training almost always wants this off unless an explicit adjacency
         filter is provided -- self intersections of neighbouring links cause
         spawn-time blow-ups. Set True to keep full self-collision.
+        ``'auto'`` is that adjacency filter: full self-collision, except
+        between pairs of bodies whose collision geoms already touch (are
+        closer than ``self_collision_margin``) in the zero pose or the
+        ``home`` pose -- neighbouring modules, a link and the bracket it is
+        bolted to. Those pairs get a ``<contact><exclude>``; every other
+        pair (two fingers of a hand, a finger and the palm it curls onto,
+        two legs) collides. Needs the ``mujoco`` package.
+    self_collision_margin : float
+        Distance [m] under which two bodies count as touching for
+        ``self_collision='auto'``.
     add_actuator_forcerange : bool
         If True (default) position/velocity actuators get a ``forcerange`` taken
         from the URDF joint effort limit, so RL policies cannot command
@@ -925,7 +936,66 @@ def urdf_to_mjcf(urdf, out_path, mesh_dir=None, floating_base=False,
     _indent(root)
     tree = ET.ElementTree(root)
     tree.write(out_path, encoding="utf-8", xml_declaration=False)
+    if self_collision == "auto":
+        pairs = _touching_body_pairs(out_path, self_collision_margin)
+        if pairs:
+            contact_el = ET.SubElement(root, "contact")
+            for body1, body2 in pairs:
+                ET.SubElement(contact_el, "exclude",
+                              {"body1": body1, "body2": body2})
+            _indent(root)
+            tree = ET.ElementTree(root)
+            tree.write(out_path, encoding="utf-8", xml_declaration=False)
     return ET.tostring(root, encoding="unicode")
+
+
+def _touching_body_pairs(xml_path, margin):
+    """Body pairs whose collision geoms touch in the zero / home pose.
+
+    Parameters
+    ----------
+    xml_path : str
+        A compiled-ready MJCF (meshes resolvable from it).
+    margin : float
+        Geoms closer than this [m] count as touching.
+
+    Returns
+    -------
+    list of tuple of str
+        Sorted ``(body1, body2)`` name pairs. Parent-child pairs are
+        included: MuJoCo's parent filter does not apply when the parent is
+        welded to the world (every link of a fixed-base robot up to the
+        first joint), so it cannot be relied on. Pairs within one weld
+        group (never collided by MuJoCo) are left out.
+    """
+    import itertools
+
+    import mujoco
+
+    model = mujoco.MjModel.from_xml_path(xml_path)
+    data = mujoco.MjData(model)
+    poses = [model.qpos0.copy()]
+    for k in range(model.nkey):
+        poses.append(model.key_qpos[k].copy())
+    geoms = [g for g in range(model.ngeom)
+             if (model.geom_contype[g] or model.geom_conaffinity[g])
+             and model.geom_bodyid[g] != 0]
+    pairs = set()
+    for qpos in poses:
+        data.qpos[:] = qpos
+        mujoco.mj_kinematics(model, data)
+        for g1, g2 in itertools.combinations(geoms, 2):
+            b1, b2 = int(model.geom_bodyid[g1]), int(model.geom_bodyid[g2])
+            # bodies welded together never collide in MuJoCo
+            if model.body_weldid[b1] == model.body_weldid[b2]:
+                continue
+            key = tuple(sorted((model.body(b1).name, model.body(b2).name)))
+            if key in pairs:
+                continue
+            distance = mujoco.mj_geomDistance(model, data, g1, g2, margin, None)
+            if distance < margin:
+                pairs.add(key)
+    return sorted(pairs)
 
 
 def _inertial_attrib(inertial, link_name=None):
