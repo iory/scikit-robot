@@ -724,3 +724,81 @@ class TestSelfCollisionAuto(unittest.TestCase):
         model, out_path = self._model()
         self.assertIsNone(ET.parse(out_path).getroot().find('contact'))
         self.assertEqual(self._contacts(model, 0.6, -0.6), set())
+
+
+# A light finger link on a stiff hobby-servo position loop: 0.02 kg, 1e-6
+# kg m^2. Undamped P control at kp=50 and dt=0.002 is far past explicit
+# Euler's stability limit (omega * dt ~ 7).
+_LIGHT_LINK_URDF = """<?xml version="1.0"?>
+<robot name="finger">
+  <link name="base">
+    <inertial><origin xyz="0 0 0" rpy="0 0 0"/><mass value="1.0"/>
+      <inertia ixx="1e-3" ixy="0" ixz="0" iyy="1e-3" iyz="0" izz="1e-3"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="tip"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/><axis xyz="1 0 0"/>
+    <limit lower="-1.5" upper="1.5" effort="0.657" velocity="6.5"/>
+  </joint>
+  <link name="tip">
+    <inertial><origin xyz="0 0.02 0" rpy="0 0 0"/><mass value="0.02"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+</robot>
+"""
+
+
+class TestPositionActuatorDamping(unittest.TestCase):
+    """``actuator_kv`` reaches ``<position>`` actuators as their D term."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.urdf = os.path.join(self.tmpdir, 'finger.urdf')
+        with open(self.urdf, 'w') as f:
+            f.write(_LIGHT_LINK_URDF)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _convert(self, **kwargs):
+        out_path = os.path.join(self.tmpdir, 'finger.xml')
+        urdf_to_mjcf(self.urdf, out_path, add_ground=False, **kwargs)
+        return out_path, ET.parse(out_path).getroot()
+
+    def test_kv_is_written_on_position_actuators(self):
+        _out, root = self._convert(actuator_kv=0.05)
+        position = root.find('actuator').find('position')
+        self.assertAlmostEqual(float(position.get('kv')), 0.05)
+
+    def test_default_position_actuator_has_no_kv(self):
+        _out, root = self._convert()
+        self.assertIsNone(root.find('actuator').find('position').get('kv'))
+
+    def test_velocity_actuator_default_gain_is_unchanged(self):
+        _out, root = self._convert(actuator_type='velocity')
+        self.assertAlmostEqual(
+            float(root.find('actuator').find('velocity').get('kv')), 1.0)
+
+    def test_integrator_is_written_on_option(self):
+        _out, root = self._convert(integrator='implicitfast')
+        self.assertEqual(root.find('option').get('integrator'),
+                         'implicitfast')
+        _out, root = self._convert()
+        self.assertIsNone(root.find('option').get('integrator'))
+
+    def test_damped_light_joint_holds_still(self):
+        try:
+            import mujoco
+        except ImportError:
+            self.skipTest('mujoco not installed')
+        out, _root = self._convert(actuator_kv=0.05,
+                                   integrator='implicitfast')
+        model = mujoco.MjModel.from_xml_path(out)
+        data = mujoco.MjData(model)
+        for _ in range(1000):
+            mujoco.mj_step(model, data)
+        self.assertTrue(np.all(np.isfinite(data.qpos)))
+        self.assertLess(abs(data.qpos[0]), 0.05)
+        self.assertLess(abs(data.qvel[0]), 1e-3)
